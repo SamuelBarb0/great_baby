@@ -37,7 +37,7 @@ function pedidoWallet(string $orden, float $esperado): DropiPedido
 }
 
 /** Movimiento tal como lo devuelve GET /historywallet. */
-function mov(int $id, string $codigo, string $tipo, float $monto, ?int $orden, string $fecha = '2026-09-10T15:00:00.000000Z'): array
+function movWallet(int $id, string $codigo, string $tipo, float $monto, ?int $orden, string $fecha = '2026-09-10T15:00:00.000000Z'): array
 {
     $texto = [
         '1006' => "ENTRADA POR GANANCIA EN LA ORDEN COMO PROVEEDOR: {$orden}* GUIA: *G{$orden}*",
@@ -61,14 +61,14 @@ function walletDropi(array $movimientos): void
 }
 
 it('mapea un movimiento real de Dropi', function () {
-    $pago = MapearMovimientoWalletDropi::map(mov(265724011, '1006', 'ENTRADA', 17900, 90794435));
+    $pago = MapearMovimientoWalletDropi::map(movWallet(265724011, '1006', 'ENTRADA', 17900, 90794435));
     expect($pago->tipo)->toBe('pago_guia')
         ->and($pago->monto)->toBe(17900.0)
         ->and($pago->ordenId)->toBe('90794435')
         ->and($pago->guia)->toBe('G90794435')
         ->and($pago->dropiMovimientoId)->toBe('web:265724011');
 
-    $retiro = MapearMovimientoWalletDropi::map(mov(1, '1020', 'SALIDA', 500000, null));
+    $retiro = MapearMovimientoWalletDropi::map(movWallet(1, '1020', 'SALIDA', 500000, null));
     expect($retiro->tipo)->toBe('retiro_banco')->and($retiro->monto)->toBe(-500000.0)->and($retiro->ordenId)->toBeNull();
 });
 
@@ -76,12 +76,12 @@ it('importa desde la fecha de corte, enlaza por orden y compara la SUMA de las l
     $partido = pedidoWallet('100', 50000);
     $subpago = pedidoWallet('200', 40000);
     walletDropi([
-        mov(1, '1006', 'ENTRADA', 30000, 100),
-        mov(2, '1006', 'ENTRADA', 20000, 100), // mismo pedido, segunda línea
-        mov(3, '1006', 'ENTRADA', 35000, 200),
-        mov(4, '1006', 'ENTRADA', 25000, 400), // su pedido todavía no está en el ERP
-        mov(5, '1020', 'SALIDA', 1000000, null),
-        mov(0, '1006', 'ENTRADA', 9999, 100, '2026-08-20T15:00:00.000000Z'), // antes del corte
+        movWallet(1, '1006', 'ENTRADA', 30000, 100),
+        movWallet(2, '1006', 'ENTRADA', 20000, 100), // mismo pedido, segunda línea
+        movWallet(3, '1006', 'ENTRADA', 35000, 200),
+        movWallet(4, '1006', 'ENTRADA', 25000, 400), // su pedido todavía no está en el ERP
+        movWallet(5, '1020', 'SALIDA', 1000000, null),
+        movWallet(0, '1006', 'ENTRADA', 9999, 100, '2026-08-20T15:00:00.000000Z'), // antes del corte
     ]);
 
     $this->artisan('dropi:web-wallet-sync', ['--desde' => '2026-09-01'])->assertSuccessful();
@@ -108,7 +108,7 @@ it('importa desde la fecha de corte, enlaza por orden y compara la SUMA de las l
 });
 
 it('enlaza el pago que llegó antes que su pedido', function () {
-    walletDropi([mov(4, '1006', 'ENTRADA', 25000, 400)]);
+    walletDropi([movWallet(4, '1006', 'ENTRADA', 25000, 400)]);
     $this->artisan('dropi:web-wallet-sync', ['--desde' => '2026-09-01'])->assertSuccessful();
 
     $pedido = pedidoWallet('400', 25000);
@@ -121,12 +121,12 @@ it('enlaza el pago que llegó antes que su pedido', function () {
 
 it('un reverso de Dropi resta del pago y deja la diferencia a la vista', function () {
     $pedido = pedidoWallet('100', 50000);
-    walletDropi([mov(1, '1006', 'ENTRADA', 50000, 100)]);
+    walletDropi([movWallet(1, '1006', 'ENTRADA', 50000, 100)]);
     $this->artisan('dropi:web-wallet-sync', ['--desde' => '2026-09-01'])->assertSuccessful();
     expect(DropiSancion::where('pedido_id', $pedido->id)->exists())->toBeFalse();
 
     Http::swap(new \Illuminate\Http\Client\Factory);
-    walletDropi([mov(1, '1006', 'ENTRADA', 50000, 100), mov(2, '1009', 'SALIDA', 20000, 100)]);
+    walletDropi([movWallet(1, '1006', 'ENTRADA', 50000, 100), movWallet(2, '1009', 'SALIDA', 20000, 100)]);
     $this->artisan('dropi:web-wallet-sync', ['--desde' => '2026-09-01'])->assertSuccessful();
 
     $sancion = DropiSancion::where('pedido_id', $pedido->id)->sole();
@@ -137,7 +137,7 @@ it('un reverso de Dropi resta del pago y deja la diferencia a la vista', functio
 
 it('un sobrepago de Dropi queda como sanción legible', function () {
     $pedido = pedidoWallet('100', 50000);
-    walletDropi([mov(1, '1006', 'ENTRADA', 60000, 100)]);
+    walletDropi([movWallet(1, '1006', 'ENTRADA', 60000, 100)]);
     $this->artisan('dropi:web-wallet-sync', ['--desde' => '2026-09-01'])->assertSuccessful();
 
     $sancion = DropiSancion::where('pedido_id', $pedido->id)->sole();
@@ -148,7 +148,7 @@ it('un sobrepago de Dropi queda como sanción legible', function () {
 
 it('el asiento de un movimiento de Dropi no toma el usuario de Dropi', function () {
     // El payload real trae user_id = un usuario DE DROPI (992001, un empleado suyo).
-    $m = mov(9, '1020', 'SALIDA', 1000, null);
+    $m = movWallet(9, '1020', 'SALIDA', 1000, null);
     $m['user_id'] = 992001;
     walletDropi([$m]);
 
@@ -163,7 +163,7 @@ it('el asiento de un movimiento de Dropi no toma el usuario de Dropi', function 
 
 it('el sync de pedidos no devuelve a Entregado un pedido que la wallet ya marcó Pagado', function () {
     $pedido = pedidoWallet('100', 50000);
-    walletDropi([mov(1, '1006', 'ENTRADA', 50000, 100)]);
+    walletDropi([movWallet(1, '1006', 'ENTRADA', 50000, 100)]);
     $this->artisan('dropi:web-wallet-sync', ['--desde' => '2026-09-01'])->assertSuccessful();
     expect($pedido->fresh()->estado)->toBe(EstadoPedidoDropi::Pagado);
 
@@ -184,7 +184,7 @@ it('el reverso de un pago anterior al corte en un pedido devuelto no es diferenc
     // Dropi pagó en agosto (antes del corte) y en septiembre reversa porque se devolvió.
     $pedido = pedidoWallet('100', 13500);
     $pedido->transicionar(EstadoPedidoDropi::DevolucionEnCamino, 'sistema');
-    walletDropi([mov(1, '1009', 'SALIDA', 13500, 100)]);
+    walletDropi([movWallet(1, '1009', 'SALIDA', 13500, 100)]);
 
     $this->artisan('dropi:web-wallet-sync', ['--desde' => '2026-09-01'])->assertSuccessful();
 
@@ -204,7 +204,7 @@ it('el cruce separa atrasos, entregados en plazo y en camino', function () {
     $enCamino->forceFill($base + ['estado' => EstadoPedidoDropi::Despachado])->save();
     $pagado = pedidoWallet('4', 40000);
     $pagado->forceFill($base + ['estado' => EstadoPedidoDropi::Entregado, 'entregado_at' => now()->subDays(5)])->save();
-    walletDropi([mov(1, '1006', 'ENTRADA', 40000, 4, now()->subDays(4)->toIso8601String())]);
+    walletDropi([movWallet(1, '1006', 'ENTRADA', 40000, 4, now()->subDays(4)->toIso8601String())]);
     $this->artisan('dropi:web-wallet-sync', ['--desde' => now()->subDays(30)->toDateString()])->assertSuccessful();
     config()->set('dropi.web.wallet_desde', now()->subDays(30)->toDateString());
 
