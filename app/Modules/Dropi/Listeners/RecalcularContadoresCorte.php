@@ -34,9 +34,13 @@ class RecalcularContadoresCorte
             return;
         }
 
-        $counts = DropiCorte::query()
-            ->from('dropi_pedidos')
+        // Query builder plano: con DropiCorte::query()->from('dropi_pedidos') el
+        //   scope de SoftDeletes de DropiCorte agregaba `dropi_cortes.deleted_at IS
+        //   NULL` a una consulta sobre dropi_pedidos → error SQL → la transacción de
+        //   transicionar() se revertía y NINGÚN pedido de corte abierto cambiaba de estado.
+        $counts = \Illuminate\Support\Facades\DB::table('dropi_pedidos')
             ->where('corte_id', $corteId)
+            ->whereNull('deleted_at')
             ->selectRaw("
                 COUNT(*) as totales,
                 SUM(CASE WHEN estado IN ('despachado','entregado','pagado') THEN 1 ELSE 0 END) as despachados,

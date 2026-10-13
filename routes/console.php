@@ -66,3 +66,12 @@ Schedule::command('gb:purgar-fotos-empaque')->dailyAt('03:30')->withoutOverlappi
 
 // Cuando llegue la API de Dropi (§26) → activar sync automático:
 // Schedule::command('dropi:sync --horas=1')->everyFiveMinutes()->withoutOverlapping();
+
+// Driver web de Dropi · sync casi en tiempo real en tres ritmos (SincronizarDropiWeb).
+//   Solo corre con DROPI_WEB_SYNC=true y una sesión conectada en Dropi → Conexión Dropi.
+$dropiWebSync = fn () => (bool) config('dropi.web.sync_activo');
+Schedule::command('dropi:web-sync recientes')->everyFifteenSeconds()->withoutOverlapping(2)->when($dropiWebSync);
+Schedule::command('dropi:web-sync ventana')->everyMinute()->withoutOverlapping(10)->when($dropiWebSync);
+Schedule::command('dropi:web-sync transito')->everyTenMinutes()->withoutOverlapping(30)->when($dropiWebSync);
+// Wallet: los pagos de Dropi entran por lotes durante el día; cada 30 min basta.
+Schedule::command('dropi:web-wallet-sync')->everyThirtyMinutes()->withoutOverlapping(20)->when($dropiWebSync);

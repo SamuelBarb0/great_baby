@@ -8,6 +8,8 @@ return [
     |--------------------------------------------------------------------------
     | mock: usa fixtures locales (dev y CI)
     | api : usa la API real de Dropi (requiere url + key)
+    | web : usa la API interna de app.dropi.co con la sesión de una cuenta
+    |       (se conecta desde Dropi → Conexión Dropi)
     */
     'driver' => env('DROPI_DRIVER', 'mock'),
 
@@ -15,6 +17,21 @@ return [
         'url' => env('DROPI_API_URL', ''),
         'key' => env('DROPI_API_KEY', ''),
         'timeout' => (int) env('DROPI_API_TIMEOUT', 15),
+    ],
+
+    'web' => [
+        'email' => env('DROPI_WEB_EMAIL', ''),
+        'password' => env('DROPI_WEB_PASSWORD', ''),
+        'white_brand_id' => (int) env('DROPI_WEB_BRAND_ID', 1),
+        'bff_url' => env('DROPI_WEB_BFF_URL', 'https://api-v2.dropi.co/bff'),
+        // API clásico: escrituras (actualizar estatus). Exige encabezados de navegador.
+        'legacy_url' => env('DROPI_WEB_LEGACY_URL', 'https://api.dropi.co/api'),
+        'timeout' => (int) env('DROPI_WEB_TIMEOUT', 20),
+        // Enciende el sync programado (routes/console.php). Apagado por defecto.
+        'sync_activo' => (bool) env('DROPI_WEB_SYNC', false),
+        // Primer día que se importa de la wallet. Cada movimiento genera su
+        // asiento contable, así que no se trae la historia anterior.
+        'wallet_desde' => env('DROPI_WALLET_DESDE', '2026-09-01'),
     ],
 
     'mock' => [

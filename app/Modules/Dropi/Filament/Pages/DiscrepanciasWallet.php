@@ -40,6 +40,10 @@ class DiscrepanciasWallet extends Page
             ->whereIn('estado', [EstadoPedidoDropi::Despachado, EstadoPedidoDropi::Entregado])
             ->whereDoesntHave('pagoWallet')
             ->where('despachado_at', '<=', now()->subDays(3))
+            // La wallet se importa desde DROPI_WALLET_DESDE: lo despachado antes
+            // se cobró antes y su pago no está aquí. Sin este límite salían como
+            // deudas los pedidos viejos (ej. los cargados por Excel el 21-sep).
+            ->where('despachado_at', '>=', config('dropi.web.wallet_desde'))
             ->orderBy('despachado_at')
             ->limit(50)
             ->get();
@@ -70,6 +74,7 @@ class DiscrepanciasWallet extends Page
             'esperado' => (float) DropiPedido::query()
                 ->whereIn('estado', [EstadoPedidoDropi::Despachado, EstadoPedidoDropi::Entregado])
                 ->whereDoesntHave('pagoWallet')
+                ->where('despachado_at', '>=', config('dropi.web.wallet_desde'))
                 ->sum('monto_esperado_proveedor'),
             'sanciones' => (float) DropiSancion::sum('diferencia'),
             'huerfanos' => (float) DropiWalletMovimiento::where('tipo', 'pago_guia')->whereNull('pedido_id')->sum('monto'),

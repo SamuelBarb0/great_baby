@@ -26,6 +26,23 @@ class RegistrarAsientoWalletDropi
 {
     public const CUENTA_WALLET = '111015';
 
+    /**
+     * Usuario del ERP al que se atribuye el asiento: el del ajuste manual
+     * (Aracely), o null = sistema. Solo se lee `fuente.user_id` en un ajuste
+     * manual: en los movimientos de Dropi `fuente` es el payload de Dropi y su
+     * `user_id` es un usuario DE DROPI (p. ej. un empleado suyo). Tomarlo
+     * reventaba la llave foránea o, peor, si coincidía con un id del ERP,
+     * atribuía el asiento a quien no era.
+     */
+    public static function usuarioDelAsiento(DropiWalletMovimiento $mov): ?int
+    {
+        $fuente = is_array($mov->fuente) ? $mov->fuente : [];
+
+        return ($fuente['origen'] ?? null) === 'ajuste_manual' && isset($fuente['user_id'])
+            ? (int) $fuente['user_id']
+            : null;
+    }
+
     public function handle(DropiWalletMovimiento $mov): void
     {
         DB::transaction(function () use ($mov) {
@@ -85,10 +102,8 @@ class RegistrarAsientoWalletDropi
                 'origen_type' => DropiWalletMovimiento::class,
                 'origen_id' => $mov->id,
                 'descripcion' => $desc,
-                // N5 seg · en contexto de cron auth()->id() es null. Preferimos
-                // user_id del payload `fuente` (Aracely en ajuste manual) o null
-                // marcado como 'sistema' para que la auditoría muestre origen claro.
-                'user_id' => is_array($mov->fuente) ? ($mov->fuente['user_id'] ?? null) : null,
+                // N5 seg · en contexto de cron auth()->id() es null.
+                'user_id' => self::usuarioDelAsiento($mov),
             ]);
             MovimientoContable::create([
                 'fecha' => $fecha,
@@ -98,10 +113,8 @@ class RegistrarAsientoWalletDropi
                 'origen_type' => DropiWalletMovimiento::class,
                 'origen_id' => $mov->id,
                 'descripcion' => $desc,
-                // N5 seg · en contexto de cron auth()->id() es null. Preferimos
-                // user_id del payload `fuente` (Aracely en ajuste manual) o null
-                // marcado como 'sistema' para que la auditoría muestre origen claro.
-                'user_id' => is_array($mov->fuente) ? ($mov->fuente['user_id'] ?? null) : null,
+                // N5 seg · en contexto de cron auth()->id() es null.
+                'user_id' => self::usuarioDelAsiento($mov),
             ]);
         });
     }
