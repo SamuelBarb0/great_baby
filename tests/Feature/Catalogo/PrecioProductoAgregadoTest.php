@@ -128,6 +128,31 @@ it('el pedido que arma el cliente solo no lleva vendedor', function () {
     expect($pedido->vendedor_id)->toBeNull();
 });
 
+it('el agregado cuenta para el cupo de crédito', function () {
+    // Antes el cupo sólo sumaba precios de variante: un agregado pesaba $0 y
+    // el pedido nunca se retenía por cupo, por grande que fuera.
+    ponerPrecio($this->producto, $this->lista, 24900);
+    App\Modules\Cartera\Models\CondicionCredito::create([
+        'contacto_id' => $this->cliente->id, 'cupo' => 40000, 'plazo_dias' => 30,
+        'activa' => true, 'vigente_desde' => now()->subMonth()->toDateString(),
+    ]);
+
+    $pedido = pedirAgregado($this->cliente, $this->producto, 2);
+
+    expect($pedido->estado)->toBe('retenido')
+        ->and($pedido->motivo_retencion)->toContain('cupo excedido en $9,800');
+});
+
+it('el agregado dentro del cupo no se retiene', function () {
+    ponerPrecio($this->producto, $this->lista, 24900);
+    App\Modules\Cartera\Models\CondicionCredito::create([
+        'contacto_id' => $this->cliente->id, 'cupo' => 100000, 'plazo_dias' => 30,
+        'activa' => true, 'vigente_desde' => now()->subMonth()->toDateString(),
+    ]);
+
+    expect(pedirAgregado($this->cliente, $this->producto, 2)->estado)->toBe('enviado');
+});
+
 it('un producto solo puede tener un precio por lista', function () {
     ponerPrecio($this->producto, $this->lista, 24900);
 

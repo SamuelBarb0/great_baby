@@ -41,7 +41,10 @@ class CrearPedidoCliente
         abort_if(! $listaId, 422, 'El cliente no tiene lista de precios asignada.');
 
         [$precios, $variantes, $productosAgg] = $this->resolverPrecios($items, $listaId);
-        [$retenido, $motivos] = $this->evaluarCartera($cliente, $items, $precios);
+        [$retenido, $motivos] = $this->evaluarCartera(
+            $cliente,
+            $this->totalEstimado($items, $precios, $variantes, $productosAgg, $listaId)
+        );
 
         $pedido = DB::transaction(function () use (
             $cliente, $items, $notas, $vendedorId, $listaId,
@@ -178,12 +181,9 @@ class CrearPedidoCliente
      *
      * @return array{0: bool, 1: list<string>}
      */
-    private function evaluarCartera(Contacto $cliente, array $items, array $precios): array
+    private function evaluarCartera(Contacto $cliente, float $totalEstimado): array
     {
         $credito = ConsultarCredito::run($cliente->id);
-        $totalEstimado = collect($items)->sum(
-            fn ($i) => (int) $i['cantidad'] * (float) ($precios[$i['variante_id'] ?? 0] ?? 0)
-        );
 
         $motivos = [];
         if ($credito['tiene_mora_critica']) {
@@ -199,6 +199,28 @@ class CrearPedidoCliente
         }
 
         return [! empty($motivos), $motivos];
+    }
+
+    /**
+     * Total con IVA que va a tener el pedido, calculado igual que al crearlo.
+     *
+     * Antes el cupo sólo sumaba `$precios[variante_id]`: un producto agregado
+     * (sin variante) pesaba $0, así que un pedido de puros agregados nunca
+     * excedía el cupo. Además se comparaba sin IVA contra una cartera que sí
+     * lo trae, y una línea sin precio se contaba aunque después se descarte.
+     */
+    private function totalEstimado(array $items, array $precios, $variantes, $productosAgg, int $listaId): float
+    {
+        $total = 0.0;
+        foreach ($items as $it) {
+            $linea = $this->resolverLinea($it, $precios, $variantes, $productosAgg, $listaId);
+            if (! $linea) continue;
+
+            $lineaSub = round($linea['precio'] * (int) $it['cantidad'], 2);
+            $total += $lineaSub + round($lineaSub * ($linea['ivaPct'] / 100), 2);
+        }
+
+        return round($total, 2);
     }
 
     /**
