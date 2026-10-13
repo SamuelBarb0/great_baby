@@ -18,5 +18,8 @@ final class PagoWalletDTO
         public ?string $categoria = null,
         public array $raw = [],
         public ?string $dropiMovimientoId = null,
+        // ID de la orden en Dropi. La wallet real lo trae en cada movimiento de
+        // una orden; es más confiable que la guía, que viene dentro del texto.
+        public ?string $ordenId = null,
     ) {}
 }

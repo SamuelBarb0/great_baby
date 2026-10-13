@@ -3,6 +3,7 @@
 namespace App\Modules\Dropi\Actions;
 
 use App\Modules\Dropi\Enums\EstadoPedidoDropi;
+use App\Modules\Dropi\Models\DropiVinculoProducto;
 use App\Modules\Dropi\Models\InventarioMovimiento;
 use App\Modules\Dropi\Models\InventarioUbicacion;
 use App\Modules\Dropi\Models\ProductoVariante;
@@ -20,19 +21,33 @@ class ResolverEstadoInicial
     public function porSku(array $items): EstadoPedidoDropi
     {
         foreach ($items as $it) {
-            $variante = ProductoVariante::where('codigo_barras', $it['sku'])->first();
-            if (! $variante) {
+            $varianteId = $this->varianteIdPara($it['sku']);
+            if (! $varianteId) {
                 // SKU desconocido → tratar como pendiente para que el alistador lo revise.
                 return EstadoPedidoDropi::PendienteInventario;
             }
 
-            $disponible = $this->stockDisponible($variante->id);
+            $disponible = $this->stockDisponible($varianteId);
             if ($disponible < (int) $it['cantidad']) {
                 return EstadoPedidoDropi::PendienteInventario;
             }
         }
 
         return EstadoPedidoDropi::Pending;
+    }
+
+    /**
+     * Variante del catálogo GB para una llave de Dropi: primero el vínculo que
+     * alguien hizo a mano (Productos sin vincular), después el código de barras.
+     */
+    public function varianteIdPara(?string $sku): ?int
+    {
+        if ($sku === null || $sku === '') {
+            return null;
+        }
+
+        return DropiVinculoProducto::where('sku_dropi', $sku)->value('variante_id')
+            ?? ProductoVariante::where('codigo_barras', $sku)->value('id');
     }
 
     /**

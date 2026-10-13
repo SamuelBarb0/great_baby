@@ -96,6 +96,31 @@ class DropiPedidoResource extends Resource
         return auth()->user()?->esAracely() ?? false;
     }
 
+    /**
+     * Pedido que trae el sync web: lo que manda Dropi (guía, cliente,
+     * transportadora…) se cambia en Dropi y llega solo.
+     */
+    public static function vieneDeDropi(?DropiPedido $record): bool
+    {
+        return $record !== null && filled($record->dropi_orden_id)
+            && \Illuminate\Support\Facades\DB::table('dropi_web_huellas')->where('dropi_orden_id', $record->dropi_orden_id)->exists();
+    }
+
+    /**
+     * En esos pedidos, los campos de Dropi quedan de solo lectura y NO se guardan:
+     * si alguien deja el formulario abierto y el sync pone la guía real mientras
+     * tanto, guardar no la pisa con la vieja. Los pedidos manuales o de Excel
+     * siguen editables.
+     */
+    protected static function campoDeDropi(TextInput $campo): TextInput
+    {
+        return $campo
+            ->disabled(fn ($record) => self::vieneDeDropi($record))
+            ->dehydrated(fn ($record) => ! self::vieneDeDropi($record))
+            ->hintIcon(fn ($record) => self::vieneDeDropi($record) ? 'heroicon-o-lock-closed' : null)
+            ->hintIconTooltip('Viene de Dropi: se cambia en Dropi y llega solo.');
+    }
+
     public static function form(Schema $schema): Schema
     {
         return $schema->components([
@@ -105,15 +130,15 @@ class DropiPedidoResource extends Resource
                     ->getOptionLabelFromRecordUsing(fn ($record) => $record?->etiqueta() ?? '—')
                     ->required()
                     ->searchable(),
-                TextInput::make('guia')->label('Guía')->required()->unique(ignoreRecord: true)
-                    ->helperText('§11 diseño Dropi — identificador principal, único en el sistema.'),
-                TextInput::make('dropi_orden_id')->label('ID orden Dropi'),
-                TextInput::make('transportadora'),
-                TextInput::make('tienda'),
+                self::campoDeDropi(TextInput::make('guia')->label('Guía')->required()->unique(ignoreRecord: true)
+                    ->helperText('§11 diseño Dropi — identificador principal, único en el sistema.')),
+                self::campoDeDropi(TextInput::make('dropi_orden_id')->label('ID orden Dropi')),
+                self::campoDeDropi(TextInput::make('transportadora')),
+                self::campoDeDropi(TextInput::make('tienda')),
             ])->columns(2),
 
             Section::make('Vendedor dropshipping')->schema([
-                TextInput::make('vendedor_nombre')->label('Nombre del vendedor'),
+                self::campoDeDropi(TextInput::make('vendedor_nombre')->label('Nombre del vendedor')),
                 TextInput::make('vendedor_identificacion')->label('Identificación'),
                 Toggle::make('requiere_factura_b2b')
                     ->label('Facturar B2B a este vendedor')
@@ -121,12 +146,12 @@ class DropiPedidoResource extends Resource
             ])->columns(3),
 
             Section::make('Cliente final (envío)')->schema([
-                TextInput::make('cliente_nombre')->required(),
+                self::campoDeDropi(TextInput::make('cliente_nombre')->required()),
                 TextInput::make('cliente_doc')->label('Documento'),
-                TextInput::make('cliente_telefono')->label('Teléfono'),
-                TextInput::make('cliente_direccion')->label('Dirección')->columnSpanFull(),
-                TextInput::make('cliente_ciudad')->label('Ciudad'),
-                TextInput::make('cliente_depto')->label('Departamento'),
+                self::campoDeDropi(TextInput::make('cliente_telefono')->label('Teléfono')),
+                self::campoDeDropi(TextInput::make('cliente_direccion')->label('Dirección')->columnSpanFull()),
+                self::campoDeDropi(TextInput::make('cliente_ciudad')->label('Ciudad')),
+                self::campoDeDropi(TextInput::make('cliente_depto')->label('Departamento')),
             ])->columns(3),
 
             Section::make('Ciclo de vida (lectura)')
@@ -184,6 +209,10 @@ class DropiPedidoResource extends Resource
                 TextColumn::make('pagado_at')->label('Pagado')->dateTime('Y-m-d H:i')->toggleable(isToggledHiddenByDefault: true)->sortable(),
             ])
             ->defaultSort('created_at', 'desc')
+            // Tabla en vivo: el sync con Dropi trae pedidos cada 15 s; la tabla se
+            //   refresca al mismo ritmo sin recargar la página (conserva filtros,
+            //   búsqueda y paginación). Livewire pausa el sondeo si la pestaña no se ve.
+            ->poll('15s')
             ->filters([
                 SelectFilter::make('estado')
                     ->options(collect(EstadoPedidoDropi::cases())->mapWithKeys(fn ($e) => [$e->value => $e->label()])),
@@ -219,6 +248,17 @@ class DropiPedidoResource extends Resource
             ->recordActions([
                 ViewAction::make(),
                 EditAction::make(),
+                // Las acciones de la fila de pedidos de la web de Dropi, hechas desde el ERP.
+                \Filament\Actions\ActionGroup::make([
+                    self::accionInfoDropi(),
+                    self::accionActualizarEstatusEnDropi(),
+                    self::accionEtiquetasDropi(),
+                ])
+                    ->label('Dropi')
+                    ->icon('heroicon-o-truck')
+                    ->button()
+                    ->color('warning')
+                    ->visible(fn (DropiPedido $record) => filled($record->dropi_orden_id) && (auth()->user()?->esAracely() ?? false)),
             ])
             ->toolbarActions([
                 \Filament\Actions\BulkActionGroup::make([
@@ -230,6 +270,131 @@ class DropiPedidoResource extends Resource
                         ]),
                 ]),
             ]);
+    }
+
+    /** La lupa de Dropi: el pedido tal como está ahora en Dropi. Solo lectura. */
+    protected static function accionInfoDropi(): \Filament\Actions\Action
+    {
+        return \Filament\Actions\Action::make('infoDropi')
+            ->label('Información en Dropi')
+            ->icon('heroicon-o-magnifying-glass')
+            ->modalHeading(fn (DropiPedido $record) => 'Orden ' . $record->dropi_orden_id . ' en Dropi')
+            ->modalWidth('4xl')
+            ->modalContent(function (DropiPedido $record) {
+                try {
+                    $detalle = app(\App\Modules\Dropi\Clients\DropiWebClient::class)->pedidoDetalle((int) $record->dropi_orden_id);
+                    $error = null;
+                } catch (\Throwable $e) {
+                    $detalle = [];
+                    $error = 'No se pudo consultar Dropi: ' . $e->getMessage();
+                }
+
+                return view('dropi.pedidos.info-dropi', compact('detalle', 'error'));
+            })
+            ->modalSubmitAction(false)
+            ->modalCancelActionLabel('Cerrar');
+    }
+
+    /**
+     * Etiquetas de Dropi: marcar las que el pedido debe tener (se aplica la
+     * diferencia en Dropi) y, si hace falta, crear una nueva en la cuenta.
+     */
+    protected static function accionEtiquetasDropi(): \Filament\Actions\Action
+    {
+        $client = fn () => app(\App\Modules\Dropi\Clients\DropiWebClient::class);
+
+        return \Filament\Actions\Action::make('etiquetasDropi')
+            ->label('Etiquetas en Dropi')
+            ->icon('heroicon-o-tag')
+            ->modalHeading(fn (DropiPedido $record) => 'Etiquetas de la orden ' . $record->dropi_orden_id . ' en Dropi')
+            ->modalDescription('Los cambios se guardan en Dropi de verdad.')
+            // Lo que vio el sync (≤15 s de antigüedad): abre al instante. Al guardar,
+            //   GestionarEtiquetasDropi compara contra Dropi en vivo.
+            ->fillForm(fn (DropiPedido $record) => [
+                'etiquetas' => json_decode((string) \Illuminate\Support\Facades\DB::table('dropi_web_huellas')
+                    ->where('dropi_orden_id', $record->dropi_orden_id)->value('etiquetas'), true) ?: [],
+                'color' => '#f59e0b',
+            ])
+            ->schema([
+                \Filament\Forms\Components\CheckboxList::make('etiquetas')
+                    ->label('Etiquetas del pedido')
+                    ->options(function () use ($client) {
+                        try {
+                            return collect($client()->etiquetasCuenta())->pluck('nombre', 'id')->all();
+                        } catch (\Throwable) {
+                            return [];
+                        }
+                    })
+                    ->helperText('Marca las que debe tener. Si la lista está vacía, la cuenta aún no tiene etiquetas: crea una abajo.')
+                    ->columns(2),
+                TextInput::make('nueva')->label('Crear y poner una etiqueta nueva')->maxLength(40)->placeholder('Ej.: Revisar dirección'),
+                \Filament\Forms\Components\ColorPicker::make('color')->label('Color de la etiqueta nueva')->default('#f59e0b'),
+            ])
+            ->modalSubmitActionLabel('Guardar en Dropi')
+            ->action(function (DropiPedido $record, array $data) {
+                try {
+                    $r = \App\Modules\Dropi\Actions\GestionarEtiquetasDropi::run(
+                        $record, $data['etiquetas'] ?? [], $data['nueva'] ?? null, $data['color'] ?? null, auth()->id(),
+                    );
+                } catch (\Throwable $e) {
+                    \Filament\Notifications\Notification::make()->title('Dropi no guardó las etiquetas')->body($e->getMessage())->danger()->persistent()->send();
+
+                    return;
+                }
+                \Filament\Notifications\Notification::make()
+                    ->title('Etiquetas guardadas en Dropi')
+                    ->body(($r['creada'] ? 'Etiqueta nueva creada. ' : '') . "Puestas: {$r['puestas']} · quitadas: {$r['quitadas']}")
+                    ->success()->send();
+            });
+    }
+
+    /**
+     * «Actualizar Estatus» de Dropi desde el ERP: el cambio se sube a Dropi y el
+     * pedido se vuelve a traer al momento (ver ActualizarEstatusEnDropi).
+     */
+    protected static function accionActualizarEstatusEnDropi(): \Filament\Actions\Action
+    {
+        return \Filament\Actions\Action::make('actualizarEstatusDropi')
+            ->label('Actualizar estatus')
+            ->icon('heroicon-o-pencil-square')
+            ->color('warning')
+            ->visible(fn (DropiPedido $record) => filled($record->dropi_orden_id) && (auth()->user()?->esAracely() ?? false))
+            ->modalHeading(fn (DropiPedido $record) => 'Actualizar estatus en Dropi · orden ' . $record->dropi_orden_id)
+            ->modalDescription(function (DropiPedido $record) {
+                $actual = \Illuminate\Support\Facades\DB::table('dropi_web_huellas')
+                    ->where('dropi_orden_id', $record->dropi_orden_id)->value('estatus_dropi');
+
+                return 'Estatus actual en Dropi: ' . ($actual ?: 'sin dato todavía')
+                    . '. El cambio se hace en Dropi de verdad, igual que desde su web; si no aplica para este pedido, Dropi lo rechaza y aquí verás su motivo.';
+            })
+            ->schema([
+                Select::make('estatus')
+                    ->label('Nuevo estatus')
+                    ->options(\App\Modules\Dropi\Actions\ActualizarEstatusEnDropi::OPCIONES)
+                    ->required()
+                    ->live()
+                    ->native(false),
+                Textarea::make('motivo')
+                    ->label('Motivo del rechazo')
+                    ->rows(2)
+                    ->maxLength(500)
+                    ->visible(fn ($get) => $get('estatus') === 'RECHAZADO')
+                    ->required(fn ($get) => $get('estatus') === 'RECHAZADO'),
+            ])
+            ->modalSubmitActionLabel('Actualizar en Dropi')
+            ->action(function (DropiPedido $record, array $data) {
+                try {
+                    $r = \App\Modules\Dropi\Actions\ActualizarEstatusEnDropi::run($record, $data['estatus'], $data['motivo'] ?? null, auth()->id());
+                } catch (\Throwable $e) {
+                    \Filament\Notifications\Notification::make()->title('Dropi no hizo el cambio')->body($e->getMessage())->danger()->persistent()->send();
+
+                    return;
+                }
+                \Filament\Notifications\Notification::make()
+                    ->title('Estatus actualizado en Dropi')
+                    ->body($r['shipping_guide'] ? "Guía: {$r['shipping_guide']} · {$r['shipping_company']}" : null)
+                    ->success()->send();
+            });
     }
 
     public static function getPages(): array

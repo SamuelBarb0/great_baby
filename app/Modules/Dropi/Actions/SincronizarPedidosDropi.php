@@ -9,7 +9,6 @@ use App\Modules\Dropi\Enums\EstadoPedidoDropi;
 use App\Modules\Dropi\Models\DropiEstadoBitacora;
 use App\Modules\Dropi\Models\DropiPedido;
 use App\Modules\Dropi\Models\DropiPedidoItem;
-use App\Modules\Dropi\Models\ProductoVariante;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use Lorisleiva\Actions\Concerns\AsAction;
@@ -210,7 +209,18 @@ class SincronizarPedidosDropi
         if ($clienteNombre === '') $clienteNombre = 'SIN NOMBRE';
 
         $corte = AsignarCorteACarga::run($dto->creadoAt);
-        $existente = DropiPedido::where('guia', $guia)->first();
+
+        // Driver web · los pedidos sin despachar entran con guía provisional
+        //   (SIN-GUIA-<orden>), así que se buscan también por orden de Dropi y la
+        //   guía real reemplaza a la provisional cuando Dropi la asigna.
+        $existente = ($dto->dropiOrdenId !== ''
+                ? DropiPedido::where('dropi_orden_id', $dto->dropiOrdenId)->first()
+                : null)
+            ?? DropiPedido::where('guia', $guia)->first();
+        $guiaNueva = $existente
+            && $existente->guia !== $guia
+            && ! str_starts_with($guia, \App\Modules\Dropi\Services\MapearPedidoDropiWeb::PREFIJO_SIN_GUIA)
+            && ! DropiPedido::withTrashed()->where('guia', $guia)->exists();
 
         // Re-audit DR-α (FUNC-C1) · antes: `$estadoInicial = $existente
         //   ? $existente->estado : porSku(...)` — para existente = estado
@@ -224,6 +234,18 @@ class SincronizarPedidosDropi
         //   creación cuando el DTO no trae estado interpretable.
         $itemsPlano = array_map(fn ($it) => ['sku' => $it->skuDropi, 'cantidad' => $it->cantidad], $dto->items);
         $estadoDesdeDropi = self::mapearEstadoDropi($dto->estadoDropi);
+        // Un «pendiente» de Dropi no hace retroceder lo que la bodega ya movió
+        //   (alistando, empacado, pendiente_inventario…).
+        if ($existente && $estadoDesdeDropi === EstadoPedidoDropi::Pending) {
+            $estadoDesdeDropi = null;
+        }
+        // Pagado lo pone la wallet (el pago de Dropi es la prueba de cobro) y Dropi
+        //   no tiene ese estado: su pedido sigue diciendo ENTREGADO. Sin esto, si la
+        //   wallet se adelantaba al sync, el pedido volvía de Pagado a Entregado.
+        if ($existente && $existente->estado === EstadoPedidoDropi::Pagado
+            && in_array($estadoDesdeDropi, [EstadoPedidoDropi::Entregado, EstadoPedidoDropi::Despachado], true)) {
+            $estadoDesdeDropi = null;
+        }
         $estadoInicial = $existente
             ? ($estadoDesdeDropi ?? $existente->estado)
             : ($estadoDesdeDropi ?? $this->resolverEstado->porSku($itemsPlano));
@@ -254,7 +276,17 @@ class SincronizarPedidosDropi
 
         if ($existente) {
             // Campos NO sensibles al estado: cliente/monto/fechas.
-            $sinEstado = array_diff_key($data, ['estado' => true]);
+            //   - corte_id: se asigna al crear; reasignarlo en cada sync movía pedidos
+            //     entre cortes (el modelo lo documenta como protegido).
+            //   - null no borra: Dropi no manda el documento del cliente ni la
+            //     identificación del vendedor, y eso borraba lo escrito en el ERP.
+            $sinEstado = array_filter(
+                array_diff_key($data, ['estado' => true, 'corte_id' => true]),
+                fn ($v) => $v !== null,
+            );
+            if ($guiaNueva) {
+                $sinEstado['guia'] = $guia;
+            }
 
             // A7 · fechas del payload sólo pisan si son MÁS recientes.
             foreach (['despachado_at', 'entregado_at', 'devuelto_at', 'pagado_at'] as $f) {
@@ -355,12 +387,12 @@ class SincronizarPedidosDropi
         $cambio = false;
 
         foreach ($dto->items as $item) {
-            $variante = ProductoVariante::where('codigo_barras', $item->skuDropi)->first();
+            $varianteId = $this->resolverEstado->varianteIdPara($item->skuDropi);
 
             $registro = DropiPedidoItem::updateOrCreate(
                 ['pedido_id' => $pedido->id, 'sku_dropi' => $item->skuDropi],
                 array_filter([
-                    'variante_id' => $variante?->id,
+                    'variante_id' => $varianteId,
                     'cantidad' => $item->cantidad,
                     'precio_proveedor_unit' => $item->precioProveedorUnit,
                     'producto_nombre' => $item->productoNombre,
