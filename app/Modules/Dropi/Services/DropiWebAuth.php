@@ -47,7 +47,7 @@ class DropiWebAuth
         $resp = $this->bff()->post('auth/core/beforeLoginUnknownDevice', $this->credenciales());
         $body = $resp->json() ?? [];
 
-        if (! $resp->successful() || ! ($body['is_succesfull'] ?? false)) {
+        if (! $resp->successful() || ! self::exito($body)) {
             return $this->fallar($sesion, 'Dropi rechazó el inicio de sesión: ' . $this->motivo($resp->status(), $body));
         }
 
@@ -81,7 +81,7 @@ class DropiWebAuth
         $sesion = $this->sesion();
 
         $resp = $this->api($token)->get('orders/myorders/v2', ['result_number' => 1, 'start' => 0]);
-        if ($resp->status() === 401 || ! ($resp->json('is_succesfull') ?? false)) {
+        if ($resp->status() === 401 || ! self::exito($resp->json() ?? [])) {
             return $this->fallar($sesion, 'Dropi no aceptó ese token (HTTP ' . $resp->status() . ').');
         }
 
@@ -269,7 +269,7 @@ class DropiWebAuth
         $resp = $this->bff()->post('auth/core/login', $this->credenciales() + ['otp' => $codigo, 'with_cdc' => false]);
         $body = $resp->json() ?? [];
 
-        if (! $resp->successful() || ! ($body['is_succesfull'] ?? false)) {
+        if (! $resp->successful() || ! self::exito($body)) {
             return $this->fallar($sesion, 'Dropi no aceptó el login: ' . $this->motivo($resp->status(), $body));
         }
 
@@ -347,6 +347,16 @@ class DropiWebAuth
         }
 
         return $email;
+    }
+
+    /**
+     * ¿Dropi dice que salió bien? Su BFF respondía `is_succesfull` (con la
+     * errata) y en octubre de 2026 lo corrigió a `is_successful` sin aviso:
+     * el login empezó a fallar con «rechazó… OK». Se aceptan las dos.
+     */
+    public static function exito(array $body): bool
+    {
+        return (bool) ($body['is_successful'] ?? $body['is_succesfull'] ?? false);
     }
 
     protected function motivo(int $status, array $body): string

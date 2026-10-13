@@ -64,6 +64,18 @@ it('guarda el token cifrado en la base', function () {
         ->and(decrypt($crudo, false))->toBe($token);
 });
 
+it('conecta con la respuesta de Dropi ya sin la errata (is_successful)', function () {
+    // Octubre 2026: Dropi corrigió `is_succesfull` → `is_successful` y el login
+    // fallaba con «Dropi rechazó el inicio de sesión: OK».
+    $token = jwtDePrueba(['exp' => now()->addHour()->timestamp]);
+    Http::fake([
+        'bff.test/auth/core/beforeLoginUnknownDevice' => Http::response(['is_successful' => true, 'status_reason' => 'OK', 'data' => ['login_otp' => false]]),
+        'bff.test/auth/core/login' => Http::response(['is_successful' => true, 'data' => ['token' => $token]]),
+    ]);
+
+    expect(app(DropiWebAuth::class)->iniciar())->toBe(DropiWebSesion::CONECTADO);
+});
+
 it('deja el motivo cuando Dropi rechaza el código', function () {
     Http::fake([
         'bff.test/auth/core/login' => Http::response(['is_succesfull' => false, 'status_reason' => 'Código inválido'], 400),

@@ -40,7 +40,7 @@ class DropiWebClient implements DropiClientInterface
         ] + $filtros, fn ($v) => $v !== null && $v !== ''));
 
         $body = $resp->json() ?? [];
-        if (! $resp->successful() || ! ($body['is_succesfull'] ?? false)) {
+        if (! $resp->successful() || ! DropiWebAuth::exito($body)) {
             throw new \RuntimeException('Dropi respondió HTTP ' . $resp->status() . ' al listar pedidos: ' . ($body['status_reason'] ?? $body['message'] ?? ''));
         }
 
@@ -58,7 +58,7 @@ class DropiWebClient implements DropiClientInterface
     {
         $resp = $this->auth->request()->get("orders/myorders/v2/{$ordenId}", ['warranty' => 'false']);
         $body = $resp->json() ?? [];
-        if (! $resp->successful() || ! ($body['is_succesfull'] ?? false) || empty($body['data']['objects'])) {
+        if (! $resp->successful() || ! DropiWebAuth::exito($body) || empty($body['data']['objects'])) {
             throw new \RuntimeException("Dropi no devolvió el pedido {$ordenId} (HTTP {$resp->status()}): " . ($body['status_reason'] ?? ''));
         }
 
