@@ -61,6 +61,11 @@ class DescontarStockPorDespacho
         // salía null, el costo caía siempre en la cuenta global y la glosa del
         // libro decía «sin-ref» en vez de la referencia.
         $pedido->loadMissing(['items.variante.producto', 'items.producto']);
+
+        // Antes de escribir nada: si una línea deja el kardex en negativo, el
+        // despacho no sale. Los locks que toma quedan hasta el commit.
+        $this->exigirSaldo($pedido, $ubicacionId);
+
         $lineas = 0;
 
         // Costo con el que sale cada ítem, en una sola consulta para no hacer
@@ -85,14 +90,6 @@ class DescontarStockPorDespacho
             }
 
             $esAgregado = $item->variante_id === null && $item->producto_id !== null;
-
-            // Serializa contra un conteo o traslado simultáneo sobre el mismo
-            // producto y bodega, igual que hace el egreso de Dropi.
-            $lock = InventarioMovimiento::query()->where('ubicacion_id', $ubicacionId);
-            $esAgregado
-                ? $lock->where('producto_id', $item->producto_id)->whereNull('variante_id')
-                : $lock->where('variante_id', $item->variante_id);
-            $lock->lockForUpdate()->get();
 
             $costoUnit = $costos[CostoPromedio::clave($item->variante_id, $item->producto_id)] ?? 0.0;
 
@@ -128,6 +125,51 @@ class DescontarStockPorDespacho
         $this->causarCosto($pedido, $asiento, $userId);
 
         return $lineas;
+    }
+
+    /**
+     * Frena el despacho si la bodega de origen no tiene saldo para todo el pedido.
+     *
+     * Hasta ahora el egreso se escribía siempre: despachar 10 con 3 en bodega
+     * dejaba el kardex en −7 sin avisar a nadie. Se compara contra el saldo
+     * FÍSICO (lo que hay en el estante), no el disponible: el pedido que se
+     * está despachando puede tener su propia reserva y se contaría dos veces.
+     *
+     * Las cantidades se suman por producto porque un mismo SKU puede venir en
+     * dos líneas, y cada una sola cabría aunque juntas no.
+     */
+    private function exigirSaldo(PedidoCliente $pedido, int $ubicacionId): void
+    {
+        $pedidas = [];
+        foreach ($pedido->items as $item) {
+            if (! $item->variante_id && ! $item->producto_id) continue;
+            $cantidad = (int) ($item->cantidad ?? 0);
+            if ($cantidad <= 0) continue;
+
+            $clave = CostoPromedio::clave($item->variante_id, $item->producto_id);
+            $pedidas[$clave] ??= ['item' => $item, 'cantidad' => 0];
+            $pedidas[$clave]['cantidad'] += $cantidad;
+        }
+
+        $faltantes = [];
+        foreach ($pedidas as ['item' => $item, 'cantidad' => $cantidad]) {
+            // Serializa contra un conteo o traslado simultáneo sobre el mismo
+            // producto y bodega, igual que hace el egreso de Dropi.
+            $q = InventarioMovimiento::query()->where('ubicacion_id', $ubicacionId);
+            $item->variante_id
+                ? $q->where('variante_id', $item->variante_id)
+                : $q->where('producto_id', $item->producto_id)->whereNull('variante_id');
+            $saldo = (int) $q->lockForUpdate()->get(['cantidad'])->sum('cantidad');
+
+            if ($saldo < $cantidad) {
+                $ref = $item->sku_snapshot ?: ($item->descripcion_snapshot ?: "ítem #{$item->id}");
+                $faltantes[] = "{$ref}: pide {$cantidad}, hay ".max($saldo, 0);
+            }
+        }
+
+        abort_if($faltantes, 422,
+            'No hay saldo suficiente en la bodega de origen para despachar: '
+            .implode(' · ', $faltantes).'. Cargá la entrada o trasladá la mercancía antes de despachar.');
     }
 
     /**

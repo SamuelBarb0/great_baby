@@ -166,6 +166,50 @@ it('sin costo conocido descuenta el stock pero no inventa un asiento en cero', f
             ->where('origen_type', PedidoCliente::class)->count())->toBe(0);
 });
 
+it('no despacha más de lo que hay en la bodega y no escribe nada', function () {
+    // Antes salía igual y el kardex quedaba en −7.
+    $p = productoConStock($this->bodega, 3, 12000);
+    $pedido = pedidoDespachable($this->cliente, $this->bodega, $p, 10);
+
+    expect(fn () => (new DescontarStockPorDespacho())->ejecutar($pedido))
+        ->toThrow(Symfony\Component\HttpKernel\Exception\HttpException::class, 'pide 10, hay 3');
+
+    expect(InventarioMovimiento::where('tipo', 'salida_venta')->count())->toBe(0)
+        ->and(MovimientoContable::count())->toBe(0);
+});
+
+it('suma las líneas del mismo producto antes de comparar con el saldo', function () {
+    // 6 + 6 con 10 en bodega: cada línea sola cabe, juntas no.
+    $p = productoConStock($this->bodega, 10, 12000);
+    $pedido = pedidoDespachable($this->cliente, $this->bodega, $p, 6);
+    $pedido->items()->first()->replicate()->save();
+
+    expect(fn () => (new DescontarStockPorDespacho())->ejecutar($pedido->fresh()))
+        ->toThrow(Symfony\Component\HttpKernel\Exception\HttpException::class, 'pide 12, hay 10');
+});
+
+it('el saldo de otra bodega no cuenta', function () {
+    $otra = InventarioUbicacion::create([
+        'codigo' => 'BOD-OTRA', 'nombre' => 'Otra bodega',
+        'categoria' => CategoriaUbicacion::Venta, 'activa' => true,
+    ]);
+    $p = productoConStock($otra, 100, 12000);
+    $pedido = pedidoDespachable($this->cliente, $this->bodega, $p, 1);
+
+    expect(fn () => (new DescontarStockPorDespacho())->ejecutar($pedido))
+        ->toThrow(Symfony\Component\HttpKernel\Exception\HttpException::class, 'pide 1, hay 0');
+});
+
+it('despacha todo el saldo y el kardex queda en cero', function () {
+    $p = productoConStock($this->bodega, 7, 12000);
+    $pedido = pedidoDespachable($this->cliente, $this->bodega, $p, 7);
+
+    (new DescontarStockPorDespacho())->ejecutar($pedido);
+
+    expect((int) InventarioMovimiento::where('producto_id', $p->id)
+        ->where('ubicacion_id', $this->bodega->id)->sum('cantidad'))->toBe(0);
+});
+
 it('un pedido sin bodega de origen no descuenta ni asienta', function () {
     $p = productoConStock($this->bodega, 100, 12000);
     $pedido = pedidoDespachable($this->cliente, $this->bodega, $p, 7);
