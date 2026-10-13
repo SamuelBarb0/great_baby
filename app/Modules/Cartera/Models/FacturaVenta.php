@@ -69,7 +69,7 @@ class FacturaVenta extends Model implements AuditableContract
             if ($f->exists && $f->getOriginal('emitida_at')) {
                 $inmutables = [
                     'numero', 'fecha_emision', 'cufe', 'ari_factura_id', 'emitida_at',
-                    'total', 'subtotal', 'descuento', 'impuestos',
+                    'total', 'subtotal', 'descuento', 'impuestos', 'retenciones',
                     'contacto_id', 'es_electronica',
                 ];
                 foreach ($inmutables as $campo) {
@@ -137,6 +137,12 @@ class FacturaVenta extends Model implements AuditableContract
         });
     }
 
+    /** Lo que el cliente retiene sobre esta factura (ver AplicarRetencionesVenta). */
+    public function retencionesAplicadas(): \Illuminate\Database\Eloquent\Relations\MorphMany
+    {
+        return $this->morphMany(RetencionAplicada::class, 'origen');
+    }
+
     /** Relación a las Notas Crédito emitidas contra esta factura. */
     public function notasCredito(): HasMany
     {
@@ -158,6 +164,7 @@ class FacturaVenta extends Model implements AuditableContract
         'descuento' => 'decimal:2',
         'impuestos' => 'decimal:2',
         'total' => 'decimal:2',
+        'retenciones' => 'decimal:2',
         'saldo' => 'decimal:2',
     ];
 
@@ -257,7 +264,9 @@ class FacturaVenta extends Model implements AuditableContract
         $totalNc = (float) $this->notasCredito()
             ->whereNotIn('estado', ['rechazada', 'anulada'])
             ->sum('valor');
-        $this->saldo = max(0, (float) $this->total - $totalPagado - $totalNc);
+        // Lo que el cliente retiene no lo va a pagar nunca: el saldo parte del
+        // neto, si no un cliente que paga completo quedaría debiendo lo retenido.
+        $this->saldo = max(0, (float) $this->total - (float) $this->retenciones - $totalPagado - $totalNc);
 
         if ($this->saldo <= 0.009) {
             $this->estado = EstadoFactura::Pagada;

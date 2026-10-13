@@ -258,7 +258,9 @@ class SiigoEmisionService
             ->where('tipo', 'iva')->where('activo', true)->whereNotNull('siigo_id')
             ->pluck('siigo_id', 'porcentaje');
 
-        $items = $factura->items->map(function ($item) use ($ivaPorPct) {
+        $retencionesSiigo = $this->retencionesSiigo($factura);
+
+        $items = $factura->items->map(function ($item) use ($ivaPorPct, $retencionesSiigo) {
             $variante = $item->variante;
             $producto = $variante?->producto ?? $item->producto;
             $codigo = $this->codigoSiigoDe($variante, $producto, $item->descripcion);
@@ -286,6 +288,12 @@ class SiigoEmisionService
                 $linea['taxes'] = [['id' => $siigoTaxId]];
             }
 
+            // Retenciones del cliente: SIIGO las calcula por ítem con el
+            // impuesto de retención y las descuenta del total a pagar.
+            foreach ($retencionesSiigo as $taxId) {
+                $linea['taxes'][] = ['id' => $taxId];
+            }
+
             return $linea;
         })->all();
 
@@ -308,7 +316,9 @@ class SiigoEmisionService
             'items' => $items,
             'payments' => [[
                 'id' => (int) $config->payment_type_id,
-                'value' => (float) $factura->total,
+                // Neto de retenciones: SIIGO exige que los pagos sumen el
+                // total MENOS lo retenido, si no responde invalid_total_payments.
+                'value' => round((float) $factura->total - (float) $factura->retenciones, 2),
                 'due_date' => $factura->fecha_vencimiento?->format('Y-m-d')
                     ?? $factura->fecha_emision->format('Y-m-d'),
             ]],
@@ -325,6 +335,36 @@ class SiigoEmisionService
         }
 
         return $payload;
+    }
+
+    /**
+     * Ids de impuesto SIIGO de las retenciones que lleva la factura.
+     *
+     * Una retención sin `siigo_tax_id` frena la emisión, igual que un IVA sin
+     * mapear: mandar la factura sin ella dejaría en SIIGO un total a pagar
+     * distinto del que ve el cliente en el ERP.
+     *
+     * @return list<int>
+     */
+    private function retencionesSiigo(FacturaVenta $factura): array
+    {
+        if ((float) $factura->retenciones <= 0) {
+            return [];
+        }
+
+        return $factura->retencionesAplicadas()->with('config')->get()
+            ->map(function ($r) {
+                $taxId = (int) ($r->config?->siigo_tax_id ?? 0);
+                if (! $taxId) {
+                    throw new RuntimeException(
+                        "La regla de {$r->tipo} «{$r->config?->concepto}» no tiene «ID impuesto SIIGO». "
+                        .'Asignalo en Cartera → Retenciones.'
+                    );
+                }
+
+                return $taxId;
+            })
+            ->unique()->values()->all();
     }
 
     /**

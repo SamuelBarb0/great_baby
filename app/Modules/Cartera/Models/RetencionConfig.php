@@ -12,7 +12,7 @@ class RetencionConfig extends Model
     protected $table = 'retenciones_config';
     protected $fillable = [
         'tipo', 'concepto', 'ciudad', 'base_minima', 'tarifa_pct',
-        'cuenta_puc', 'activa', 'notas',
+        'cuenta_puc', 'siigo_tax_id', 'activa', 'notas',
     ];
     protected $casts = [
         'base_minima' => 'decimal:2',

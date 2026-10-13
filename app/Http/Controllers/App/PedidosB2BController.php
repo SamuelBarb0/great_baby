@@ -509,6 +509,10 @@ class PedidosB2BController extends Controller implements HasMiddleware
                 ]);
             }
 
+            // Lo que el cliente nos va a retener: antes del asiento y de SIIGO,
+            // que lo leen de la factura.
+            app(\App\Modules\Cartera\Actions\AplicarRetencionesVenta::class)->ejecutar($f);
+
             // C-QA-D-1 (CRÍTICO): el observer `saved` corre en create con items=0 y NO genera asiento.
             // Disparamos explícitamente después de insertar ítems.
             // El action es idempotente (chequea si ya existe asiento para esta factura).

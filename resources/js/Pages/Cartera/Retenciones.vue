@@ -13,14 +13,14 @@ const modalConfirm = ref(null);
 
 const tab = ref('retefuente');
 const modal = ref(false);
-const form = reactive({ id: null, tipo: 'retefuente', concepto: '', ciudad: '', base_minima: 0, tarifa_pct: 0, cuenta_puc: '', activa: true, notas: '' });
+const form = reactive({ id: null, tipo: 'retefuente', concepto: '', ciudad: '', base_minima: 0, tarifa_pct: 0, cuenta_puc: '', siigo_tax_id: null, activa: true, notas: '' });
 const procesando = ref(false);
 
 const filtradas = computed(() => props.reglas.filter(r => r.tipo === tab.value));
 
 const abrir = (regla = null) => {
     if (regla) Object.assign(form, regla);
-    else Object.assign(form, { id: null, tipo: tab.value, concepto: '', ciudad: '', base_minima: 0, tarifa_pct: 0, cuenta_puc: '', activa: true, notas: '' });
+    else Object.assign(form, { id: null, tipo: tab.value, concepto: '', ciudad: '', base_minima: 0, tarifa_pct: 0, cuenta_puc: '', siigo_tax_id: null, activa: true, notas: '' });
     modal.value = true;
 };
 
@@ -66,6 +66,11 @@ const tabs = [
                 <p class="text-sm text-surface-500 mt-1">
                     Reglas para calcular automático Retefuente/Reteica/Reteiva al pagar facturas de compra.
                     Se aplican al confirmar recepción · quedan en <code>retenciones_aplicadas</code> y viajan a SIIGO como parte del voucher de egreso.
+                </p>
+                <p class="text-sm text-surface-500 mt-1">
+                    En <strong>ventas</strong> se usan las mismas tarifas para lo que el cliente nos retiene (concepto
+                    <code>compras_generales</code>, cuentas 1355 de Reglas → Contable), sólo para clientes marcados en su ficha.
+                    Para facturas electrónicas la regla necesita su «ID impuesto SIIGO».
                 </p>
             </div>
 
@@ -168,6 +173,11 @@ const tabs = [
                         <div>
                             <label class="text-xs font-semibold">Cuenta PUC *</label>
                             <input v-model="form.cuenta_puc" required maxlength="30" class="input w-full font-mono" placeholder="236540"/>
+                        </div>
+                        <div>
+                            <label class="text-xs font-semibold">ID impuesto SIIGO</label>
+                            <input v-model.number="form.siigo_tax_id" type="number" min="1" class="input w-full font-mono" placeholder="Del catálogo /v1/taxes"/>
+                            <p class="text-[11px] text-surface-500 mt-0.5">Necesario para mandar la retención en la factura electrónica.</p>
                         </div>
                         <div>
                             <label class="text-xs font-semibold">Notas</label>

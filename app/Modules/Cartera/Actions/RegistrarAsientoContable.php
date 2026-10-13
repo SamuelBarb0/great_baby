@@ -37,15 +37,30 @@ class RegistrarAsientoContable
 
             $lineas = [];
 
-            // CxC al cliente
+            // CxC al cliente: lo que va a pagar, neto de lo que nos retiene.
+            $retenido = (float) $factura->retenciones;
             $lineas[] = [
                 'fecha' => $factura->fecha_emision,
                 'cuenta_puc' => '1305', 'tercero_type' => $terceroTipo, 'tercero_id' => $factura->contacto_id,
-                'debe' => (float) $factura->total, 'haber' => 0,
+                'debe' => round((float) $factura->total - $retenido, 2), 'haber' => 0,
                 'origen_type' => FacturaVenta::class, 'origen_id' => $factura->id,
                 'descripcion' => "Factura {$factura->numero} — {$factura->contacto?->nombreDisplay()}",
                 'user_id' => $userId,
             ];
+
+            // Retenciones que nos practica el cliente: saldo a favor (1355xx).
+            if ($retenido > 0) {
+                foreach ($factura->retencionesAplicadas()->get() as $r) {
+                    $lineas[] = [
+                        'fecha' => $factura->fecha_emision,
+                        'cuenta_puc' => $r->cuenta_puc, 'tercero_type' => $terceroTipo, 'tercero_id' => $factura->contacto_id,
+                        'debe' => (float) $r->valor, 'haber' => 0,
+                        'origen_type' => FacturaVenta::class, 'origen_id' => $factura->id,
+                        'descripcion' => ucfirst($r->tipo).' '.(float) $r->tarifa_pct."% factura {$factura->numero}",
+                        'user_id' => $userId,
+                    ];
+                }
+            }
 
             // Ingreso por venta
             $ingreso = (float) $factura->subtotal - (float) $factura->descuento;

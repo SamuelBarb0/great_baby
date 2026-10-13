@@ -215,6 +215,7 @@ class ContactosController extends Controller implements HasMiddleware
                 'es_proveedor' => (bool) $contacto->es_proveedor,
                 'es_empleado' => (bool) $contacto->es_empleado,
                 'regimen_iva' => $contacto->regimen_iva,
+                'retenciones_default' => (array) ($contacto->retenciones_default ?? []),
                 'lista_precios_id' => $contacto->lista_precios_id,
                 'activo' => (bool) $contacto->activo,
             ] : null,
@@ -278,6 +279,9 @@ class ContactosController extends Controller implements HasMiddleware
             'es_proveedor' => ['boolean'],
             'es_empleado' => ['boolean'],
             'regimen_iva' => ['nullable', 'in:responsable,no_responsable'],
+            // Qué nos retiene este cliente al pagar (AplicarRetencionesVenta).
+            'retenciones_default' => ['nullable', 'array:fuente,ica,iva'],
+            'retenciones_default.*' => ['boolean'],
             'lista_precios_id' => ['nullable', 'integer', 'exists:listas_precios,id'],
             'activo' => ['boolean'],
         ], [

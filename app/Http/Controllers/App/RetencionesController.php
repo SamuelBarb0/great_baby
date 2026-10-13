@@ -44,6 +44,7 @@ class RetencionesController extends Controller implements HasMiddleware
             'base_minima' => ['nullable', 'numeric', 'min:0'],
             'tarifa_pct' => ['required', 'numeric', 'min:0', 'max:100'],
             'cuenta_puc' => ['required', 'string', 'max:30'],
+            'siigo_tax_id' => ['nullable', 'integer', 'min:1'],
             'activa' => ['boolean'],
             'notas' => ['nullable', 'string'],
         ]);

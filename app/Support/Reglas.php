@@ -57,6 +57,12 @@ class Reglas
         'contable.cta_caja_default' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '110505', 'etiqueta' => 'Cuenta caja general', 'descripcion' => 'PUC Great Baby · 110505 Caja general'],
         'contable.cta_proveedores_default' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '220505', 'etiqueta' => 'Cuenta proveedores nacionales', 'descripcion' => 'PUC Great Baby · 220505 Proveedores nacionales'],
         'contable.cta_retefuente_default' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '236575', 'etiqueta' => 'Cuenta autorretenciones por defecto', 'descripcion' => '⚠ Confirmar concepto específico con Silvia (2365xx según naturaleza)'],
+        // Retenciones que el CLIENTE nos practica al pagar una venta: son saldo a
+        // favor (1355), no por pagar (2365, que es lo de compras).
+        'contable.cta_retefuente_venta' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '135515', 'etiqueta' => 'Retefuente que nos practican (ventas)', 'descripcion' => 'PUC · 135515 Retención en la fuente. ⚠ Confirmar con Silvia'],
+        'contable.cta_reteiva_venta' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '135517', 'etiqueta' => 'ReteIVA que nos practican (ventas)', 'descripcion' => 'PUC · 135517 Impuesto a las ventas retenido. ⚠ Confirmar con Silvia'],
+        'contable.cta_reteica_venta' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '135518', 'etiqueta' => 'ReteICA que nos practican (ventas)', 'descripcion' => 'PUC · 135518 Impuesto de industria y comercio retenido. ⚠ Confirmar con Silvia'],
+        'contable.concepto_retencion_venta' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => 'compras_generales', 'etiqueta' => 'Concepto de retención en ventas', 'descripcion' => 'Regla de Cartera → Retenciones que se usa al facturar: el cliente nos compra mercancía, así que para él es «compras generales».'],
         'contable.centro_costo_default' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => 'GB-01', 'etiqueta' => 'Centro de costo por defecto', 'descripcion' => 'Cuenta / centro de imputación por defecto para asientos'],
 
         // ============ CRM · segmentación ============
