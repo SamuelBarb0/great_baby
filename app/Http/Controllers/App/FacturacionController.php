@@ -44,11 +44,29 @@ class FacturacionController extends Controller implements HasMiddleware
 
     public function bandeja(Request $r): Response
     {
-        // Pedidos aprobados + alistados (fin_at) sin factura todavía.
+        /*
+         * Pedidos aprobados sin factura todavia.
+         *
+         * Antes exigia ademas `alistado_fin_at`: que el pedido ya estuviera
+         * alistado. Eso contradice el flujo real y lo dejaba en punto muerto:
+         * la cola de alistamiento sólo muestra pedidos con
+         * `estado = 'facturado'` y sus acciones cortan con «Sólo se alistan
+         * pedidos facturados». Para facturar habia que alistar, y para alistar
+         * habia que facturar. Un pedido aprobado no llegaba a ninguna de las
+         * dos pantallas.
+         *
+         * El orden correcto lo dice el propio despacho: «la factura ya está
+         * impresa y acompaña físicamente la mercancía». Primero se factura,
+         * despues bodega alista con esa factura en la mano, y al final se
+         * despacha. Encontrado el 2026-10-13 llevando un pedido de punta a
+         * punta por la interfaz.
+         *
+         * El filtro de novedades se mantiene: un pedido alistado con problema
+         * sin resolver no se factura.
+         */
         $pendientes = PedidoCliente::query()
             ->where('estado', 'aprobado')
             ->whereNull('factura_id')
-            ->whereNotNull('alistado_fin_at')
             ->where(function ($q) {
                 $q->whereNull('alistado_con_novedad')
                   ->orWhere('alistado_con_novedad', false)
@@ -61,7 +79,7 @@ class FacturacionController extends Controller implements HasMiddleware
                 'ubicacionOrigen:id,codigo,nombre',
                 'items:id,pedido_id',
             ])
-            ->orderBy('alistado_fin_at')
+            ->orderBy('created_at')
             ->limit(100)
             ->get()
             ->map(fn ($p) => [

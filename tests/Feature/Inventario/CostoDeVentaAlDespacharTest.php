@@ -210,13 +210,41 @@ it('despacha todo el saldo y el kardex queda en cero', function () {
         ->where('ubicacion_id', $this->bodega->id)->sum('cantidad'))->toBe(0);
 });
 
-it('un pedido sin bodega de origen no descuenta ni asienta', function () {
+it('un pedido sin bodega de origen igual descuenta: la deduce del kardex', function () {
+    /*
+     * Esta prueba decía antes «no descuenta ni asienta» y daba verde: dejó
+     * fijada como correcta la razón por la que ninguna venta B2B bajó nunca el
+     * inventario. La bodega del pedido la pone una regla de ruteo por ciudad, y
+     * esa tabla está vacía —no existe pantalla para cargarla—, así que TODOS los
+     * pedidos caían en este caso. Verificado el 2026-10-13 llevando una venta
+     * entera por la interfaz: 40 unidades antes del despacho, 40 después.
+     *
+     * Cuando el pedido no lo dice, se deduce de dónde está la mercancía.
+     */
     $p = productoConStock($this->bodega, 100, 12000);
     $pedido = pedidoDespachable($this->cliente, $this->bodega, $p, 7);
     $pedido->update(['ubicacion_origen_id' => null]);
 
     $lineas = (new DescontarStockPorDespacho())->ejecutar($pedido->fresh());
 
-    expect($lineas)->toBe(0)
+    expect($lineas)->toBe(1)
+        ->and((int) InventarioMovimiento::where('producto_id', $p->id)->sum('cantidad'))->toBe(93)
+        ->and(MovimientoContable::where('origen_id', $pedido->id)->count())->toBe(2);
+});
+
+it('no inventa un egreso de algo que no está en ninguna bodega', function () {
+    // El otro lado del mismo cambio: deducir no puede volverse adivinar. Sin
+    // existencias en ningún lado no hay de dónde sacarlo.
+    $p = Producto::sinKardexAutomatico(fn () => Producto::create([
+        'referencia' => 'NUNCA-ENTRO', 'nombre' => 'Jamás entró a bodega',
+        'desglose_stock' => false, 'stock_directo' => 0, 'precio_proveedor' => 12000,
+    ]));
+    $pedido = pedidoDespachable($this->cliente, $this->bodega, $p, 7);
+    $pedido->update(['ubicacion_origen_id' => null]);
+
+    $accion = new DescontarStockPorDespacho();
+
+    expect($accion->ejecutar($pedido->fresh()))->toBe(0)
+        ->and($accion->motivo)->not->toBeNull()
         ->and(MovimientoContable::count())->toBe(0);
 });

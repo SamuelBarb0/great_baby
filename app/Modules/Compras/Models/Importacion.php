@@ -131,6 +131,8 @@ class Importacion extends Model implements AuditableContract
         }
         $fin = $this->fecha_llegada ?? now();
 
-        return $this->fecha_zarpe->diffInDays($fin);
+        // Entero: `diffInDays` es flotante en Carbon 3 y el contenedor en
+        // tránsito se mostraba con decimales («12.7083 días»).
+        return (int) round($this->fecha_zarpe->diffInDays($fin));
     }
 }

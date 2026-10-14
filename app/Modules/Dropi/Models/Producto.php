@@ -159,6 +159,34 @@ class Producto extends Model implements AuditableContract, HasMedia
     protected static bool $omitirKardexInicial = false;
 
     /**
+     * Ubicación donde debe entrar el stock inicial del próximo producto.
+     *
+     * Null = la primera activa, que es como se comportaba antes y es lo que
+     * necesitan los importadores y seeders que no eligen lugar.
+     */
+    protected static ?int $ubicacionStockInicial = null;
+
+    /**
+     * Corre `$fn` dejando el stock inicial en la ubicación indicada.
+     *
+     * @template T
+     *
+     * @param  callable():T  $fn
+     * @return T
+     */
+    public static function conStockInicialEn(?int $ubicacionId, callable $fn)
+    {
+        $previo = self::$ubicacionStockInicial;
+        self::$ubicacionStockInicial = $ubicacionId;
+
+        try {
+            return $fn();
+        } finally {
+            self::$ubicacionStockInicial = $previo;
+        }
+    }
+
+    /**
      * Corre `$fn` sin que la creación de productos genere kardex automático.
      *
      * @template T
@@ -201,7 +229,25 @@ class Producto extends Model implements AuditableContract, HasMedia
             if (self::$omitirKardexInicial) return;
             if ($p->desglose_stock || (int) $p->stock_directo <= 0) return;
 
-            $bodega = \App\Modules\Dropi\Models\InventarioUbicacion::query()
+            /*
+             * Dónde entra ese stock.
+             *
+             * Antes se tomaba SIEMPRE la primera ubicación activa por id, sin
+             * preguntar. Medido el 2026-10-13 montando una bodega nueva: se
+             * crea «BOG-DEMO», se escriben 60 unidades y las 60 aparecen en
+             * «R-A-01», una bodega vieja. El formulario pide la cantidad y
+             * nunca pregunta el lugar, así que el error es invisible hasta que
+             * alguien va a despachar y no encuentra la mercancía.
+             *
+             * Ahora manda la ubicación que eligió la persona; si no eligió
+             * ninguna se conserva el comportamiento anterior, para no romper
+             * las importaciones y los seeders que no la envían.
+             */
+            $bodega = self::$ubicacionStockInicial
+                ? \App\Modules\Dropi\Models\InventarioUbicacion::find(self::$ubicacionStockInicial)
+                : null;
+
+            $bodega ??= \App\Modules\Dropi\Models\InventarioUbicacion::query()
                 ->where(fn ($q) => $q->where('activa', true)->orWhereNull('activa'))
                 ->orderBy('id')
                 ->first();
@@ -221,6 +267,13 @@ class Producto extends Model implements AuditableContract, HasMedia
                 'ubicacion_id' => $bodega->id,
                 'tipo' => 'stock_inicial_form',
                 'cantidad' => (int) $p->stock_directo,
+                // El stock inicial entraba SIN costo. Como el kardex valoriza
+                // con el promedio de las entradas, la bodega entera valía $0 y
+                // la venta salía a costo cero: ningún despacho causaba costo de
+                // ventas, así que el margen bruto del Estado de resultados daba
+                // 100% siempre. Medido el 2026-10-13 en el reporte de stock por
+                // bodega, con mercancía adentro y la bodega en $0.
+                'costo_unit' => $p->precio_proveedor ?: null,
                 'notas' => $notaMarker,
             ]);
         });
