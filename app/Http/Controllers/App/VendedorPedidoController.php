@@ -292,6 +292,27 @@ class VendedorPedidoController extends Controller implements HasMiddleware
 
         $variantes = $variantes->concat($agregados)->values();
 
+        /*
+         * Cuántas unidades hay de verdad.
+         *
+         * El catálogo del vendedor NO traía existencias: se podían prometer 999
+         * unidades de algo que tiene 35 y la pantalla no decía nada, ni al
+         * escribir la cantidad ni al enviar el pedido. Comprobado el 2026-10-13
+         * levantando un pedido real por $24.875.100 sobre 35 unidades de stock.
+         * El problema aparecía recién en bodega, con el cliente ya avisado y la
+         * factura en camino.
+         *
+         * No se bloquea —un pedido contra contenedor que viene en camino es
+         * legítimo— pero tiene que verse antes de prometerlo.
+         */
+        $saldos = $this->disponiblePorSujeto($variantes);
+
+        $variantes = $variantes->map(function ($v) use ($saldos) {
+            $v['disponible'] = (int) ($saldos[$v['variante_id'] ? 'v:'.$v['variante_id'] : 'p:'.$v['producto_id']] ?? 0);
+
+            return $v;
+        })->values();
+
         // Semáforo rápido · para que el vendedor sepa en terreno si el pedido
         //   del cliente va a quedar retenido antes de armarlo.
         $credito = ConsultarCredito::run($cliente->id);
@@ -314,6 +335,57 @@ class VendedorPedidoController extends Controller implements HasMiddleware
                 'dias_mora_max' => (int) ($credito['dias_mora_max'] ?? 0),
             ],
         ]);
+    }
+
+    /**
+     * Saldo disponible de cada ítem del catálogo, en dos consultas.
+     *
+     * Sólo cuentan las bodegas de venta activas: lo que está en avería, en
+     * garantía o reservado no se le puede prometer a nadie.
+     *
+     * @return array<string,int>  clave `v:{id}` o `p:{id}` => unidades
+     */
+    private function disponiblePorSujeto(\Illuminate\Support\Collection $items): array
+    {
+        $ubicaciones = \App\Modules\Dropi\Models\InventarioUbicacion::query()
+            ->where('activa', true)
+            ->where('disponible_para_venta', true)
+            ->pluck('id');
+
+        if ($ubicaciones->isEmpty()) {
+            return [];
+        }
+
+        $out = [];
+
+        $variantes = $items->pluck('variante_id')->filter()->values();
+        if ($variantes->isNotEmpty()) {
+            \App\Modules\Dropi\Models\InventarioMovimiento::query()
+                ->whereIn('variante_id', $variantes)
+                ->whereIn('ubicacion_id', $ubicaciones)
+                ->selectRaw('variante_id, SUM(cantidad) as saldo')
+                ->groupBy('variante_id')->get()
+                // `fn` captura por valor: con una arrow function `$out` se
+                // escribía sobre una copia y volvía siempre vacío.
+                ->each(function ($r) use (&$out) {
+                    $out['v:'.$r->variante_id] = (int) $r->saldo;
+                });
+        }
+
+        $productos = $items->where('variante_id', null)->pluck('producto_id')->filter()->values();
+        if ($productos->isNotEmpty()) {
+            \App\Modules\Dropi\Models\InventarioMovimiento::query()
+                ->whereIn('producto_id', $productos)
+                ->whereNull('variante_id')
+                ->whereIn('ubicacion_id', $ubicaciones)
+                ->selectRaw('producto_id, SUM(cantidad) as saldo')
+                ->groupBy('producto_id')->get()
+                ->each(function ($r) use (&$out) {
+                    $out['p:'.$r->producto_id] = (int) $r->saldo;
+                });
+        }
+
+        return $out;
     }
 
     public function confirmar(Request $r, int $contactoId): RedirectResponse

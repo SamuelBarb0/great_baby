@@ -39,6 +39,13 @@ class SiigoClient
         // Activar con SIIGO_DRIVER=fake en .env. Devuelve un token dummy
         // vigente 24h y todos los request() responden con IDs simulados.
         if (config('siigo.driver', 'real') === 'fake') {
+            // Deja constancia igual que el modo real. Sin esto, el driver
+            // falso autenticaba «bien» pero `ultimo_auth_ok` se quedaba como
+            // estuviera: la pantalla seguía diciendo que la credencial está
+            // muerta y el middleware aplazaba todos los push, en una
+            // instalación donde por definición nada puede fallar.
+            $this->registrarAuth(true);
+
             return 'fake_token_greatbaby_' . now()->format('Ymd');
         }
 

@@ -7,6 +7,7 @@ use App\Modules\Dropi\Models\InventarioMovimiento;
 use App\Modules\Dropi\Models\InventarioUbicacion;
 use App\Modules\Dropi\Models\ProductoVariante;
 use App\Modules\Inventario\Models\AlertaStockConfig;
+use App\Modules\Inventario\Support\CostoPromedio;
 use App\Modules\Dropi\Models\Producto;
 use App\Modules\Inventario\Models\TomaFisica;
 use App\Modules\Inventario\Models\TomaFisicaItem;
@@ -236,7 +237,12 @@ class InventarioGestionController extends Controller implements HasMiddleware
         $costoPromedios = $this->calcularCostosPromedio();
 
         // Total unidades por ubicación
-        $saldos = InventarioMovimiento::selectRaw('ubicacion_id, SUM(cantidad) as total, COUNT(DISTINCT variante_id) as skus')
+        // Contaba `DISTINCT variante_id`, así que una bodega llena de productos
+        // agregados decía «0 SKUs» al lado de sus propias unidades.
+        $saldos = InventarioMovimiento::selectRaw(
+            'ubicacion_id, SUM(cantidad) as total, '
+            .'COUNT(DISTINCT COALESCE(CONCAT("v", variante_id), CONCAT("p", producto_id))) as skus'
+        )
             ->groupBy('ubicacion_id')
             ->having('total', '!=', 0)
             ->get()->keyBy('ubicacion_id');
@@ -256,26 +262,46 @@ class InventarioGestionController extends Controller implements HasMiddleware
                 ];
             });
 
-        // Top 30 variantes con más stock · agregando costo_prom y valor
-        $topStock = InventarioMovimiento::selectRaw('variante_id, SUM(cantidad) as total')
+        /*
+         * Top 30 con más stock.
+         *
+         * Pedía `whereNotNull('variante_id')`, así que los productos AGREGADOS
+         * no aparecían nunca: la pantalla decía «Top 30 con más stock» y dejaba
+         * afuera buena parte de la mercancía que hay en bodega.
+         */
+        $porVariante = InventarioMovimiento::selectRaw('variante_id as sujeto, SUM(cantidad) as total')
             ->whereNotNull('variante_id')
-            ->groupBy('variante_id')->having('total', '>', 0)->orderByDesc('total')->limit(30)->get();
+            ->groupBy('variante_id')->having('total', '>', 0)
+            ->orderByDesc('total')->limit(30)->get()
+            ->map(fn ($r) => ['tipo' => 'v', 'id' => (int) $r->sujeto, 'total' => (int) $r->total]);
 
-        $ids = $topStock->pluck('variante_id')->filter()->all();
-        $vars = ProductoVariante::with('producto:id,referencia,nombre')->whereIn('id', $ids)->get()->keyBy('id');
+        $porProducto = InventarioMovimiento::selectRaw('producto_id as sujeto, SUM(cantidad) as total')
+            ->whereNull('variante_id')->whereNotNull('producto_id')
+            ->groupBy('producto_id')->having('total', '>', 0)
+            ->orderByDesc('total')->limit(30)->get()
+            ->map(fn ($r) => ['tipo' => 'p', 'id' => (int) $r->sujeto, 'total' => (int) $r->total]);
 
-        $top = $topStock->map(function ($r) use ($vars, $costoPromedios) {
-            $vid = (int) $r->variante_id;
-            $v = $vars->get($vid);
-            $costoProm = (float) ($costoPromedios[$vid] ?? 0);
-            $total = (int) $r->total;
+        $topStock = $porVariante->concat($porProducto)->sortByDesc('total')->take(30)->values();
+
+        $vars = ProductoVariante::with('producto:id,referencia,nombre')
+            ->whereIn('id', $topStock->where('tipo', 'v')->pluck('id')->all())
+            ->get()->keyBy('id');
+        $prods = Producto::whereIn('id', $topStock->where('tipo', 'p')->pluck('id')->all())
+            ->get(['id', 'referencia', 'nombre', 'siigo_code'])->keyBy('id');
+
+        $top = $topStock->map(function ($r) use ($vars, $prods, $costoPromedios) {
+            $esVariante = $r['tipo'] === 'v';
+            $v = $esVariante ? $vars->get($r['id']) : null;
+            $p = $esVariante ? $v?->producto : $prods->get($r['id']);
+            $costoProm = (float) ($costoPromedios[$r['tipo'].':'.$r['id']] ?? 0);
+
             return [
-                'codigo' => $v?->codigo_barras ?? '—',
-                'producto' => $v?->producto?->nombre ?? '—',
-                'total' => $total,
+                'codigo' => ($esVariante ? $v?->codigo_barras : $p?->referencia) ?? '—',
+                'producto' => $p?->nombre ?? '—',
+                'total' => $r['total'],
                 'costo_prom' => $costoProm,
-                'valor' => round($total * $costoProm, 2),
-                'siigo_code' => $v?->siigo_code,
+                'valor' => round($r['total'] * $costoProm, 2),
+                'siigo_code' => $esVariante ? $v?->siigo_code : $p?->siigo_code,
             ];
         });
 
@@ -298,18 +324,43 @@ class InventarioGestionController extends Controller implements HasMiddleware
      */
     private function calcularCostosPromedio(): array
     {
-        $entradas = InventarioMovimiento::selectRaw(
-            'variante_id, SUM(cantidad * costo_unit) as valor_ent, SUM(cantidad) as cant_ent'
-        )
-            ->where('cantidad', '>', 0)
-            ->where('costo_unit', '>', 0)
-            ->groupBy('variante_id')
-            ->get()->keyBy('variante_id');
-
+        /*
+         * Agrupaba sólo por `variante_id`. Los productos AGREGADOS —los que no
+         * tienen variante, que es la mayor parte del catálogo de Great Baby—
+         * caían todos en una sola fila con la clave NULL: el costo de una pijama
+         * de $12.000 promediado con el de un coche de $400.000, y ese número
+         * mezclado aplicado después a los dos. Encontrado el 2026-10-13 en el
+         * «Reporte de stock por bodega».
+         *
+         * Se devuelve con las mismas claves que usa el resto del inventario:
+         * `v:{id}` por variante, `p:{id}` por producto agregado.
+         */
         $out = [];
-        foreach ($entradas as $vid => $r) {
-            $out[$vid] = $r->cant_ent > 0 ? round((float) $r->valor_ent / (float) $r->cant_ent, 4) : 0;
-        }
+
+        $promedio = function ($campo, $prefijo) use (&$out) {
+            $q = InventarioMovimiento::selectRaw(
+                "{$campo} as sujeto, SUM(cantidad * costo_unit) as valor_ent, SUM(cantidad) as cant_ent"
+            )
+                ->where('cantidad', '>', 0)
+                ->where('costo_unit', '>', 0)
+                ->whereNotNull($campo)
+                ->groupBy($campo);
+
+            // Un producto cuenta como agregado sólo si el movimiento no trae
+            // variante; si no, se contaría dos veces lo mismo.
+            if ($campo === 'producto_id') {
+                $q->whereNull('variante_id');
+            }
+
+            foreach ($q->get() as $r) {
+                $out[$prefijo.':'.$r->sujeto] = $r->cant_ent > 0
+                    ? round((float) $r->valor_ent / (float) $r->cant_ent, 4) : 0;
+            }
+        };
+
+        $promedio('variante_id', 'v');
+        $promedio('producto_id', 'p');
+
         return $out;
     }
 
@@ -319,13 +370,15 @@ class InventarioGestionController extends Controller implements HasMiddleware
      */
     private function calcularValorPorUbicacion(array $costos): array
     {
-        $saldos = InventarioMovimiento::selectRaw('ubicacion_id, variante_id, SUM(cantidad) as saldo')
-            ->groupBy('ubicacion_id', 'variante_id')
+        $saldos = InventarioMovimiento::selectRaw(
+            'ubicacion_id, variante_id, producto_id, SUM(cantidad) as saldo'
+        )
+            ->groupBy('ubicacion_id', 'variante_id', 'producto_id')
             ->having('saldo', '>', 0)
             ->get();
         $out = [];
         foreach ($saldos as $r) {
-            $costo = (float) ($costos[$r->variante_id] ?? 0);
+            $costo = (float) ($costos[CostoPromedio::clave($r->variante_id, $r->producto_id)] ?? 0);
             $out[$r->ubicacion_id] = ($out[$r->ubicacion_id] ?? 0) + ((int) $r->saldo * $costo);
         }
         return array_map(fn ($v) => round($v, 2), $out);
@@ -345,6 +398,19 @@ class InventarioGestionController extends Controller implements HasMiddleware
                 'fecha' => $t->fecha_conteo?->format('Y-m-d'),
                 'items_diferentes' => (int) $t->items_diferentes,
             ]),
+
+            // Sin esto el botón «Nuevo conteo» era decorativo: abría el modal
+            // con el desplegable de ubicaciones VACÍO, así que nunca se podía
+            // crear una toma física. La pantalla declaraba la prop y el
+            // controlador no la mandaba. Encontrado el 2026-10-13 haciendo el
+            // recorrido completo.
+            'ubicaciones' => InventarioUbicacion::where('activa', true)
+                // Las de SIIGO son bodegas importadas del catálogo: no se
+                // cuentan, son destino contable. Mismo criterio que en la
+                // pantalla de ubicaciones.
+                ->where('codigo', 'not like', 'SIIGO-%')
+                ->orderBy('codigo')
+                ->get(['id', 'codigo', 'nombre']),
         ]);
     }
 

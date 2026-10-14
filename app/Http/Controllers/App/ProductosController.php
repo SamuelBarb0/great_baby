@@ -176,6 +176,11 @@ class ProductosController extends Controller implements HasMiddleware
             'neto' => ['boolean'],
             'desglose_stock' => ['boolean'],
             'stock_directo' => ['nullable', 'numeric', 'min:0'],
+            // Donde entra ese stock inicial. Sin esto el kardex lo dejaba
+            // en la primera ubicacion activa, que casi nunca es la que la
+            // persona tenia en mente: se monta una bodega nueva, se escriben
+            // 60 unidades y aparecen en otra bodega sin que nadie lo note.
+            'stock_ubicacion_id' => ['nullable', 'integer', 'exists:inventario_ubicaciones,id'],
             // Cuentas contables
             'cta_ingreso' => ['nullable', 'string', 'max:30'],
             'cta_iva_venta' => ['nullable', 'string', 'max:30'],
@@ -231,15 +236,20 @@ class ProductosController extends Controller implements HasMiddleware
         $sustitutos = $data['sustitutos'] ?? [];
         $impuestosIds = $data['impuestos_ids'] ?? null;
         $variantes = $data['variantes'] ?? null;  // null = no tocar, [] = borrar todas
-        unset($data['accesorios'], $data['sustitutos'], $data['impuestos_ids'], $data['variantes']);
+        $ubicacionStock = $data['stock_ubicacion_id'] ?? null;
+        unset($data['accesorios'], $data['sustitutos'], $data['impuestos_ids'], $data['variantes'],
+              $data['stock_ubicacion_id']);
 
         // FASE F2.A1 (ALTO) · envolver save + syncs en transacción para evitar
         // estados parciales si falla el 2º sync y que el Observer ya haya encolado.
-        \DB::transaction(function () use (&$producto, $data, $accesorios, $sustitutos, $impuestosIds, $variantes) {
+        \DB::transaction(function () use (&$producto, $data, $accesorios, $sustitutos, $impuestosIds, $variantes, $ubicacionStock) {
             if ($producto && $producto->exists) {
                 $producto->fill($data)->save();
             } else {
-                $producto = Producto::create($data + ['activo' => true]);
+                $producto = Producto::conStockInicialEn(
+                    $ubicacionStock,
+                    fn () => Producto::create($data + ['activo' => true]),
+                );
             }
 
             $accesoriosSync = collect($accesorios)->mapWithKeys(fn ($a) => [$a['id'] => ['cantidad_default' => $a['cantidad'] ?? 1]])->all();
@@ -1199,6 +1209,14 @@ class ProductosController extends Controller implements HasMiddleware
             ->values();
 
         return [
+            // Para elegir DONDE entra el stock inicial. Sin esta lista el
+            // formulario pedia la cantidad y el kardex la dejaba en la primera
+            // ubicacion activa, casi nunca la que la persona tenia en mente.
+            'ubicaciones' => \App\Modules\Dropi\Models\InventarioUbicacion::where('activa', true)
+                ->where('codigo', 'not like', 'SIIGO-%')
+                ->orderByRaw('bodega_id IS NULL DESC')
+                ->orderBy('codigo')
+                ->get(['id', 'codigo', 'nombre']),
             'marcas' => \App\Modules\Catalogo\Models\Marca::orderBy('nombre')->get(['id', 'nombre']),
             'categorias' => \App\Modules\Catalogo\Models\Categoria::orderBy('nombre')
                 ->get(['id', 'nombre', 'siigo_account_group_id']),

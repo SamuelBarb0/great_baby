@@ -52,10 +52,23 @@ const agregar = (v) => {
             producto_id: v.producto_id ?? null,
             sku: v.sku, nombre: v.nombre, color: v.color, talla: v.talla,
             precio: v.precio, iva_pct: v.iva_pct, cantidad: 1,
+            disponible: v.disponible ?? 0,
         };
     }
 };
 const quitar = (k) => { delete carrito.value[k]; carrito.value = { ...carrito.value }; };
+
+/*
+ * Lo que se está prometiendo por encima de lo que hay.
+ *
+ * El catálogo no mostraba existencias: se podían cargar 999 unidades de algo
+ * que tiene 35 y ni la pantalla ni el envío decían nada. El pedido salía, el
+ * cliente quedaba avisado, y el faltante aparecía recién en bodega.
+ *
+ * No se bloquea —Great Baby vende contra contenedor en camino— pero se ve.
+ */
+const sinStock = computed(() =>
+    carritoLista.value.filter((it) => it.cantidad > (it.disponible ?? 0)));
 
 const carritoLista = computed(() => Object.values(carrito.value));
 const subtotal = computed(() => carritoLista.value.reduce((a, it) => a + it.precio * it.cantidad, 0));
@@ -154,7 +167,13 @@ const confirmar = () => {
                                     <span v-if="v.color || v.talla"> · {{ v.color }} {{ v.talla }}</span>
                                 </div>
                             </div>
-                            <div class="text-sm font-bold whitespace-nowrap">{{ money(v.precio) }}</div>
+                            <div class="text-right whitespace-nowrap">
+                                <div class="text-sm font-bold">{{ money(v.precio) }}</div>
+                                <div :class="['text-[10px] font-semibold',
+                                              v.disponible > 0 ? 'text-emerald-600' : 'text-red-600']">
+                                    {{ v.disponible > 0 ? `${v.disponible} disponibles` : 'sin stock' }}
+                                </div>
+                            </div>
                             <button @click="agregar(v)" class="btn-primary text-xs px-2 py-1">
                                 <Plus class="h-3 w-3"/> Agregar
                             </button>
@@ -172,10 +191,16 @@ const confirmar = () => {
                     </div>
                     <div v-else class="space-y-2 max-h-[380px] overflow-y-auto">
                         <div v-for="it in carritoLista" :key="it.clave"
-                             class="p-2 rounded border border-surface-200 dark:border-surface-700 flex items-center gap-2">
+                             :class="['p-2 rounded border flex items-center gap-2',
+                                      it.cantidad > (it.disponible ?? 0)
+                                        ? 'border-red-400 bg-red-50 dark:bg-red-950/20'
+                                        : 'border-surface-200 dark:border-surface-700']">
                             <div class="flex-1 min-w-0">
                                 <div class="text-sm font-semibold truncate">{{ it.nombre }}</div>
                                 <div class="text-xs text-surface-500">{{ it.color }} {{ it.talla }} · {{ money(it.precio) }}</div>
+                                <div v-if="it.cantidad > (it.disponible ?? 0)" class="text-[10px] font-bold text-red-600">
+                                    Sólo hay {{ it.disponible ?? 0 }} · faltan {{ it.cantidad - (it.disponible ?? 0) }}
+                                </div>
                             </div>
                             <input v-model.number="it.cantidad" type="number" min="1" max="9999"
                                    class="w-14 text-center border rounded px-1 py-0.5 text-sm">
@@ -192,6 +217,12 @@ const confirmar = () => {
                         <div class="flex justify-between"><span>Subtotal</span><b>{{ money(subtotal) }}</b></div>
                         <div class="flex justify-between text-surface-500"><span>IVA</span><span>{{ money(iva) }}</span></div>
                         <div class="flex justify-between text-lg font-bold border-t pt-1"><span>Total</span><span class="text-brand-600">{{ money(total) }}</span></div>
+                    </div>
+
+                    <div v-if="sinStock.length" class="p-2 rounded bg-red-50 border-l-4 border-red-500 text-xs text-red-800">
+                        ⚠ <b>No hay stock para {{ sinStock.length }} ítem(s)</b> de este pedido.
+                        Se puede enviar igual si la mercancía viene en camino, pero bodega no va a
+                        poder alistarlo completo hasta que entre.
                     </div>
 
                     <div v-if="vaARetener && carritoLista.length" class="p-2 rounded bg-amber-50 border-l-4 border-amber-500 text-xs text-amber-800">

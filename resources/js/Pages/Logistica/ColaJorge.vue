@@ -105,6 +105,20 @@ const tipoNovedadLabel = (t) => ({
 // Cronómetro vivo para los pedidos en alistamiento.
 const now = ref(Date.now());
 setInterval(() => now.value = Date.now(), 30000);
+/*
+ * Cuánto tardó el alistamiento, en palabras.
+ *
+ * Llegaba en minutos desde el servidor y se pintaba crudo: un alistamiento de
+ * 19 segundos decía «0.31666666666666665 min» en la tarjeta.
+ */
+const duracion = (seg) => {
+    if (seg == null) return '';
+    if (seg < 60) return `${seg} s`;
+    const min = Math.round(seg / 60);
+    if (min < 60) return `${min} min`;
+    return `${Math.floor(min / 60)} h ${min % 60} min`;
+};
+
 const minutosDesde = (hhmm) => {
     if (!hhmm) return 0;
     const [h, m] = hhmm.split(':').map(Number);
@@ -171,12 +185,21 @@ const minutosDesde = (hhmm) => {
                             </div>
                             <div class="text-sm">{{ p.cliente }}</div>
                             <div class="text-xs text-surface-500">{{ p.ciudad }} · factura {{ p.factura }} · {{ money(p.total) }}</div>
-                            <div class="flex items-center gap-2 pt-1">
-                                <select v-if="rol.puede_reasignar" :disabled="procesando" @change="e => asignar(p.id, e.target.value)" class="flex-1 text-xs border border-surface-300 rounded px-2 py-1 bg-white dark:bg-surface-900">
+                            <!--
+                                El `select` llevaba `flex-1` sin `min-w-0`: en flexbox el ancho
+                                mínimo por defecto es el del contenido, así que con el nombre de un
+                                alistador largo el desplegable se negaba a encogerse y empujaba el
+                                botón «Tomar» FUERA de la tarjeta. Quedaba medio tapado por la
+                                columna de al lado y no se podía hacer clic en él: la acción
+                                principal de la pantalla de bodega era inalcanzable con el mouse.
+                                Encontrado el 2026-10-13 alistando un pedido real.
+                            -->
+                            <div class="flex flex-col gap-2 pt-1">
+                                <select v-if="rol.puede_reasignar" :disabled="procesando" @change="e => asignar(p.id, e.target.value)" class="w-full min-w-0 text-xs border border-surface-300 rounded px-2 py-1 bg-white dark:bg-surface-900">
                                     <option value="">Asignar a…</option>
                                     <option v-for="a in alistadores" :key="a.id" :value="a.id">{{ a.name }}</option>
                                 </select>
-                                <button @click="iniciar(p.id)" :disabled="procesando" class="btn-primary text-xs px-2 py-1">
+                                <button @click="iniciar(p.id)" :disabled="procesando" class="btn-primary w-full justify-center text-xs px-2 py-1">
                                     ▶ Tomar
                                 </button>
                             </div>
@@ -284,8 +307,8 @@ const minutosDesde = (hhmm) => {
                                 <Link :href="`/app/pedidos-b2b/${p.id}`" class="font-bold text-brand-700 hover:underline">
                                     {{ p.numero }}
                                 </Link>
-                                <span v-if="p.duracion_min !== null" class="text-xs font-mono bg-emerald-200 text-emerald-900 px-2 py-0.5 rounded">
-                                    ⏱ {{ p.duracion_min }} min
+                                <span v-if="p.duracion_seg !== null" class="text-xs font-mono bg-emerald-200 text-emerald-900 px-2 py-0.5 rounded">
+                                    ⏱ {{ duracion(p.duracion_seg) }}
                                 </span>
                             </div>
                             <div class="text-sm">{{ p.cliente }}</div>
