@@ -103,6 +103,8 @@ class GenerarFacturasB2BDeCorte
                     ]);
                 }
 
+                app(AplicarRetencionesVenta::class)->ejecutar($factura);
+
                 // Re-audit C1 · asiento contable EXPLÍCITO después de items.
                 $factura->ensureAsiento();
 

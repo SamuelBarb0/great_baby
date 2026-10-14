@@ -106,7 +106,12 @@ const guardar = async () => {
         if (data.ok) {
             modal.value = null;
             mostrarFlash('success', data.mensaje);
-            router.reload({ only: ['ubicaciones', 'candidatos_admin'] });
+            // `bodegas` tambien: es la lista del desplegable «Dónde está».
+            // Sin refrescarla, la bodega que acabas de crear no aparecía ahí
+            // y había que recargar la página a mano para colgarle una posición
+            // —que es justo lo siguiente que uno hace al montar una bodega—.
+            // Tambien `sin_sede`, que es el contador del aviso de arriba.
+            router.reload({ only: ['ubicaciones', 'candidatos_admin', 'bodegas', 'sin_sede'] });
         }
     } catch (e) {
         mostrarFlash('error', mensajeDeError(e, 'No pude guardar la ubicacion'));

@@ -114,6 +114,12 @@
             <tr><td>IVA:</td><td style="text-align:right;">${{ number_format((float) $factura->impuestos, 0, ',', '.') }}</td></tr>
         @endif
         <tr class="grand"><td>TOTAL:</td><td style="text-align:right;">${{ number_format((float) $factura->total, 0, ',', '.') }}</td></tr>
+        @if((float) $factura->retenciones > 0)
+            @foreach($factura->retencionesAplicadas as $r)
+                <tr><td>{{ ['retefuente' => 'Retefuente', 'reteiva' => 'ReteIVA', 'reteica' => 'ReteICA'][$r->tipo] ?? $r->tipo }} {{ rtrim(rtrim(number_format((float) $r->tarifa_pct, 3, ',', '.'), '0'), ',') }}%:</td><td style="text-align:right;">-${{ number_format((float) $r->valor, 0, ',', '.') }}</td></tr>
+            @endforeach
+            <tr><td><strong>Neto a pagar:</strong></td><td style="text-align:right;"><strong>${{ number_format((float) $factura->total - (float) $factura->retenciones, 0, ',', '.') }}</strong></td></tr>
+        @endif
         <tr><td>Saldo pendiente:</td><td style="text-align:right;color:#ef4444;font-weight:700;">${{ number_format((float) $factura->saldo, 0, ',', '.') }}</td></tr>
     </tbody></table>
 

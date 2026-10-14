@@ -215,6 +215,7 @@ class ContactosController extends Controller implements HasMiddleware
                 'es_proveedor' => (bool) $contacto->es_proveedor,
                 'es_empleado' => (bool) $contacto->es_empleado,
                 'regimen_iva' => $contacto->regimen_iva,
+                'retenciones_default' => (array) ($contacto->retenciones_default ?? []),
                 'lista_precios_id' => $contacto->lista_precios_id,
                 'activo' => (bool) $contacto->activo,
             ] : null,
@@ -231,17 +232,19 @@ class ContactosController extends Controller implements HasMiddleware
             // Detal, Dropi y Distribuidor están en cero. El cliente queda
             // asignado a una lista vacía y el vendedor descubre el problema
             // recién cuando le busca mercancía y no le aparece nada.
+            // El conteo mira las DOS tablas de precios: los granulares tarifan
+            // por variante y los agregados por producto. Contando solo la
+            // primera, una lista con precios de puros agregados figuraba como
+            // vacia y quedaba bloqueada: no se le podia asignar a nadie.
             'listas' => \App\Modules\Catalogo\Models\ListaPrecios::query()
-                ->withCount(['precios as con_precio_count' => fn ($q) => $q
-                    ->where(fn ($w) => $w->whereNull('vigente_hasta')
-                        ->orWhere('vigente_hasta', '>=', now()->toDateString()))])
+                ->conConteoDePrecios()
                 ->orderByRaw('siigo_id IS NOT NULL')
                 ->orderBy('nombre')
                 ->get(['id', 'nombre', 'siigo_id'])
                 ->map(fn ($l) => [
                     'id' => $l->id,
                     'nombre' => $l->nombre,
-                    'productos' => (int) $l->con_precio_count,
+                    'productos' => $l->productos_tarifados,
                     'grupo' => $l->siigo_id ? 'Listas del catálogo de SIIGO' : 'Listas de Great Baby',
                 ]),
 
@@ -278,6 +281,9 @@ class ContactosController extends Controller implements HasMiddleware
             'es_proveedor' => ['boolean'],
             'es_empleado' => ['boolean'],
             'regimen_iva' => ['nullable', 'in:responsable,no_responsable'],
+            // Qué nos retiene este cliente al pagar (AplicarRetencionesVenta).
+            'retenciones_default' => ['nullable', 'array:fuente,ica,iva'],
+            'retenciones_default.*' => ['boolean'],
             'lista_precios_id' => ['nullable', 'integer', 'exists:listas_precios,id'],
             'activo' => ['boolean'],
         ], [

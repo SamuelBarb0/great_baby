@@ -5,11 +5,13 @@ namespace App\Modules\Dropi\Providers;
 use App\Modules\Dropi\Clients\DropiApiClient;
 use App\Modules\Dropi\Clients\DropiClientInterface;
 use App\Modules\Dropi\Clients\DropiMockClient;
+use App\Modules\Dropi\Clients\DropiWebClient;
 use App\Modules\Dropi\Events\PedidoDropiTransicionado;
 use App\Modules\Dropi\Listeners\DescontarInventarioAlEmpacar;
 use App\Modules\Dropi\Listeners\RecalcularContadoresCorte;
 use App\Modules\Dropi\Listeners\RegistrarAsientoWalletDropi;
 use App\Modules\Dropi\Listeners\RevertirEgresoAlDesempacar;
+use App\Modules\Dropi\Services\DropiWebAuth;
 use App\Modules\Facturacion\Emisores\AriEmisor;
 use App\Support\Contracts\EmisorDocumentoFiscal;
 use Illuminate\Support\Facades\Event;
@@ -28,6 +30,8 @@ class DropiServiceProvider extends ServiceProvider
             );
         });
 
+        $this->app->singleton(DropiWebAuth::class, fn ($app) => new DropiWebAuth($app['config']->get('dropi.web')));
+
         $this->app->singleton(DropiClientInterface::class, function ($app) {
             $config = $app['config']->get('dropi');
 
@@ -40,6 +44,7 @@ class DropiServiceProvider extends ServiceProvider
                     $config['api']['url'],
                     $config['api']['key'],
                 ),
+                'web' => $app->make(DropiWebClient::class),
                 default => new DropiMockClient($config['mock']['fixtures_path']),
             };
         });

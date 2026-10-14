@@ -65,6 +65,9 @@ const form = useForm({
     // cuando el user guardaba sin agregar variantes.
     desglose_stock: props.producto?.desglose_stock ?? false,
     stock_directo: props.producto?.stock_directo || 0,
+    // Dónde entra ese stock inicial. Null = la primera activa, que es como se
+    // comportaba antes y es lo que esperan los importadores.
+    stock_ubicacion_id: null,
     // Pestaña 2: Comercial
     impuesto_id: props.producto?.impuesto_id || null,
     precio_proveedor: props.producto?.precio_proveedor || 0,
@@ -835,10 +838,32 @@ const matrizDisenos = ref([]);
                         <strong>Enciende</strong> si vendes el mismo producto en distintas versiones (Rojo‑M, Rojo‑L, Azul‑M…). Vas a poder capturar cada variante en la pestaña 2 y cada una va a SIIGO como su propio producto para facturar bien.<br>
                         <strong>Déjalo apagado</strong> si es un producto único sin variaciones (ej. un biberón, un peluche). SIIGO lo verá como un solo renglón.
                     </p>
-                    <div v-if="!form.desglose_stock" class="mt-2">
-                        <label class="text-xs font-semibold text-surface-600">Stock inicial</label>
-                        <input v-model="form.stock_directo" type="number" min="0" class="input w-40"/>
-                        <p class="text-[10px] text-surface-500 mt-1">Cantidad de unidades que tienes hoy en bodega.</p>
+                    <!-- El stock inicial necesita saber DÓNDE entra. Antes sólo
+                         se pedía la cantidad y el kardex la dejaba en la primera
+                         ubicación activa: se montaba una bodega nueva, se
+                         escribían 60 unidades y aparecían en otra bodega sin que
+                         nadie se enterara hasta ir a despachar. -->
+                    <div v-if="!form.desglose_stock" class="mt-2 grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                            <label class="text-xs font-semibold text-surface-600">Stock inicial</label>
+                            <input v-model="form.stock_directo" type="number" min="0" class="input w-40"/>
+                            <p class="text-[10px] text-surface-500 mt-1">Cantidad de unidades que tienes hoy en bodega.</p>
+                        </div>
+                        <div v-if="Number(form.stock_directo) > 0">
+                            <label class="text-xs font-semibold text-surface-600">¿En cuál bodega está?</label>
+                            <select v-model="form.stock_ubicacion_id" class="input w-full">
+                                <option :value="null">— la primera disponible —</option>
+                                <option v-for="u in (catalogos.ubicaciones || [])" :key="u.id" :value="u.id">
+                                    {{ u.codigo }} · {{ u.nombre }}
+                                </option>
+                            </select>
+                            <p class="text-[10px] mt-1"
+                               :class="form.stock_ubicacion_id ? 'text-surface-500' : 'text-amber-700'">
+                                {{ form.stock_ubicacion_id
+                                    ? 'Ahí van a quedar las unidades.'
+                                    : 'Sin elegir, las unidades caen en la primera bodega de la lista.' }}
+                            </p>
+                        </div>
                     </div>
                 </div>
             </div>

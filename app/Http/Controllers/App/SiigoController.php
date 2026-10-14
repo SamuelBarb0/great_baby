@@ -146,9 +146,45 @@ class SiigoController extends Controller implements HasMiddleware
         try {
             app(\App\Modules\Siigo\Clients\SiigoClient::class)->authenticate();
 
-            return back()->with('success', 'SIIGO respondió correctamente: la integración está viva.');
+            return back()->with('success',
+                'SIIGO respondió correctamente: la integración está viva. '.$this->reencolarPendientes());
         } catch (\Throwable $t) {
             return back()->with('error', 'SIIGO no aceptó las credenciales · '.$t->getMessage());
+        }
+    }
+
+    /**
+     * Apenas la llave vuelve a servir, se reencola lo que quedó pendiente.
+     *
+     * Sin esto había que esperar a la pasada de las 04:15. Y pasó de verdad:
+     * la llave del sandbox se cayó la tarde del 2026-10-09, los 29 trabajos
+     * encolados aguantaron sus 12 horas de `retryUntil` esperándola, se
+     * vencieron de madrugada y a la mañana siguiente el ERP seguía sin mandar
+     * nada aunque la credencial ya estuviera arreglada.
+     *
+     * No se pierde trabajo por eso —`siigo:empujar-pendientes` barre las
+     * tablas y encuentra lo que no tiene `siigo_id`—, pero sí se pierde un día.
+     * Acá se dispara ese mismo barrido en el momento en que alguien prueba la
+     * conexión con éxito, que es justo cuando Aracely acaba de pegar la llave.
+     */
+    private function reencolarPendientes(): string
+    {
+        try {
+            \Illuminate\Support\Facades\Artisan::call('siigo:empujar-pendientes');
+            $salida = \Illuminate\Support\Facades\Artisan::output();
+
+            if (preg_match('/(\d+) documentos encolados/', $salida, $m) && (int) $m[1] > 0) {
+                return "Se reencolaron {$m[1]} documento(s) que estaban esperando.";
+            }
+
+            return 'No había nada pendiente por reenviar.';
+        } catch (\Throwable $e) {
+            // Que un fallo acá no tumbe el mensaje de «conexión OK», que es la
+            // información que la persona vino a buscar.
+            \Illuminate\Support\Facades\Log::channel('siigo')
+                ->warning('No se pudo reencolar tras probar la conexión', ['error' => $e->getMessage()]);
+
+            return 'Revisá los pendientes a mano: el reenvío automático falló.';
         }
     }
 

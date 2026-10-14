@@ -33,6 +33,11 @@ const form = ref({
     es_proveedor: props.contacto?.es_proveedor ?? false,
     es_empleado: props.contacto?.es_empleado ?? false,
     regimen_iva: props.contacto?.regimen_iva ?? '',
+    retenciones_default: {
+        fuente: !! props.contacto?.retenciones_default?.fuente,
+        ica: !! props.contacto?.retenciones_default?.ica,
+        iva: !! props.contacto?.retenciones_default?.iva,
+    },
     lista_precios_id: props.contacto?.lista_precios_id ?? '',
     activo: props.contacto?.activo ?? true,
 });
@@ -239,6 +244,25 @@ const guardar = () => {
                             <option value="responsable">Responsable de IVA</option>
                             <option value="no_responsable">No responsable</option>
                         </select>
+                    </div>
+                </div>
+
+                <div v-if="form.es_cliente || form.es_cliente_b2b">
+                    <label class="text-xs font-semibold text-surface-600 dark:text-surface-300">Retenciones que nos practica al pagar</label>
+                    <p class="text-xs text-surface-500 mb-1">
+                        Sólo si es agente de retención. Se calculan solas al facturar con las reglas de Cartera → Retenciones
+                        y la factura muestra el neto a pagar.
+                    </p>
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-1">
+                        <label class="flex items-center gap-2 p-2 rounded min-h-11 cursor-pointer hover:bg-surface-50 dark:hover:bg-surface-800">
+                            <input type="checkbox" v-model="form.retenciones_default.fuente" class="h-4 w-4"/> <span class="text-sm">Retefuente</span>
+                        </label>
+                        <label class="flex items-center gap-2 p-2 rounded min-h-11 cursor-pointer hover:bg-surface-50 dark:hover:bg-surface-800">
+                            <input type="checkbox" v-model="form.retenciones_default.iva" class="h-4 w-4"/> <span class="text-sm">ReteIVA</span>
+                        </label>
+                        <label class="flex items-center gap-2 p-2 rounded min-h-11 cursor-pointer hover:bg-surface-50 dark:hover:bg-surface-800">
+                            <input type="checkbox" v-model="form.retenciones_default.ica" class="h-4 w-4"/> <span class="text-sm">ReteICA (según su ciudad)</span>
+                        </label>
                     </div>
                 </div>
 

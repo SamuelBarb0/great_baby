@@ -126,8 +126,11 @@ class ColaJorgeController extends Controller implements HasMiddleware
             'asignado_at' => $p->alistado_asignado_at?->format('H:i'),
             'inicio_at' => $p->alistado_inicio_at?->format('H:i'),
             'fin_at' => $p->alistado_fin_at?->format('H:i'),
-            'duracion_min' => ($p->alistado_inicio_at && $p->alistado_fin_at)
-                ? max(0, $p->alistado_inicio_at->diffInMinutes($p->alistado_fin_at))
+            // En segundos, y la pantalla decide cómo leerlo. `diffInMinutes`
+            // devuelve FLOTANTE en Carbon 3, así que un alistamiento de 19
+            // segundos se pintaba tal cual: «0.31666666666666665 min».
+            'duracion_seg' => ($p->alistado_inicio_at && $p->alistado_fin_at)
+                ? max(0, (int) round($p->alistado_inicio_at->diffInSeconds($p->alistado_fin_at)))
                 : null,
             'facturado_at' => $p->facturado_at?->format('Y-m-d H:i'),
             'notas' => $p->alistado_notas,

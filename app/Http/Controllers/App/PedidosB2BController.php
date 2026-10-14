@@ -199,8 +199,12 @@ class PedidosB2BController extends Controller implements HasMiddleware
                         'at' => $p->alistado_fin_at->format('Y-m-d H:i'),
                         'icon' => $p->alistado_con_novedad ? '⚠' : '📦',
                         'color' => $p->alistado_con_novedad ? 'red' : 'emerald',
+                        // `diffInMinutes` devuelve flotante en Carbon 3: la línea de
+                        // tiempo mostraba «0.31666666666666665 min» en un alistamiento
+                        // de 19 segundos. Se redondea, y por debajo del minuto se
+                        // cuenta en segundos para que diga algo.
                         'detalle' => ($p->alistado_inicio_at
-                            ? max(0, $p->alistado_inicio_at->diffInMinutes($p->alistado_fin_at)).' min'
+                            ? $this->duracionLegible($p->alistado_inicio_at, $p->alistado_fin_at)
                             : '').
                             ($p->alistado_tipo_novedad ? ' · '.strtoupper($p->alistado_tipo_novedad) : '').
                             ($p->alistado_notas ? ' · '.$p->alistado_notas : ''),
@@ -331,6 +335,26 @@ class PedidosB2BController extends Controller implements HasMiddleware
      * cerrar el ciclo con huella — así se puede consultar luego la línea de
      * tiempo del pedido (LOG-J10).
      */
+    private ?string $motivoStock = null;
+
+    /** Cuánto duró algo, en palabras: «19 s», «4 min», «1 h 12 min». */
+    private function duracionLegible(?\Carbon\Carbon $desde, ?\Carbon\Carbon $hasta): string
+    {
+        if (! $desde || ! $hasta) {
+            return '';
+        }
+
+        $seg = max(0, (int) round($desde->diffInSeconds($hasta)));
+
+        if ($seg < 60) {
+            return "{$seg} s";
+        }
+
+        $min = (int) round($seg / 60);
+
+        return $min < 60 ? "{$min} min" : intdiv($min, 60).' h '.($min % 60).' min';
+    }
+
     public function despachar(Request $r, int $pedido): RedirectResponse
     {
         $data = $r->validate([
@@ -379,15 +403,22 @@ class PedidosB2BController extends Controller implements HasMiddleware
 
             // La mercancía sale de la bodega: baja del kardex. Sin esto el ERP
             // seguía mostrando en stock lo que ya iba camino al cliente.
-            $lineas = (new \App\Modules\Inventario\Actions\DescontarStockPorDespacho())
-                ->ejecutar($p, $r->user()->id);
-
-            $this->lineasDescontadas = $lineas;
+            $accion = new \App\Modules\Inventario\Actions\DescontarStockPorDespacho();
+            $this->lineasDescontadas = $accion->ejecutar($p, $r->user()->id);
+            $this->motivoStock = $accion->motivo;
         });
 
         $msg = 'Pedido despachado · guía registrada.';
         if (($this->lineasDescontadas ?? 0) > 0) {
             $msg .= " Se descontaron {$this->lineasDescontadas} ítem(s) del inventario.";
+        }
+
+        // Un despacho que no bajó inventario NO es un despacho exitoso a secas:
+        // el estante y el sistema quedan distintos y nadie se entera hasta el
+        // conteo. Se avisa en pantalla, no sólo en el log.
+        if ($this->motivoStock) {
+            return back()->with('warning', 'Pedido despachado, PERO el inventario no bajó. '
+                .$this->motivoStock.' Avisá a logística para cuadrarlo a mano.');
         }
 
         return back()->with('success', $msg);
@@ -508,6 +539,10 @@ class PedidosB2BController extends Controller implements HasMiddleware
                     'subtotal' => $it->subtotal,
                 ]);
             }
+
+            // Lo que el cliente nos va a retener: antes del asiento y de SIIGO,
+            // que lo leen de la factura.
+            app(\App\Modules\Cartera\Actions\AplicarRetencionesVenta::class)->ejecutar($f);
 
             // C-QA-D-1 (CRÍTICO): el observer `saved` corre en create con items=0 y NO genera asiento.
             // Disparamos explícitamente después de insertar ítems.
