@@ -471,7 +471,21 @@ class SiigoEmisionService
                 'price' => (float) ($ordenItem?->precio_unit ?? 0),
                 'discount' => 0,
             ];
-            if ($ivaTaxId > 0) $line['taxes'] = [['id' => $ivaTaxId]];
+            /*
+             * El IVA se adjunta sólo si la LÍNEA DE LA ORDEN lo lleva.
+             *
+             * Antes se le pegaba a toda línea sin mirar la orden, así que una
+             * compra exenta o al 0% salía gravada al 19% en SIIGO: el ERP
+             * mandaba `payments` por el total de la orden y SIIGO calculaba
+             * otro, rechazando todo con
+             *   `invalid_total_payments · The total purchase calculated is X`.
+             * Comprobado el 2026-10-14 con una OC real de $240.000 sin IVA,
+             * que SIIGO liquidaba en $285.600 (exactamente 19% más).
+             */
+            if ($ivaTaxId > 0 && (float) ($ordenItem?->iva_pct ?? 0) > 0) {
+                $line['taxes'] = [['id' => $ivaTaxId]];
+            }
+
             return $line;
         })->filter(fn ($it) => $it['quantity'] > 0)->values()->all();
 

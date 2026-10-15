@@ -146,8 +146,32 @@ class SiigoController extends Controller implements HasMiddleware
         try {
             app(\App\Modules\Siigo\Clients\SiigoClient::class)->authenticate();
 
+            /*
+             * Una conexión que responde ES la prueba de que está configurado.
+             *
+             * `siigo_config.activo` es la puerta que miran TODOS los jobs de
+             * push: con ella en false salen en 6 ms sin llamar a nada. Y no
+             * había una sola pantalla que la prendiera —el interruptor del
+             * panel vive dentro de un `v-if="config.activo"`, o sea que el
+             * botón para encenderlo estaba escondido porque estaba apagado—.
+             *
+             * El resultado, comprobado el 2026-10-14: Aracely pega usuario,
+             * llave y Partner ID, prueba la conexión, le dice «la integración
+             * está viva»… y el panel sigue mostrando «SIIGO aún no
+             * configurado» mientras 71 documentos esperan en la cola sin que
+             * nadie los mande.
+             */
+            $recienActivada = ! $cfg->activo;
+            if ($recienActivada) {
+                $cfg->forceFill(['activo' => true])->save();
+                SiigoConfig::invalidarPushAutoCache();
+            }
+
             return back()->with('success',
-                'SIIGO respondió correctamente: la integración está viva. '.$this->reencolarPendientes());
+                ($recienActivada ? 'Integración ACTIVADA · ' : '')
+                .'SIIGO respondió correctamente: la integración está viva. '
+                .$this->reencolarPendientes()
+                .($cfg->push_auto ? '' : ' OJO: el push automático está en pausa — prendelo abajo para que salgan solos.'));
         } catch (\Throwable $t) {
             return back()->with('error', 'SIIGO no aceptó las credenciales · '.$t->getMessage());
         }
@@ -939,9 +963,29 @@ class SiigoController extends Controller implements HasMiddleware
             'siigo.cta_sobrante_inventario_default' => 'Sobrante de toma física',
         ];
 
+        /*
+         * Qué claves eligió alguien de verdad, para poder distinguirlas de las
+         * que vienen del valor por defecto del código.
+         */
+        $elegidas = \App\Models\ReglaNegocio::todas();
+
         $filas = [];
         foreach ($claves as $clave => $etiqueta) {
-            $codigo = trim((string) setting($clave, ''));
+            /*
+             * El valor EFECTIVO, que es el que el ERP va a escribir en el
+             * asiento. Acá decía `setting($clave, '')`, y ese segundo argumento
+             * **anula el valor por defecto** de `Reglas::DEFAULTS` (`??` sólo
+             * cae con null, y '' no es null). Resultado: las cinco filas decían
+             * «Sin configurar · sin valor» mientras el ERP armaba los asientos
+             * con 5195, 1110, 139535, 5299 y 4295 — entre ellas una que no
+             * existe en el plan y tres de encabezado.
+             *
+             * O sea: la tarjeta que existe para avisar «SIIGO va a rechazar
+             * estas cuentas» escondía exactamente eso. Lo que se muestra tiene
+             * que ser lo que hay. Encontrado el 2026-10-14.
+             */
+            $codigo = trim((string) setting($clave));
+            $heredado = ! array_key_exists($clave, $elegidas);
 
             if ($codigo === '') {
                 $filas[] = ['clave' => $clave, 'etiqueta' => $etiqueta, 'codigo' => '',
@@ -952,9 +996,11 @@ class SiigoController extends Controller implements HasMiddleware
             $cuenta = \Illuminate\Support\Facades\DB::table('plan_cuentas')
                 ->where('codigo', $codigo)->first(['codigo', 'nombre']);
 
+            $origen = $heredado ? ' · valor por defecto, nadie lo eligió todavía' : '';
+
             if (! $cuenta) {
                 $filas[] = ['clave' => $clave, 'etiqueta' => $etiqueta, 'codigo' => $codigo,
-                    'estado' => 'rojo', 'detalle' => 'No existe en el plan de cuentas.'];
+                    'estado' => 'rojo', 'detalle' => 'No existe en el plan de cuentas.'.$origen];
                 continue;
             }
 
@@ -968,9 +1014,9 @@ class SiigoController extends Controller implements HasMiddleware
                 'etiqueta' => $etiqueta,
                 'codigo' => $codigo,
                 'estado' => $hijas > 0 ? 'amber' : 'verde',
-                'detalle' => $hijas > 0
+                'detalle' => ($hijas > 0
                     ? $cuenta->nombre." · es cuenta de encabezado ({$hijas} subcuentas): hay que usar una auxiliar."
-                    : $cuenta->nombre,
+                    : $cuenta->nombre).$origen,
             ];
         }
 

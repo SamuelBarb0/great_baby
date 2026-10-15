@@ -245,21 +245,41 @@ class ColaJorgeController extends Controller implements HasMiddleware
         abort_unless(in_array($p->estado, ['facturado', 'despachado', 'aprobado'], true), 422,
             'Sólo se imprime hoja de picking de pedidos aprobados/facturados.');
 
-        // Para cada variante del pedido, saldo por ubicación > 0.
-        $varianteIds = $p->items->pluck('variante_id')->filter()->unique()->values();
-        $saldosPorVariante = [];
-        if ($varianteIds->isNotEmpty()) {
-            $rows = \DB::table('inventario_movimientos as m')
-                ->join('inventario_ubicaciones as u', 'u.id', '=', 'm.ubicacion_id')
-                ->whereIn('m.variante_id', $varianteIds)
-                ->where('u.activa', true)
-                ->groupBy('m.variante_id', 'u.id', 'u.codigo', 'u.nombre', 'u.categoria')
-                ->selectRaw('m.variante_id, u.id as uid, u.codigo, u.nombre, u.categoria, SUM(m.cantidad) as stock')
-                ->having('stock', '>', 0)
-                ->orderByDesc('stock')
-                ->get();
-            foreach ($rows as $row) {
-                $saldosPorVariante[(int) $row->variante_id][] = [
+        /*
+         * Dónde está cada ítem, para que el alistador sepa a qué estante ir.
+         *
+         * Esto buscaba SÓLO por `variante_id`. Los productos AGREGADOS —los que
+         * no se desglosan por color ni talla, que son la mayor parte del
+         * catálogo de Great Baby— tienen la variante en null, así que su lista
+         * de ubicaciones salía siempre vacía y la hoja imprimía
+         * «⚠ SIN STOCK — reportar a Jorge» aunque hubiera mercancía de sobra.
+         * Comprobado el 2026-10-14 con 52 unidades en dos bodegas.
+         *
+         * El costo real no es la hoja fea: es que manda al alistador a reportar
+         * un faltante que no existe, y un faltante abre novedad y retiene el
+         * pedido.
+         */
+        $saldos = fn (string $campo, $ids) => $ids->isEmpty() ? collect() : \DB::table('inventario_movimientos as m')
+            ->join('inventario_ubicaciones as u', 'u.id', '=', 'm.ubicacion_id')
+            ->whereIn("m.{$campo}", $ids)
+            // Un producto cuenta como agregado sólo si el movimiento no trae
+            // variante; si no, se sumaría el stock de sus variantes.
+            ->when($campo === 'producto_id', fn ($q) => $q->whereNull('m.variante_id'))
+            ->where('u.activa', true)
+            ->groupBy("m.{$campo}", 'u.id', 'u.codigo', 'u.nombre', 'u.categoria')
+            ->selectRaw("m.{$campo} as sujeto, u.codigo, u.nombre, u.categoria, SUM(m.cantidad) as stock")
+            ->having('stock', '>', 0)
+            ->orderByDesc('stock')
+            ->get();
+
+        $saldosPorSujeto = [];
+        foreach ([['variante_id', 'v'], ['producto_id', 'p']] as [$campo, $pre]) {
+            $ids = $campo === 'variante_id'
+                ? $p->items->pluck('variante_id')->filter()->unique()->values()
+                : $p->items->whereNull('variante_id')->pluck('producto_id')->filter()->unique()->values();
+
+            foreach ($saldos($campo, $ids) as $row) {
+                $saldosPorSujeto["{$pre}:{$row->sujeto}"][] = [
                     'codigo' => $row->codigo,
                     'nombre' => $row->nombre,
                     'categoria' => $row->categoria,
@@ -268,8 +288,9 @@ class ColaJorgeController extends Controller implements HasMiddleware
             }
         }
 
-        $items = $p->items->map(function ($it) use ($saldosPorVariante) {
-            $saldos = $saldosPorVariante[(int) $it->variante_id] ?? [];
+        $items = $p->items->map(function ($it) use ($saldosPorSujeto) {
+            $clave = $it->variante_id ? 'v:'.$it->variante_id : 'p:'.$it->producto_id;
+            $saldos = $saldosPorSujeto[$clave] ?? [];
             // Priorizar categoría 'venta' en la hoja (lo apto para despacho).
             usort($saldos, fn ($a, $b) => ($a['categoria'] === 'venta' ? 0 : 1) <=> ($b['categoria'] === 'venta' ? 0 : 1));
             return [

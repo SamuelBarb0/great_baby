@@ -33,7 +33,7 @@ beforeEach(function () {
     // es `sync`: sin esto, el `create()` del montaje ejecuta el job de verdad.
     Illuminate\Support\Facades\Queue::fake();
     config()->set('siigo.driver', 'fake');
-    SiigoConfig::current()->forceFill(['push_auto' => true, 'activo' => true])->save();
+    SiigoConfig::current()->forceFill(['username' => 'sandbox@siigoapi.com', 'access_key' => 'llave-de-prueba', 'push_auto' => true, 'activo' => true])->save();
     SiigoConfig::invalidarPushAutoCache();
 
     $this->cliente = Contacto::create([

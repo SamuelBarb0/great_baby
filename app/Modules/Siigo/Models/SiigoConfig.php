@@ -77,6 +77,25 @@ class SiigoConfig extends Model
      */
     public function credencialMuerta(): bool
     {
+        /*
+         * Sin credenciales escritas no hay nada que intentar.
+         *
+         * Esto devolvía `false` en una instalación recién montada: nadie probó
+         * la conexión todavía, así que `ultimo_auth_ok` es NULL —no `false`— y
+         * la guarda no disparaba. El resultado es justo lo que el middleware
+         * existe para evitar: los push salen a pegarle a SIIGO sin usuario y
+         * queman las 12 h de `retryUntil` antes de morir en `failed_jobs`.
+         *
+         * Comprobado el 2026-10-14 con la base reconstruida: `siigo_config`
+         * vacía, `SIIGO_DRIVER=real` y 30 `PushProductoASiigo` esperando.
+         *
+         * Se mira el valor CRUDO para no descifrar la llave sólo para saber si
+         * hay algo guardado.
+         */
+        if (blank($this->username) || blank($this->getRawOriginal('access_key'))) {
+            return true;
+        }
+
         if ($this->ultimo_auth_ok !== false) {
             return false;
         }

@@ -62,6 +62,12 @@ function correrMiddleware(object $job): array
 function ponerAuth(?bool $ok, ?string $error = null): void
 {
     SiigoConfig::current()->forceFill([
+        // Las credenciales van puestas a propósito: estos casos describen una
+        // instalación YA configurada en distintos estados de salud. Sin ellas
+        // se confunde «la llave no sirve» con «no hay llave escrita», que es
+        // otra cosa y la cubre SinCredencialNoSaleNadaTest.
+        'username' => 'sandbox@siigoapi.com',
+        'access_key' => 'llave-de-prueba',
         'ultimo_auth_ok' => $ok,
         'ultimo_auth_error' => $error,
         'ultimo_auth_at' => now(),
