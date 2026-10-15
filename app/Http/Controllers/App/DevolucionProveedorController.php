@@ -149,7 +149,13 @@ class DevolucionProveedorController extends Controller implements HasMiddleware
             'id' => ['nullable', 'integer', 'exists:devoluciones_proveedor,id'],
             'proveedor_id' => ['required', 'integer', 'exists:contactos,id'],
             'ubicacion_id' => ['required', 'integer', 'exists:inventario_ubicaciones,id'],
-            'recepcion_id' => ['nullable', 'integer', 'exists:recepciones_compra,id'],
+            // Misma trampa que en recepciones: la tabla es `compras_recepciones`
+            // (así la declara `RecepcionCompra::$table`), no `recepciones_compra`.
+            // Al ser `nullable` sólo reventaba cuando alguien SÍ elegía la
+            // recepción de origen, que es el caso normal de una devolución a
+            // proveedor. Encontrado el 2026-10-14 barriendo las reglas `exists`
+            // contra las tablas que existen de verdad.
+            'recepcion_id' => ['nullable', 'integer', 'exists:compras_recepciones,id'],
             'fecha' => ['required', 'date'],
             'motivo' => ['required', 'string', 'max:200'],
         ]);

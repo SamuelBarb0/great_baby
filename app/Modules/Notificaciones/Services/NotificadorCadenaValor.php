@@ -47,15 +47,20 @@ class NotificadorCadenaValor
     public function recepcionConfirmada(RecepcionCompra $rc): void
     {
         if (! $this->activo()) return;
-        $rc->loadMissing('ordenCompra.proveedor');
-        if (! $this->puedeContactar($rc->ordenCompra?->proveedor)) return;
-        $tel = $rc->ordenCompra?->proveedor?->telefono;
+        // La relación se llama `orden`, no `ordenCompra` (ver RecepcionCompra).
+        // Con el nombre equivocado esto reventaba con RelationNotFoundException
+        // en CADA recepción confirmada: el aviso al proveedor no salía nunca y
+        // el job moría en `failed_jobs`, donde nadie mira. Encontrado el
+        // 2026-10-14 recibiendo una orden de compra real.
+        $rc->loadMissing('orden.proveedor');
+        if (! $this->puedeContactar($rc->orden?->proveedor)) return;
+        $tel = $rc->orden?->proveedor?->telefono;
         if (! $tel) return;
         $msg = sprintf(
             "Hola %s! Confirmamos recepción de la remesa %s asociada a la OC %s. Gracias. — GREAT BABY",
-            $rc->ordenCompra->proveedor->nombre_completo ?? 'proveedor',
+            $rc->orden->proveedor->nombre_completo ?? 'proveedor',
             $rc->numero,
-            $rc->ordenCompra->numero
+            $rc->orden->numero
         );
         $this->enviarSeguro($tel, $msg, 'Recepción confirmada', ['recepcion_id' => $rc->id]);
     }

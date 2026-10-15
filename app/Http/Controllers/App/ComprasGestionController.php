@@ -140,8 +140,10 @@ class ComprasGestionController extends Controller implements HasMiddleware
             'items.*.precio_unit' => ['required', 'numeric', 'min:0'],
             'items.*.iva_pct' => ['nullable', 'numeric'],
             'items.*.descuento_pct' => ['nullable', 'numeric'],
-            'items.*.producto_id' => ['nullable', 'integer'],
-            'items.*.variante_id' => ['nullable', 'integer'],
+            // Se validaban como enteros sueltos: un id inventado pasaba y
+            // dejaba la línea apuntando a un producto que no existe.
+            'items.*.producto_id' => ['nullable', 'integer', 'exists:productos,id'],
+            'items.*.variante_id' => ['nullable', 'integer', 'exists:producto_variantes,id'],
         ]);
         $oc = CrearOrdenCompra::run($data);
         return redirect()->route('app.compras.oc.show', $oc->id)->with('success', "OC {$oc->numero} creada.");
@@ -355,7 +357,13 @@ class ComprasGestionController extends Controller implements HasMiddleware
             'transportista' => ['nullable', 'string', 'max:100'],
             'observaciones' => ['nullable', 'string', 'max:1000'],
             'items' => ['required', 'array', 'min:1'],
-            'items.*.orden_item_id' => ['required', 'integer', 'exists:compras_orden_items,id'],
+            // La tabla es `compra_orden_items` en singular (así la declara
+            // `OrdenCompraItem::$table`). Con el nombre en plural la regla
+            // `exists` reventaba con «table doesn't exist» y CONFIRMAR UNA
+            // RECEPCIÓN FALLABA SIEMPRE con 500: no se podía meter mercancía a
+            // bodega por la interfaz. Encontrado el 2026-10-14 recibiendo una
+            // OC real; el botón se quedaba en «Guardando…» sin decir nada.
+            'items.*.orden_item_id' => ['required', 'integer', 'exists:compra_orden_items,id'],
             'items.*.cantidad_recibida' => ['required', 'numeric', 'min:0.001'],
             'items.*.lote' => ['nullable', 'string', 'max:80'],
             // LOG-J8 · cada línea declara su destino (apto/averia/cuarentena/revision/faltante).
@@ -421,6 +429,12 @@ class ComprasGestionController extends Controller implements HasMiddleware
                 $rc->items()->create([
                     'orden_item_id' => $ocItem->id,
                     'variante_id' => $ocItem->variante_id,
+                    // Copiaba sólo la variante. Los productos AGREGADOS —la
+                    // mayor parte del catálogo de Great Baby— no tienen
+                    // variante, así que llegaban acá sin nada con qué
+                    // identificarse y `RecibirMercancia` se saltaba el kardex:
+                    // la recepción quedaba registrada y el stock no subía.
+                    'producto_id' => $ocItem->producto_id,
                     'cantidad_recibida' => $cantidad,
                     'costo_unit' => $costoUnit,
                     'subtotal' => round($costoUnit * $cantidad, 2),
