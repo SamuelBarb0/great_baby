@@ -82,6 +82,21 @@ final class MenuApp
 
             // RrhhController · puede('rrhh')
             'rrhh' => $puede('rrhh'),
+            // RequisicionesController · el líder de área entra ACÁ y a nada
+            //   más de Gestión Humana: pide personal y sigue lo suyo.
+            'rrhh_requisiciones' => $puede('rrhh_requisiciones'),
+            // SeleccionController / ContratacionController · el proceso de
+            //   selección y la contratación son de Gestión Humana.
+            'rrhh_seleccion' => $puede('rrhh_seleccion'),
+            // OrdenContratacionController · lo autoriza la Junta Directiva.
+            'rrhh_orden_contratacion' => $puede('rrhh_orden_contratacion'),
+            // La PANTALLA de órdenes la abren los dos lados, igual que su
+            //   middleware: Gestión Humana pide, la Junta decide.
+            'rrhh_ordenes' => $puede('rrhh') || $puede('rrhh_orden_contratacion'),
+            // IndicadoresRrhhController · los números de toda la empresa, para
+            //   Gestión Humana y para la Junta. El líder de área no entra:
+            //   esto no es de su equipo.
+            'rrhh_indicadores' => $puede('rrhh') || $puede('rrhh_orden_contratacion'),
 
             // ComprasController (listado de OC) · esContable()
             'compras_lista' => $puede('contabilidad'),

@@ -1,7 +1,7 @@
 <script setup>
 import { ref, reactive } from 'vue';
-import { Head, router } from '@inertiajs/vue3';
-import { Users, Plus, GraduationCap } from 'lucide-vue-next';
+import { Head, Link, router } from '@inertiajs/vue3';
+import { Users, Plus, GraduationCap, Download } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
 
 const props = defineProps({ empleados: { type: Object, required: true }, filtro: { type: String, default: 'activo' } });
@@ -21,9 +21,13 @@ const crear = () => {
         onFinish: () => procesando.value = false,
     });
 };
-const cambiarInduccion = (e, estado) => {
-    router.put(`/app/rrhh/empleados/${e.id}/induccion`, { estado_induccion: estado }, { preserveScroll: true });
-};
+/*
+ * El selector de inducción de esta tabla se fue en F4.
+ *
+ * Movía el estado a «completada» sin fecha, sin responsable y sin qué se vio,
+ * que para una inducción en seguridad y salud en el trabajo es justo lo que
+ * hay que poder demostrar. Ahora se registra desde la ficha de cada quien.
+ */
 const filtrar = (f) => router.get('/app/rrhh/empleados', { estado: f });
 const money = (n) => n ? '$' + Number(n).toLocaleString('es-CO', { maximumFractionDigits: 0 }) : '—';
 const badgeInd = (e) => ({ pendiente: 'bg-amber-100 text-amber-800', en_curso: 'bg-blue-100 text-blue-800', completada: 'bg-emerald-100 text-emerald-800' }[e] || 'bg-surface-100');
@@ -35,7 +39,13 @@ const badgeInd = (e) => ({ pendiente: 'bg-amber-100 text-amber-800', en_curso: '
         <div class="space-y-4">
             <div class="flex items-start justify-between">
                 <h1 class="text-2xl font-bold flex items-center gap-2"><Users class="h-6 w-6 text-brand-600"/>Empleados</h1>
-                <button @click="modal = true" class="btn-primary"><Plus class="h-4 w-4"/> Nuevo empleado</button>
+                <div class="flex gap-2">
+                    <!-- El filtro de arriba manda: se exporta lo que se ve. -->
+                    <a :href="`/app/rrhh/exportar/empleados?estado=${filtro}`" class="btn-secondary">
+                        <Download class="h-4 w-4"/> Excel
+                    </a>
+                    <button @click="modal = true" class="btn-primary"><Plus class="h-4 w-4"/> Nuevo empleado</button>
+                </div>
             </div>
 
             <div v-if="$page.props.flash?.success" class="p-3 rounded-lg bg-emerald-500/15 border-l-4 border-emerald-500 text-emerald-700 text-sm">{{ $page.props.flash.success }}</div>
@@ -58,12 +68,15 @@ const badgeInd = (e) => ({ pendiente: 'bg-amber-100 text-amber-800', en_curso: '
                             <th class="text-right p-3">Salario</th>
                             <th class="text-left p-3">Ingreso</th>
                             <th class="text-center p-3">Inducción</th>
+                            <th class="text-center p-3">Prueba</th>
                         </tr>
                     </thead>
                     <tbody class="divide-y">
                         <tr v-for="e in empleados.data" :key="e.id" class="hover:bg-surface-50">
                             <td class="p-3">
-                                <div class="font-bold">{{ e.nombre }}</div>
+                                <Link :href="`/app/rrhh/empleados/${e.id}`" class="font-bold text-brand-600 hover:underline">
+                                    {{ e.nombre }}
+                                </Link>
                                 <div class="text-xs text-surface-500">{{ e.documento }} · {{ e.email }}</div>
                             </td>
                             <td class="p-3">
@@ -74,12 +87,17 @@ const badgeInd = (e) => ({ pendiente: 'bg-amber-100 text-amber-800', en_curso: '
                             <td class="p-3 text-right">{{ money(e.salario) }}</td>
                             <td class="p-3 text-xs">{{ e.ingreso }}</td>
                             <td class="p-3 text-center">
-                                <select :value="e.induccion" @change="ev => cambiarInduccion(e, ev.target.value)"
-                                    :class="['input text-xs', badgeInd(e.induccion)]">
-                                    <option value="pendiente">Pendiente</option>
-                                    <option value="en_curso">En curso</option>
-                                    <option value="completada">Completada</option>
-                                </select>
+                                <Link :href="`/app/rrhh/empleados/${e.id}`"
+                                    :class="['inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase', badgeInd(e.induccion)]">
+                                    {{ e.induccion }}
+                                </Link>
+                            </td>
+                            <td class="p-3 text-center text-xs">
+                                <span v-if="e.prueba_dias === null" class="text-surface-400">—</span>
+                                <span v-else-if="e.prueba_dias < 0" class="text-rose-600 font-bold">Vencido</span>
+                                <span v-else :class="e.prueba_dias <= 15 ? 'text-amber-600 font-bold' : 'text-surface-500'">
+                                    {{ e.prueba_dias }} día(s)
+                                </span>
                             </td>
                         </tr>
                     </tbody>

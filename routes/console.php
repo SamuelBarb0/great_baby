@@ -75,3 +75,13 @@ Schedule::command('dropi:web-sync ventana')->everyMinute()->withoutOverlapping(1
 Schedule::command('dropi:web-sync transito')->everyTenMinutes()->withoutOverlapping(30)->when($dropiWebSync);
 // Wallet: los pagos de Dropi entran por lotes durante el día; cada 30 min basta.
 Schedule::command('dropi:web-wallet-sync')->everyThirtyMinutes()->withoutOverlapping(20)->when($dropiWebSync);
+
+/*
+ * Gestión Humana · recordatorio de períodos de prueba.
+ *
+ * Una vez por semana, los lunes temprano: el plazo se mide en meses, así que
+ * avisar a diario sería ruido, pero dejarlo sin aviso es como está hoy —se
+ * vence solo y después terminar el contrato ya cuesta indemnización—.
+ */
+Schedule::command('rrhh:avisar-periodos-prueba')
+    ->weeklyOn(1, '07:30')->timezone('America/Bogota')->withoutOverlapping();

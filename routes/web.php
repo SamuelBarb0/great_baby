@@ -42,6 +42,7 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     Route::get('/cosas-del-dia', \App\Http\Controllers\App\CosasDelDiaController::class)->name('app.cosas');
     Route::post('/copiloto', [\App\Http\Controllers\App\CopilotoController::class, 'preguntar'])->name('app.copiloto');
     Route::get('/notificaciones', \App\Http\Controllers\App\NotificacionesController::class)->name('app.notificaciones');
+    Route::post('/notificaciones/leidas', [\App\Http\Controllers\App\NotificacionesController::class, 'marcarLeidas'])->name('app.notificaciones.leidas');
     Route::get('/mapa-colombia', \App\Http\Controllers\App\MapaColombiaController::class)->name('app.mapa');
     Route::post('/logout', [\App\Http\Controllers\App\AuthController::class, 'logout'])->name('app.logout');
 
@@ -415,14 +416,78 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     Route::post('/gastos/{gasto}/pagado', [\App\Http\Controllers\App\GastosController::class, 'marcarPagado'])->name('app.gastos.pagado');
 
     // M9 · Gestión Humana
+    // F1 · Requisiciones. Van primero porque son el arranque del proceso, y
+    //      con su propio permiso: el líder de área entra acá sin ver el resto
+    //      de Gestión Humana (salarios y hojas de vida de toda la empresa).
+    Route::get('/rrhh/requisiciones', [\App\Http\Controllers\App\RequisicionesController::class, 'index'])->name('app.rrhh.requisiciones');
+    Route::post('/rrhh/requisiciones', [\App\Http\Controllers\App\RequisicionesController::class, 'store'])->name('app.rrhh.requisicion.crear');
+    Route::get('/rrhh/requisiciones/{requisicion}', [\App\Http\Controllers\App\RequisicionesController::class, 'show'])->name('app.rrhh.requisicion.show');
+    Route::put('/rrhh/requisiciones/{requisicion}', [\App\Http\Controllers\App\RequisicionesController::class, 'update'])->name('app.rrhh.requisicion.actualizar');
+    Route::post('/rrhh/requisiciones/{requisicion}/enviar', [\App\Http\Controllers\App\RequisicionesController::class, 'enviar'])->name('app.rrhh.requisicion.enviar');
+    Route::post('/rrhh/requisiciones/{requisicion}/aprobar', [\App\Http\Controllers\App\RequisicionesController::class, 'aprobar'])->name('app.rrhh.requisicion.aprobar');
+    Route::post('/rrhh/requisiciones/{requisicion}/rechazar', [\App\Http\Controllers\App\RequisicionesController::class, 'rechazar'])->name('app.rrhh.requisicion.rechazar');
+    Route::post('/rrhh/requisiciones/{requisicion}/vacante', [\App\Http\Controllers\App\RequisicionesController::class, 'abrirVacante'])->name('app.rrhh.requisicion.vacante');
+    // F2 · El jefe elige de la terna desde SU pantalla, sin entrar a Gestión Humana.
+    Route::post('/rrhh/candidatos/{candidato}/elegir', [\App\Http\Controllers\App\RequisicionesController::class, 'elegirDeLaTerna'])->name('app.rrhh.candidato.elegir');
+
     Route::get('/rrhh/vacantes', [\App\Http\Controllers\App\RrhhController::class, 'vacantesIndex'])->name('app.rrhh.vacantes');
     Route::post('/rrhh/vacantes', [\App\Http\Controllers\App\RrhhController::class, 'vacanteCrear'])->name('app.rrhh.vacante.crear');
-    Route::get('/rrhh/vacantes/{vacante}', [\App\Http\Controllers\App\RrhhController::class, 'vacanteShow'])->name('app.rrhh.vacante.show');
-    Route::post('/rrhh/vacantes/{vacante}/candidatos', [\App\Http\Controllers\App\RrhhController::class, 'candidatoCrear'])->name('app.rrhh.candidato.crear');
-    Route::put('/rrhh/candidatos/{candidato}', [\App\Http\Controllers\App\RrhhController::class, 'candidatoActualizar'])->name('app.rrhh.candidato.actualizar');
+    // F2 · La vacante se abre directo en su tablero de selección: la pantalla
+    //      vieja escribía etapas que ya no existen y rompía al leerlas.
+    Route::get('/rrhh/vacantes/{vacante}', [\App\Http\Controllers\App\SeleccionController::class, 'tablero'])->name('app.rrhh.vacante.show');
+    Route::post('/rrhh/vacantes/{vacante}/candidatos', [\App\Http\Controllers\App\SeleccionController::class, 'crear'])->name('app.rrhh.candidato.crear');
+    Route::post('/rrhh/candidatos/{candidato}/mover', [\App\Http\Controllers\App\SeleccionController::class, 'mover'])->name('app.rrhh.candidato.mover');
+    Route::post('/rrhh/candidatos/{candidato}/descartar', [\App\Http\Controllers\App\SeleccionController::class, 'descartar'])->name('app.rrhh.candidato.descartar');
+    Route::post('/rrhh/candidatos/{candidato}/antecedentes', [\App\Http\Controllers\App\SeleccionController::class, 'antecedentes'])->name('app.rrhh.candidato.antecedentes');
+    Route::post('/rrhh/candidatos/{candidato}/valorar', [\App\Http\Controllers\App\SeleccionController::class, 'valorar'])->name('app.rrhh.candidato.valorar');
+    Route::get('/rrhh/candidatos/{candidato}/hoja-de-vida', [\App\Http\Controllers\App\SeleccionController::class, 'verHojaDeVida'])->name('app.rrhh.candidato.hv');
     Route::get('/rrhh/empleados', [\App\Http\Controllers\App\RrhhController::class, 'empleadosIndex'])->name('app.rrhh.empleados');
     Route::post('/rrhh/empleados', [\App\Http\Controllers\App\RrhhController::class, 'empleadoCrear'])->name('app.rrhh.empleado.crear');
-    Route::put('/rrhh/empleados/{empleado}/induccion', [\App\Http\Controllers\App\RrhhController::class, 'empleadoInduccion'])->name('app.rrhh.empleado.induccion');
+
+    // F11 · Los indicadores que se le presentan a la Junta Directiva.
+    Route::get('/rrhh/indicadores', [\App\Http\Controllers\App\IndicadoresRrhhController::class, 'index'])->name('app.rrhh.indicadores');
+    Route::get('/rrhh/indicadores/pdf', [\App\Http\Controllers\App\IndicadoresRrhhController::class, 'pdf'])->name('app.rrhh.indicadores.pdf');
+    Route::get('/rrhh/indicadores/retiros', [\App\Http\Controllers\App\IndicadoresRrhhController::class, 'retirosExcel'])->name('app.rrhh.indicadores.retiros');
+    Route::post('/rrhh/empleados/{empleado}/retiro', [\App\Http\Controllers\App\IndicadoresRrhhController::class, 'registrarRetiro'])->name('app.rrhh.empleado.retiro');
+
+    // F6 · Sacar la información: PDF para la carpeta física (que la norma
+    //      exige) y CSV para abrir en Excel, masivo y de a uno.
+    Route::get('/rrhh/empleados/{empleado}/pdf', [\App\Http\Controllers\App\ExportacionRrhhController::class, 'historiaLaboral'])->name('app.rrhh.empleado.pdf');
+    Route::get('/rrhh/candidatos/{candidato}/pdf', [\App\Http\Controllers\App\ExportacionRrhhController::class, 'procesoCandidato'])->name('app.rrhh.candidato.pdf');
+    Route::get('/rrhh/exportar/empleados', [\App\Http\Controllers\App\ExportacionRrhhController::class, 'empleadosExcel'])->name('app.rrhh.exportar.empleados');
+    Route::get('/rrhh/exportar/vacantes/{vacante}/candidatos', [\App\Http\Controllers\App\ExportacionRrhhController::class, 'candidatosExcel'])->name('app.rrhh.exportar.candidatos');
+    Route::get('/rrhh/exportar/requisiciones', [\App\Http\Controllers\App\ExportacionRrhhController::class, 'requisicionesExcel'])->name('app.rrhh.exportar.requisiciones');
+
+    // F5a · La orden de contratación que autoriza la Junta Directiva.
+    //       Es el control entre «el jefe eligió» y «arranca la contratación».
+    Route::get('/rrhh/ordenes', [\App\Http\Controllers\App\OrdenContratacionController::class, 'index'])->name('app.rrhh.ordenes');
+    Route::post('/rrhh/candidatos/{candidato}/orden', [\App\Http\Controllers\App\OrdenContratacionController::class, 'solicitar'])->name('app.rrhh.orden.solicitar');
+    Route::post('/rrhh/ordenes/{orden}/autorizar', [\App\Http\Controllers\App\OrdenContratacionController::class, 'autorizar'])->name('app.rrhh.orden.autorizar');
+    Route::post('/rrhh/ordenes/{orden}/negar', [\App\Http\Controllers\App\OrdenContratacionController::class, 'negar'])->name('app.rrhh.orden.negar');
+
+    // F5b · El jefe de área y SU gente (concepto de período de prueba).
+    Route::get('/rrhh/mi-equipo', [\App\Http\Controllers\App\MiEquipoController::class, 'index'])->name('app.rrhh.miequipo');
+    Route::post('/rrhh/mi-equipo/{empleado}/concepto', [\App\Http\Controllers\App\MiEquipoController::class, 'conceptoDePrueba'])->name('app.rrhh.miequipo.concepto');
+
+    // F3 · Contratación: de «lo elegimos» a «ya trabaja acá».
+    Route::get('/rrhh/contrataciones', [\App\Http\Controllers\App\ContratacionController::class, 'index'])->name('app.rrhh.contrataciones');
+    Route::post('/rrhh/candidatos/{candidato}/contratar', [\App\Http\Controllers\App\ContratacionController::class, 'abrir'])->name('app.rrhh.contratacion.abrir');
+    Route::get('/rrhh/contrataciones/{contratacion}', [\App\Http\Controllers\App\ContratacionController::class, 'show'])->name('app.rrhh.contratacion.show');
+    Route::post('/rrhh/contrataciones/{contratacion}/acuerdo', [\App\Http\Controllers\App\ContratacionController::class, 'acuerdo'])->name('app.rrhh.contratacion.acuerdo');
+    Route::post('/rrhh/contrataciones/{contratacion}/examen', [\App\Http\Controllers\App\ContratacionController::class, 'examen'])->name('app.rrhh.contratacion.examen');
+    Route::post('/rrhh/contrataciones/{contratacion}/firmar', [\App\Http\Controllers\App\ContratacionController::class, 'firmarContrato'])->name('app.rrhh.contratacion.firmar');
+    Route::post('/rrhh/contrataciones/{contratacion}/afiliacion', [\App\Http\Controllers\App\ContratacionController::class, 'afiliacion'])->name('app.rrhh.contratacion.afiliacion');
+    Route::post('/rrhh/contrataciones/{contratacion}/documento', [\App\Http\Controllers\App\ContratacionController::class, 'subirDocumento'])->name('app.rrhh.contratacion.documento');
+    Route::post('/rrhh/contrataciones/{contratacion}/completar', [\App\Http\Controllers\App\ContratacionController::class, 'completar'])->name('app.rrhh.contratacion.completar');
+    Route::post('/rrhh/contrataciones/{contratacion}/cancelar', [\App\Http\Controllers\App\ContratacionController::class, 'cancelar'])->name('app.rrhh.contratacion.cancelar');
+    Route::get('/rrhh/documentos/{documento}', [\App\Http\Controllers\App\ContratacionController::class, 'verDocumento'])->name('app.rrhh.documento.ver');
+
+    // F3 + F4 · La ficha del empleado: historia laboral, inducción y prueba.
+    Route::get('/rrhh/empleados/{empleado}', [\App\Http\Controllers\App\EmpleadoController::class, 'show'])->name('app.rrhh.empleado.show');
+    Route::post('/rrhh/empleados/{empleado}/induccion', [\App\Http\Controllers\App\EmpleadoController::class, 'induccion'])->name('app.rrhh.empleado.induccion');
+    Route::post('/rrhh/empleados/{empleado}/prueba', [\App\Http\Controllers\App\EmpleadoController::class, 'periodoDePrueba'])->name('app.rrhh.empleado.prueba');
+    Route::post('/rrhh/empleados/{empleado}/prueba/evaluar', [\App\Http\Controllers\App\EmpleadoController::class, 'evaluarPrueba'])->name('app.rrhh.empleado.prueba.evaluar');
+    Route::post('/rrhh/empleados/{empleado}/documento', [\App\Http\Controllers\App\EmpleadoController::class, 'subirDocumento'])->name('app.rrhh.empleado.documento');
 
     // LOG-J9 · Marketing (préstamos de productos a bodega)
     Route::get('/marketing', [\App\Http\Controllers\App\MarketingPrestamosController::class, 'index'])->name('app.marketing.index');

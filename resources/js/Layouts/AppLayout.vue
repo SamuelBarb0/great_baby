@@ -254,8 +254,20 @@ const groups = [
         key: 'rrhh',
         label: 'Gestión Humana',
         items: [
+            // Primero la solicitud: es por donde arranca el proceso, y para el
+            // líder de área es lo ÚNICO que ve de este grupo.
+            { name: 'Solicitudes de personal', href: '/app/rrhh/requisiciones', icon: Users, permiso: 'rrhh_requisiciones' },
+            // El jefe de área ve SU gente acá: período de prueba y poco más.
+            //   No entra a «Empleados», que lleva los salarios de la empresa.
+            { name: 'Mi equipo', href: '/app/rrhh/mi-equipo', icon: Users, permiso: 'rrhh_requisiciones' },
             { name: 'Vacantes', href: '/app/rrhh/vacantes', icon: Users, permiso: 'rrhh' },
+            // La autorización de la Junta Directiva. La ven los dos lados:
+            //   quien la pide (Gestión Humana) y quien decide (la Junta).
+            { name: '✓ Órdenes de contratación', href: '/app/rrhh/ordenes', icon: Users, permiso: 'rrhh_ordenes' },
+            { name: 'Contrataciones', href: '/app/rrhh/contrataciones', icon: Users, permiso: 'rrhh' },
             { name: 'Empleados', href: '/app/rrhh/empleados', icon: Users, permiso: 'rrhh' },
+            // Lo que Elena lleva a la Junta Directiva.
+            { name: '📊 Indicadores', href: '/app/rrhh/indicadores', icon: BarChart3, permiso: 'rrhh_indicadores' },
         ],
     },
     {
@@ -493,8 +505,22 @@ const visibleGroups = computed(() => groups
                 </div>
 
                 <div class="flex items-center gap-2">
-                    <!-- FASE E · Semáforo SIIGO (polling 30s) -->
-                    <SemaforoSiigo/>
+                    <!--
+                        FASE E · Semáforo SIIGO (polling 30s).
+
+                        Sólo para quien puede abrir /app/siigo. Se mostraba a
+                        todo el mundo, y como esa pantalla es de gerencia, cada
+                        usuario sin acceso se quedaba con el chip en «cargando…»
+                        para siempre —el `catch {}` del componente se traga el
+                        403— mientras pedía el semáforo cada 30 segundos y
+                        recibía un Forbidden cada vez. Y el chip es un enlace,
+                        así que al hacerle clic se llegaba a un 403.
+
+                        Es el mismo defecto que ya se había arreglado en el menú
+                        («mostraba enlaces que el controller no deja abrir»);
+                        este sobrevivió porque vive en la barra, no en `groups`.
+                    -->
+                    <SemaforoSiigo v-if="puedeVer('siigo')"/>
                     <!-- MEJORAS-B · Bell real-time con polling 20s + sonido -->
                     <NotificacionesBell/>
                     <div class="flex items-center gap-2 pl-2 border-l border-surface-200 dark:border-surface-800">

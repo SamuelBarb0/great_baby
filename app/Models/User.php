@@ -157,6 +157,13 @@ class User extends Authenticatable implements FilamentUser
             $this->hasRole('Contador') => '/app/cartera',
             $this->esSac()             => '/app/garantias',
             $this->esMarketing()       => '/app/marketing',
+            // Gestión Humana y los líderes de área arrancan por las solicitudes
+            //   de personal: para ella es lo que espera su decisión, y para él
+            //   es lo único suyo acá. Sin esta línea caían en el `default`, que
+            //   es «Cosas del día» y pide perfil de bodega — o sea, entraban al
+            //   sistema directo a un 403, que es exactamente lo que este método
+            //   existe para evitar.
+            $this->tieneAcceso('rrhh_requisiciones') => '/app/rrhh/requisiciones',
             $this->esAdminBodega() || $this->esAlistador() || $this->hasRole('Despachador') => '/app/logistica/cola-jorge',
             default                    => '/app/cosas-del-dia',
         };

@@ -122,7 +122,20 @@ final class Permisos
         //   tenían el acceso, así nada cambia y a la vez quedan bajo el control
         //   de la pantalla de Roles.
         'vendedor'         => ['Vendedor'],
-        'rrhh'             => ['Gerente'],
+        'rrhh'             => ['Gerente', 'GestionHumana'],
+        // Gestión Humana, por secciones · un líder de área NO entra a «rrhh»:
+        //   ahí se ven salarios y hojas de vida de toda la empresa. Lo único
+        //   que necesita es pedir personal y seguir SUS solicitudes, y eso es
+        //   un permiso aparte. Lo pidió así Elena en la reunión del 19-oct:
+        //   «solamente los jefes o líderes de área pueden hacer la solicitud».
+        'rrhh_requisiciones' => ['Gerente', 'GestionHumana', 'LiderArea'],
+        'rrhh_seleccion'     => ['Gerente', 'GestionHumana'],
+        // La orden de contratación la autoriza la JUNTA DIRECTIVA, no Gestión
+        //   Humana ni el líder que pidió el personal: «solo ingresa la empresa
+        //   realmente a un contrato si viene autorizado por la junta directiva»
+        //   (Elena, 19-oct). Por eso es un permiso aparte y NO lo tiene
+        //   GestionHumana: si lo tuviera, ella se autorizaría a sí misma.
+        'rrhh_orden_contratacion' => ['Gerente'],
         'mapa_colombia'    => ['AdminBodega', 'Gerente'],
         // La parrilla de contenido la gateaba `esAracely()`, así que el rol
         //   Marketing la veía en el menú y recibía 403. Se deja como permiso
@@ -169,7 +182,7 @@ final class Permisos
         'Inventario' => ['traslados', 'tomas_fisicas', 'alertas_stock', 'kardex', 'stock_bodegas'],
         'Catálogo' => ['productos', 'ubicaciones', 'importar_productos', 'productos.push_siigo'],
         'Servicio al cliente' => ['garantias', 'servicio_cliente', 'bandeja_importaciones'],
-        'Perfiles operativos' => ['bodega', 'logistica', 'facturacion', 'marketing', 'marketing_parrilla', 'vendedor', 'rrhh', 'mapa_colombia'],
+        'Perfiles operativos' => ['bodega', 'logistica', 'facturacion', 'marketing', 'marketing_parrilla', 'vendedor', 'rrhh', 'rrhh_requisiciones', 'rrhh_seleccion', 'rrhh_orden_contratacion', 'mapa_colombia'],
         'Configuración' => ['empresa', 'siigo', 'usuarios', 'plantillas'],
     ];
 
@@ -222,6 +235,9 @@ final class Permisos
         'marketing' => 'Marketing y préstamos de producto',
         'vendedor' => 'Panel del vendedor y armar pedidos en terreno',
         'rrhh' => 'Gestión humana (vacantes y empleados)',
+        'rrhh_requisiciones' => 'Solicitar personal y seguir mis solicitudes',
+        'rrhh_seleccion' => 'Proceso de selección (candidatos, entrevistas, terna)',
+        'rrhh_orden_contratacion' => 'Autorizar contrataciones (Junta Directiva)',
         'mapa_colombia' => 'Mapa de Colombia',
         'marketing_parrilla' => 'Parrilla de contenido',
         'empresa' => 'Datos de la empresa',

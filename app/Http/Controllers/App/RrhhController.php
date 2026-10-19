@@ -64,47 +64,20 @@ class RrhhController extends Controller implements HasMiddleware
         return back()->with('success', 'Vacante creada.');
     }
 
-    public function vacanteShow(int $vacante): Response
-    {
-        $v = Vacante::with('candidatos')->findOrFail($vacante);
-        return Inertia::render('Rrhh/Vacantes/Show', [
-            'vacante' => [
-                'id' => $v->id, 'titulo' => $v->titulo, 'area' => $v->area,
-                'descripcion' => $v->descripcion, 'requisitos' => $v->requisitos,
-                'modalidad' => $v->modalidad, 'tipo_contrato' => $v->tipo_contrato,
-                'estado' => $v->estado,
-                'salario_min' => (float) $v->salario_min, 'salario_max' => (float) $v->salario_max,
-            ],
-            'candidatos' => $v->candidatos->map(fn ($c) => [
-                'id' => $c->id, 'nombre' => $c->nombre, 'email' => $c->email, 'telefono' => $c->telefono,
-                'etapa' => $c->etapa, 'calificacion' => $c->calificacion,
-                'notas' => $c->notas, 'fecha' => $c->created_at?->format('Y-m-d'),
-            ])->all(),
-        ]);
-    }
-
-    public function candidatoCrear(Request $r, int $vacante): RedirectResponse
-    {
-        $data = $r->validate([
-            'nombre' => ['required', 'string', 'max:150'],
-            'email' => ['nullable', 'email', 'max:150'],
-            'telefono' => ['nullable', 'string', 'max:30'],
-            'notas' => ['nullable', 'string', 'max:500'],
-        ]);
-        Candidato::create([...$data, 'vacante_id' => $vacante, 'etapa' => 'nuevo']);
-        return back()->with('success', 'Candidato agregado.');
-    }
-
-    public function candidatoActualizar(Request $r, int $candidato): RedirectResponse
-    {
-        $data = $r->validate([
-            'etapa' => ['required', 'in:nuevo,revision,entrevista,prueba,oferta,contratado,descartado'],
-            'calificacion' => ['nullable', 'integer', 'min:1', 'max:5'],
-            'notas' => ['nullable', 'string', 'max:500'],
-        ]);
-        Candidato::findOrFail($candidato)->update($data);
-        return back()->with('success', 'Candidato actualizado.');
-    }
+    /*
+     * `vacanteShow`, `candidatoCrear` y `candidatoActualizar` se fueron en F2.
+     *
+     * Escribían las etapas del enum viejo (`nuevo`, `revision`, `entrevista`…),
+     * que dejaron de existir al separar la entrevista del jefe de la de
+     * psicología. Con la columna vuelta `string` no reventaban al guardar:
+     * guardaban `nuevo` tan campantes y la explosión llegaba después, al LEER
+     * el candidato («"nuevo" is not a valid backing value»), dejando la
+     * pantalla de la vacante caída sin que nadie supiera por qué.
+     *
+     * Su reemplazo es el tablero de selección (`SeleccionController`), que
+     * además hace lo que la pantalla vieja no hacía: antecedentes, valoración,
+     * hoja de vida y terna.
+     */
 
     // ---------- EMPLEADOS ----------
     public function empleadosIndex(Request $request): Response
@@ -123,6 +96,9 @@ class RrhhController extends Controller implements HasMiddleware
                 'ingreso' => $e->fecha_ingreso?->toDateString(),
                 'estado' => $e->estado, 'induccion' => $e->estado_induccion,
                 'salario' => (float) $e->salario,
+                // Cuántos días le quedan de prueba. Null = no aplica o ya se
+                // evaluó; negativo = se venció y nadie decidió nada.
+                'prueba_dias' => $e->diasDePrueba(),
             ]),
             'filtro' => $estado,
         ]);
@@ -146,15 +122,16 @@ class RrhhController extends Controller implements HasMiddleware
         Empleado::create([...$data, 'estado' => 'activo', 'estado_induccion' => 'pendiente']);
         // Si viene de candidato, marcarlo contratado
         if (! empty($data['candidato_id'])) {
-            Candidato::where('id', $data['candidato_id'])->update(['etapa' => 'contratado']);
+            Candidato::where('id', $data['candidato_id'])
+                ->update(['etapa' => \App\Modules\Rrhh\Enums\EtapaCandidato::Seleccionado->value]);
         }
         return back()->with('success', 'Empleado registrado.');
     }
 
-    public function empleadoInduccion(Request $r, int $empleado): RedirectResponse
-    {
-        $data = $r->validate(['estado_induccion' => ['required', 'in:pendiente,en_curso,completada']]);
-        Empleado::findOrFail($empleado)->update($data);
-        return back()->with('success', 'Inducción actualizada.');
-    }
+    /*
+     * `empleadoInduccion` se fue en F4. Sólo movía el enum a «completada», sin
+     * fecha ni responsable ni qué se vio — y para una inducción en seguridad y
+     * salud en el trabajo eso es justo lo que hay que poder demostrar. Su
+     * reemplazo está en `EmpleadoController::induccion`.
+     */
 }
