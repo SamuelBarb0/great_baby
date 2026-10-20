@@ -125,7 +125,7 @@ class ConciliarWalletDropi
             'fuente' => $mov->raw,
         ]);
 
-        return $this->aplicar($pedido, $mov->tipo, (float) $mov->monto, $mov->fecha);
+        return $this->aplicar($pedido, $mov->tipo, (float) $mov->monto, $mov->fecha, $movId);
     }
 
     /**
@@ -150,13 +150,63 @@ class ConciliarWalletDropi
 
         $mov->update(['pedido_id' => $pedido->id]);
         $tipo = $mov->tipo instanceof \App\Modules\Dropi\Enums\TipoMovimientoWallet ? $mov->tipo->value : (string) $mov->tipo;
-        $resultado = $this->aplicar($pedido, $tipo, (float) $mov->monto, CarbonImmutable::parse($mov->fecha));
+        $resultado = $this->aplicar($pedido, $tipo, (float) $mov->monto, CarbonImmutable::parse($mov->fecha), $mov->dropi_movimiento_id);
 
         if ($tipo === 'pago_guia') {
             $this->evaluarDiferencia($pedido->id);
         }
 
         return $resultado;
+    }
+
+    /**
+     * 9.3 · El pago de Dropi cierra la factura del pedido: un recibo de caja
+     * (PagoVenta, medio `wallet_dropi`) aplicado a ella. Su asiento es wallet
+     * 111015 contra 1305, el mismo que antes hacía el movimiento de wallet; por
+     * eso RegistrarAsientoWalletDropi ya no asienta los pagos de pedidos
+     * facturados (si no, el 1305 se acreditaba dos veces). El observer del
+     * pago baja el saldo de la factura y manda el recibo a SIIGO.
+     */
+    protected function registrarCobro(DropiPedido $pedido, float $monto, CarbonImmutable $fecha, ?string $movId): void
+    {
+        if (! $pedido->factura_venta_id) {
+            return;
+        }
+        $factura = \App\Modules\Cartera\Models\FacturaVenta::find($pedido->factura_venta_id);
+        if (! $factura) {
+            return;
+        }
+        if ($movId && \App\Modules\Cartera\Models\PagoVenta::where('referencia', $movId)->exists()) {
+            return;
+        }
+
+        $aplicado = min($monto, max(0, (float) $factura->saldo));
+        \App\Modules\Cartera\Models\PagoVenta::create([
+            'factura_id' => $factura->id,
+            'contacto_id' => $factura->contacto_id,
+            'fecha' => $fecha->toDateString(),
+            'monto_recibido' => $monto,
+            'monto_aplicado' => $aplicado,
+            'diferencia' => round($aplicado - $monto, 2),
+            'medio_pago' => 'wallet_dropi',
+            'referencia' => $movId ? mb_substr($movId, 0, 60) : null,
+            'banco' => 'Wallet Dropi',
+            'notas' => "Pago Dropi guía {$pedido->guia}",
+        ]);
+    }
+
+    /** Un reverso 1009 de Dropi deshace el recibo: la factura vuelve a quedar por cobrar. */
+    protected function reversarCobro(DropiPedido $pedido, float $monto): void
+    {
+        if (! $pedido->factura_venta_id) {
+            return;
+        }
+        $pago = \App\Modules\Cartera\Models\PagoVenta::where('factura_id', $pedido->factura_venta_id)
+            ->where('medio_pago', 'wallet_dropi')
+            ->orderByRaw('ABS(monto_recibido - ?) ASC', [$monto])
+            ->orderByDesc('id')
+            ->first();
+        $pago?->delete();
     }
 
     /** Primero por la orden de Dropi (la wallet real la trae en cada movimiento); la guía, de respaldo. */
@@ -168,7 +218,7 @@ class ConciliarWalletDropi
             ?? ($guia ? DropiPedido::where('guia', $guia)->first() : null);
     }
 
-    protected function aplicar(?DropiPedido $pedido, string $tipo, float $monto, CarbonImmutable $fecha): string
+    protected function aplicar(?DropiPedido $pedido, string $tipo, float $monto, CarbonImmutable $fecha, ?string $movId = null): string
     {
         // §15 Capa 1: pago de guía → matchear + marcar pedido pagado
         if ($tipo === 'pago_guia' && $pedido) {
@@ -176,6 +226,7 @@ class ConciliarWalletDropi
             // ya quedó guardado y resta en la suma del pedido; no mueve estados.
             if ($monto <= 0) {
                 $this->pedidosPagados[$pedido->id] = true;
+                $this->reversarCobro($pedido, abs($monto));
 
                 return 'pago';
             }
@@ -209,6 +260,8 @@ class ConciliarWalletDropi
                 ['conciliacion' => 'auto', 'monto' => $monto],
                 ['pagado_at' => $fecha],
             );
+
+            $this->registrarCobro($pedido, $monto, $fecha, $movId);
 
             // La diferencia de precio se mide al final de la corrida, con la
             // suma de todas las líneas del pedido (ver evaluarDiferencia).

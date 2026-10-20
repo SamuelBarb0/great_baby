@@ -65,6 +65,8 @@ class DropiServiceProvider extends ServiceProvider
         //  - RecalcularContadoresCorte (A4): actualiza contadores del corte activo.
         Event::listen(PedidoDropiTransicionado::class, DescontarInventarioAlEmpacar::class);
         Event::listen(PedidoDropiTransicionado::class, RevertirEgresoAlDesempacar::class);
+        // 9.1 / 9.3 · remisión 1:1 + factura a consumidor final al despachar.
+        Event::listen(PedidoDropiTransicionado::class, \App\Modules\Dropi\Listeners\FacturarAlDespachar::class);
         Event::listen(PedidoDropiTransicionado::class, RecalcularContadoresCorte::class);
     }
 }

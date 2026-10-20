@@ -45,7 +45,7 @@ class GenerarRemisionesCorte
             $valorLote = 0.0;
 
             foreach ($pedidos as $pedido) {
-                $consecutivo = $this->siguienteConsecutivo();
+                $consecutivo = self::siguienteConsecutivo();
 
                 DropiRemision::create([
                     'pedido_id' => $pedido->id,
@@ -76,7 +76,7 @@ class GenerarRemisionesCorte
      *   Ahora: agregación bajo lock del rango completo — el 2º cierre espera
      *   al 1º porque MariaDB serializa el SELECT..FOR UPDATE sobre el índice.
      */
-    protected function siguienteConsecutivo(): string
+    public static function siguienteConsecutivo(): string
     {
         $prefijo = 'REM-DP-';
         $len = strlen($prefijo);

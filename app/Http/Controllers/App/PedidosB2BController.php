@@ -604,13 +604,6 @@ class PedidosB2BController extends Controller implements HasMiddleware
      */
     private function siguienteNumeroFactura(): string
     {
-        $prefijo = (setting('empresa.prefijo_dian') ?: 'FV') . '-' . now()->format('ymd') . '-';
-        $rangoHasta = (int) setting('empresa.rango_hasta', 0) ?: null;
-
-        return \App\Modules\Cartera\Actions\SiguienteConsecutivoFactura::run(
-            $prefijo,
-            4,
-            $rangoHasta,
-        );
+        return \App\Modules\Cartera\Support\NumeroFactura::siguiente();
     }
 }
