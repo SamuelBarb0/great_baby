@@ -73,6 +73,10 @@ class HandleInertiaRequests extends Middleware
                 'empaqueResultado' => fn () => $request->session()->get('empaqueResultado'),
                 'errores' => fn () => $request->session()->get('errores'),
                 'importResumen' => fn () => $request->session()->get('importResumen'),
+                // F7 · Enlace de activación del portal del colaborador. Se
+                //   muestra una sola vez, para que Gestión Humana lo copie y
+                //   se lo mande a la persona por WhatsApp.
+                'enlace_activacion' => fn () => $request->session()->get('enlace_activacion'),
                 // Enlace al Excel que SIIGO acaba de generar (balance de prueba).
                 'siigo_reporte_url' => fn () => $request->session()->get('siigo_reporte_url'),
             ],

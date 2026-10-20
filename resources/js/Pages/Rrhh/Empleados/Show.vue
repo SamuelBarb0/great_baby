@@ -9,7 +9,7 @@
 import { ref, reactive, computed } from 'vue';
 import { Head, Link, router } from '@inertiajs/vue3';
 import {
-    ArrowLeft, User, Clock, GraduationCap, FileText, Upload, History, AlertTriangle, Printer, LogOut,
+    ArrowLeft, User, Clock, GraduationCap, FileText, Upload, History, AlertTriangle, Printer, LogOut, KeyRound,
 } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
 
@@ -76,6 +76,19 @@ const subirDoc = () => {
  * pregunta de la Junta —«por qué se retira la gente»— no hay con qué
  * responderle.
  */
+/*
+ * Crear el acceso al portal.
+ *
+ * El enlace se muestra en pantalla además de intentar el correo: acá el correo
+ * del empleado muchas veces no existe o no lo revisa, y Gestión Humana lo
+ * manda por el WhatsApp, que es como se comunican.
+ */
+const modalAcceso = ref(false);
+const emailAcceso = ref(props.empleado.email || '');
+const crearAcceso = () => enviar('/acceso', { email: emailAcceso.value },
+    { onSuccess: () => (modalAcceso.value = false) });
+
+
 const modalRetiro = ref(false);
 const retiro = reactive({
     fecha_retiro: new Date().toISOString().slice(0, 10),
@@ -131,6 +144,18 @@ const tono = (t) => ({
                 {{ $page.props.flash.success }}
             </div>
 
+            <!-- El enlace de activación, para copiarlo y mandarlo por WhatsApp -->
+            <div v-if="$page.props.flash?.enlace_activacion"
+                class="p-3 rounded-lg bg-blue-500/10 border-l-4 border-blue-500 text-sm">
+                <p class="font-semibold text-blue-800">Mandale este enlace a la persona:</p>
+                <code class="block mt-1 p-2 rounded bg-white dark:bg-surface-900 text-xs break-all select-all">
+                    {{ $page.props.flash.enlace_activacion }}
+                </code>
+                <p class="text-xs text-blue-700 mt-1">
+                    Sirve una sola vez y vence en 7 días. Ahí pone su contraseña y ya entra con su correo.
+                </p>
+            </div>
+
             <div class="flex items-start justify-between gap-3 flex-wrap">
                 <div>
                     <h1 class="text-2xl font-bold flex items-center gap-2">
@@ -150,6 +175,10 @@ const tono = (t) => ({
                     <a :href="`/app/rrhh/empleados/${empleado.id}/pdf`" class="btn-secondary">
                         <Printer class="h-4 w-4" /> Historia laboral en PDF
                     </a>
+                    <button v-if="empleado.estado === 'activo' && !empleado.user_id" @click="modalAcceso = true"
+                        class="btn-secondary">
+                        <KeyRound class="h-4 w-4" /> Crear acceso al portal
+                    </button>
                     <button v-if="empleado.estado === 'activo'" @click="modalRetiro = true"
                         class="btn-secondary text-rose-600">
                         <LogOut class="h-4 w-4" /> Registrar retiro
@@ -187,6 +216,12 @@ const tono = (t) => ({
                             <div><span class="text-xs text-surface-400 uppercase block">Ingresó</span>{{ empleado.fecha_ingreso }}</div>
                             <div><span class="text-xs text-surface-400 uppercase block">Contrato</span>{{ empleado.tipo_contrato }}</div>
                             <div><span class="text-xs text-surface-400 uppercase block">Salario</span>{{ money(empleado.salario) }}</div>
+                            <div>
+                                <span class="text-xs text-surface-400 uppercase block">Portal</span>
+                                <span v-if="empleado.activacion_pendiente" class="text-amber-600">Sin activar</span>
+                                <span v-else-if="empleado.user_id" class="text-emerald-700">Activo</span>
+                                <span v-else class="text-surface-400">Sin acceso</span>
+                            </div>
                             <div v-if="empleado.fecha_retiro">
                                 <span class="text-xs text-surface-400 uppercase block">Se retiró</span>
                                 <span class="text-rose-600 font-semibold">{{ empleado.fecha_retiro }}</span>
@@ -268,6 +303,32 @@ const tono = (t) => ({
                         </li>
                         <li v-if="!bitacora.length" class="text-sm text-surface-400">Todavía no hay nada.</li>
                     </ol>
+                </div>
+            </div>
+        </div>
+
+        <!-- Crear acceso al portal -->
+        <div v-if="modalAcceso" @click.self="modalAcceso = false"
+            class="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+            <div class="card p-6 max-w-lg w-full">
+                <h3 class="text-lg font-bold">Acceso al portal para {{ empleado.nombre }}</h3>
+                <p class="text-xs text-surface-500 mb-3">
+                    Va a poder ver sus datos, sus documentos y lo que le entregamos, y avisarnos
+                    si algo se le daña. No ve su salario.
+                </p>
+                <div>
+                    <label class="text-xs font-semibold">Con qué correo entra</label>
+                    <input type="email" v-model="emailAcceso" class="input w-full" autofocus
+                        placeholder="nombre@correo.com" />
+                    <p v-if="errores.email" class="text-xs text-rose-600 mt-1">{{ errores.email }}</p>
+                    <p class="text-[10px] text-surface-400 mt-1">
+                        Al guardar te damos un enlace para mandarle. Ahí pone su propia contraseña.
+                    </p>
+                </div>
+                <div class="flex justify-end gap-2 mt-4">
+                    <button @click="modalAcceso = false" class="btn-secondary">Cancelar</button>
+                    <button @click="crearAcceso" :disabled="procesando || !emailAcceso"
+                        class="btn-primary">Crear acceso</button>
                 </div>
             </div>
         </div>

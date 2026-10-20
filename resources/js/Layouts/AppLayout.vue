@@ -266,8 +266,12 @@ const groups = [
             { name: '✓ Órdenes de contratación', href: '/app/rrhh/ordenes', icon: Users, permiso: 'rrhh_ordenes' },
             { name: 'Contrataciones', href: '/app/rrhh/contrataciones', icon: Users, permiso: 'rrhh' },
             { name: 'Empleados', href: '/app/rrhh/empleados', icon: Users, permiso: 'rrhh' },
+            { name: 'Dotación y herramientas', href: '/app/rrhh/asignaciones', icon: Package, permiso: 'rrhh_asignaciones' },
             // Lo que Elena lleva a la Junta Directiva.
             { name: '📊 Indicadores', href: '/app/rrhh/indicadores', icon: BarChart3, permiso: 'rrhh_indicadores' },
+            // El espacio del propio empleado. Es lo ÚNICO que ve un
+            //   Colaborador, así que el grupo entero le queda con una entrada.
+            { name: '👤 Mi espacio', href: '/app/mi-espacio', icon: Users, permiso: 'portal_colaborador' },
         ],
     },
     {

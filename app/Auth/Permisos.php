@@ -136,6 +136,12 @@ final class Permisos
         //   (Elena, 19-oct). Por eso es un permiso aparte y NO lo tiene
         //   GestionHumana: si lo tuviera, ella se autorizaría a sí misma.
         'rrhh_orden_contratacion' => ['Gerente'],
+        // El portal del propio empleado: sus datos, sus documentos, sus
+        //   herramientas y sus avisos. Es lo ÚNICO que abre el rol
+        //   `Colaborador`, y nadie más lo necesita —cada quien ve lo suyo
+        //   porque el controlador lo ata a su `user_id`, no porque tenga
+        //   este permiso—.
+        'portal_colaborador' => ['Colaborador'],
         'mapa_colombia'    => ['AdminBodega', 'Gerente'],
         // La parrilla de contenido la gateaba `esAracely()`, así que el rol
         //   Marketing la veía en el menú y recibía 403. Se deja como permiso
@@ -182,7 +188,7 @@ final class Permisos
         'Inventario' => ['traslados', 'tomas_fisicas', 'alertas_stock', 'kardex', 'stock_bodegas'],
         'Catálogo' => ['productos', 'ubicaciones', 'importar_productos', 'productos.push_siigo'],
         'Servicio al cliente' => ['garantias', 'servicio_cliente', 'bandeja_importaciones'],
-        'Perfiles operativos' => ['bodega', 'logistica', 'facturacion', 'marketing', 'marketing_parrilla', 'vendedor', 'rrhh', 'rrhh_requisiciones', 'rrhh_seleccion', 'rrhh_orden_contratacion', 'mapa_colombia'],
+        'Perfiles operativos' => ['bodega', 'logistica', 'facturacion', 'marketing', 'marketing_parrilla', 'vendedor', 'rrhh', 'rrhh_requisiciones', 'rrhh_seleccion', 'rrhh_orden_contratacion', 'portal_colaborador', 'mapa_colombia'],
         'Configuración' => ['empresa', 'siigo', 'usuarios', 'plantillas'],
     ];
 
@@ -238,6 +244,7 @@ final class Permisos
         'rrhh_requisiciones' => 'Solicitar personal y seguir mis solicitudes',
         'rrhh_seleccion' => 'Proceso de selección (candidatos, entrevistas, terna)',
         'rrhh_orden_contratacion' => 'Autorizar contrataciones (Junta Directiva)',
+        'portal_colaborador' => 'Mi espacio (portal del empleado)',
         'mapa_colombia' => 'Mapa de Colombia',
         'marketing_parrilla' => 'Parrilla de contenido',
         'empresa' => 'Datos de la empresa',

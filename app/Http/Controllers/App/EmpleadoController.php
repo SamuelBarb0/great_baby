@@ -67,6 +67,9 @@ class EmpleadoController extends Controller implements HasMiddleware
                 'prueba_evaluada_at' => $e->prueba_evaluada_at?->format('Y-m-d'),
                 'prueba_resultado' => $e->prueba_resultado,
                 'prueba_observacion' => $e->prueba_observacion,
+                'user_id' => $e->user_id,
+                'acceso_creado_at' => $e->acceso_creado_at?->toDateString(),
+                'activacion_pendiente' => (bool) $e->activacion_token,
                 'tipo_retiro' => $e->tipo_retiro,
                 'motivo_retiro' => $e->motivo_retiro,
                 'fecha_retiro' => $e->fecha_retiro?->toDateString(),
@@ -213,6 +216,44 @@ class EmpleadoController extends Controller implements HasMiddleware
      * de área no lo tiene —ahí están los salarios y las hojas de vida de toda
      * la empresa—. Él entra por su propia pantalla y sólo sobre SU gente.
      */
+
+    /**
+     * Le crea el acceso al portal a un empleado.
+     *
+     * Devuelve el enlace de activación en pantalla, no sólo por correo: acá el
+     * correo del empleado muchas veces no existe o no lo revisa, y Gestión
+     * Humana lo manda por el WhatsApp, que es como se comunican.
+     */
+    public function crearAcceso(Request $r, int $empleado): RedirectResponse
+    {
+        $e = Empleado::findOrFail($empleado);
+
+        abort_unless($e->estado === 'activo', 422,
+            'Sólo se le crea acceso a alguien que está trabajando.');
+
+        $data = $r->validate([
+            // Si ya tiene correo se usa el suyo; si no, se pide acá y queda
+            // guardado, porque el login es por correo.
+            'email' => ['required', 'email', 'max:150'],
+        ], [], ['email' => 'correo']);
+
+        $otro = \App\Models\User::where('email', $data['email'])
+            ->when($e->user_id, fn ($q) => $q->where('id', '!=', $e->user_id))->first();
+
+        // Si el correo ya es de otra persona del sistema, enlazarlo le daría
+        // a esta persona el espacio de aquella.
+        if ($otro && ! Empleado::where('user_id', $otro->id)->where('id', $e->id)->exists()
+            && Empleado::where('user_id', $otro->id)->exists()) {
+            return back()->withErrors([
+                'email' => 'Ese correo ya es de otro empleado del sistema.',
+            ]);
+        }
+
+        $resultado = PortalColaboradorController::crearAcceso($e, $data['email']);
+
+        return back()->with('success', 'Acceso creado.')
+            ->with('enlace_activacion', $resultado['link']);
+    }
 
     public function subirDocumento(Request $r, int $empleado): RedirectResponse
     {

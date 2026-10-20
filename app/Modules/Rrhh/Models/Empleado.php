@@ -27,7 +27,8 @@ class Empleado extends Model
     protected $table = 'rrhh_empleados';
 
     protected $fillable = [
-        'candidato_id', 'vacante_id', 'nombre', 'tipo_documento', 'numero_documento',
+        'candidato_id', 'vacante_id', 'user_id', 'nombre', 'tipo_documento', 'numero_documento',
+        'activacion_token', 'activacion_expira_at', 'acceso_creado_at',
         'email', 'telefono', 'cargo', 'area', 'tipo_contrato', 'salario',
         'fecha_ingreso', 'fecha_retiro', 'tipo_retiro', 'motivo_retiro', 'retirado_por_id',
         'estado', 'estado_induccion', 'notas',
@@ -45,6 +46,8 @@ class Empleado extends Model
         'prueba_hasta' => 'date',
         'prueba_evaluada_at' => 'datetime',
         'prueba_jefe_at' => 'datetime',
+        'activacion_expira_at' => 'datetime',
+        'acceso_creado_at' => 'datetime',
     ];
 
     /**
@@ -154,5 +157,28 @@ class Empleado extends Model
     public function documentos(): HasMany
     {
         return $this->hasMany(DocumentoEmpleado::class);
+    }
+
+    /** Su cuenta para entrar al portal, si Gestión Humana ya se la creó. */
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(\App\Models\User::class, 'user_id');
+    }
+
+    /** Lo que la empresa le entregó: dotación y herramientas. */
+    public function asignaciones(): HasMany
+    {
+        return $this->hasMany(Asignacion::class)->latest('id');
+    }
+
+    /**
+     * Lo que todavía tiene en su poder.
+     *
+     * Es la consulta que no existía el día que alguien se fue con la tablet:
+     * sin ella, el paz y salvo se firma a ciegas.
+     */
+    public function pendientesDeDevolver()
+    {
+        return $this->asignaciones()->pendientes();
     }
 }

@@ -16,6 +16,9 @@ use Spatie\Permission\Models\Role;
  * `GestionHumana` es quien recibe esas solicitudes, aprueba, publica la
  * vacante y lleva el proceso de selección.
  *
+ * `Colaborador` es el empleado mirando su propio espacio. Es el rol más
+ * acotado de todos: abre una sola pantalla, la suya.
+ *
  * Es idempotente: se puede correr las veces que haga falta. No toca los
  * permisos que el administrador haya repartido después a mano desde la
  * pantalla de Roles, que es la que manda.
@@ -26,7 +29,7 @@ class RolesGestionHumanaSeeder extends Seeder
     {
         $guard = config('auth.defaults.guard', 'web');
 
-        foreach (['LiderArea', 'GestionHumana'] as $nombre) {
+        foreach (['LiderArea', 'GestionHumana', 'Colaborador'] as $nombre) {
             $rol = Role::firstOrCreate(['name' => $nombre, 'guard_name' => $guard]);
 
             // Sólo se reparten permisos la primera vez. Si el rol ya tiene

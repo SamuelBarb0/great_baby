@@ -32,6 +32,13 @@ Route::middleware(['web', 'auth'])->get('/set-canal/{canal}', function (string $
 Route::middleware(['web', 'guest'])->prefix('app')->group(function () {
     Route::get('/login', [\App\Http\Controllers\App\AuthController::class, 'showLogin'])->name('app.login');
     Route::post('/login', [\App\Http\Controllers\App\AuthController::class, 'login'])->middleware('throttle:8,1');
+
+    // F7 · El empleado pone su contraseña por primera vez. Va acá y no en el
+    //      grupo de `auth` porque justamente todavía no tiene sesión: el
+    //      enlace se lo manda Gestión Humana por WhatsApp.
+    Route::get('/activar-portal', [\App\Http\Controllers\App\PortalColaboradorController::class, 'mostrarActivacion'])->name('app.portal.activar');
+    Route::post('/activar-portal', [\App\Http\Controllers\App\PortalColaboradorController::class, 'activar'])
+        ->middleware('throttle:10,60');
 });
 
 // App (auth)
@@ -443,6 +450,18 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     Route::get('/rrhh/candidatos/{candidato}/hoja-de-vida', [\App\Http\Controllers\App\SeleccionController::class, 'verHojaDeVida'])->name('app.rrhh.candidato.hv');
     Route::get('/rrhh/empleados', [\App\Http\Controllers\App\RrhhController::class, 'empleadosIndex'])->name('app.rrhh.empleados');
     Route::post('/rrhh/empleados', [\App\Http\Controllers\App\RrhhController::class, 'empleadoCrear'])->name('app.rrhh.empleado.crear');
+
+    // F7 · «Mi espacio»: lo que el empleado ve de sí mismo.
+    Route::get('/mi-espacio', [\App\Http\Controllers\App\PortalColaboradorController::class, 'miEspacio'])->name('app.miespacio');
+    Route::post('/mi-espacio/asignaciones/{asignacion}/reportar', [\App\Http\Controllers\App\PortalColaboradorController::class, 'reportarNovedad'])->name('app.miespacio.reportar');
+    Route::get('/mi-espacio/documentos/{documento}', [\App\Http\Controllers\App\PortalColaboradorController::class, 'miDocumento'])->name('app.miespacio.documento');
+    Route::post('/rrhh/empleados/{empleado}/acceso', [\App\Http\Controllers\App\EmpleadoController::class, 'crearAcceso'])->name('app.rrhh.empleado.acceso');
+
+    // F9 · Dotación y herramientas: qué tiene cada quien.
+    Route::get('/rrhh/asignaciones', [\App\Http\Controllers\App\AsignacionesController::class, 'index'])->name('app.rrhh.asignaciones');
+    Route::post('/rrhh/asignaciones', [\App\Http\Controllers\App\AsignacionesController::class, 'entregar'])->name('app.rrhh.asignacion.entregar');
+    Route::post('/rrhh/asignaciones/{asignacion}/devolver', [\App\Http\Controllers\App\AsignacionesController::class, 'devolver'])->name('app.rrhh.asignacion.devolver');
+    Route::post('/rrhh/reportes/{reporte}/atender', [\App\Http\Controllers\App\AsignacionesController::class, 'atenderReporte'])->name('app.rrhh.reporte.atender');
 
     // F11 · Los indicadores que se le presentan a la Junta Directiva.
     Route::get('/rrhh/indicadores', [\App\Http\Controllers\App\IndicadoresRrhhController::class, 'index'])->name('app.rrhh.indicadores');

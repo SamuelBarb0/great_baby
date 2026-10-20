@@ -163,6 +163,11 @@ class User extends Authenticatable implements FilamentUser
             //   es «Cosas del día» y pide perfil de bodega — o sea, entraban al
             //   sistema directo a un 403, que es exactamente lo que este método
             //   existe para evitar.
+            // El colaborador entra a lo suyo y a nada más. Va ANTES que el
+            //   resto porque es el rol más acotado: si alguien fuera las dos
+            //   cosas, manda su trabajo, no su espacio personal.
+            $this->tieneAcceso('portal_colaborador') && ! $this->tieneAcceso('rrhh_requisiciones')
+                => '/app/mi-espacio',
             $this->tieneAcceso('rrhh_requisiciones') => '/app/rrhh/requisiciones',
             $this->esAdminBodega() || $this->esAlistador() || $this->hasRole('Despachador') => '/app/logistica/cola-jorge',
             default                    => '/app/cosas-del-dia',

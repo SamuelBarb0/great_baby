@@ -97,6 +97,11 @@ final class MenuApp
             //   Gestión Humana y para la Junta. El líder de área no entra:
             //   esto no es de su equipo.
             'rrhh_indicadores' => $puede('rrhh') || $puede('rrhh_orden_contratacion'),
+            // PortalColaboradorController · el espacio propio del empleado.
+            'portal_colaborador' => $puede('portal_colaborador'),
+            // AsignacionesController · dotación y herramientas. Lo abren
+            //   Gestión Humana (arma el paz y salvo) y el líder (entrega).
+            'rrhh_asignaciones' => $puede('rrhh') || $puede('rrhh_requisiciones'),
 
             // ComprasController (listado de OC) · esContable()
             'compras_lista' => $puede('contabilidad'),
