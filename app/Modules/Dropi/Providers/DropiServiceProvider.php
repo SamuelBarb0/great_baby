@@ -32,18 +32,25 @@ class DropiServiceProvider extends ServiceProvider
 
         $this->app->singleton(DropiWebAuth::class, fn ($app) => new DropiWebAuth($app['config']->get('dropi.web')));
 
+        // Driver `api` (token de integración, ver DropiApiClient). Antes mandaba
+        // la llave como `Bearer` y Dropi la espera en `dropi-integration-key`.
+        $this->app->singleton(DropiApiClient::class, fn ($app) => new DropiApiClient(
+            $app->make(DropiWebAuth::class),
+            $app['config']->get('dropi.api'),
+        ));
+
+        // Con DROPI_DRIVER=api, todo lo que pide el cliente web (sync en tres
+        // ritmos, información del pedido, estatus, etiquetas, wallet) recibe el
+        // de la API oficial: lee pedidos por el token y hereda lo demás.
+        $this->app->bind(DropiWebClient::class, fn ($app) => $app['config']->get('dropi.driver') === 'api'
+            ? $app->make(DropiApiClient::class)
+            : new DropiWebClient($app->make(DropiWebAuth::class)));
+
         $this->app->singleton(DropiClientInterface::class, function ($app) {
             $config = $app['config']->get('dropi');
 
             return match ($config['driver']) {
-                'api' => new DropiApiClient(
-                    Http::baseUrl($config['api']['url'])
-                        ->withToken($config['api']['key'])
-                        ->timeout($config['api']['timeout'])
-                        ->acceptJson(),
-                    $config['api']['url'],
-                    $config['api']['key'],
-                ),
+                'api' => $app->make(DropiApiClient::class),
                 'web' => $app->make(DropiWebClient::class),
                 default => new DropiMockClient($config['mock']['fixtures_path']),
             };
