@@ -1,10 +1,11 @@
 <script setup>
-import { ref, reactive } from 'vue';
+import { ref, reactive, computed, watch, nextTick } from 'vue';
 import { Head, router } from '@inertiajs/vue3';
-import { Undo2, Search, Package, AlertCircle } from 'lucide-vue-next';
+import { Undo2, Search, Package, AlertCircle, ScanLine, Minus, Plus } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import { useMoney } from '@/composables/useMoney';
 import { usePedidoBadge } from '@/composables/usePedidoBadge';
+import { useSonido } from '@/composables/useSonido';
 
 const props = defineProps({
     guiaBuscar: { type: String, default: '' },
@@ -23,6 +24,52 @@ const buscar = () => {
     if (!q) return; // U10 · no dispara con input vacío
     router.get('/app/dropi/devolucion/registrar', { guia: q }, { preserveState: true, preserveScroll: true });
 };
+
+// 5.4 · Re-escaneo: lo que vuelve a bodega es lo que se escanea, no lo que
+// decía el pedido. Cada lectura de la pistola suma una unidad a su producto.
+const { beep } = useSonido();
+const recibidos = reactive({});
+const lectura = ref('');
+const ultimo = ref(null); // { tipo: 'ok'|'warn'|'error', texto }
+const inputEscaneo = ref(null);
+
+const iniciarConteo = () => {
+    Object.keys(recibidos).forEach((k) => delete recibidos[k]);
+    (props.pedido?.por_escanear ?? []).forEach((r) => { recibidos[r.clave] = 0; });
+    ultimo.value = null;
+};
+watch(() => props.pedido?.id, () => { iniciarConteo(); nextTick(() => inputEscaneo.value?.focus()); }, { immediate: true });
+
+const esperadas = computed(() => (props.pedido?.por_escanear ?? []).reduce((s, r) => s + r.esperadas, 0));
+const escaneadas = computed(() => Object.values(recibidos).reduce((s, n) => s + n, 0));
+const completo = computed(() => esperadas.value > 0 && escaneadas.value === esperadas.value);
+
+const escanear = () => {
+    const codigo = (lectura.value ?? '').trim().toUpperCase();
+    lectura.value = '';
+    if (!codigo || !props.pedido) return;
+    const renglon = props.pedido.por_escanear.find((r) => r.codigos.includes(codigo));
+    if (!renglon) {
+        ultimo.value = { tipo: 'error', texto: `${codigo} no es de este pedido` };
+        beep('error');
+        return;
+    }
+    if (recibidos[renglon.clave] >= renglon.esperadas) {
+        ultimo.value = { tipo: 'warn', texto: `${renglon.referencia}: ya están las ${renglon.esperadas} que se despacharon` };
+        beep('warn');
+        return;
+    }
+    recibidos[renglon.clave]++;
+    ultimo.value = { tipo: 'ok', texto: `✓ ${renglon.referencia} (${recibidos[renglon.clave]}/${renglon.esperadas})` };
+    beep('ok');
+};
+// Por si una etiqueta no lee: ajuste a mano (queda igual en la devolución).
+const ajustar = (r, delta) => {
+    recibidos[r.clave] = Math.max(0, Math.min(r.esperadas, recibidos[r.clave] + delta));
+};
+
+const reingresa = computed(() => !['baja_total', 'no_llego_fisicamente'].includes(form.destino_inventario));
+
 const guardar = () => {
     if (!props.pedido) return;
     // Re-audit DR-β UX (UX-C4) · "no llegó físicamente" requiere nota explícita
@@ -31,11 +78,20 @@ const guardar = () => {
         alert('Para "no llegó físicamente" es obligatoria una nota (≥10 caracteres) que explique cómo se detectó.');
         return;
     }
+    if (reingresa.value && esperadas.value > 0 && escaneadas.value === 0) {
+        alert('No has escaneado ninguna unidad. Escanea lo que llegó o, si no llegó nada, elige «NO llegó físicamente».');
+        return;
+    }
+    if (reingresa.value && escaneadas.value < esperadas.value
+        && !confirm(`Faltan ${esperadas.value - escaneadas.value} unidad(es) por escanear. Solo vuelve a bodega lo escaneado y el faltante queda anotado. ¿Registrar así?`)) {
+        return;
+    }
     procesando.value = true;
     router.post('/app/dropi/devolucion/registrar', {
         pedido_id: props.pedido.id,
         destino_inventario: form.destino_inventario,
         notas: form.notas,
+        recibidos: { ...recibidos },
     }, { onFinish: () => { procesando.value = false; } });
 };
 
@@ -56,6 +112,12 @@ const { badge } = usePedidoBadge();
 
             <div v-if="$page.props.flash?.success" class="p-3 rounded-lg bg-emerald-500/15 border-l-4 border-emerald-500 text-emerald-700 text-sm">
                 {{ $page.props.flash.success }}
+            </div>
+            <div v-if="$page.props.flash?.warning" class="p-3 rounded-lg bg-amber-500/15 border-l-4 border-amber-500 text-amber-800 dark:text-amber-200 text-sm">
+                {{ $page.props.flash.warning }}
+            </div>
+            <div v-if="$page.props.flash?.error" class="p-3 rounded-lg bg-red-500/15 border-l-4 border-red-500 text-red-700 dark:text-red-300 text-sm">
+                {{ $page.props.flash.error }}
             </div>
 
             <div class="card p-4">
@@ -97,7 +159,43 @@ const { badge } = usePedidoBadge();
                     </div>
                 </div>
 
-                <div>
+                <!-- 5.4 · Re-escaneo de lo que llegó -->
+                <div v-if="!pedido.devolucion_existente && pedido.por_escanear.length">
+                    <div class="flex items-center justify-between mb-2">
+                        <div class="text-xs uppercase tracking-widest font-bold text-brand-600">Escanea lo que llegó</div>
+                        <div class="text-sm font-bold" :class="completo ? 'text-emerald-600' : 'text-amber-600'">
+                            {{ escaneadas }} / {{ esperadas }} unidades
+                        </div>
+                    </div>
+                    <div class="flex gap-2">
+                        <div class="relative flex-1">
+                            <ScanLine class="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-surface-400"/>
+                            <input ref="inputEscaneo" v-model="lectura" @keydown.enter.prevent="escanear"
+                                class="input w-full pl-9 font-mono" placeholder="Código de barras o referencia del producto"
+                                autocomplete="off" aria-label="Escanear producto devuelto"/>
+                        </div>
+                    </div>
+                    <p v-if="ultimo" class="mt-2 text-sm font-semibold"
+                        :class="{ 'text-emerald-600': ultimo.tipo === 'ok', 'text-amber-600': ultimo.tipo === 'warn', 'text-red-600': ultimo.tipo === 'error' }">
+                        {{ ultimo.texto }}
+                    </p>
+                    <ul class="mt-3 text-sm divide-y divide-surface-100 dark:divide-surface-800">
+                        <li v-for="r in pedido.por_escanear" :key="r.clave" class="py-2 flex items-center gap-3">
+                            <div class="flex-1 min-w-0">
+                                <div class="font-mono text-xs text-surface-500">{{ r.referencia }}</div>
+                                <div class="truncate">{{ r.descripcion }}</div>
+                            </div>
+                            <button type="button" @click="ajustar(r, -1)" class="btn-ghost p-1" :aria-label="`Quitar una unidad de ${r.referencia}`"><Minus class="h-4 w-4"/></button>
+                            <div class="w-16 text-center font-bold tabular-nums"
+                                :class="recibidos[r.clave] === r.esperadas ? 'text-emerald-600' : 'text-amber-600'">
+                                {{ recibidos[r.clave] }}/{{ r.esperadas }}
+                            </div>
+                            <button type="button" @click="ajustar(r, 1)" class="btn-ghost p-1" :aria-label="`Sumar una unidad de ${r.referencia}`"><Plus class="h-4 w-4"/></button>
+                        </li>
+                    </ul>
+                </div>
+
+                <div v-else-if="!pedido.devolucion_existente">
                     <div class="text-xs uppercase tracking-widest font-bold text-brand-600 mb-2">Ítems del pedido</div>
                     <ul class="text-sm divide-y divide-surface-100">
                         <li v-for="(it, idx) in pedido.items" :key="idx" class="py-2 flex items-center justify-between">
@@ -108,6 +206,7 @@ const { badge } = usePedidoBadge();
                             <div class="font-bold">{{ it.cantidad }}</div>
                         </li>
                     </ul>
+                    <p class="text-xs text-amber-700 mt-2">Ningún ítem está vinculado al catálogo: no hay nada que reingresar al inventario.</p>
                 </div>
 
                 <div v-if="!pedido.devolucion_existente" class="border-t border-surface-200 dark:border-surface-800 pt-4 space-y-3">

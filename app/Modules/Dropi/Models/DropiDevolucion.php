@@ -32,12 +32,17 @@ class DropiDevolucion extends Model implements AuditableContract
 
     protected $fillable = [
         'pedido_id', 'recibido_at', 'destino_inventario',
+        'recibidos', 'unidades_esperadas', 'unidades_recibidas', 'reescaneada',
         'decision_por', 'genero_nota_credito', 'nota_credito_ari_id', 'notas',
     ];
 
     protected $casts = [
         'recibido_at' => 'datetime',
         'genero_nota_credito' => 'boolean',
+        'recibidos' => 'array',
+        'unidades_esperadas' => 'integer',
+        'unidades_recibidas' => 'integer',
+        'reescaneada' => 'boolean',
     ];
 
     public function pedido(): BelongsTo

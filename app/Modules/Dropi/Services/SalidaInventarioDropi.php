@@ -77,6 +77,22 @@ class SalidaInventarioDropi
     }
 
     /**
+     * Bodega de la que salió cada sujeto del pedido (la de más unidades si
+     * salió de varias). La devolución reingresa ahí.
+     *
+     * @return array<string, int>  clave `v:{id}` / `p:{id}` => ubicacion_id
+     */
+    public static function bodegasDeSalida(int $pedidoId): array
+    {
+        $out = [];
+        foreach (self::netoPorSujeto($pedidoId)->sortByDesc('unidades') as $r) {
+            $out[CostoPromedio::clave($r->variante_id, $r->producto_id)] ??= (int) $r->ubicacion_id;
+        }
+
+        return $out;
+    }
+
+    /**
      * Saca el pedido del kardex y causa su costo. Idempotente: si ya tiene
      * unidades fuera, no hace nada.
      *

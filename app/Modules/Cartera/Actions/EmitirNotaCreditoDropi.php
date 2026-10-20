@@ -44,7 +44,15 @@ class EmitirNotaCreditoDropi
         $pedido = $devolucion->pedido;
         if (! $pedido) return null;
 
-        if (! $pedido->ari_factura_id) {
+        // 5.3 · la factura del pedido: la del corte (`factura_venta_id`, la
+        // escribe GenerarFacturasB2BDeCorte) o la vieja referencia ARI.
+        $factura = $pedido->factura_venta_id
+            ? \App\Modules\Cartera\Models\FacturaVenta::find($pedido->factura_venta_id)
+            : ($pedido->ari_factura_id
+                ? \App\Modules\Cartera\Models\FacturaVenta::where('ari_factura_id', $pedido->ari_factura_id)->first()
+                : null);
+
+        if (! $factura && ! $pedido->ari_factura_id) {
             $devolucion->update([
                 'genero_nota_credito' => false,
                 'notas' => trim(($devolucion->notas ?? '') . "\n[NC skip] pedido sin factura previa"),
@@ -69,7 +77,7 @@ class EmitirNotaCreditoDropi
         // revienta después de consumir el consecutivo, el rollback deshace TODO
         // — no se quema el folio DIAN.
         try {
-            return DB::transaction(function () use ($devId, $devolucion, $pedido, $valor) {
+            return DB::transaction(function () use ($devId, $devolucion, $pedido, $valor, $factura) {
                 // Raíz A · reservación atómica del "slot" de NC.
                 $reservado = DropiDevolucion::whereKey($devId)
                     ->where('genero_nota_credito', false)
@@ -90,11 +98,9 @@ class EmitirNotaCreditoDropi
                 $numeroCompleto = SiguienteConsecutivoFactura::run($prefijo, 4, $rangoNc);
                 $numeroSecuencial = (int) preg_replace('/\D/', '', substr($numeroCompleto, strlen($prefijo)));
 
-                // Re-audit DATOS #4 · popular factura_id local si existe correlación
-                // por ari_factura_id del pedido (join a FacturaVenta local).
-                $facturaLocal = \App\Modules\Cartera\Models\FacturaVenta::query()
-                    ->where('ari_factura_id', $pedido->ari_factura_id)
-                    ->value('id');
+                // Re-audit DATOS #4 · la NC cuelga de la factura local: así
+                // `recalcular()` le baja el saldo y cartera deja de cobrarla.
+                $facturaLocal = $factura?->id;
 
                 $nc = NotaCredito::create([
                     'prefijo' => rtrim($prefijo, '-'),
@@ -114,7 +120,12 @@ class EmitirNotaCreditoDropi
                 // Dispatch a SIIGO SOLO tras commit (post-tx).
                 DB::afterCommit(function () use ($devId, $numeroCompleto, $pedido, $valor, $nc) {
                     try {
-                        \App\Modules\Cartera\Jobs\EnviarNotaCreditoSiigo::dispatch($devId, $numeroCompleto);
+                        // 5.3 · el envío real (el mismo de las NC manuales, con su
+                        // kill-switch de SIIGO). Antes iba a EnviarNotaCreditoSiigo,
+                        // que sólo escribía «(mock) enviando NC» en el log.
+                        if ((bool) setting('dropi.auto_nc_envia_siigo', true)) {
+                            \App\Modules\Siigo\Jobs\PushNotaCreditoASiigo::dispatch($nc->id);
+                        }
                         Log::info('[NC-Dropi] NC local + dispatch SIIGO', [
                             'pedido' => $pedido->guia, 'valor' => $valor, 'ref' => $numeroCompleto, 'nc_id' => $nc->id,
                         ]);

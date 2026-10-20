@@ -93,15 +93,49 @@ class GenerarFacturasB2BDeCorte
                     'observaciones' => "Facturación B2B del corte " . $corte->etiqueta() . " · " . $pedidosVendedor->count() . " pedidos",
                 ]);
 
+                // Una línea por producto del pedido. Antes era una línea por guía
+                // sin producto, y desde que volvió el check
+                // `chk_factura_venta_item_sujeto` (2026-10-07: toda línea debe
+                // tener variante o producto) la base la rechazaba: ningún corte
+                // con pedidos B2B se podía facturar.
+                $sinCatalogo = [];
                 foreach ($pedidosVendedor as $p) {
-                    FacturaVentaItem::create([
-                        'factura_id' => $factura->id,
-                        'descripcion' => "Guía {$p->guia} · " . ($p->cliente_nombre ?? '—'),
-                        'cantidad' => 1,
-                        'precio_unit' => (float) $p->monto_esperado_proveedor,
-                        'subtotal' => (float) $p->monto_esperado_proveedor,
-                    ]);
+                    foreach ($p->items as $it) {
+                        if (! $it->variante_id && ! $it->producto_id) {
+                            $sinCatalogo[] = "{$p->guia} ({$it->sku_dropi})";
+                            continue;
+                        }
+                        $cant = (int) ($it->cantidad ?? 0);
+                        if ($cant <= 0) continue;
+                        $precio = (float) $it->precio_proveedor_unit;
+                        FacturaVentaItem::create([
+                            'factura_id' => $factura->id,
+                            'variante_id' => $it->variante_id,
+                            'producto_id' => $it->producto_id,
+                            'descripcion' => "Guía {$p->guia} · " . ($it->sku_dropi ?? '—'),
+                            'cantidad' => $cant,
+                            'precio_unit' => $precio,
+                            'subtotal' => round($precio * $cant, 2),
+                        ]);
+                    }
                 }
+                if ($sinCatalogo) {
+                    // Sin producto no hay línea posible: se dice en la factura
+                    // para que se vincule el producto y se ajuste a mano, y el
+                    // total es el de las líneas, no el de los pedidos.
+                    $total = round((float) $factura->items()->sum('subtotal'), 2);
+                    $factura->forceFill([
+                        'subtotal' => $total, 'total' => $total, 'saldo' => $total,
+                        'observaciones' => $factura->observaciones
+                            . ' · SIN PRODUCTO VINCULADO (no facturado): ' . implode(', ', $sinCatalogo),
+                    ])->save();
+                }
+
+                // 5.3 · cada pedido sabe en qué factura quedó: la nota crédito de
+                // su devolución la necesita (antes buscaba `ari_factura_id`, que
+                // nada llenaba, y ninguna devolución generaba NC).
+                DropiPedido::whereIn('id', $pedidosVendedor->pluck('id'))
+                    ->update(['factura_venta_id' => $factura->id]);
 
                 app(AplicarRetencionesVenta::class)->ejecutar($factura);
 

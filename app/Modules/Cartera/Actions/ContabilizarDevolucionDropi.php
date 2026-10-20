@@ -131,6 +131,7 @@ class ContabilizarDevolucionDropi
         // ---------- Armar líneas ----------
         $lineas = [];
         $totalReingresado = 0.0;
+        $quedan = [];
         foreach ($items as $idx => $item) {
             $porcion = $porciones[$idx] ?? 0.0;
             if ($porcion <= 0) continue;
@@ -150,11 +151,19 @@ class ContabilizarDevolucionDropi
                 'descripcion' => $desc, 'user_id' => $userId,
             ];
 
-            // Sólo reingresa al kardex lo que tiene variante (RegistrarDevolucion),
-            // y sólo se reversa un costo que de verdad se causó.
-            $costoItem = $item->variante_id
-                ? round(($costos['v:'.$item->variante_id] ?? 0) * (float) ($item->cantidad ?? 1), 2)
-                : 0.0;
+            // Se reversa el costo sólo de lo que volvió al kardex: lo escaneado
+            // al recibir (5.4), repartido entre las líneas del mismo producto,
+            // y sólo si ese costo de verdad se causó al salir.
+            $clave = \App\Modules\Inventario\Support\CostoPromedio::clave($item->variante_id, $item->producto_id);
+            $vuelven = 0;
+            if ($item->variante_id || $item->producto_id) {
+                $quedan[$clave] ??= is_array($devolucion->recibidos)
+                    ? (int) ($devolucion->recibidos[$clave] ?? 0)
+                    : PHP_INT_MAX;
+                $vuelven = min((int) ($item->cantidad ?? 1), $quedan[$clave]);
+                $quedan[$clave] -= $vuelven;
+            }
+            $costoItem = round(($costos[$clave] ?? 0) * $vuelven, 2);
 
             if ($devolucion->destino_inventario === 'reingreso' && $costoItem > 0) {
                 $lineas[] = [

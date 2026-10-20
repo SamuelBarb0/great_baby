@@ -32,6 +32,33 @@
                 </div>
             </x-filament::section>
 
+            {{-- 5.4 · Re-escaneo: vuelve a bodega lo que se escanea, no lo que decía el pedido --}}
+            @php($renglones = $this->porEscanear())
+            @if($renglones)
+                @php($esp = array_sum(array_column($renglones, 'esperadas')))
+                @php($rec = array_sum($recibidos))
+                <x-filament::section style="margin-top:1rem;">
+                    <x-slot name="heading">Escanear lo que llegó · {{ $rec }} / {{ $esp }} unidades</x-slot>
+                    <x-slot name="description">Pistola o teclado + Enter. Solo vuelve al inventario lo escaneado; el faltante queda anotado.</x-slot>
+                    <input type="text" wire:model="lectura" wire:keydown.enter.prevent="escanear" autocomplete="off"
+                           placeholder="Código de barras o referencia" aria-label="Escanear producto devuelto"
+                           style="width:100%;padding:.6rem .75rem;border:1px solid rgba(156,163,175,.4);border-radius:.5rem;font-family:ui-monospace,monospace;background:transparent;">
+                    @if($ultimaLectura)
+                        <div style="margin-top:.5rem;font-weight:600;color:{{ str_starts_with($ultimaLectura, '✓') ? '#059669' : (str_starts_with($ultimaLectura, '⚠') ? '#d97706' : '#dc2626') }};">{{ $ultimaLectura }}</div>
+                    @endif
+                    <ul style="margin-top:.75rem;list-style:none;padding:0;">
+                        @foreach($renglones as $clave => $r)
+                            <li style="display:flex;align-items:center;gap:.75rem;padding:.5rem 0;border-bottom:1px solid rgba(156,163,175,.15);">
+                                <span style="flex:1;font-family:ui-monospace,monospace;">{{ $r['referencia'] }}</span>
+                                <button type="button" wire:click="ajustar('{{ $clave }}', -1)" aria-label="Quitar una unidad" style="padding:.1rem .6rem;border:1px solid rgba(156,163,175,.4);border-radius:.375rem;">−</button>
+                                <strong style="min-width:3.5rem;text-align:center;color:{{ ($recibidos[$clave] ?? 0) === $r['esperadas'] ? '#059669' : '#d97706' }};">{{ $recibidos[$clave] ?? 0 }}/{{ $r['esperadas'] }}</strong>
+                                <button type="button" wire:click="ajustar('{{ $clave }}', 1)" aria-label="Sumar una unidad" style="padding:.1rem .6rem;border:1px solid rgba(156,163,175,.4);border-radius:.375rem;">+</button>
+                            </li>
+                        @endforeach
+                    </ul>
+                </x-filament::section>
+            @endif
+
             {{-- Paso 3: decidir destino DESPUÉS de ver contexto --}}
             <div style="margin-top:1rem;">
                 {{ $this->form->getComponents()[1] }}

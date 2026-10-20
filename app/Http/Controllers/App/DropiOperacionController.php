@@ -227,7 +227,7 @@ class DropiOperacionController extends Controller implements HasMiddleware
         if ($guiaBuscar) {
             $pedido = DropiPedido::where('guia', $guiaBuscar)
                 ->orWhere('dropi_orden_id', $guiaBuscar)
-                ->with(['items.variante.producto'])
+                ->with(['items.variante.producto', 'items.producto'])
                 ->first();
         }
         return Inertia::render('Dropi/Devolucion/Registrar', [
@@ -245,9 +245,39 @@ class DropiOperacionController extends Controller implements HasMiddleware
                     'cantidad' => (int) $i->cantidad,
                 ])->all(),
                 'devolucion_existente' => DropiDevolucion::where('pedido_id', $pedido->id)->exists(),
+                // 5.4 · lo que se re-escanea: un renglón por producto, con los
+                // códigos que acepta la pistola (barras de la variante o
+                // referencia del agregado).
+                'por_escanear' => $this->porEscanear($pedido),
             ] : null,
             'destinos' => array_map(fn ($d) => ['value' => $d->value, 'label' => $d->label()], DestinoDevolucion::cases()),
         ]);
+    }
+
+    /**
+     * @return list<array{clave:string, referencia:string, descripcion:string, esperadas:int, codigos:list<string>}>
+     */
+    private function porEscanear(DropiPedido $pedido): array
+    {
+        $out = [];
+        foreach ($pedido->items as $i) {
+            if (! $i->variante_id && ! $i->producto_id) continue;
+            $clave = \App\Modules\Inventario\Support\CostoPromedio::clave($i->variante_id, $i->producto_id);
+            $producto = $i->variante?->producto ?? $i->producto;
+            $out[$clave] ??= [
+                'clave' => $clave,
+                'referencia' => (string) ($producto?->referencia ?? $i->sku_dropi),
+                'descripcion' => trim(($producto?->nombre ?? '').' '.($i->variante?->color_nombre ?? '').' '.($i->variante?->talla ?? '')),
+                'esperadas' => 0,
+                'codigos' => array_values(array_filter(array_map(
+                    fn ($c) => $c ? strtoupper(trim((string) $c)) : null,
+                    $i->variante_id ? [$i->variante?->codigo_barras] : [$producto?->referencia],
+                ))),
+            ];
+            $out[$clave]['esperadas'] += (int) $i->cantidad;
+        }
+
+        return array_values($out);
     }
 
     public function devolucionGuardar(Request $request): RedirectResponse
@@ -256,21 +286,32 @@ class DropiOperacionController extends Controller implements HasMiddleware
             'pedido_id' => ['required', 'integer', 'exists:dropi_pedidos,id'],
             'destino_inventario' => ['required', Rule::in(array_map(fn ($d) => $d->value, DestinoDevolucion::cases()))],
             'notas' => ['nullable', 'string', 'max:500'],
+            'recibidos' => ['nullable', 'array'],
+            'recibidos.*' => ['integer', 'min:0'],
         ]);
 
         try {
             $pedido = DropiPedido::findOrFail($data['pedido_id']);
-            RegistrarDevolucion::run(
+            $r = RegistrarDevolucion::run(
                 $pedido->guia,
                 DestinoDevolucion::from($data['destino_inventario']),
                 (int) auth()->id(),
                 $data['notas'] ?? null,
+                // La pantalla siempre re-escanea: lo que no se escaneó no volvió.
+                $data['recibidos'] ?? [],
             );
         } catch (Throwable $e) {
             return back()->with('error', $e->getMessage())->withInput();
         }
 
-        return redirect()->route('app.dropi.devolucion.registrar')->with('success', 'Devolución registrada.');
+        $faltan = array_sum($r['faltantes']);
+
+        return redirect()->route('app.dropi.devolucion.registrar')->with(
+            $faltan ? 'warning' : 'success',
+            $faltan
+                ? "Devolución registrada. Faltaron {$faltan} unidad(es): quedó anotado en la devolución."
+                : 'Devolución registrada: todo lo despachado volvió.',
+        );
     }
 
     // ============================================================
