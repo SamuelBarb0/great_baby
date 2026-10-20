@@ -14,8 +14,8 @@ use Lorisleiva\Actions\Concerns\AsAction;
  *
  *   4175 (Devoluciones en ventas)   DÉBITO  = valor (por-item)
  *   1305 (CxC del vendedor Dropi)   HABER   = valor total    ← con tercero_id
- *   1435 (Inventario)               DÉBITO  = valor (si reingresa)
- *   6135 (Costo mercancía vendida)  HABER   = valor (si reingresa)
+ *   1435 (Inventario)               DÉBITO  = costo de salida (si reingresa)
+ *   6135 (Costo mercancía vendida)  HABER   = costo de salida (si reingresa)
  *
  * Re-audit fixes:
  *   DATOS C6 · si `totalPeso <= 0` (items sin cantidad/precio) → skip completo
@@ -122,6 +122,12 @@ class ContabilizarDevolucionDropi
             }
         }
 
+        // Costo con que salió cada ítem (egreso del empaque). El reverso del
+        // costo va a ESE valor: antes se reversaba al precio de venta, y como
+        // la venta Dropi nunca había causado costo, cada devolución dejaba el
+        // 6135 en negativo y el inventario inflado por el margen.
+        $costos = \App\Modules\Dropi\Services\SalidaInventarioDropi::costosDeSalida($pedido->id);
+
         // ---------- Armar líneas ----------
         $lineas = [];
         $totalReingresado = 0.0;
@@ -144,22 +150,28 @@ class ContabilizarDevolucionDropi
                 'descripcion' => $desc, 'user_id' => $userId,
             ];
 
-            if ($devolucion->destino_inventario === 'reingreso') {
+            // Sólo reingresa al kardex lo que tiene variante (RegistrarDevolucion),
+            // y sólo se reversa un costo que de verdad se causó.
+            $costoItem = $item->variante_id
+                ? round(($costos['v:'.$item->variante_id] ?? 0) * (float) ($item->cantidad ?? 1), 2)
+                : 0.0;
+
+            if ($devolucion->destino_inventario === 'reingreso' && $costoItem > 0) {
                 $lineas[] = [
                     'fecha' => $fecha, 'cuenta_puc' => $ctaInv,
-                    'debe' => $porcion, 'haber' => 0,
+                    'debe' => $costoItem, 'haber' => 0,
                     'origen_type' => $origenType, 'origen_id' => $origenId,
                     'descripcion' => "Reingreso inv " . ($producto?->referencia ?? '—') . " · {$pedido->guia}",
                     'user_id' => $userId,
                 ];
                 $lineas[] = [
                     'fecha' => $fecha, 'cuenta_puc' => $ctaCosto,
-                    'debe' => 0, 'haber' => $porcion,
+                    'debe' => 0, 'haber' => $costoItem,
                     'origen_type' => $origenType, 'origen_id' => $origenId,
                     'descripcion' => "Reverso costo " . ($producto?->referencia ?? '—') . " · {$pedido->guia}",
                     'user_id' => $userId,
                 ];
-                $totalReingresado += $porcion;
+                $totalReingresado += $costoItem;
             }
         }
 

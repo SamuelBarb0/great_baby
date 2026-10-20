@@ -15,6 +15,7 @@ class DropiEstadoBitacora extends Model
     protected $fillable = [
         'pedido_id', 'estado_desde', 'estado_hasta',
         'fuente', 'payload', 'user_id',
+        'lat', 'lng', 'gps_precision_m', 'gps_estado', 'ip', 'user_agent',
     ];
 
     protected $casts = [

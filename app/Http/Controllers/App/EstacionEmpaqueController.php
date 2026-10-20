@@ -8,6 +8,7 @@ use App\Modules\Dropi\Actions\ProcesarEscaneoEmpaque;
 use App\Modules\Dropi\Enums\EstadoPedidoDropi;
 use App\Modules\Dropi\Models\DropiPedido;
 use App\Modules\Dropi\Models\EmpaqueRegistro;
+use App\Modules\Dropi\Support\Trazabilidad;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controllers\HasMiddleware;
@@ -230,8 +231,10 @@ class EstacionEmpaqueController extends Controller implements HasMiddleware
             ]);
         }
 
+        $gps = $request->validate(Trazabilidad::reglas())['gps'] ?? null;
+
         try {
-            $res = ConfirmarEmpaqueYSiguiente::run($pedidoActivoId, $request->user()->id);
+            $res = ConfirmarEmpaqueYSiguiente::run($pedidoActivoId, $request->user()->id, $gps);
             $request->session()->forget('empaque.pedidoActivoId');
 
             $siguiente = $this->colaProximos(null)[0] ?? null;

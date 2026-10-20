@@ -53,6 +53,19 @@
     </div>
 
     <script>
+        // Ubicación del equipo para la trazabilidad. Nunca rechaza: si se niega
+        // el permiso o no hay GPS, manda el motivo y el servidor decide.
+        window.gbUbicacion = window.gbUbicacion || function (timeoutMs = 8000) {
+            return new Promise((resolve) => {
+                if (!navigator.geolocation) return resolve({ estado: 'no_disponible' });
+                navigator.geolocation.getCurrentPosition(
+                    (p) => resolve({ estado: 'ok', lat: p.coords.latitude, lng: p.coords.longitude, precision: Math.round(p.coords.accuracy) }),
+                    (e) => resolve({ estado: e && e.code === 1 ? 'denegado' : 'no_disponible' }),
+                    { enableHighAccuracy: true, timeout: timeoutMs, maximumAge: 60000 },
+                );
+            });
+        };
+
     (function () {
         let stream = null;
         let detector = null;
@@ -174,11 +187,20 @@
         }
 
         window.confirmarDespacho = async function (pedidoId) {
-            const r = await postJson('/dropi/escaner/despachar', { pedido_id: pedidoId, guia: ultimaGuia });
+            // Capa de seguridad: desde dónde se despachó (ver Trazabilidad).
+            const gps = await window.gbUbicacion();
+            const r = await postJson('/dropi/escaner/despachar', { pedido_id: pedidoId, guia: ultimaGuia, gps });
             if (r.ok) {
                 feedback('ok'); ultimaGuia = '';
                 document.getElementById('scanner-resultado').innerHTML =
                     '<div style="text-align:center;color:#10b981;font-weight:700;padding:2rem;">✅ ' + r.guia + ' despachado</div>';
+            } else {
+                // Antes el rechazo no se mostraba: el botón parecía no hacer nada.
+                feedback('err');
+                const aviso = document.createElement('div');
+                aviso.style.cssText = 'text-align:center;color:#ef4444;font-weight:700;padding:1rem;';
+                aviso.textContent = '✖ ' + (r.mensaje || 'No se pudo despachar.');
+                document.getElementById('scanner-resultado').prepend(aviso);
             }
         };
 

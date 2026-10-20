@@ -8,6 +8,7 @@ use App\Modules\Dropi\Models\DropiDevolucion;
 use App\Modules\Dropi\Models\DropiPedido;
 use App\Modules\Dropi\Models\InventarioMovimiento;
 use App\Modules\Dropi\Models\InventarioUbicacion;
+use App\Modules\Dropi\Services\SalidaInventarioDropi;
 use Illuminate\Support\Facades\DB;
 use Lorisleiva\Actions\Concerns\AsAction;
 use RuntimeException;
@@ -93,6 +94,10 @@ class RegistrarDevolucion
             return 0;
         }
 
+        // Vuelve con el costo con que salió: sin él la entrada valía $0 y
+        // bajaba el costo promedio de todo lo que quedaba en esa bodega.
+        $costos = SalidaInventarioDropi::costosDeSalida($pedido->id);
+
         $movimientos = 0;
         foreach ($pedido->items as $item) {
             if (! $item->variante_id) {
@@ -112,6 +117,7 @@ class RegistrarDevolucion
                     'ubicacion_id' => $ubicacion->id,
                     'tipo' => 'ingreso',
                     'cantidad' => (int) $item->cantidad,
+                    'costo_unit' => $costos['v:'.$item->variante_id] ?? null,
                     'user_id' => $userId,
                     'notas' => "Devolución guía {$pedido->guia} → {$destino->label()}",
                 ]

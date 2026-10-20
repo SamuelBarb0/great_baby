@@ -14,6 +14,7 @@ class Reglas
         'empaque.foto_obligatoria' => ['grupo' => 'empaque', 'tipo' => 'bool', 'valor' => '1', 'etiqueta' => 'Foto obligatoria para confirmar empaque', 'descripcion' => 'Bloquea el confirmar si no hay foto'],
         'empaque.tiempo_objetivo_seg' => ['grupo' => 'empaque', 'tipo' => 'int', 'valor' => 180, 'etiqueta' => 'Tiempo objetivo por empaque (segundos)', 'descripcion' => 'Base para semáforos y ranking'],
         'empaque.rate_limit_min' => ['grupo' => 'empaque', 'tipo' => 'int', 'valor' => 120, 'etiqueta' => 'Escaneos máximos por minuto', 'descripcion' => 'Throttle en la estación'],
+        'empaque.gps_obligatorio' => ['grupo' => 'empaque', 'tipo' => 'bool', 'valor' => '0', 'etiqueta' => 'Ubicación (GPS) obligatoria para empacar y despachar Dropi', 'descripcion' => 'Si el navegador no entrega la ubicación, no deja confirmar. Apagada: se registra si la hay y se anota por qué no'],
         'empaque.retention_foto_dias' => ['grupo' => 'empaque', 'tipo' => 'int', 'valor' => 180, 'etiqueta' => 'Días retención foto empaque', 'descripcion' => 'Purga automática de fotos más antiguas que N días post-empaque (Habeas Data)'],
 
         // ============ DASHBOARD (alertas) ============

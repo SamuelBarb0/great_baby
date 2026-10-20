@@ -87,7 +87,7 @@ class EstacionEmpaque extends Page
         $this->dispatch('empaque-scan', sonido: $resultado['sonido'], mensaje: $resultado['mensaje']);
     }
 
-    public function confirmarYSiguiente(): void
+    public function confirmarYSiguiente(?array $gps = null): void
     {
         if (! $this->pedidoActivoId) {
             return;
@@ -108,7 +108,7 @@ class EstacionEmpaque extends Page
         }
 
         try {
-            $res = ConfirmarEmpaqueYSiguiente::run($this->pedidoActivoId, auth()->id());
+            $res = ConfirmarEmpaqueYSiguiente::run($this->pedidoActivoId, auth()->id(), $gps);
             Notification::make()->title($res['msg'])->success()->send();
             $this->pedidoActivoId = null;
             $this->ultimoResultado = null;

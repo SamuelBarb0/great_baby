@@ -12,6 +12,7 @@ use App\Modules\Dropi\Models\DropiCorte;
 use App\Modules\Dropi\Models\DropiDevolucion;
 use App\Modules\Dropi\Models\DropiPedido;
 use App\Modules\Dropi\Models\DropiWalletMovimiento;
+use App\Modules\Dropi\Support\Trazabilidad;
 use Illuminate\Http\Request;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Routing\Controllers\HasMiddleware;
@@ -170,14 +171,15 @@ class DropiOperacionController extends Controller implements HasMiddleware
      * ConfirmarEmpaqueYSiguiente, que exige items pickeados.
      * Si el flujo no completó la Estación, devuelve error legible.
      */
-    public function empacarPedido(int $pedidoId): RedirectResponse
+    public function empacarPedido(Request $request, int $pedidoId): RedirectResponse
     {
         $userId = auth()->id();
+        $gps = $request->validate(Trazabilidad::reglas())['gps'] ?? null;
         try {
             $miLock = DropiAlistadorLock::where('pedido_id', $pedidoId)->where('alistador_id', $userId)->exists();
             abort_unless($miLock, 409, 'El pedido lo tomó otro alistador o expiró.');
 
-            ConfirmarEmpaqueYSiguiente::run($pedidoId, $userId);
+            ConfirmarEmpaqueYSiguiente::run($pedidoId, $userId, $gps);
             DropiAlistadorLock::where('pedido_id', $pedidoId)->delete();
         } catch (Throwable $e) {
             return back()->with('error', $e->getMessage());
@@ -185,9 +187,10 @@ class DropiOperacionController extends Controller implements HasMiddleware
         return back()->with('success', 'Pedido empacado');
     }
 
-    public function despacharPedido(int $pedidoId): RedirectResponse
+    public function despacharPedido(Request $request, int $pedidoId): RedirectResponse
     {
         $userId = auth()->id();
+        $gps = $request->validate(Trazabilidad::reglas())['gps'] ?? null;
         try {
             $p = DropiPedido::find($pedidoId);
             abort_unless($p, 404, 'Pedido no encontrado.');
@@ -196,8 +199,13 @@ class DropiOperacionController extends Controller implements HasMiddleware
                 || \App\Modules\Dropi\Models\EmpaqueRegistro::where('pedido_id', $pedidoId)
                     ->where('operario_id', $userId)->exists();
             abort_unless($puedeDespachar, 409, 'Solo el alistador que empacó (o Aracely) puede despachar.');
+            Trazabilidad::exigir($gps);
 
-            $p->transicionar(EstadoPedidoDropi::Despachado, 'manual', $userId, [], ['despachado_at' => now()]);
+            $p->transicionar(
+                EstadoPedidoDropi::Despachado, 'manual', $userId,
+                ['origen' => 'vista_alistador'] + Trazabilidad::payload($gps),
+                ['despachado_at' => now()],
+            );
         } catch (Throwable $e) {
             return back()->with('error', $e->getMessage());
         }

@@ -11,6 +11,7 @@ import CameraCapture from '@/Components/CameraCapture.vue';
 import RankingTable from '@/Components/RankingTable.vue';
 import { useSonido } from '@/composables/useSonido';
 import { useConfetti } from '@/composables/useConfetti';
+import { obtenerUbicacion } from '@/composables/useUbicacion';
 
 const props = defineProps({
     pedidoActivo: { type: Object, default: null },
@@ -123,10 +124,12 @@ const guardarFoto = (dataUri) => {
 // Si el pedido activo desaparece (confirmado/cancelado desde otro lugar), cerrar el modal
 watch(() => props.pedidoActivo, (p) => { if (! p) modalCamara.value = false; });
 
-const confirmar = () => {
+const confirmar = async () => {
     if (procesandoConfirmar.value) return;
     procesandoConfirmar.value = true;
-    router.post('/app/estacion-empaque/confirmar', {}, {
+    // Capa de seguridad: desde dónde se confirmó el empaque (ver Trazabilidad).
+    const gps = await obtenerUbicacion();
+    router.post('/app/estacion-empaque/confirmar', { gps }, {
         preserveScroll: true,
         preserveState: false,
         onFinish: () => { procesandoConfirmar.value = false; },

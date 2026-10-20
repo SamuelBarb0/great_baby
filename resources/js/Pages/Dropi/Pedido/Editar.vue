@@ -10,7 +10,18 @@ import { usePedidoBadge } from '@/composables/usePedidoBadge';
 const props = defineProps({
     pedido: { type: Object, required: true },
     estadosDisponibles: { type: Array, required: true },
+    trazabilidad: { type: Array, default: () => [] },
 });
+
+const GPS_MOTIVO = { denegado: 'permiso negado', no_disponible: 'GPS no disponible', sin_dato: 'no se envió' };
+const COLOR_EVENTO = (ev) => ev.tipo === 'inventario' ? 'bg-violet-500'
+    : ev.tipo === 'foto' ? 'bg-pink-500'
+    : ev.fuente === 'api' ? 'bg-blue-500'
+    : ev.fuente === 'sistema' ? 'bg-emerald-500'
+    : 'bg-amber-500';
+const fechaHora = (iso) => iso
+    ? new Date(iso).toLocaleString('es-CO', { timeZone: 'America/Bogota', dateStyle: 'short', timeStyle: 'medium' })
+    : '—';
 
 const { money } = useMoney();
 const { badge } = usePedidoBadge();
@@ -181,6 +192,39 @@ const guardarReal = () => {
                         </tr>
                     </tbody>
                 </table>
+            </div>
+
+            <!-- 4.5 · Trazabilidad del envío: quién, cuándo, desde dónde y con qué equipo. -->
+            <div class="card p-4">
+                <div class="text-xs uppercase tracking-widest font-bold text-brand-600 mb-1">Trazabilidad del envío</div>
+                <p class="text-xs text-surface-500 dark:text-surface-400 mb-3">Cambios de estado, empaque, foto y salida de inventario, en orden.</p>
+                <ol v-if="trazabilidad.length" class="relative border-l-2 border-surface-200 dark:border-surface-700 ml-1.5 space-y-3">
+                    <li v-for="(ev, idx) in trazabilidad" :key="idx" class="ml-4">
+                        <span class="absolute -left-[7px] mt-1.5 h-3 w-3 rounded-full ring-2 ring-white dark:ring-surface-900" :class="COLOR_EVENTO(ev)"></span>
+                        <div class="flex flex-wrap items-center gap-2">
+                            <span class="font-semibold text-sm">{{ ev.titulo }}</span>
+                            <span v-if="ev.fuente" class="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-surface-100 dark:bg-surface-800">{{ ev.fuente }}</span>
+                        </div>
+                        <div class="text-xs text-surface-500 dark:text-surface-400">
+                            {{ fechaHora(ev.at) }}<template v-if="ev.quien"> · {{ ev.quien }}</template>
+                        </div>
+                        <div v-if="ev.detalle" class="text-xs text-surface-600 dark:text-surface-300">{{ ev.detalle }}</div>
+                        <div v-if="ev.gps" class="text-xs mt-0.5">
+                            <template v-if="ev.gps.mapa">
+                                📍 <a :href="ev.gps.mapa" target="_blank" rel="noopener" class="text-brand-600 underline">Ver en el mapa</a>
+                                <span v-if="ev.gps.precision" class="text-surface-500"> (± {{ ev.gps.precision }} m)</span>
+                            </template>
+                            <span v-else class="text-red-600 dark:text-red-400">📍 Sin ubicación: {{ GPS_MOTIVO[ev.gps.estado] ?? ev.gps.estado }}</span>
+                        </div>
+                        <div v-if="ev.equipo || ev.ip" class="text-[11px] text-surface-500">
+                            💻 {{ ev.equipo }}<template v-if="ev.ip"> · IP {{ ev.ip }}</template>
+                        </div>
+                        <div v-if="ev.foto_url" class="text-xs mt-0.5">
+                            📸 <a :href="ev.foto_url" target="_blank" rel="noopener" class="text-brand-600 underline">Ver foto</a>
+                        </div>
+                    </li>
+                </ol>
+                <p v-else class="text-sm text-surface-500">Sin registros todavía.</p>
             </div>
         </div>
 

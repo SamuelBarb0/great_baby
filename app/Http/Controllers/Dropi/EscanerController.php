@@ -7,6 +7,7 @@ use App\Modules\Dropi\Enums\EstadoPedidoDropi;
 use App\Modules\Dropi\Events\PedidoDespachado;
 use App\Modules\Dropi\Jobs\NotificarClienteDespachoJob;
 use App\Modules\Dropi\Models\DropiPedido;
+use App\Modules\Dropi\Support\Trazabilidad;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Throwable;
@@ -83,7 +84,7 @@ class EscanerController extends Controller
         $data = $request->validate([
             'pedido_id' => ['required', 'integer', 'exists:dropi_pedidos,id'],
             'guia' => ['required', 'string', 'max:100'],
-        ]);
+        ] + Trazabilidad::reglas());
 
         $pedido = DropiPedido::find($data['pedido_id']);
         if (! $pedido) {
@@ -107,11 +108,12 @@ class EscanerController extends Controller
         }
 
         try {
+            Trazabilidad::exigir($data['gps'] ?? null);
             $pedido->transicionar(
                 EstadoPedidoDropi::Despachado,
                 'manual',
                 auth()->id(),
-                ['origen' => 'escaner_camara'],
+                ['origen' => 'escaner_camara'] + Trazabilidad::payload($data['gps'] ?? null),
                 ['despachado_at' => now()],
             );
         } catch (Throwable $e) {

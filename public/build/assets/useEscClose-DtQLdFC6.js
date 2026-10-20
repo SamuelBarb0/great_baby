@@ -1,0 +1,1 @@
+import{m as t,G as s}from"./app-0WnAkMhz.js";function a(e){const n=o=>{o.key==="Escape"&&e.value&&(e.value=!1)};t(e,o=>{o?window.addEventListener("keydown",n):window.removeEventListener("keydown",n)},{immediate:!0}),s(()=>window.removeEventListener("keydown",n))}export{a as u};
