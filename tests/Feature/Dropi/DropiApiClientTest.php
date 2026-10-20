@@ -134,3 +134,64 @@ it('el sync en tiempo real importa pedidos por la API oficial', function () {
     $r2 = app(SincronizarDropiWeb::class)->handle('recientes');
     expect($r2['cambiados'])->toBe(0);
 });
+
+function pagoWallet(int $movId, int $orden, float $monto, string $fecha = '2026-10-20T04:16:03', string $codigo = '1006'): array
+{
+    return [
+        'id' => $movId, 'type' => $codigo === '1009' ? 'SALIDA' : 'ENTRADA', 'amount' => $monto, 'order_id' => $orden,
+        'identification_code' => $codigo, 'created_at' => $fecha, 'user_id' => null,
+        'description' => "ENTRADA POR GANANCIA EN LA ORDEN COMO PROVEEDOR: {$orden}* GUIA: *G-{$orden}*",
+    ];
+}
+
+it('el pago que trae el detalle (history_wallet) se concilia y deja el pedido pagado', function () {
+    $entregado = ordenDropi(102, 'ENTREGADO', 'G-102') + ['history_wallet' => [pagoWallet(5001, 102, 90000)]];
+    Http::fake([
+        URL_INTEGRACIONES.'orders/myorders/102' => Http::response(['isSuccess' => true, 'objects' => $entregado]),
+        URL_INTEGRACIONES.'orders/myorders*' => Http::response(['isSuccess' => true, 'objects' => [$entregado]]),
+    ]);
+
+    $r = app(SincronizarDropiWeb::class)->handle('recientes');
+
+    $pedido = DropiPedido::where('dropi_orden_id', '102')->first();
+    expect($r['pagos'])->toBe(1)
+        ->and($pedido->estado)->toBe(App\Modules\Dropi\Enums\EstadoPedidoDropi::Pagado)
+        ->and(App\Modules\Dropi\Models\DropiWalletMovimiento::where('dropi_movimiento_id', 'web:5001')->value('pedido_id'))->toBe($pedido->id);
+});
+
+it('la vuelta «pagos» encuentra el pago que llegó sin cambio de estatus, una sola vez', function () {
+    $sinPago = ordenDropi(103, 'ENTREGADO', 'G-103');
+    Http::fake([
+        URL_INTEGRACIONES.'orders/myorders/103' => Http::sequence()
+            ->push(['isSuccess' => true, 'objects' => $sinPago])
+            ->push(['isSuccess' => true, 'objects' => $sinPago + ['history_wallet' => [pagoWallet(5002, 103, 90000)]]])
+            ->whenEmpty(Http::response(['isSuccess' => true, 'objects' => $sinPago + ['history_wallet' => [pagoWallet(5002, 103, 90000)]]])),
+        URL_INTEGRACIONES.'orders/myorders*' => Http::response(['isSuccess' => true, 'objects' => [$sinPago]]),
+    ]);
+
+    app(SincronizarDropiWeb::class)->handle('recientes');
+    expect(DropiPedido::where('dropi_orden_id', '103')->value('estado'))->toBe(App\Modules\Dropi\Enums\EstadoPedidoDropi::Entregado);
+
+    // Dropi paga: la lista no cambia (misma huella), pero la vuelta de pagos lo ve.
+    expect(app(SincronizarDropiWeb::class)->handle('recientes')['cambiados'])->toBe(0);
+    $r = app(SincronizarDropiWeb::class)->handle('pagos');
+
+    expect($r['pagos'])->toBe(1)
+        ->and(DropiPedido::where('dropi_orden_id', '103')->value('estado'))->toBe(App\Modules\Dropi\Enums\EstadoPedidoDropi::Pagado);
+
+    // Ya pagado: no se vuelve a buscar ni se duplica el movimiento.
+    expect(app(SincronizarDropiWeb::class)->handle('pagos')['vistos'])->toBe(0)
+        ->and(App\Modules\Dropi\Models\DropiWalletMovimiento::where('dropi_movimiento_id', 'web:5002')->count())->toBe(1);
+});
+
+it('no trae movimientos anteriores a la fecha de corte contable', function () {
+    config(['dropi.web.wallet_desde' => '2026-09-01']);
+
+    $movs = SincronizarDropiWeb::movimientosWallet(['id' => 9, 'history_wallet' => [
+        pagoWallet(1, 9, 1000, '2026-08-20T10:00:00'),
+        pagoWallet(2, 9, 1000, '2026-09-02T10:00:00'),
+    ]]);
+
+    expect($movs)->toHaveCount(1)->and($movs[0]->dropiMovimientoId)->toBe('web:2')
+        ->and($movs[0]->ordenId)->toBe('9');
+});

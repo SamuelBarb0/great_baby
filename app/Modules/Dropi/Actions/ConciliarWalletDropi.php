@@ -37,7 +37,23 @@ class ConciliarWalletDropi
     {
         $desde ??= CarbonImmutable::now()->subMonth();
 
-        $movimientos = $this->client->walletDesde($desde);
+        return $this->conciliar($this->client->walletDesde($desde));
+    }
+
+    /**
+     * Concilia movimientos que ya se tienen en mano. Además del historial
+     * completo (arriba), lo usa el sync de pedidos con los movimientos que trae
+     * el detalle de cada pedido (`history_wallet`) por la API oficial, que no
+     * expone la wallet completa. Mismos ids `web:{id}`: un movimiento que llegue
+     * por las dos vías se guarda una sola vez.
+     *
+     * @param  iterable<PagoWalletDTO>  $movimientos
+     * @return array{procesados:int, pagos_matcheados:int, sanciones_detectadas:int, gastos_registrados:int, errores:int}
+     */
+    public function conciliar(iterable $movimientos): array
+    {
+        $movimientos = collect($movimientos);
+        $this->pedidosPagados = [];
 
         $pagos = 0;
         $sanciones = 0;

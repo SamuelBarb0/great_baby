@@ -73,6 +73,9 @@ $dropiWebSync = fn () => (bool) config('dropi.web.sync_activo');
 Schedule::command('dropi:web-sync recientes')->everyFifteenSeconds()->withoutOverlapping(2)->when($dropiWebSync);
 Schedule::command('dropi:web-sync ventana')->everyMinute()->withoutOverlapping(10)->when($dropiWebSync);
 Schedule::command('dropi:web-sync transito')->everyTenMinutes()->withoutOverlapping(30)->when($dropiWebSync);
+// Pagos: Dropi paga ~1 día después de la entrega sin cambiar el estatus; se
+//   revisa el detalle de los entregados sin pago (trae su `history_wallet`).
+Schedule::command('dropi:web-sync pagos --max-detalles=60')->everyThirtyMinutes()->withoutOverlapping(20)->when($dropiWebSync);
 // Wallet: los pagos de Dropi entran por lotes durante el día; cada 30 min basta.
 Schedule::command('dropi:web-wallet-sync')->everyThirtyMinutes()->withoutOverlapping(20)->when($dropiWebSync);
 
