@@ -42,19 +42,14 @@ class FacturarPedidoDropi
     /** Por qué no se facturó, para la bitácora y el log. */
     public ?string $motivo = null;
 
-    public function handle(DropiPedido $pedido, ?int $userId = null): ?FacturaVenta
+    /**
+     * @param  bool  $manual  4.6 · facturar a pedido desde el escáner: no
+     *                        depende de la regla automática ni de la fecha de corte.
+     */
+    public function handle(DropiPedido $pedido, ?int $userId = null, bool $manual = false): ?FacturaVenta
     {
-        $this->motivo = null;
-
-        if (! (bool) setting('dropi.facturacion_automatica', false)) {
-            $this->motivo = 'facturación automática apagada';
-
-            return null;
-        }
-        $desde = trim((string) setting('dropi.facturar_desde', ''));
-        if ($desde !== '' && now()->toDateString() < $desde) {
-            $this->motivo = "facturación desde {$desde}";
-
+        $this->motivo = $manual ? null : self::motivoReglas();
+        if ($this->motivo) {
             return null;
         }
 
@@ -157,6 +152,37 @@ class FacturarPedidoDropi
 
             return $factura;
         });
+    }
+
+    /** Por qué la facturación automática no corre hoy (null = sí corre). */
+    public static function motivoReglas(): ?string
+    {
+        if (! (bool) setting('dropi.facturacion_automatica', false)) {
+            return 'facturación automática apagada';
+        }
+        $desde = trim((string) setting('dropi.facturar_desde', ''));
+        if ($desde !== '' && now()->toDateString() < $desde) {
+            return "facturación desde {$desde}";
+        }
+
+        return null;
+    }
+
+    /**
+     * Por qué un pedido despachado no tiene factura, en palabras para el
+     * escáner. 4.6: quien escanea tiene que saberlo en el momento.
+     */
+    public static function motivoSinFactura(DropiPedido $pedido): string
+    {
+        if ($m = self::motivoReglas()) {
+            return ucfirst($m).'.';
+        }
+        $pedido->loadMissing('items');
+        if ($pedido->items->every(fn ($i) => ! $i->variante_id && ! $i->producto_id)) {
+            return 'Ningún producto del pedido está vinculado al catálogo (Dropi → Productos sin vincular).';
+        }
+
+        return 'La factura no se pudo crear: revisar el registro de errores.';
     }
 
     /** El tercero genérico de la DIAN para ventas a personas sin identificar. */

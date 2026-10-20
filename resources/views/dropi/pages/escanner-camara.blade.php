@@ -114,6 +114,25 @@
             }
         }
 
+        // Lo que viene de Dropi (nombre del cliente, ciudad) se escapa antes de
+        // pintarlo: antes iba crudo a innerHTML.
+        function esc(v) {
+            return String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        }
+
+        // 4.6 · qué factura tiene el pedido, o por qué no tiene.
+        function bloqueFactura(f, pedidoId, guia) {
+            if (!f) return '';
+            if (f.numero) {
+                const estado = { timbrada: '✔ timbrada en la DIAN', enviando_siigo: '⏳ enviándose a SIIGO', interna: 'interna (SIIGO apagado)' }[f.estado] ?? f.estado;
+                return `<div style="margin-top:.75rem;padding:.5rem .75rem;border-radius:.375rem;background:rgba(16,185,129,.1);font-size:.9rem;">📄 Factura <strong>${esc(f.numero)}</strong> · ${esc(estado)}</div>`;
+            }
+            const boton = f.puede_facturar
+                ? `<button onclick="facturarAhora(${Number(pedidoId)}, ${esc(JSON.stringify(String(guia ?? '')))})" style="margin-top:.5rem;padding:.6rem 1rem;background:#2563eb;color:#fff;border:0;border-radius:.5rem;font-weight:700;min-height:44px;cursor:pointer;">📄 Facturar ahora</button>`
+                : '';
+            return `<div style="margin-top:.75rem;padding:.5rem .75rem;border-radius:.375rem;background:rgba(245,158,11,.12);font-size:.9rem;">⚠ Sin factura: ${esc(f.motivo)}${boton ? '<br>' + boton : ''}</div>`;
+        }
+
         function pintarResultado(r) {
             const el = document.getElementById('scanner-resultado');
             const colores = { success: '#10b981', warning: '#f59e0b', danger: '#ef4444', info: '#3b82f6', gray: '#6b7280' };
@@ -121,9 +140,11 @@
 
             let acciones = '';
             if (r.accion === 'despachar') {
-                acciones = `<button onclick="confirmarDespacho(${r.pedido_id})" style="margin-top:.75rem;padding:.75rem 1rem;background:#10b981;color:#fff;border:0;border-radius:.5rem;font-weight:700;min-height:44px;cursor:pointer;">✅ Confirmar despacho</button>`;
+                acciones = `<button onclick="confirmarDespacho(${Number(r.pedido_id)})" style="margin-top:.75rem;padding:.75rem 1rem;background:#10b981;color:#fff;border:0;border-radius:.5rem;font-weight:700;min-height:44px;cursor:pointer;">✅ Confirmar despacho</button>`;
+            } else if (r.accion === 'doble_escaneo') {
+                acciones = bloqueFactura(r.factura, r.pedido_id, r.guia);
             } else if (r.accion === 'proponer_devolucion') {
-                acciones = `<a href="/admin/dropi-devoluciones/registrar?guia=${encodeURIComponent(r.guia)}" style="display:inline-block;margin-top:.75rem;padding:.75rem 1rem;background:#3b82f6;color:#fff;border-radius:.5rem;font-weight:700;text-decoration:none;">→ Registrar devolución</a>`;
+                acciones = bloqueFactura(r.factura, r.pedido_id, r.guia) + `<a href="/admin/dropi-devoluciones/registrar?guia=${encodeURIComponent(r.guia)}" style="display:inline-block;margin-top:.75rem;padding:.75rem 1rem;background:#3b82f6;color:#fff;border-radius:.5rem;font-weight:700;text-decoration:none;">→ Registrar devolución</a>`;
             }
 
             el.style.textAlign = 'left';
@@ -131,14 +152,13 @@
             el.style.display = 'block';
             el.innerHTML = `
                 <div style="border-left:4px solid ${color};padding-left:1rem;">
-                    <div style="font-weight:700;font-size:1.1rem;color:${color};">${r.titulo}</div>
-                    <div style="font-family:ui-monospace,monospace;font-size:.95rem;margin-top:.25rem;">${r.guia}</div>
-                    <div style="font-size:.9rem;color:#9ca3af;margin-top:.5rem;">${r.detalle}</div>
+                    <div style="font-weight:700;font-size:1.1rem;color:${color};">${esc(r.titulo)}</div>
+                    <div style="font-family:ui-monospace,monospace;font-size:.95rem;margin-top:.25rem;">${esc(r.guia)}</div>
+                    <div style="font-size:.9rem;color:#9ca3af;margin-top:.5rem;">${esc(r.detalle)}</div>
                     ${r.context ? `
                         <div style="margin-top:.75rem;padding:.5rem .75rem;background:rgba(156,163,175,.1);border-radius:.375rem;font-size:.85rem;">
-                            <strong>${r.context.cliente ?? ''}</strong> · ${r.context.ciudad ?? ''}<br>
-                            Estado actual: ${r.context.estado ?? ''}<br>
-                            Monto: $${(r.context.monto ?? 0).toLocaleString('es-CO')}
+                            <strong>${esc(r.context.cliente)}</strong> · ${esc(r.context.ciudad)}<br>
+                            Estado actual: ${esc(r.context.estado)}
                         </div>` : ''}
                     ${acciones}
                 </div>
@@ -193,7 +213,8 @@
             if (r.ok) {
                 feedback('ok'); ultimaGuia = '';
                 document.getElementById('scanner-resultado').innerHTML =
-                    '<div style="text-align:center;color:#10b981;font-weight:700;padding:2rem;">✅ ' + r.guia + ' despachado</div>';
+                    '<div style="text-align:center;color:#10b981;font-weight:700;padding:2rem 2rem 0;">✅ ' + esc(r.guia) + ' despachado</div>'
+                    + bloqueFactura(r.factura, pedidoId, r.guia);
             } else {
                 // Antes el rechazo no se mostraba: el botón parecía no hacer nada.
                 feedback('err');
@@ -202,6 +223,24 @@
                 aviso.textContent = '✖ ' + (r.mensaje || 'No se pudo despachar.');
                 document.getElementById('scanner-resultado').prepend(aviso);
             }
+        };
+
+        // 4.6 · factura en el momento un pedido despachado que quedó sin factura.
+        window.facturarAhora = async function (pedidoId, guia) {
+            const r = await postJson('/dropi/escaner/facturar', { pedido_id: pedidoId, guia });
+            const el = document.getElementById('scanner-resultado');
+            const aviso = document.createElement('div');
+            aviso.style.cssText = 'margin-top:.75rem;font-weight:700;padding:.5rem;';
+            if (r.ok) {
+                feedback('ok');
+                aviso.style.color = '#10b981';
+                aviso.innerHTML = '✅ Facturado' + bloqueFactura(r.factura, pedidoId, guia);
+            } else {
+                feedback('err');
+                aviso.style.color = '#ef4444';
+                aviso.textContent = '✖ ' + (r.mensaje || 'No se pudo facturar.');
+            }
+            el.append(aviso);
         };
 
         window.scannerIniciar = async function () {

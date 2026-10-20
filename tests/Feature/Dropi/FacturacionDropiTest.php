@@ -197,3 +197,55 @@ it('el cierre del corte ya no factura por vendedor (no duplica la venta)', funct
     expect(FacturaVenta::count())->toBe(1)
         ->and(FacturaVenta::first()->id)->toBe($p->factura_venta_id);
 });
+
+// ---------- 4.6 · escanear guía → facturar ----------
+
+function facAracely(): App\Models\User
+{
+    $u = App\Models\User::factory()->create();
+    $u->assignRole(Spatie\Permission\Models\Role::firstOrCreate(['name' => 'Aracely', 'guard_name' => 'web']));
+
+    return $u;
+}
+
+it('4.6 · despachar escaneando la guía devuelve la factura que salió', function () {
+    $p = facPedido('E-1');
+    $p->transicionar(EstadoPedidoDropi::Alistando, 'manual', $this->user->id);
+    $p->transicionar(EstadoPedidoDropi::Empacado, 'manual', $this->user->id);
+
+    $r = $this->actingAs(facAracely())->postJson('/dropi/escaner/despachar', ['pedido_id' => $p->id, 'guia' => 'E-1'])
+        ->assertOk()->json();
+
+    expect($r['factura']['numero'])->toBe(FacturaVenta::find($p->fresh()->factura_venta_id)->numero)
+        ->and($r['factura']['estado'])->toBe('interna');
+});
+
+it('4.6 · con la facturación apagada el escáner dice por qué y Aracely factura a mano', function () {
+    Reglas::set('dropi.facturacion_automatica', false);
+    $p = facDespachar(facPedido('E-2'), $this->user->id);
+    $aracely = facAracely();
+
+    $a = $this->actingAs($aracely)->postJson('/dropi/escaner/analizar', ['guia' => 'E-2'])->assertOk()->json('factura');
+    expect($a['numero'])->toBeNull()
+        ->and($a['motivo'])->toContain('apagada')
+        ->and($a['puede_facturar'])->toBeTrue();
+
+    $r = $this->actingAs($aracely)->postJson('/dropi/escaner/facturar', ['pedido_id' => $p->id, 'guia' => 'E-2'])->assertOk()->json();
+    expect($r['factura']['numero'])->not->toBeNull()
+        ->and(FacturaVenta::count())->toBe(1);
+
+    // Escanear otra vez no factura dos veces.
+    $this->actingAs($aracely)->postJson('/dropi/escaner/facturar', ['pedido_id' => $p->id, 'guia' => 'E-2'])->assertOk();
+    expect(FacturaVenta::count())->toBe(1);
+});
+
+it('4.6 · un alistador ve el motivo pero no puede facturar', function () {
+    Reglas::set('dropi.facturacion_automatica', false);
+    $p = facDespachar(facPedido('E-3'), $this->user->id);
+    $alistador = App\Models\User::factory()->create();
+    $alistador->assignRole(Spatie\Permission\Models\Role::firstOrCreate(['name' => 'Alistador', 'guard_name' => 'web']));
+
+    $a = $this->actingAs($alistador)->postJson('/dropi/escaner/analizar', ['guia' => 'E-3'])->assertOk()->json('factura');
+    expect($a['puede_facturar'])->toBeFalse();
+    $this->actingAs($alistador)->postJson('/dropi/escaner/facturar', ['pedido_id' => $p->id, 'guia' => 'E-3'])->assertForbidden();
+});

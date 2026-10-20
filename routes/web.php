@@ -705,6 +705,9 @@ Route::middleware(['web', 'auth'])->group(function () {
         ->middleware('throttle:60,1')->name('dropi.escaner.analizar');
     Route::post('/dropi/escaner/despachar', [EscanerController::class, 'despachar'])
         ->middleware('throttle:30,1')->name('dropi.escaner.despachar');
+    // 4.6 · escanear guía → facturar el pedido despachado que quedó sin factura.
+    Route::post('/dropi/escaner/facturar', [EscanerController::class, 'facturar'])
+        ->middleware('throttle:30,1')->name('dropi.escaner.facturar');
 
     // Re-audit SEG C1 · rate-limit para bloquear enumeración de estados de cuenta.
     Route::get('/cartera/estado-cuenta/{contacto}', [EstadoCuentaController::class, 'pdf'])
