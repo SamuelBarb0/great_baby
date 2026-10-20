@@ -11,6 +11,8 @@ const props = defineProps({
     guiaBuscar: { type: String, default: '' },
     pedido: { type: Object, default: null },
     destinos: { type: Array, default: () => [] },
+    esperadas: { type: Array, default: () => [] },
+    diasTolerancia: { type: Number, default: 7 },
 });
 
 const guia = ref(props.guiaBuscar);
@@ -19,6 +21,7 @@ const form = reactive({
     destino_inventario: props.destinos[0]?.value ?? 'reingreso',
     notas: '',
 });
+const abrirEsperada = (g) => { guia.value = g; buscar(); };
 const buscar = () => {
     const q = (guia.value ?? '').trim();
     if (!q) return; // U10 · no dispara con input vacío
@@ -127,6 +130,25 @@ const { badge } = usePedidoBadge();
                         placeholder="Ej: 4200000123456 o DP-12345" autofocus/>
                     <button @click="buscar" class="btn-primary"><Search class="h-4 w-4"/> Buscar</button>
                 </div>
+            </div>
+
+            <!-- 8.4 · Devoluciones esperadas: lo que Dropi marcó como devuelto y aún no llega -->
+            <div v-if="!pedido && esperadas.length" class="card p-4">
+                <div class="flex items-center justify-between mb-2">
+                    <div class="text-xs uppercase tracking-widest font-bold text-brand-600">Vienen de vuelta ({{ esperadas.length }})</div>
+                    <div class="text-[11px] text-surface-500">En rojo: más de {{ diasTolerancia }} días sin llegar</div>
+                </div>
+                <ul class="text-sm divide-y divide-surface-100 dark:divide-surface-800">
+                    <li v-for="e in esperadas" :key="e.guia">
+                        <button type="button" @click="abrirEsperada(e.guia)"
+                            class="w-full py-2 flex items-center gap-3 text-left hover:bg-surface-50 dark:hover:bg-surface-800/50 rounded">
+                            <span class="font-mono text-xs flex-shrink-0">{{ e.guia }}</span>
+                            <span class="flex-1 min-w-0 truncate">{{ e.cliente }} · {{ e.ciudad }}</span>
+                            <span class="text-xs font-semibold tabular-nums flex-shrink-0"
+                                :class="e.dias > diasTolerancia ? 'text-red-600' : 'text-surface-500'">{{ e.dias }} d</span>
+                        </button>
+                    </li>
+                </ul>
             </div>
 
             <div v-if="guiaBuscar && !pedido" class="card p-6 text-center text-red-600">

@@ -251,6 +251,23 @@ class DropiOperacionController extends Controller implements HasMiddleware
                 'por_escanear' => $this->porEscanear($pedido),
             ] : null,
             'destinos' => array_map(fn ($d) => ['value' => $d->value, 'label' => $d->label()], DestinoDevolucion::cases()),
+            // 8.4 · devoluciones esperadas: Dropi las marcó como devueltas y
+            // todavía no se reciben. Las más viejas primero (las que ya
+            // pasaron la tolerancia son mercancía fantasma).
+            'esperadas' => DropiPedido::whereNotNull('devuelto_at')
+                ->where('devuelto_at', '>=', now()->subDays(30))
+                ->whereDoesntHave('devolucion')
+                ->orderBy('devuelto_at')
+                ->limit(50)
+                ->get(['id', 'guia', 'cliente_nombre', 'cliente_ciudad', 'transportadora', 'devuelto_at'])
+                ->map(fn ($p) => [
+                    'guia' => $p->guia,
+                    'cliente' => $p->cliente_nombre,
+                    'ciudad' => $p->cliente_ciudad,
+                    'transportadora' => $p->transportadora,
+                    'dias' => (int) $p->devuelto_at->diffInDays(now(), absolute: true),
+                ])->all(),
+            'diasTolerancia' => (int) setting('dropi.dias_tolerancia_devolucion', 7),
         ]);
     }
 
