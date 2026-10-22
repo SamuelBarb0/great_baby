@@ -523,6 +523,17 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     Route::delete('/marketing/parrilla/{post}', [\App\Http\Controllers\App\MarketingController::class, 'postEliminar'])->name('app.marketing.post.eliminar');
     Route::get('/marketing/producto/{producto}/ficha', [\App\Http\Controllers\App\MarketingController::class, 'fichaEditar'])->name('app.marketing.ficha');
     Route::match(['put', 'post'], '/marketing/producto/{producto}/ficha', [\App\Http\Controllers\App\MarketingController::class, 'fichaGuardar'])->name('app.marketing.ficha.guardar');
+    // MKT-1 a MKT-4 · publicación, piezas, tablero por contenedor y producción
+    Route::post('/marketing/producto/{producto}/publicar', [\App\Http\Controllers\App\MarketingController::class, 'publicar'])->name('app.marketing.publicar');
+    Route::put('/marketing/producto/{producto}/piezas', [\App\Http\Controllers\App\MarketingController::class, 'piezas'])->name('app.marketing.piezas');
+    Route::get('/marketing/tablero', [\App\Http\Controllers\App\MarketingController::class, 'tablero'])->name('app.marketing.tablero');
+    Route::post('/marketing/parrilla/{post}/etapa', [\App\Http\Controllers\App\MarketingController::class, 'postEtapa'])->name('app.marketing.post.etapa');
+    Route::get('/marketing/creativos', [\App\Http\Controllers\App\MarketingCreativosController::class, 'index'])->name('app.marketing.creativos');
+    Route::post('/marketing/creativos', [\App\Http\Controllers\App\MarketingCreativosController::class, 'subir'])->middleware('throttle:60,1')->name('app.marketing.creativo.subir');
+    Route::put('/marketing/creativos/{creativo}', [\App\Http\Controllers\App\MarketingCreativosController::class, 'actualizar'])->name('app.marketing.creativo.actualizar');
+    Route::delete('/marketing/creativos/{creativo}', [\App\Http\Controllers\App\MarketingCreativosController::class, 'eliminar'])->name('app.marketing.creativo.eliminar');
+    Route::get('/marketing/creativos/{creativo}/ver', [\App\Http\Controllers\App\MarketingCreativosController::class, 'ver'])->name('app.marketing.creativo.ver');
+    Route::get('/marketing/creativos/{creativo}/descargar', [\App\Http\Controllers\App\MarketingCreativosController::class, 'descargar'])->name('app.marketing.creativo.descargar');
 
     // M7 · Garantías
     Route::get('/garantias', [\App\Http\Controllers\App\GarantiasController::class, 'index'])->name('app.garantias.index');

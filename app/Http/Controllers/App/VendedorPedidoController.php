@@ -248,7 +248,8 @@ class VendedorPedidoController extends Controller implements HasMiddleware
             ->with(['producto' => fn ($q) => $q->select('id', 'referencia', 'nombre', 'impuesto_id')
                 ->with('impuesto:id,porcentaje')])
             ->whereIn('id', $precios->keys())
-            ->whereHas('producto', fn ($q) => $q->where('activo', true))
+            // MKT-1 · activo y publicado: lo que Marketing ocultó no se ofrece.
+            ->whereHas('producto', fn ($q) => $q->visibleParaVentas())
             ->orderBy('id')
             ->get(['id', 'producto_id', 'codigo_barras', 'color_nombre', 'talla'])
             ->map(fn ($v) => [
@@ -275,7 +276,7 @@ class VendedorPedidoController extends Controller implements HasMiddleware
             ->vigentes()
             ->with(['producto' => fn ($q) => $q->select('id', 'referencia', 'nombre', 'impuesto_id', 'activo', 'desglose_stock')
                 ->with('impuesto:id,porcentaje')])
-            ->whereHas('producto', fn ($q) => $q->where('activo', true)->where('desglose_stock', false))
+            ->whereHas('producto', fn ($q) => $q->visibleParaVentas()->where('desglose_stock', false))
             ->get()
             ->map(fn ($pp) => [
                 'variante_id' => null,
