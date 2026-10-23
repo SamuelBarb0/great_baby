@@ -58,7 +58,7 @@ class RegistrarDevolucionProveedor
                     'tipo' => 'salida_devolucion_proveedor',
                     'cantidad' => -1 * abs((float) $it->cantidad),
                     'costo_unit' => (float) $it->costo_unit,
-                    'referencia_type' => DevolucionProveedor::class,
+                    'referencia_tipo' => DevolucionProveedor::class,
                     'referencia_id' => $d->id,
                     'user_id' => $userId,
                     'notas' => "Devolución {$d->numero} · {$d->motivo}",

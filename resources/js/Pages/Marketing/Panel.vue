@@ -26,6 +26,8 @@ const props = defineProps({
     // modelo no guarda a qué préstamo corresponde.
     en_mi_almacen: { type: Array, default: () => [] },
     es_super: { type: Boolean, default: false },
+    // MKT-5 · préstamos ya entregados: la devolución dice cuál cierra.
+    para_devolver: { type: Array, default: () => [] },
 });
 
 const abiertos = computed(() => props.prestamos?.abiertos ?? []);
@@ -47,6 +49,7 @@ const modal = ref(null);          // 'pedir' | 'devolver' | null
 const comercialId = ref(props.bodegas_comerciales[0]?.id ?? '');
 const mktId = ref(props.mis_bodegas[0]?.id ?? '');
 const observaciones = ref('');
+const prestamoId = ref('');
 const enviando = ref(false);
 const errores = ref({});
 
@@ -55,6 +58,7 @@ const puedePedir = computed(() => props.bodegas_comerciales.length > 0 && props.
 const abrir = (tipo) => {
     modal.value = tipo;
     observaciones.value = '';
+    prestamoId.value = props.para_devolver.length === 1 ? props.para_devolver[0].id : '';
     errores.value = {};
 };
 
@@ -67,6 +71,7 @@ const enviar = () => {
         origen_id: pedir ? comercialId.value : mktId.value,
         destino_id: pedir ? mktId.value : comercialId.value,
         observaciones: observaciones.value || null,
+        prestamo_id: pedir ? null : (prestamoId.value || null),
     }, {
         preserveScroll: true,
         onSuccess: () => { modal.value = null; },
@@ -81,6 +86,13 @@ const estadoChip = (e) => ({
     recibido: 'bg-emerald-100 text-emerald-800',
     anulado: 'bg-red-100 text-red-800',
 }[e] || 'bg-surface-100');
+
+/** Quién firmó cada paso, en una línea: «Aprobó Aracely · Entregó Jorge · Recogió Laura». */
+const firmas = (p) => [
+    p.aprobado_por && `Aprobó ${p.aprobado_por}`,
+    p.entregado_por && (p.es_prestamo ? `Alistó ${p.entregado_por}` : `Despachó ${p.entregado_por}`),
+    p.recogido_por && (p.es_prestamo ? `Recogió ${p.recogido_por}` : `La trajo ${p.recogido_por}`),
+].filter(Boolean).join(' · ');
 </script>
 
 <template>
@@ -135,7 +147,7 @@ const estadoChip = (e) => ({
                         Pedíselo a Aracely y estos botones se activan.
                     </div>
                     <div v-else class="text-[11px] text-surface-500 pt-1 italic">
-                        La solicitud queda en borrador; bodega la surte y la despacha.
+                        Pedís → la aprueban → bodega la alista y te avisa → la recogés y queda firmado quién y en qué estado.
                     </div>
                 </div>
             </div>
@@ -153,9 +165,9 @@ const estadoChip = (e) => ({
                         <tr>
                             <th class="p-2 text-left">N°</th>
                             <th class="p-2 text-left">De → A</th>
-                            <th class="p-2 text-left">Motivo</th>
+                            <th class="p-2 text-left">Qué se pidió</th>
                             <th class="p-2 text-center">Items</th>
-                            <th class="p-2 text-left">Solicitó</th>
+                            <th class="p-2 text-left">Responsables</th>
                             <th class="p-2 text-left">Fecha</th>
                             <th class="p-2 text-center">Estado</th>
                         </tr>
@@ -168,12 +180,21 @@ const estadoChip = (e) => ({
                                 <span class="text-surface-400 mx-1">→</span>
                                 <span class="font-mono text-xs">{{ p.destino }}</span>
                             </td>
-                            <td class="p-2 text-xs">{{ p.motivo || '—' }}</td>
+                            <td class="p-2 text-xs max-w-xs">
+                                <div class="line-clamp-2">{{ p.observaciones || '—' }}</div>
+                                <div v-if="p.estado_mercancia_label" class="mt-0.5"
+                                     :class="p.estado_mercancia === 'completo' ? 'text-emerald-700' : 'text-amber-700 font-semibold'">
+                                    {{ p.estado_mercancia_label }}<span v-if="p.observaciones_entrega"> · {{ p.observaciones_entrega }}</span>
+                                </div>
+                            </td>
                             <td class="p-2 text-center">{{ p.items_count }}</td>
-                            <td class="p-2 text-xs">{{ p.solicitado_por || '—' }}</td>
+                            <td class="p-2 text-xs">
+                                <div>Pidió {{ p.solicitado_por || '—' }}</div>
+                                <div v-if="firmas(p)" class="text-surface-500">{{ firmas(p) }}</div>
+                            </td>
                             <td class="p-2 text-xs">{{ p.fecha }}</td>
                             <td class="p-2 text-center">
-                                <span class="px-2 py-0.5 rounded text-xs font-semibold" :class="estadoChip(p.estado)">{{ p.estado_label || p.estado }}</span>
+                                <span class="px-2 py-0.5 rounded text-xs font-semibold whitespace-nowrap" :class="estadoChip(p.estado)">{{ p.paso || p.estado_label }}</span>
                             </td>
                         </tr>
                     </tbody>
@@ -211,12 +232,18 @@ const estadoChip = (e) => ({
                             <div class="font-mono text-xs">{{ p.numero }} · {{ p.origen }} → {{ p.destino }}</div>
                             <div class="text-xs text-surface-500">
                                 {{ p.items_count }} ítems · {{ p.ejecutado_at || p.fecha }}
+                                <span v-if="p.prestamo"> · cierra {{ p.prestamo }}</span>
+                            </div>
+                            <div v-if="firmas(p)" class="text-xs text-surface-500">{{ firmas(p) }}</div>
+                            <div v-if="p.estado_mercancia_label" class="text-xs"
+                                 :class="p.estado_mercancia === 'completo' ? 'text-emerald-700' : 'text-amber-700 font-semibold'">
+                                {{ p.estado_mercancia_label }}<span v-if="p.observaciones_entrega"> · {{ p.observaciones_entrega }}</span>
                             </div>
                         </div>
                         <!-- El chip decía "OK" en verde para todo. Un préstamo
                              anulado se veía igual que una devolución completa. -->
-                        <span class="px-2 py-0.5 rounded text-xs font-semibold" :class="estadoChip(p.estado)">
-                            {{ p.estado_label || p.estado }}
+                        <span class="px-2 py-0.5 rounded text-xs font-semibold whitespace-nowrap" :class="estadoChip(p.estado)">
+                            {{ p.paso || p.estado_label }}
                         </span>
                     </div>
                 </div>
@@ -245,6 +272,16 @@ const estadoChip = (e) => ({
                     </select>
                 </div>
 
+                <div v-if="modal === 'devolver' && para_devolver.length">
+                    <label class="text-xs font-semibold">¿De qué préstamo es?</label>
+                    <select v-model.number="prestamoId" class="input w-full">
+                        <option value="">No sé / varios</option>
+                        <option v-for="p in para_devolver" :key="p.id" :value="p.id">
+                            {{ p.numero }}{{ p.observaciones ? ' · ' + p.observaciones.slice(0, 50) : '' }}
+                        </option>
+                    </select>
+                </div>
+
                 <div>
                     <label class="text-xs font-semibold">
                         {{ modal === 'pedir' ? '¿Qué necesitás y para cuándo?' : '¿Qué estás devolviendo?' }}
@@ -261,7 +298,9 @@ const estadoChip = (e) => ({
                 </p>
 
                 <p class="text-xs text-surface-500">
-                    Queda como solicitud en borrador. Bodega decide qué referencias entran y la despacha.
+                    {{ modal === 'pedir'
+                        ? 'Se aprueba, bodega elige las referencias y te llega un aviso cuando esté lista para recoger.'
+                        : 'Bodega la recibe y anota en qué estado llegó.' }}
                 </p>
 
                 <div class="flex justify-end gap-2 pt-1">

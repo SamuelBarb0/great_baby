@@ -77,6 +77,12 @@ class EjecutarTraslado
             if ($traslado->origen_id === $traslado->destino_id) {
                 throw new InvalidArgumentException('Origen y destino no pueden ser la misma bodega.');
             }
+            // MKT-5 · las muestras para Marketing salen de bodega sólo aprobadas.
+            if ($traslado->esPrestamoMarketing() && ! $traslado->aprobado_at) {
+                throw new InvalidArgumentException(
+                    "Traslado {$traslado->numero}: la solicitud de muestras de Marketing todavía no está aprobada."
+                );
+            }
 
             $items = $traslado->items()->orderBy('id')->get();
             if ($items->isEmpty()) {
