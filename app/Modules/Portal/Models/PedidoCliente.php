@@ -23,6 +23,8 @@ class PedidoCliente extends Model implements AuditableContract
         // LOG-J1 · si el pedido lo levantó un vendedor en terreno,
         //   queda su user_id en vendedor_id para comisiones y auditoría.
         'vendedor_id',
+        // Multiempresa · razón social que factura el pedido (NULL = Great Baby).
+        'empresa_id',
         // LOG-J4 · ubicación origen auto-asignada por la regla de ruteo.
         'ubicacion_origen_id',
         'numero', 'contacto_id', 'lista_precios_id', 'estado',

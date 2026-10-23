@@ -33,6 +33,12 @@ class SiigoClient
 
     public function __construct(private readonly SiigoConfig $config) {}
 
+    /** Multiempresa · qué cuenta de SIIGO usa este cliente (una por razón social). */
+    public function configId(): int
+    {
+        return (int) $this->config->id;
+    }
+
     public function authenticate(): string
     {
         // Modo FAKE · para demo/pruebas sin credenciales SIIGO reales.

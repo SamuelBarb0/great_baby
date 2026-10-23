@@ -72,7 +72,7 @@ class QrDianService
      */
     public function contenidoQr(FacturaVenta $factura): string
     {
-        $empresa = EmpresaConfig::current();
+        $empresa = EmpresaConfig::porId($factura->empresa_id);
         $numero = (string) ($factura->numero_siigo ?? $factura->numero);
         $fecha = $factura->fecha_emision?->format('Y-m-d') ?? '';
         $horaFuente = $factura->emitida_at ?? $factura->created_at ?? now();

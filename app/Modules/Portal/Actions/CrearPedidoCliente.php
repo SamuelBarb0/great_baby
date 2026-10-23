@@ -35,7 +35,7 @@ class CrearPedidoCliente
     /**
      * @param  list<array{variante_id?:int|null, producto_id?:int|null, cantidad:int}>  $items
      */
-    public function ejecutar(Contacto $cliente, array $items, ?string $notas = null, ?int $vendedorId = null): PedidoCliente
+    public function ejecutar(Contacto $cliente, array $items, ?string $notas = null, ?int $vendedorId = null, ?int $empresaId = null): PedidoCliente
     {
         $listaId = (int) ($cliente->lista_precios_id ?? 0);
         abort_if(! $listaId, 422, 'El cliente no tiene lista de precios asignada.');
@@ -47,7 +47,7 @@ class CrearPedidoCliente
         );
 
         $pedido = DB::transaction(function () use (
-            $cliente, $items, $notas, $vendedorId, $listaId,
+            $cliente, $items, $notas, $vendedorId, $listaId, $empresaId,
             $precios, $variantes, $productosAgg, $retenido, $motivos
         ) {
             // LOG-J4 · ruteo automático · si hay regla para la ciudad del
@@ -55,6 +55,7 @@ class CrearPedidoCliente
             // Jorge lo filtra para la sede correcta.
             $ped = PedidoCliente::create([
                 'numero' => $this->siguienteNumero(),
+                'empresa_id' => $empresaId,
                 'contacto_id' => $cliente->id,
                 'vendedor_id' => $vendedorId,
                 'lista_precios_id' => $listaId,

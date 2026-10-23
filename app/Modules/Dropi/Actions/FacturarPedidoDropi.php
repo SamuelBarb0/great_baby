@@ -102,10 +102,21 @@ class FacturarPedidoDropi
 
             $total = round(array_sum(array_column($lineas, 'total')), 2);
             $subtotal = round(array_sum(array_map(fn ($l) => $l['base'] * $l['cantidad'], $lineas)), 2);
-            $siigoActivo = (bool) (\App\Modules\Siigo\Models\SiigoConfig::current()->activo ?? false);
+            // Multiempresa · lo de Dropi lo factura la razón social del
+            //   e-commerce, no Great Baby. Mientras no esté configurada y activa
+            //   no se factura: queda la remisión con el motivo, igual que un
+            //   pedido sin catálogo, en vez de salir con el NIT equivocado.
+            $empresa = \App\Models\EmpresaConfig::porCodigo((string) setting('dropi.empresa', 'ecommerce'));
+            if (! $empresa?->activa) {
+                $this->motivo = 'la empresa del e-commerce no está activa: configurala en Configuración → Empresas';
+
+                return null;
+            }
+            $siigoActivo = (bool) (\App\Modules\Siigo\Models\SiigoConfig::deEmpresa($empresa->id)->activo ?? false);
 
             $factura = FacturaVenta::create([
-                'numero' => NumeroFactura::siguiente(),
+                'empresa_id' => $empresa->id,
+                'numero' => NumeroFactura::siguiente($empresa),
                 'contacto_id' => self::consumidorFinal()->id,
                 'fecha_emision' => now()->toDateString(),
                 'fecha_vencimiento' => now()->toDateString(),

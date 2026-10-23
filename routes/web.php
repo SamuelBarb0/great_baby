@@ -365,6 +365,9 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     Route::get('/catalogo', [\App\Http\Controllers\App\CatalogoController::class, 'index'])->name('app.catalogo.index');
     Route::get('/empresa', [\App\Http\Controllers\App\EmpresaController::class, 'index'])->name('app.empresa.index');
     Route::post('/empresa', [\App\Http\Controllers\App\EmpresaController::class, 'guardar'])->name('app.empresa.guardar');
+    // Multiempresa · cuenta de SIIGO de cada razón social que no es la principal.
+    Route::post('/empresa/{empresa}/siigo', [\App\Http\Controllers\App\EmpresaController::class, 'guardarSiigo'])->name('app.empresa.siigo');
+    Route::post('/empresa/{empresa}/siigo/probar', [\App\Http\Controllers\App\EmpresaController::class, 'probarSiigo'])->middleware('throttle:10,1')->name('app.empresa.siigo.probar');
     Route::get('/siigo', [\App\Http\Controllers\App\SiigoController::class, 'index'])->name('app.siigo.index');
     // F8 · panel de control del sync SIIGO
     Route::post('/siigo/kill-switch', [\App\Http\Controllers\App\SiigoController::class, 'toggleKillSwitch'])->name('app.siigo.kill-switch');
@@ -551,6 +554,7 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     Route::post('/pedidos-b2b/{pedido}/aprobar', [\App\Http\Controllers\App\PedidosB2BController::class, 'aprobar'])->name('app.pedidos-b2b.aprobar');
     Route::post('/pedidos-b2b/{pedido}/rechazar', [\App\Http\Controllers\App\PedidosB2BController::class, 'rechazar'])->name('app.pedidos-b2b.rechazar');
     Route::post('/pedidos-b2b/{pedido}/facturar', [\App\Http\Controllers\App\PedidosB2BController::class, 'facturar'])->name('app.pedidos-b2b.facturar');
+    Route::post('/pedidos-b2b/{pedido}/empresa', [\App\Http\Controllers\App\PedidosB2BController::class, 'cambiarEmpresa'])->name('app.pedidos-b2b.empresa');
     // LOG-J7 · gate duro: no se despacha sin factura (raíz inventario negativo que reportó Don Jorge).
     Route::post('/pedidos-b2b/{pedido}/despachar', [\App\Http\Controllers\App\PedidosB2BController::class, 'despachar'])->middleware('throttle:30,1')->name('app.pedidos-b2b.despachar');
 

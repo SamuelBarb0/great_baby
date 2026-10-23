@@ -8,7 +8,11 @@ const props = defineProps({
     cliente: { type: Object, required: true },
     variantes: { type: Array, required: true },
     credito: { type: Object, required: true },
+    // Multiempresa · razones sociales activas; la primera es Great Baby.
+    empresas: { type: Array, default: () => [] },
 });
+
+const empresaId = ref(props.empresas[0]?.id ?? null);
 
 const money = (n) => new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n || 0);
 
@@ -105,6 +109,7 @@ const confirmar = () => {
             cantidad: it.cantidad,
         })),
         notas: notas.value || null,
+        empresa_id: empresaId.value,
     }, {
         onError: (e) => { err.value = Object.values(e)[0] || 'No se pudo crear.'; },
         onFinish: () => procesando.value = false,
@@ -209,6 +214,14 @@ const confirmar = () => {
                             </button>
                         </div>
                     </div>
+
+                    <!-- Con una sola empresa activa no se pregunta. -->
+                    <label v-if="empresas.length > 1" class="block text-sm">
+                        <span class="text-xs font-semibold">Factura</span>
+                        <select v-model.number="empresaId" class="w-full text-sm border rounded p-2 dark:bg-surface-800">
+                            <option v-for="e in empresas" :key="e.id" :value="e.id">{{ e.nombre }}</option>
+                        </select>
+                    </label>
 
                     <textarea v-model="notas" placeholder="Notas opcionales para el pedido…" rows="2"
                               class="w-full text-sm border rounded p-2 dark:bg-surface-800"></textarea>

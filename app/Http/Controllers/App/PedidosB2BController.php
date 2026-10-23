@@ -102,6 +102,9 @@ class PedidosB2BController extends Controller implements HasMiddleware
                 'motivo_rechazo' => $p->motivo_rechazo,
                 // LOG-J2 · motivo de retención automática por cartera.
                 'motivo_retencion' => $p->motivo_retencion,
+                // Multiempresa · razón social que factura (NULL = la principal).
+                'empresa_id' => \App\Models\EmpresaConfig::porId($p->empresa_id)->id,
+                'empresa' => \App\Models\EmpresaConfig::porId($p->empresa_id)->nombreCorto(),
                 'creado' => $p->created_at?->format('Y-m-d H:i'),
                 'enviado_at' => $p->enviado_at?->format('Y-m-d H:i'),
                 'aprobado_at' => $p->aprobado_at?->format('Y-m-d H:i'),
@@ -247,7 +250,29 @@ class PedidosB2BController extends Controller implements HasMiddleware
                 'precio' => (float) $i->precio_unitario,
                 'total' => (float) $i->total,
             ])->values(),
+            'empresas' => \App\Models\EmpresaConfig::activas()
+                ->map(fn ($e) => ['id' => $e->id, 'nombre' => $e->nombreCorto()])->values(),
         ]);
+    }
+
+    /**
+     * Multiempresa · cambiar la razón social que factura. Sólo mientras no
+     * haya factura: después, el número, el NIT y la cuenta de SIIGO ya son
+     * los de la empresa que facturó.
+     */
+    public function cambiarEmpresa(Request $r, int $pedido): RedirectResponse
+    {
+        $data = $r->validate([
+            'empresa_id' => ['required', 'integer', \Illuminate\Validation\Rule::exists('empresa_config', 'id')->where('activa', true)],
+        ]);
+
+        $p = PedidoCliente::findOrFail($pedido);
+        abort_if($p->factura_id, 422, 'El pedido ya está facturado: la empresa no se puede cambiar.');
+        abort_if($p->estado === 'rechazado', 422, 'El pedido está rechazado.');
+
+        $p->update(['empresa_id' => (int) $data['empresa_id']]);
+
+        return back()->with('success', 'Este pedido lo factura '.\App\Models\EmpresaConfig::porId($p->empresa_id)->nombreCorto().'.');
     }
 
     public function aprobar(int $pedido): RedirectResponse
@@ -500,10 +525,14 @@ class PedidosB2BController extends Controller implements HasMiddleware
             //   electrónica (es_electronica=true) para que `ReintentarEmisionDian`
             //   la mande a /v1/invoices SIEMPRE después de commit. Si Siigo está
             //   apagado, cae a factura interna (DIAN manual) sin perder el flujo.
-            $siigoActivo = \App\Modules\Siigo\Models\SiigoConfig::current()->activo ?? false;
+            //   Multiempresa · factura la razón social que eligió el pedido, con
+            //   su prefijo y su cuenta de SIIGO (NULL = Great Baby).
+            $empresa = \App\Models\EmpresaConfig::porId($p->empresa_id);
+            $siigoActivo = \App\Modules\Siigo\Models\SiigoConfig::deEmpresa($empresa->id)->activo ?? false;
 
             $f = FacturaVenta::create([
-                'numero' => $this->siguienteNumeroFactura(),  // C-QA-D-2
+                'empresa_id' => $empresa->id,
+                'numero' => \App\Modules\Cartera\Support\NumeroFactura::siguiente($empresa),  // C-QA-D-2
                 'contacto_id' => $p->contacto_id,
                 'fecha_emision' => now()->toDateString(),
                 'fecha_vencimiento' => now()->addDays($plazo)->toDateString(),
@@ -595,15 +624,5 @@ class PedidosB2BController extends Controller implements HasMiddleware
         }
 
         return back()->with('success', $msg);
-    }
-
-    /**
-     * Re-audit DATOS C3/C4 · consecutivo transaccional real, con validación de
-     * rango DIAN de la empresa. Reemplaza el SELECT MAX+1 anterior (race +
-     * ancho fijo se rompe en 10 000).
-     */
-    private function siguienteNumeroFactura(): string
-    {
-        return \App\Modules\Cartera\Support\NumeroFactura::siguiente();
     }
 }
