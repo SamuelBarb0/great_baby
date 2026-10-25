@@ -123,7 +123,9 @@ class FacturaPdfController extends Controller
         // Task #46: usar plantilla WYSIWYG si hay una configurada; sino fallback a la clásica.
         $plantilla = \App\Modules\Plantillas\Models\PlantillaDocumento::paraTipo('factura');
         $vista = $plantilla ? 'cartera.pdf.factura-plantilla' : 'cartera.pdf.factura';
-        $cfg = $plantilla ? $plantilla->configEfectiva() : \App\Modules\Plantillas\Models\PlantillaDocumento::defaults();
+        $cfg = \App\Modules\Plantillas\Models\PlantillaDocumento::configParaPdf(
+            $plantilla ? $plantilla->configEfectiva() : \App\Modules\Plantillas\Models\PlantillaDocumento::defaults()
+        );
 
         return Pdf::loadView($vista, [
             'factura' => $factura,

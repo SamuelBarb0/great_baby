@@ -1,7 +1,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted, watch } from 'vue';
 import { Head, Link, router } from '@inertiajs/vue3';
-import { FileText, Save, Trash2, Eye, Plus, CheckCircle2 } from 'lucide-vue-next';
+import { FileText, Save, Trash2, Eye, Plus, CheckCircle2, Copy, Upload } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import AppConfirmModal from '@/Components/AppConfirmModal.vue';
 import { mensajeDeError } from '@/composables/useMensajeError';
@@ -47,6 +47,36 @@ const nuevaPlantilla = () => {
     form.id = null;
     form.nombre = 'Nueva plantilla';
 };
+
+// Otra versión a partir de la que está abierta: se guarda como plantilla
+// nueva y no le quita la predeterminada a nadie hasta que se marque.
+const duplicar = () => {
+    form.id = null;
+    form.nombre = `${form.nombre} (copia)`;
+    form.predeterminada = false;
+    guardar();
+};
+
+// El logo y la firma se suben como archivo y viajan embebidos (data URI):
+// así no dependen de que una URL externa siga viva.
+const MAX_IMAGEN = 1_000_000;
+const subirImagen = (evento, campo) => {
+    const archivo = evento.target.files?.[0];
+    evento.target.value = '';
+    if (!archivo) return;
+    if (!/^image\/(png|jpe?g|gif|webp)$/.test(archivo.type)) {
+        errorMsg.value = 'La imagen debe ser PNG, JPG, GIF o WEBP.';
+        return;
+    }
+    if (archivo.size > MAX_IMAGEN) {
+        errorMsg.value = 'La imagen pesa más de 1 MB. Redúcela e inténtalo de nuevo.';
+        return;
+    }
+    const lector = new FileReader();
+    lector.onload = () => { form.config[campo] = lector.result; errorMsg.value = ''; };
+    lector.readAsDataURL(archivo);
+};
+const esEmbebida = (v) => typeof v === 'string' && v.startsWith('data:');
 
 const guardar = () => {
     if (procesando.value) return;
@@ -221,8 +251,16 @@ watch(() => form.config, () => {
                     <div class="card p-4 space-y-3">
                         <div class="text-xs uppercase tracking-widest font-bold text-brand-600">Encabezado</div>
                         <div>
-                            <label class="text-xs">URL del logo (o data:image/...;base64)</label>
-                            <input v-model="form.config.logo_url" class="input w-full font-mono text-xs" placeholder="https://..." />
+                            <label class="text-xs">Logo</label>
+                            <div class="flex items-center gap-2">
+                                <input v-if="!esEmbebida(form.config.logo_url)" v-model="form.config.logo_url" class="input w-full font-mono text-xs" placeholder="https://… o sube un archivo" />
+                                <img v-else :src="form.config.logo_url" alt="Logo" class="h-9 max-w-[60%] object-contain border rounded bg-white p-1"/>
+                                <label class="btn-ghost text-xs cursor-pointer whitespace-nowrap">
+                                    <Upload class="h-3 w-3"/> Subir
+                                    <input type="file" accept="image/png,image/jpeg,image/gif,image/webp" class="hidden" @change="subirImagen($event, 'logo_url')"/>
+                                </label>
+                                <button v-if="form.config.logo_url" type="button" @click="form.config.logo_url = null" class="btn-ghost text-xs text-red-600">Quitar</button>
+                            </div>
                         </div>
                         <div class="grid grid-cols-2 gap-2">
                             <div>
@@ -283,6 +321,42 @@ watch(() => form.config, () => {
                     </div>
 
                     <div class="card p-4 space-y-3">
+                        <div class="text-xs uppercase tracking-widest font-bold text-brand-600">Firma</div>
+                        <label class="flex items-center gap-2 text-sm cursor-pointer">
+                            <input type="checkbox" v-model="form.config.mostrar_firma" class="rounded"/>
+                            Mostrar firma al final del documento
+                        </label>
+                        <template v-if="form.config.mostrar_firma">
+                            <div>
+                                <label class="text-xs">Imagen de la firma (opcional)</label>
+                                <div class="flex items-center gap-2">
+                                <input v-if="!esEmbebida(form.config.firma_url)" v-model="form.config.firma_url" class="input w-full font-mono text-xs" placeholder="https://… o sube un archivo" />
+                                <img v-else :src="form.config.firma_url" alt="Firma" class="h-9 max-w-[60%] object-contain border rounded bg-white p-1"/>
+                                <label class="btn-ghost text-xs cursor-pointer whitespace-nowrap">
+                                    <Upload class="h-3 w-3"/> Subir
+                                    <input type="file" accept="image/png,image/jpeg,image/gif,image/webp" class="hidden" @change="subirImagen($event, 'firma_url')"/>
+                                </label>
+                                <button v-if="form.config.firma_url" type="button" @click="form.config.firma_url = null" class="btn-ghost text-xs text-red-600">Quitar</button>
+                            </div>
+                            </div>
+                            <div class="grid grid-cols-2 gap-2">
+                                <div>
+                                    <label class="text-xs">Nombre</label>
+                                    <input v-model="form.config.firma_nombre" class="input w-full" placeholder="Quien firma"/>
+                                </div>
+                                <div>
+                                    <label class="text-xs">Cargo</label>
+                                    <input v-model="form.config.firma_cargo" class="input w-full" placeholder="Ej: Gerente administrativa"/>
+                                </div>
+                            </div>
+                            <div class="w-1/2">
+                                <label class="text-xs">Alto de la firma (px)</label>
+                                <input type="number" min="20" max="150" v-model.number="form.config.firma_alto_px" class="input w-full"/>
+                            </div>
+                        </template>
+                    </div>
+
+                    <div class="card p-4 space-y-3">
                         <div class="text-xs uppercase tracking-widest font-bold text-brand-600">Marca de agua</div>
                         <label class="flex items-center gap-2 text-sm cursor-pointer">
                             <input type="checkbox" v-model="form.config.watermark_activo" class="rounded"/>
@@ -294,7 +368,10 @@ watch(() => form.config, () => {
                         </div>
                     </div>
 
-                    <div v-if="form.id" class="pt-2">
+                    <div v-if="form.id" class="pt-2 flex items-center gap-2 flex-wrap">
+                        <button @click="duplicar" :disabled="procesando" class="btn-ghost text-sm">
+                            <Copy class="h-4 w-4"/> Duplicar como otra versión
+                        </button>
                         <button @click="eliminar" class="btn-ghost text-red-600 text-sm">
                             <Trash2 class="h-4 w-4"/> Eliminar esta plantilla
                         </button>
