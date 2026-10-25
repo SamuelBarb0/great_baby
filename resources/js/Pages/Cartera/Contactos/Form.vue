@@ -14,6 +14,7 @@ const props = defineProps({
     contacto: { type: Object, default: null },
     listas: { type: Array, default: () => [] },
     ciudades_dane: { type: Array, default: () => [] },
+    fuentes: { type: Object, default: () => ({}) },
 });
 
 const editando = computed(() => !! props.contacto?.id);
@@ -40,6 +41,8 @@ const form = ref({
     },
     lista_precios_id: props.contacto?.lista_precios_id ?? '',
     activo: props.contacto?.activo ?? true,
+    fuente: props.contacto?.fuente ?? '',
+    fuente_detalle: props.contacto?.fuente_detalle ?? '',
 });
 
 const guardando = ref(false);
@@ -194,6 +197,18 @@ const guardar = () => {
                     <div>
                         <label class="text-xs font-semibold text-surface-600 dark:text-surface-300">Departamento</label>
                         <input v-model="form.departamento" class="input w-full min-h-11" maxlength="80"/>
+                    </div>
+                    <div>
+                        <label class="text-xs font-semibold text-surface-600 dark:text-surface-300">¿Cómo llegó?</label>
+                        <select v-model="form.fuente" class="input w-full min-h-11">
+                            <option value="">Sin registrar</option>
+                            <option v-for="(label, clave) in fuentes" :key="clave" :value="clave">{{ label }}</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="text-xs font-semibold text-surface-600 dark:text-surface-300">Detalle de la fuente</label>
+                        <input v-model="form.fuente_detalle" class="input w-full min-h-11" maxlength="120"
+                               :placeholder="form.fuente === 'referido' ? '¿Quién lo refirió?' : 'Campaña, feria, página… (opcional)'"/>
                     </div>
                 </div>
             </div>
