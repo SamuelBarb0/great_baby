@@ -5,6 +5,7 @@ import { Package, Truck, Boxes, ScanLine } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import { useMoney } from '@/composables/useMoney';
 import { usePedidoBadge } from '@/composables/usePedidoBadge';
+import { obtenerUbicacion } from '@/composables/useUbicacion';
 
 const props = defineProps({
     modo: { type: String, required: true },
@@ -30,10 +31,12 @@ const tomar = (id) => {
     });
 };
 
-const despachar = (id) => {
+const despachar = async (id) => {
     if (procesandoId.value) return;
     procesandoId.value = id;
-    router.post(`/app/dropi/alistador/pedido/${id}/despachar`, {}, {
+    // Capa de seguridad: desde dónde se despachó (ver Trazabilidad).
+    const gps = await obtenerUbicacion();
+    router.post(`/app/dropi/alistador/pedido/${id}/despachar`, { gps }, {
         preserveScroll: true,
         onFinish: () => (procesandoId.value = null),
     });

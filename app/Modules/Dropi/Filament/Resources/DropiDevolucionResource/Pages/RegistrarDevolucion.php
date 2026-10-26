@@ -31,6 +31,13 @@ class RegistrarDevolucion extends Page implements HasForms
 
     public ?DropiPedido $pedido = null;
 
+    /** 5.4 · lo escaneado al recibir: clave `v:{id}` / `p:{id}` => unidades. */
+    public array $recibidos = [];
+
+    public string $lectura = '';
+
+    public ?string $ultimaLectura = null;
+
     public function mount(): void
     {
         $this->form->fill();
@@ -46,7 +53,11 @@ class RegistrarDevolucion extends Page implements HasForms
                     ->required()
                     ->live(onBlur: true)
                     ->afterStateUpdated(function ($state) {
-                        $this->pedido = $state ? DropiPedido::with('items.variante')->where('guia', $state)->first() : null;
+                        $this->pedido = $state ? DropiPedido::with(['items.variante.producto', 'items.producto'])->where('guia', strtoupper(trim($state)))->first() : null;
+                        $this->recibidos = $this->pedido
+                            ? array_map(fn () => 0, RegistrarDevolucionAction::esperados($this->pedido))
+                            : [];
+                        $this->ultimaLectura = null;
                         if ($state && ! $this->pedido) {
                             Notification::make()->title("Guía {$state} no encontrada")->danger()->send();
                         }
@@ -65,6 +76,53 @@ class RegistrarDevolucion extends Page implements HasForms
         ])->statePath('data');
     }
 
+    /**
+     * Renglones a re-escanear: referencia, esperadas y códigos que acepta.
+     *
+     * @return array<string, array{referencia:string, esperadas:int, codigos:list<string>}>
+     */
+    public function porEscanear(): array
+    {
+        if (! $this->pedido) return [];
+        $esperados = RegistrarDevolucionAction::esperados($this->pedido);
+        $refs = RegistrarDevolucionAction::referencias($this->pedido);
+        $out = [];
+        foreach ($this->pedido->items as $i) {
+            if (! $i->variante_id && ! $i->producto_id) continue;
+            $clave = \App\Modules\Inventario\Support\CostoPromedio::clave($i->variante_id, $i->producto_id);
+            $codigo = $i->variante_id ? $i->variante?->codigo_barras : ($i->producto?->referencia);
+            $out[$clave] ??= ['referencia' => $refs[$clave], 'esperadas' => $esperados[$clave], 'codigos' => []];
+            if ($codigo) $out[$clave]['codigos'][] = strtoupper(trim($codigo));
+        }
+
+        return $out;
+    }
+
+    public function escanear(): void
+    {
+        $codigo = strtoupper(trim($this->lectura));
+        $this->lectura = '';
+        if ($codigo === '') return;
+
+        foreach ($this->porEscanear() as $clave => $r) {
+            if (! in_array($codigo, $r['codigos'], true)) continue;
+            if (($this->recibidos[$clave] ?? 0) >= $r['esperadas']) {
+                $this->ultimaLectura = "⚠ {$r['referencia']}: ya están las {$r['esperadas']} que se despacharon";
+                return;
+            }
+            $this->recibidos[$clave] = ($this->recibidos[$clave] ?? 0) + 1;
+            $this->ultimaLectura = "✓ {$r['referencia']} ({$this->recibidos[$clave]}/{$r['esperadas']})";
+            return;
+        }
+        $this->ultimaLectura = "✖ {$codigo} no es de este pedido";
+    }
+
+    public function ajustar(string $clave, int $delta): void
+    {
+        $max = $this->porEscanear()[$clave]['esperadas'] ?? 0;
+        $this->recibidos[$clave] = max(0, min($max, ($this->recibidos[$clave] ?? 0) + $delta));
+    }
+
     public function registrar(): void
     {
         $data = $this->form->getState();
@@ -75,11 +133,13 @@ class RegistrarDevolucion extends Page implements HasForms
                 destino: DestinoDevolucion::from($data['destino']),
                 userId: auth()->id(),
                 notas: $data['notas'] ?? null,
+                recibidos: $this->recibidos,
             );
 
             Notification::make()
                 ->title('Devolución registrada')
-                ->body("Guía {$data['guia']} · destino: " . DestinoDevolucion::from($data['destino'])->label() . " · movimientos: {$result['movimientos']}")
+                ->body("Guía {$data['guia']} · destino: " . DestinoDevolucion::from($data['destino'])->label() . " · movimientos: {$result['movimientos']}"
+                    .(($f = array_sum($result['faltantes'])) ? " · faltaron {$f} unidad(es), quedó anotado" : ''))
                 ->success()
                 ->send();
 

@@ -26,10 +26,14 @@ class BodegaDeSalida
     /**
      * Ubicación por ítem, en una sola consulta.
      *
+     * `$categorias` limita las bodegas candidatas (Dropi sólo vende de las de
+     * categoría `venta`: una avería o una reserva de garantía no se despacha).
+     *
      * @param  list<array{variante_id:?int, producto_id:?int}>  $sujetos
+     * @param  list<string>  $categorias
      * @return array<string, int>  clave `v:{id}` o `p:{id}` => ubicacion_id
      */
-    public static function resolver(array $sujetos, ?int $origenDelPedido = null): array
+    public static function resolver(array $sujetos, ?int $origenDelPedido = null, array $categorias = []): array
     {
         if ($origenDelPedido) {
             // El pedido ya sabe de dónde sale: se respeta tal cual, que es el
@@ -53,6 +57,7 @@ class BodegaDeSalida
         $elegibles = InventarioUbicacion::query()
             ->where('activa', true)
             ->where('codigo', 'not like', 'SIIGO-%')
+            ->when($categorias, fn ($q) => $q->whereIn('categoria', $categorias))
             ->pluck('id')->all();
 
         if (! $elegibles) {

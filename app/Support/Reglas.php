@@ -14,6 +14,7 @@ class Reglas
         'empaque.foto_obligatoria' => ['grupo' => 'empaque', 'tipo' => 'bool', 'valor' => '1', 'etiqueta' => 'Foto obligatoria para confirmar empaque', 'descripcion' => 'Bloquea el confirmar si no hay foto'],
         'empaque.tiempo_objetivo_seg' => ['grupo' => 'empaque', 'tipo' => 'int', 'valor' => 180, 'etiqueta' => 'Tiempo objetivo por empaque (segundos)', 'descripcion' => 'Base para semáforos y ranking'],
         'empaque.rate_limit_min' => ['grupo' => 'empaque', 'tipo' => 'int', 'valor' => 120, 'etiqueta' => 'Escaneos máximos por minuto', 'descripcion' => 'Throttle en la estación'],
+        'empaque.gps_obligatorio' => ['grupo' => 'empaque', 'tipo' => 'bool', 'valor' => '0', 'etiqueta' => 'Ubicación (GPS) obligatoria para empacar y despachar Dropi', 'descripcion' => 'Si el navegador no entrega la ubicación, no deja confirmar. Apagada: se registra si la hay y se anota por qué no'],
         'empaque.retention_foto_dias' => ['grupo' => 'empaque', 'tipo' => 'int', 'valor' => 180, 'etiqueta' => 'Días retención foto empaque', 'descripcion' => 'Purga automática de fotos más antiguas que N días post-empaque (Habeas Data)'],
 
         // ============ DASHBOARD (alertas) ============
@@ -32,6 +33,9 @@ class Reglas
         'dropi.dias_retorno_mercancia' => ['grupo' => 'dropi', 'tipo' => 'int', 'valor' => 20, 'etiqueta' => 'Días máx. mercancía en tránsito antes de sospechosa', 'descripcion' => 'Al superar: alertar Aracely y marcar sospechoso'],
         'dropi.dias_tolerancia_devolucion' => ['grupo' => 'dropi', 'tipo' => 'int', 'valor' => 7, 'etiqueta' => 'Días tolerancia devolución física post-marca', 'descripcion' => 'Si Dropi marca devuelto pero no llega en N días → mercancía fantasma'],
         'dropi.dias_espera_cobro' => ['grupo' => 'dropi', 'tipo' => 'int', 'valor' => 40, 'etiqueta' => 'Días máx. entregado sin cobro antes de discrepancia', 'descripcion' => 'Un pedido entregado y sin movimiento wallet tras N días aparece en Discrepancias'],
+        'dropi.facturacion_automatica' => ['grupo' => 'dropi', 'tipo' => 'bool', 'valor' => '0', 'etiqueta' => 'Facturar cada pedido Dropi al despacharlo', 'descripcion' => 'Remisión 1:1 + factura a consumidor final por el valor de proveedor, y a SIIGO si está activo. Apagada: no se factura nada'],
+        'dropi.facturar_desde' => ['grupo' => 'dropi', 'tipo' => 'string', 'valor' => '', 'etiqueta' => 'Facturar pedidos Dropi despachados desde (AAAA-MM-DD)', 'descripcion' => 'Corte para no facturar la historia al prender la facturación automática'],
+        'dropi.nit_tercero' => ['grupo' => 'dropi', 'tipo' => 'string', 'valor' => '', 'etiqueta' => 'NIT de Dropi (tercero de comisiones y sanciones)', 'descripcion' => 'Los gastos que cobra Dropi (fletes de garantía, tarjeta, sanciones) se asientan con este tercero'],
         'dropi.auto_nota_credito' => ['grupo' => 'dropi', 'tipo' => 'bool', 'valor' => '1', 'etiqueta' => 'Auto-generar Nota Crédito al devolver', 'descripcion' => 'Al marcar DropiPedido como Devuelto emite NC'],
         'dropi.auto_nc_envia_siigo' => ['grupo' => 'dropi', 'tipo' => 'bool', 'valor' => '1', 'etiqueta' => 'Auto-enviar NC a SIIGO', 'descripcion' => ''],
 

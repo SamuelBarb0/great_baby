@@ -103,6 +103,9 @@ const abrirWA = () => {
                     <div class="space-y-2 text-sm">
                         <div v-if="contacto.telefono" class="flex items-center gap-2"><Phone class="h-4 w-4 text-surface-400"/> {{ contacto.telefono }}</div>
                         <div v-if="contacto.email" class="flex items-center gap-2"><Mail class="h-4 w-4 text-surface-400"/> <span class="truncate">{{ contacto.email }}</span></div>
+                        <div v-if="contacto.fuente" class="text-xs text-surface-500">
+                            Llegó por <span class="font-semibold text-surface-700 dark:text-surface-200">{{ contacto.fuente }}</span><span v-if="contacto.fuente_detalle"> · {{ contacto.fuente_detalle }}</span>
+                        </div>
                         <div v-if="contacto.direccion || contacto.ciudad" class="flex items-start gap-2 text-surface-500">
                             <MapPin class="h-4 w-4 flex-shrink-0 mt-0.5"/>
                             <div>

@@ -148,6 +148,8 @@ class ContactosController extends Controller implements HasMiddleware
                 'departamento' => $contacto->departamento,
                 'regimen_iva' => $contacto->regimen_iva,
                 'activo' => (bool) $contacto->activo,
+                'fuente' => $contacto->fuente ? (Contacto::FUENTES[$contacto->fuente] ?? $contacto->fuente) : null,
+                'fuente_detalle' => $contacto->fuente_detalle,
                 'roles' => [
                     'cliente' => (bool) $contacto->es_cliente,
                     'b2b' => (bool) $contacto->es_cliente_b2b,
@@ -218,7 +220,10 @@ class ContactosController extends Controller implements HasMiddleware
                 'retenciones_default' => (array) ($contacto->retenciones_default ?? []),
                 'lista_precios_id' => $contacto->lista_precios_id,
                 'activo' => (bool) $contacto->activo,
+                'fuente' => $contacto->fuente,
+                'fuente_detalle' => $contacto->fuente_detalle,
             ] : null,
+            'fuentes' => Contacto::FUENTES,
             // Primero las listas de Great Baby, después las que llegaron del
             // catálogo de SIIGO. Ordenadas sólo por nombre, el desplegable
             // abría en «14.999» y «Asistente Gerente» —listas de otra empresa
@@ -286,6 +291,8 @@ class ContactosController extends Controller implements HasMiddleware
             'retenciones_default.*' => ['boolean'],
             'lista_precios_id' => ['nullable', 'integer', 'exists:listas_precios,id'],
             'activo' => ['boolean'],
+            'fuente' => ['nullable', 'in:'.implode(',', array_keys(Contacto::FUENTES))],
+            'fuente_detalle' => ['nullable', 'string', 'max:120'],
         ], [
             'numero_documento.unique' => 'Ya existe un contacto con ese documento.',
         ]);

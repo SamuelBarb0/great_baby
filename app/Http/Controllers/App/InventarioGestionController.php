@@ -12,6 +12,7 @@ use App\Modules\Dropi\Models\Producto;
 use App\Modules\Inventario\Models\TomaFisica;
 use App\Modules\Inventario\Models\TomaFisicaItem;
 use App\Modules\Inventario\Models\Traslado;
+use App\Modules\Marketing\Services\MuestrasMarketing;
 use App\Modules\Inventario\Models\TrasladoItem;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -482,15 +483,17 @@ class InventarioGestionController extends Controller implements HasMiddleware
     // ---------- TRASLADO SHOW (repeater items + acciones state machine) ----------
     public function trasladoShow(int $id): Response
     {
-        $t = Traslado::with(['items.variante.producto', 'origen', 'destino', 'solicitante', 'ejecutor'])
+        $t = Traslado::with(['items.variante.producto', 'origen', 'destino', 'solicitante', 'ejecutor',
+                'aprobador', 'enviador', 'recogedor', 'prestamo'])
             ->findOrFail($id);
+        $esMuestra = $t->esMuestra();
 
         // INV-A2 · badge SIIGO del traslado · se calcula desde los movimientos
         // kardex ligados: si todos los traslado_salida/entrada tienen
         // siigo_journal_id → verde (asientos ya en SIIGO); si alguno falta → ámbar;
         // sin movs todavía → gris.
         $siigoBadge = $this->resumirBadgeSiigo(
-            \App\Modules\Dropi\Models\InventarioMovimiento::where('referencia_type', Traslado::class)
+            \App\Modules\Dropi\Models\InventarioMovimiento::where('referencia_tipo', Traslado::class)
                 ->where('referencia_id', $t->id)
                 ->get(['id', 'siigo_journal_id', 'siigo_sync_at'])
         );
@@ -509,6 +512,18 @@ class InventarioGestionController extends Controller implements HasMiddleware
                 'fecha_solicitud' => optional($t->fecha_solicitud)->format('Y-m-d'),
                 'fecha_envio' => optional($t->fecha_envio)->format('Y-m-d H:i'),
                 'fecha_ejecucion' => optional($t->fecha_ejecucion)->format('Y-m-d H:i'),
+                // MKT-5 · muestras de Marketing: quién aprobó, entregó y recogió.
+                'muestra' => $esMuestra ? [
+                    'es_prestamo' => $t->esPrestamoMarketing(),
+                    'aprobado_por' => $t->aprobador?->name,
+                    'aprobado_at' => optional($t->aprobado_at)->format('Y-m-d H:i'),
+                    'enviado_por' => $t->enviador?->name,
+                    'recogido_por' => $t->recogedor?->name,
+                    'estado_mercancia' => $t->estado_mercancia,
+                    'estado_mercancia_label' => Traslado::ESTADOS_MERCANCIA[$t->estado_mercancia] ?? null,
+                    'observaciones_entrega' => $t->observaciones_entrega,
+                    'prestamo' => $t->prestamo?->numero,
+                ] : null,
                 'items' => $t->items->map(fn ($it) => [
                     'id' => $it->id,
                     'variante_id' => $it->variante_id,
@@ -520,6 +535,8 @@ class InventarioGestionController extends Controller implements HasMiddleware
                     'notas' => $it->notas,
                 ])->values(),
             ],
+            'equipo_marketing' => $esMuestra ? app(MuestrasMarketing::class)->equipo() : [],
+            'estados_mercancia' => $esMuestra ? Traslado::ESTADOS_MERCANCIA : [],
         ]);
     }
 
@@ -620,17 +637,46 @@ class InventarioGestionController extends Controller implements HasMiddleware
         $t = Traslado::findOrFail($id);
         $this->autorizarTraslado($t);
         try {
-            app(\App\Modules\Inventario\Actions\EjecutarTraslado::class)->enviar($t);
+            $t = app(\App\Modules\Inventario\Actions\EjecutarTraslado::class)->enviar($t);
+            if ($t->esPrestamoMarketing()) {
+                app(MuestrasMarketing::class)->avisarLista($t);
+                return back()->with('success', "Muestras {$t->numero} listas: se le avisó a Marketing que pase a recogerlas.");
+            }
             return back()->with('success', "Traslado {$t->numero} enviado.");
         } catch (\Throwable $e) {
             return back()->with('error', $e->getMessage());
         }
     }
 
-    public function trasladoRecibir(int $id): RedirectResponse
+    public function trasladoRecibir(Request $r, int $id): RedirectResponse
     {
-        $t = Traslado::findOrFail($id);
+        $t = Traslado::with(['origen', 'destino'])->findOrFail($id);
         $this->autorizarTraslado($t);
+
+        // MKT-5 · en las muestras de Marketing la entrega queda firmada: quién
+        // se la llevó (o la trajo de vuelta) y en qué estado iba.
+        if ($t->esMuestra()) {
+            $data = $r->validate([
+                'recogido_por' => ['required', 'integer', 'exists:users,id'],
+                'estado_mercancia' => ['required', 'in:'.implode(',', array_keys(Traslado::ESTADOS_MERCANCIA))],
+                'observaciones_entrega' => ['nullable', 'string', 'max:1000', 'required_unless:estado_mercancia,completo'],
+            ], [
+                'observaciones_entrega.required_unless' => 'Si no va completa y en buen estado, anotá qué pasó.',
+            ], [
+                'recogido_por' => $t->esPrestamoMarketing() ? 'quién la recogió' : 'quién la trajo',
+                'estado_mercancia' => 'estado de la mercancía',
+            ]);
+            try {
+                app(MuestrasMarketing::class)->entregar($t, (int) $data['recogido_por'],
+                    $data['estado_mercancia'], $data['observaciones_entrega'] ?? null);
+                return back()->with('success', $t->esPrestamoMarketing()
+                    ? "Muestras {$t->numero} entregadas a Marketing."
+                    : "Devolución {$t->numero} recibida en bodega.");
+            } catch (\Throwable $e) {
+                return back()->with('error', $e->getMessage());
+            }
+        }
+
         try {
             app(\App\Modules\Inventario\Actions\EjecutarTraslado::class)->recibir($t);
             return back()->with('success', "Traslado {$t->numero} recibido.");
@@ -645,8 +691,24 @@ class InventarioGestionController extends Controller implements HasMiddleware
         $t = Traslado::findOrFail($id);
         $this->autorizarTraslado($t);
         try {
-            app(\App\Modules\Inventario\Actions\EjecutarTraslado::class)->anular($t, $data['motivo']);
+            $t = app(\App\Modules\Inventario\Actions\EjecutarTraslado::class)->anular($t, $data['motivo']);
+            if ($t->esMuestra()) {
+                app(MuestrasMarketing::class)->avisarAnulada($t, $data['motivo']);
+            }
             return back()->with('success', "Traslado {$t->numero} anulado.");
+        } catch (\Throwable $e) {
+            return back()->with('error', $e->getMessage());
+        }
+    }
+
+    /** MKT-5 · aprobar una solicitud de muestras de Marketing. */
+    public function trasladoAprobar(Request $r, int $id): RedirectResponse
+    {
+        $t = Traslado::with(['origen', 'destino'])->findOrFail($id);
+        $this->autorizarTraslado($t);
+        try {
+            app(MuestrasMarketing::class)->aprobar($t, $r->user());
+            return back()->with('success', "Solicitud {$t->numero} aprobada. Agregá las referencias y marcala lista.");
         } catch (\Throwable $e) {
             return back()->with('error', $e->getMessage());
         }
@@ -661,7 +723,7 @@ class InventarioGestionController extends Controller implements HasMiddleware
         // INV-A2 · badge SIIGO del conteo · ajuste_toma_fisica dispara journal
         // en SIIGO (post BUG-INV). Mostramos el estado del asiento aquí.
         $siigoBadge = $this->resumirBadgeSiigo(
-            \App\Modules\Dropi\Models\InventarioMovimiento::where('referencia_type', TomaFisica::class)
+            \App\Modules\Dropi\Models\InventarioMovimiento::where('referencia_tipo', TomaFisica::class)
                 ->where('referencia_id', $toma->id)
                 ->get(['id', 'siigo_journal_id', 'siigo_sync_at'])
         );

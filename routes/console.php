@@ -14,6 +14,9 @@ Schedule::command('dropi:liberar-locks')->everyTwoMinutes()->withoutOverlapping(
 // F15 · re-matcheo periódico de wallet huérfanos (movimientos que llegaron antes
 // de que el pedido apareciera en el sync).
 Schedule::command('dropi:reconciliar-huerfanos')->everyThirtyMinutes()->withoutOverlapping();
+// Tarjeta 8 · avisos de la campana (plazo 48/72 h, paquetes por fuera,
+//   devoluciones, diferencias). Una vez por pedido y nivel.
+Schedule::command('dropi:alertas')->everyThirtyMinutes()->withoutOverlapping();
 
 // §7 TO-BE Cartera — barrido diario de cobranza WhatsApp a las 9:00.
 Schedule::command('cartera:cobrar')->dailyAt('09:00')->withoutOverlapping();
@@ -73,6 +76,9 @@ $dropiWebSync = fn () => (bool) config('dropi.web.sync_activo');
 Schedule::command('dropi:web-sync recientes')->everyFifteenSeconds()->withoutOverlapping(2)->when($dropiWebSync);
 Schedule::command('dropi:web-sync ventana')->everyMinute()->withoutOverlapping(10)->when($dropiWebSync);
 Schedule::command('dropi:web-sync transito')->everyTenMinutes()->withoutOverlapping(30)->when($dropiWebSync);
+// Pagos: Dropi paga ~1 día después de la entrega sin cambiar el estatus; se
+//   revisa el detalle de los entregados sin pago (trae su `history_wallet`).
+Schedule::command('dropi:web-sync pagos --max-detalles=60')->everyThirtyMinutes()->withoutOverlapping(20)->when($dropiWebSync);
 // Wallet: los pagos de Dropi entran por lotes durante el día; cada 30 min basta.
 Schedule::command('dropi:web-wallet-sync')->everyThirtyMinutes()->withoutOverlapping(20)->when($dropiWebSync);
 

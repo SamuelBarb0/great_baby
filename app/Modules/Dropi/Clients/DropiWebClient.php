@@ -74,7 +74,7 @@ class DropiWebClient implements DropiClientInterface
      */
     public function actualizarEstatus(int $ordenId, string $estatus, ?string $motivo = null): array
     {
-        $resp = $this->auth->requestLegacy()->put("orders/myorders/{$ordenId}", array_filter([
+        $resp = $this->legacy()->put("orders/myorders/{$ordenId}", array_filter([
             'status' => $estatus,
             'reasonComment' => $motivo,
         ], fn ($v) => $v !== null && $v !== ''));
@@ -99,7 +99,7 @@ class DropiWebClient implements DropiClientInterface
      */
     public function etiquetasCuenta(): array
     {
-        $body = $this->legacyJson($this->auth->requestLegacy()->get('tags/showtagsselect'), 'listar etiquetas');
+        $body = $this->legacyJson($this->legacy()->get('tags/showtagsselect'), 'listar etiquetas');
 
         return array_map(fn ($t) => self::normalizarEtiqueta($t), $body['objects'] ?? []);
     }
@@ -119,21 +119,31 @@ class DropiWebClient implements DropiClientInterface
 
     public function crearEtiqueta(string $nombre, string $color): void
     {
-        $this->legacyJson($this->auth->requestLegacy()->post('tags/addtag', ['tag_name' => $nombre, 'color' => $color]), "crear la etiqueta «{$nombre}»");
+        $this->legacyJson($this->legacy()->post('tags/addtag', ['tag_name' => $nombre, 'color' => $color]), "crear la etiqueta «{$nombre}»");
     }
 
     public function asignarEtiqueta(int $ordenId, int $tagId): void
     {
-        $this->legacyJson($this->auth->requestLegacy()->post('tags/createorderstags', ['order_id' => $ordenId, 'tag_id' => $tagId]), "poner la etiqueta al pedido {$ordenId}");
+        $this->legacyJson($this->legacy()->post('tags/createorderstags', ['order_id' => $ordenId, 'tag_id' => $tagId]), "poner la etiqueta al pedido {$ordenId}");
     }
 
     public function quitarEtiqueta(int $ordenId, int $tagId): void
     {
         // La web de Dropi manda los datos del DELETE como query string.
         $this->legacyJson(
-            $this->auth->requestLegacy()->delete('tags/deleteordertag?' . http_build_query(['tag_id' => $tagId, 'order_id' => $ordenId])),
+            $this->legacy()->delete('tags/deleteordertag?' . http_build_query(['tag_id' => $tagId, 'order_id' => $ordenId])),
             "quitar la etiqueta del pedido {$ordenId}",
         );
+    }
+
+    /**
+     * Petición al API clásico de Dropi (escrituras, etiquetas, wallet) con la
+     * sesión de la cuenta. El driver `api` lo hereda tal cual para lo que la
+     * API de integraciones no expone.
+     */
+    protected function legacy(): \Illuminate\Http\Client\PendingRequest
+    {
+        return $this->auth->requestLegacy();
     }
 
     /** Respuesta del API clásico: {isSuccess, message, objects}. Lanza con el mensaje de Dropi. */
@@ -195,7 +205,7 @@ class DropiWebClient implements DropiClientInterface
      */
     public function walletCrudo(array $filtros = [], int $inicio = 0, int $cantidad = 50): array
     {
-        $resp = $this->auth->requestLegacy()->get('historywallet', array_filter([
+        $resp = $this->legacy()->get('historywallet', array_filter([
             'orderBy' => 'id',
             'orderDirection' => 'desc',
             'result_number' => $cantidad,
@@ -209,7 +219,7 @@ class DropiWebClient implements DropiClientInterface
     /** Catálogo de tipos de movimiento de la wallet, tal como lo usa la web de Dropi. */
     public function tiposWallet(): array
     {
-        return $this->legacyJson($this->auth->requestLegacy()->get('wallet/consultconstantshistorywallets'), 'leer los tipos de la wallet');
+        return $this->legacyJson($this->legacy()->get('wallet/consultconstantshistorywallets'), 'leer los tipos de la wallet');
     }
 
     /**

@@ -21,7 +21,7 @@ class FacturaClienteMail extends Mailable
 
     public function envelope(): Envelope
     {
-        $empresa = EmpresaConfig::current();
+        $empresa = EmpresaConfig::porId($this->factura->empresa_id);
         $asunto = "Tu factura {$this->factura->numero}"
             . ($this->factura->numero_siigo ? " (DIAN {$this->factura->numero_siigo})" : '')
             . " · {$empresa->razon_social}";
@@ -35,7 +35,7 @@ class FacturaClienteMail extends Mailable
             view: 'emails.factura-cliente',
             with: [
                 'factura' => $this->factura,
-                'empresa' => EmpresaConfig::current(),
+                'empresa' => EmpresaConfig::porId($this->factura->empresa_id),
                 'linkPublico' => $this->linkPublico,
             ],
         );

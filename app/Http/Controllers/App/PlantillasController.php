@@ -80,7 +80,9 @@ class PlantillasController extends Controller implements HasMiddleware
             'config.colores.acento' => ['required', 'regex:/^#[0-9a-fA-F]{6}$/'],
             'config.tipografia' => ['required', 'in:sans,serif,mono'],
             'config.layout' => ['required', 'in:espacioso,compacto'],
-            'config.logo_url' => ['nullable', 'string', 'max:2048'],
+            // Un data URI de ~1 MB en base64 pesa ~1,4 M caracteres; 2048 dejaba
+            // por fuera cualquier logo subido como archivo.
+            'config.logo_url' => ['nullable', 'string', 'max:1400000'],
             'config.logo_alto_px' => ['required', 'integer', 'min:20', 'max:200'],
             'config.encabezado_extra' => ['nullable', 'string', 'max:1000'],
             'config.encabezado_alineacion' => ['required', 'in:izquierda,centrado,derecha'],
@@ -93,6 +95,11 @@ class PlantillasController extends Controller implements HasMiddleware
             'config.terminos_condiciones' => ['nullable', 'string', 'max:2000'],
             'config.sello_texto' => ['nullable', 'string', 'max:50'],
             'config.watermark_activo' => ['boolean'],
+            'config.mostrar_firma' => ['boolean'],
+            'config.firma_url' => ['nullable', 'string', 'max:1400000'],
+            'config.firma_alto_px' => ['nullable', 'integer', 'min:20', 'max:150'],
+            'config.firma_nombre' => ['nullable', 'string', 'max:100'],
+            'config.firma_cargo' => ['nullable', 'string', 'max:100'],
         ], [
             // Fix demo · mensajes en español para evitar keys raw ("validation.regex")
             //   filtrando al usuario. Laravel no las traduce por defecto para regex/in
@@ -107,10 +114,12 @@ class PlantillasController extends Controller implements HasMiddleware
         ]);
 
         // QA-final #4: whitelist scheme del logo — solo https:// o data:image/*
-        if (! empty($data['config']['logo_url']) && ! $this->logoUrlSeguro($data['config']['logo_url'])) {
-            throw \Illuminate\Validation\ValidationException::withMessages([
-                'config.logo_url' => 'La URL del logo debe empezar por https:// o data:image/',
-            ]);
+        foreach (['logo_url' => 'del logo', 'firma_url' => 'de la firma'] as $campo => $de) {
+            if (! empty($data['config'][$campo]) && ! PlantillaDocumento::urlSegura($data['config'][$campo])) {
+                throw \Illuminate\Validation\ValidationException::withMessages([
+                    "config.{$campo}" => "La imagen {$de} debe ser un archivo subido o una URL https:// pública.",
+                ]);
+            }
         }
 
         // QA-final #5: transacción + cache invalidate para reasignar predeterminada.
@@ -141,26 +150,6 @@ class PlantillasController extends Controller implements HasMiddleware
             ->with('success', 'Plantilla guardada.');
     }
 
-    /**
-     * QA-final #4: bloquea SSRF y file://. Solo permite HTTPS externo o data URI de imagen.
-     * Rechaza IPs privadas (localhost, metadata AWS, RFC1918).
-     */
-    private function logoUrlSeguro(string $url): bool
-    {
-        // data:image/*;base64,... OK
-        if (str_starts_with($url, 'data:image/')) return true;
-        if (! str_starts_with($url, 'https://')) return false;
-        $host = parse_url($url, PHP_URL_HOST);
-        if (! $host) return false;
-        // Si es IP literal → bloquear rangos privados/reserved
-        if (filter_var($host, FILTER_VALIDATE_IP)) {
-            return (bool) filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE);
-        }
-        // Bloquear hostnames obvios de metadata / localhost
-        if (in_array(strtolower($host), ['localhost', 'metadata.google.internal', 'metadata'], true)) return false;
-        return true;
-    }
-
     public function eliminar(int $plantilla): RedirectResponse
     {
         $p = PlantillaDocumento::findOrFail($plantilla);
@@ -179,7 +168,7 @@ class PlantillasController extends Controller implements HasMiddleware
         ]);
 
         // Merge con defaults para preview robusto
-        $cfg = array_replace_recursive(PlantillaDocumento::defaults(), $data['config']);
+        $cfg = PlantillaDocumento::configParaPdf(array_replace_recursive(PlantillaDocumento::defaults(), $data['config']));
 
         // Por ahora sólo tipo=factura tiene renderer implementado. El resto usa la vista de factura como placeholder visual.
         $factura = FacturaVenta::with(['contacto', 'items.variante.producto', 'pagos'])

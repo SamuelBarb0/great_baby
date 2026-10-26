@@ -8,7 +8,13 @@ import AppLayout from '@/Layouts/AppLayout.vue';
 const props = defineProps({
     pedido: { type: Object, required: true },
     items: { type: Array, required: true },
+    // Multiempresa · razones sociales activas para cambiar quién factura.
+    empresas: { type: Array, default: () => [] },
 });
+
+const cambiarEmpresa = (e) => {
+    router.post(`/app/pedidos-b2b/${props.pedido.id}/empresa`, { empresa_id: Number(e.target.value) }, { preserveScroll: true });
+};
 
 const money = (n) => new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n || 0);
 const modalRechazar = ref(false);
@@ -115,6 +121,16 @@ const rechazar = () => {
                         <div class="text-xs text-surface-500 uppercase">Pedido B2B</div>
                         <h1 class="text-2xl font-bold">{{ pedido.numero }}</h1>
                         <div class="text-xs text-surface-500 mt-1">Recibido {{ pedido.creado }}</div>
+                        <!-- Multiempresa · quién factura; se cambia sólo antes de facturar. -->
+                        <div class="text-sm mt-2 flex items-center gap-2">
+                            <span class="text-xs text-surface-500 uppercase">Factura</span>
+                            <select v-if="empresas.length > 1 && !pedido.factura && pedido.estado !== 'rechazado'"
+                                    :value="pedido.empresa_id" @change="cambiarEmpresa"
+                                    class="input py-1 text-sm">
+                                <option v-for="e in empresas" :key="e.id" :value="e.id">{{ e.nombre }}</option>
+                            </select>
+                            <b v-else>{{ pedido.empresa }}</b>
+                        </div>
                     </div>
                     <div class="text-right">
                         <div class="text-xs text-surface-500 uppercase">Total</div>

@@ -95,7 +95,12 @@ class RegistrarAsientoContable
         return DB::transaction(function () use ($pago) {
             $this->limpiarPrevios($pago);
             $terceroTipo = 'App\\Models\\Contacto';
-            $cuentaCaja = $pago->medio_pago === 'efectivo' ? '1105' : '1110';
+            $cuentaCaja = match ($pago->medio_pago) {
+                'efectivo' => '1105',
+                // 9.3 · el pago de Dropi entra a la wallet, no al banco.
+                'wallet_dropi' => \App\Modules\Dropi\Listeners\RegistrarAsientoWalletDropi::CUENTA_WALLET,
+                default => '1110',
+            };
             $userId = auth()->id();
 
             $lineas = [];

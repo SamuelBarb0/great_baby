@@ -12,6 +12,7 @@ use App\Modules\Dropi\Models\DropiCorte;
 use App\Modules\Dropi\Models\DropiDevolucion;
 use App\Modules\Dropi\Models\DropiPedido;
 use App\Modules\Dropi\Models\DropiWalletMovimiento;
+use App\Modules\Dropi\Support\Trazabilidad;
 use Illuminate\Http\Request;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Routing\Controllers\HasMiddleware;
@@ -170,14 +171,15 @@ class DropiOperacionController extends Controller implements HasMiddleware
      * ConfirmarEmpaqueYSiguiente, que exige items pickeados.
      * Si el flujo no completó la Estación, devuelve error legible.
      */
-    public function empacarPedido(int $pedidoId): RedirectResponse
+    public function empacarPedido(Request $request, int $pedidoId): RedirectResponse
     {
         $userId = auth()->id();
+        $gps = $request->validate(Trazabilidad::reglas())['gps'] ?? null;
         try {
             $miLock = DropiAlistadorLock::where('pedido_id', $pedidoId)->where('alistador_id', $userId)->exists();
             abort_unless($miLock, 409, 'El pedido lo tomó otro alistador o expiró.');
 
-            ConfirmarEmpaqueYSiguiente::run($pedidoId, $userId);
+            ConfirmarEmpaqueYSiguiente::run($pedidoId, $userId, $gps);
             DropiAlistadorLock::where('pedido_id', $pedidoId)->delete();
         } catch (Throwable $e) {
             return back()->with('error', $e->getMessage());
@@ -185,9 +187,10 @@ class DropiOperacionController extends Controller implements HasMiddleware
         return back()->with('success', 'Pedido empacado');
     }
 
-    public function despacharPedido(int $pedidoId): RedirectResponse
+    public function despacharPedido(Request $request, int $pedidoId): RedirectResponse
     {
         $userId = auth()->id();
+        $gps = $request->validate(Trazabilidad::reglas())['gps'] ?? null;
         try {
             $p = DropiPedido::find($pedidoId);
             abort_unless($p, 404, 'Pedido no encontrado.');
@@ -196,8 +199,13 @@ class DropiOperacionController extends Controller implements HasMiddleware
                 || \App\Modules\Dropi\Models\EmpaqueRegistro::where('pedido_id', $pedidoId)
                     ->where('operario_id', $userId)->exists();
             abort_unless($puedeDespachar, 409, 'Solo el alistador que empacó (o Aracely) puede despachar.');
+            Trazabilidad::exigir($gps);
 
-            $p->transicionar(EstadoPedidoDropi::Despachado, 'manual', $userId, [], ['despachado_at' => now()]);
+            $p->transicionar(
+                EstadoPedidoDropi::Despachado, 'manual', $userId,
+                ['origen' => 'vista_alistador'] + Trazabilidad::payload($gps),
+                ['despachado_at' => now()],
+            );
         } catch (Throwable $e) {
             return back()->with('error', $e->getMessage());
         }
@@ -219,7 +227,7 @@ class DropiOperacionController extends Controller implements HasMiddleware
         if ($guiaBuscar) {
             $pedido = DropiPedido::where('guia', $guiaBuscar)
                 ->orWhere('dropi_orden_id', $guiaBuscar)
-                ->with(['items.variante.producto'])
+                ->with(['items.variante.producto', 'items.producto'])
                 ->first();
         }
         return Inertia::render('Dropi/Devolucion/Registrar', [
@@ -237,9 +245,56 @@ class DropiOperacionController extends Controller implements HasMiddleware
                     'cantidad' => (int) $i->cantidad,
                 ])->all(),
                 'devolucion_existente' => DropiDevolucion::where('pedido_id', $pedido->id)->exists(),
+                // 5.4 · lo que se re-escanea: un renglón por producto, con los
+                // códigos que acepta la pistola (barras de la variante o
+                // referencia del agregado).
+                'por_escanear' => $this->porEscanear($pedido),
             ] : null,
             'destinos' => array_map(fn ($d) => ['value' => $d->value, 'label' => $d->label()], DestinoDevolucion::cases()),
+            // 8.4 · devoluciones esperadas: Dropi las marcó como devueltas y
+            // todavía no se reciben. Las más viejas primero (las que ya
+            // pasaron la tolerancia son mercancía fantasma).
+            'esperadas' => DropiPedido::whereNotNull('devuelto_at')
+                ->where('devuelto_at', '>=', now()->subDays(30))
+                ->whereDoesntHave('devolucion')
+                ->orderBy('devuelto_at')
+                ->limit(50)
+                ->get(['id', 'guia', 'cliente_nombre', 'cliente_ciudad', 'transportadora', 'devuelto_at'])
+                ->map(fn ($p) => [
+                    'guia' => $p->guia,
+                    'cliente' => $p->cliente_nombre,
+                    'ciudad' => $p->cliente_ciudad,
+                    'transportadora' => $p->transportadora,
+                    'dias' => (int) $p->devuelto_at->diffInDays(now(), absolute: true),
+                ])->all(),
+            'diasTolerancia' => (int) setting('dropi.dias_tolerancia_devolucion', 7),
         ]);
+    }
+
+    /**
+     * @return list<array{clave:string, referencia:string, descripcion:string, esperadas:int, codigos:list<string>}>
+     */
+    private function porEscanear(DropiPedido $pedido): array
+    {
+        $out = [];
+        foreach ($pedido->items as $i) {
+            if (! $i->variante_id && ! $i->producto_id) continue;
+            $clave = \App\Modules\Inventario\Support\CostoPromedio::clave($i->variante_id, $i->producto_id);
+            $producto = $i->variante?->producto ?? $i->producto;
+            $out[$clave] ??= [
+                'clave' => $clave,
+                'referencia' => (string) ($producto?->referencia ?? $i->sku_dropi),
+                'descripcion' => trim(($producto?->nombre ?? '').' '.($i->variante?->color_nombre ?? '').' '.($i->variante?->talla ?? '')),
+                'esperadas' => 0,
+                'codigos' => array_values(array_filter(array_map(
+                    fn ($c) => $c ? strtoupper(trim((string) $c)) : null,
+                    $i->variante_id ? [$i->variante?->codigo_barras] : [$producto?->referencia],
+                ))),
+            ];
+            $out[$clave]['esperadas'] += (int) $i->cantidad;
+        }
+
+        return array_values($out);
     }
 
     public function devolucionGuardar(Request $request): RedirectResponse
@@ -248,21 +303,32 @@ class DropiOperacionController extends Controller implements HasMiddleware
             'pedido_id' => ['required', 'integer', 'exists:dropi_pedidos,id'],
             'destino_inventario' => ['required', Rule::in(array_map(fn ($d) => $d->value, DestinoDevolucion::cases()))],
             'notas' => ['nullable', 'string', 'max:500'],
+            'recibidos' => ['nullable', 'array'],
+            'recibidos.*' => ['integer', 'min:0'],
         ]);
 
         try {
             $pedido = DropiPedido::findOrFail($data['pedido_id']);
-            RegistrarDevolucion::run(
+            $r = RegistrarDevolucion::run(
                 $pedido->guia,
                 DestinoDevolucion::from($data['destino_inventario']),
                 (int) auth()->id(),
                 $data['notas'] ?? null,
+                // La pantalla siempre re-escanea: lo que no se escaneó no volvió.
+                $data['recibidos'] ?? [],
             );
         } catch (Throwable $e) {
             return back()->with('error', $e->getMessage())->withInput();
         }
 
-        return redirect()->route('app.dropi.devolucion.registrar')->with('success', 'Devolución registrada.');
+        $faltan = array_sum($r['faltantes']);
+
+        return redirect()->route('app.dropi.devolucion.registrar')->with(
+            $faltan ? 'warning' : 'success',
+            $faltan
+                ? "Devolución registrada. Faltaron {$faltan} unidad(es): quedó anotado en la devolución."
+                : 'Devolución registrada: todo lo despachado volvió.',
+        );
     }
 
     // ============================================================

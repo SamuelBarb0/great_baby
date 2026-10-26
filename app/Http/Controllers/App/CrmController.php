@@ -35,6 +35,7 @@ class CrmController extends Controller implements HasMiddleware
             'interaccionesRecientes' => $this->interaccionesRecientes(),
             'comisionesUltimoMes' => $this->comisionesUltimoMes(),
             'tiposInteraccion' => Interaccion::tipos(),
+            'fuentes' => $this->leadsPorFuente(),
         ]);
     }
 
@@ -65,6 +66,51 @@ class CrmController extends Controller implements HasMiddleware
     {
         $n = SegmentarClientes::run();
         return back()->with('success', "✅ {$n} contactos re-segmentados");
+    }
+
+    /**
+     * MKT-6 · Clientes y ventas por canal de llegada.
+     *
+     * Los contactos se cuentan por SU fuente; los pedidos, por la fuente que
+     * quedó copiada en el pedido al crearlo. «Venta» = facturado o despachado,
+     * igual que en el seguimiento del vendedor.
+     */
+    private function leadsPorFuente(): array
+    {
+        $contactos = \App\Models\Contacto::query()
+            ->where('es_cliente', true)
+            ->selectRaw("COALESCE(fuente, '') as f, COUNT(*) as total")
+            ->groupBy('f')
+            ->pluck('total', 'f');
+
+        $pedidos = \App\Modules\Portal\Models\PedidoCliente::query()
+            ->selectRaw("COALESCE(fuente, '') as f, COUNT(*) as pedidos, COUNT(DISTINCT contacto_id) as clientes_con_pedido")
+            ->selectRaw("COALESCE(SUM(CASE WHEN estado IN ('facturado','despachado') THEN total ELSE 0 END), 0) as ventas")
+            ->groupBy('f')
+            ->get()
+            ->keyBy('f');
+
+        $etiquetas = \App\Models\Contacto::FUENTES + ['' => 'Sin registrar'];
+
+        return collect($etiquetas)
+            ->map(function (string $label, string $clave) use ($contactos, $pedidos) {
+                $p = $pedidos->get($clave);
+                $total = (int) ($contactos[$clave] ?? 0);
+                $conPedido = (int) ($p->clientes_con_pedido ?? 0);
+
+                return [
+                    'fuente' => $clave === '' ? null : $clave,
+                    'label' => $label,
+                    'contactos' => $total,
+                    'clientes_con_pedido' => $conPedido,
+                    'pedidos' => (int) ($p->pedidos ?? 0),
+                    'ventas' => (float) ($p->ventas ?? 0),
+                    'conversion' => $total > 0 ? round(min($conPedido, $total) / $total * 100, 1) : 0,
+                ];
+            })
+            ->filter(fn ($r) => $r['contactos'] > 0 || $r['pedidos'] > 0 || $r['fuente'] !== null)
+            ->values()
+            ->all();
     }
 
     private function segmentosResumen(): array

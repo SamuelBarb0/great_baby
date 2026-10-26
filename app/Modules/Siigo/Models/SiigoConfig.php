@@ -14,6 +14,7 @@ class SiigoConfig extends Model
         'username', 'access_key', 'partner_id',
         'ambiente', 'activo', 'push_auto',
         'nit_emisor', 'tipo_documento_id', 'seller_id', 'payment_type_id',
+        'empresa_id', 'mapa_impuestos',
     ];
 
     protected $casts = [
@@ -34,6 +35,7 @@ class SiigoConfig extends Model
         'tipo_documento_id' => 'integer',
         'seller_id' => 'integer',
         'payment_type_id' => 'integer',
+        'mapa_impuestos' => 'array',
     ];
 
     // Access key SIEMPRE encriptado en BD, transparente al leer/escribir
@@ -53,13 +55,61 @@ class SiigoConfig extends Model
         }
     }
 
+    /** La cuenta de SIIGO de la empresa principal (Great Baby). */
     public static function current(): self
     {
-        $config = self::query()->first();
+        $principal = \App\Models\EmpresaConfig::current();
+        $config = self::query()->where('empresa_id', $principal->id)->first()
+            // Instalación sin migrar el multiempresa del todo: la fila suelta.
+            ?? self::query()->whereNull('empresa_id')->orderBy('id')->first();
         if ($config === null) {
-            $config = self::create(['ambiente' => 'sandbox', 'activo' => false]);
+            $config = self::create(['ambiente' => 'sandbox', 'activo' => false, 'empresa_id' => $principal->id]);
         }
         return $config;
+    }
+
+    /**
+     * Multiempresa · la cuenta de SIIGO de una razón social. Cada una es otra
+     * empresa ante la DIAN con su propio usuario de SIIGO; si todavía no la
+     * configuraron, nace apagada y la emisión lo dice en vez de facturar con
+     * la cuenta de otra.
+     */
+    public static function deEmpresa(?int $empresaId): self
+    {
+        $empresa = \App\Models\EmpresaConfig::porId($empresaId);
+        if ($empresa->es_principal) {
+            return self::current();
+        }
+
+        return self::query()->firstOrCreate(['empresa_id' => $empresa->id], ['ambiente' => 'sandbox', 'activo' => false]);
+    }
+
+    public function empresa(): \Illuminate\Database\Eloquent\Relations\BelongsTo
+    {
+        return $this->belongsTo(\App\Models\EmpresaConfig::class, 'empresa_id');
+    }
+
+    public function esPrincipal(): bool
+    {
+        return $this->id === self::current()->id;
+    }
+
+    /**
+     * ID del IVA en esta cuenta. La principal lo guarda en `impuestos.siigo_id`
+     * (sincronizado del catálogo); las demás, en su `mapa_impuestos`.
+     */
+    public function ivaSiigoId(float|string $porcentaje): ?int
+    {
+        $pct = rtrim(rtrim(number_format((float) $porcentaje, 3, '.', ''), '0'), '.');
+        $id = $this->mapa_impuestos['iva'][$pct] ?? null;
+        return $id ? (int) $id : null;
+    }
+
+    /** ID de una regla de retención en esta cuenta (ver `ivaSiigoId`). */
+    public function retencionSiigoId(int $retencionConfigId): ?int
+    {
+        $id = $this->mapa_impuestos['retenciones'][(string) $retencionConfigId] ?? null;
+        return $id ? (int) $id : null;
     }
 
     /**

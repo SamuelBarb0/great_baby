@@ -32,10 +32,39 @@ class SiigoEmisionService
         private readonly QrDianService $qr,
     ) {}
 
+    /**
+     * Multiempresa · cliente HTTP de la cuenta de SIIGO de una razón social.
+     * La principal usa el inyectado (el de siempre, con su token en caché);
+     * las demás, uno propio con sus credenciales y su token.
+     */
+    private function clientePara(?int $empresaId): SiigoClient
+    {
+        $config = SiigoConfig::deEmpresa($empresaId);
+
+        return $config->esPrincipal() ? $this->cliente : new SiigoClient($config);
+    }
+
+    /**
+     * Multiempresa, fase 1 · recibos y notas todavía salen por la cuenta de
+     * Great Baby. Sobre una factura de otra razón social irían a la empresa
+     * equivocada, así que se frenan con el motivo en vez de mandarlos.
+     */
+    private function exigirEmpresaPrincipal(?FacturaVenta $factura, string $que): void
+    {
+        if ($factura && $factura->empresa_id && ! SiigoConfig::deEmpresa($factura->empresa_id)->esPrincipal()) {
+            throw new RuntimeException(
+                "{$que} es de una factura de ".\App\Models\EmpresaConfig::porId($factura->empresa_id)->nombreCorto()
+                .': los recibos y notas de otras empresas todavía no se envían a SIIGO (multiempresa, fase 2).'
+            );
+        }
+    }
+
     public function emitir(FacturaVenta $factura): FacturaVenta
     {
         $this->validarElegible($factura);
-        $config = $this->validarConfig();
+        // Multiempresa · cada razón social emite con SU cuenta de SIIGO.
+        $config = $this->validarConfig($factura->empresa_id);
+        $cliente = $this->clientePara($factura->empresa_id);
 
         // El cliente tiene que existir en SIIGO antes de facturarle.
         //   Sólo había importación (SIIGO → ERP), nunca envío, así que a un
@@ -44,7 +73,7 @@ class SiigoEmisionService
         //
         //   Va ANTES de tomar el lock: si esto falla, la factura no debe
         //   quedar marcada como "emitiendo" y bloqueada 60 segundos.
-        $this->asegurarClienteEnSiigo($factura->contacto()->first());
+        $this->asegurarClienteEnSiigo($factura->contacto()->first(), $cliente);
 
         // 1. LOCK anti-carrera + set emitiendo_at
         $factura = DB::transaction(function () use ($factura) {
@@ -69,7 +98,7 @@ class SiigoEmisionService
 
         // 2. HTTP a SIIGO — FUERA de la transacción, con try/finally para limpiar la bandera SIEMPRE
         try {
-            $response = $this->cliente->request('POST', '/v1/invoices', $payload, 1, "inv:{$factura->id}");
+            $response = $cliente->request('POST', '/v1/invoices', $payload, 1, "inv:{$factura->id}");
         } catch (\Throwable $e) {
             // Excepción de red / DNS / timeout: liberar bandera y agendar reintento
             $factura->update(['emitiendo_at' => null]);
@@ -219,12 +248,17 @@ class SiigoEmisionService
         }
     }
 
-    private function validarConfig(): SiigoConfig
+    private function validarConfig(?int $empresaId = null): SiigoConfig
     {
-        $config = SiigoConfig::current();
+        $config = SiigoConfig::deEmpresa($empresaId);
+        $donde = $config->esPrincipal()
+            ? 'Configuración → Integración Siigo'
+            : 'Configuración → Empresas → '.\App\Models\EmpresaConfig::porId($empresaId)->nombreCorto();
 
         if (! $config->activo) {
-            throw new RuntimeException('La integración con Siigo está desactivada. Actívala en Configuración → Integración Siigo.');
+            throw new RuntimeException($config->esPrincipal()
+                ? 'La integración con Siigo está desactivada. Actívala en Configuración → Integración Siigo.'
+                : "La cuenta de SIIGO de {$donde} está desactivada o sin configurar.");
         }
 
         $labels = [
@@ -235,7 +269,7 @@ class SiigoEmisionService
 
         foreach ($labels as $col => $label) {
             if (empty($config->{$col})) {
-                throw new RuntimeException("Falta configurar «{$label}» en Configuración → Integración Siigo.");
+                throw new RuntimeException("Falta configurar «{$label}» en {$donde}.");
             }
         }
 
@@ -254,16 +288,18 @@ class SiigoEmisionService
         // Mapa porcentaje IVA → id de impuesto en SIIGO. Sin esto, SIIGO calcula
         //   el total SIN IVA y rechaza la factura con `invalid_total_payments`
         //   (él suma 75.000 mientras el ERP paga 89.250).
-        $ivaPorPct = \DB::table('impuestos')
-            ->where('tipo', 'iva')->where('activo', true)->whereNotNull('siigo_id')
-            ->pluck('siigo_id', 'porcentaje');
+        $ivaPorPct = $config->esPrincipal()
+            ? \DB::table('impuestos')
+                ->where('tipo', 'iva')->where('activo', true)->whereNotNull('siigo_id')
+                ->pluck('siigo_id', 'porcentaje')
+            : collect($config->mapa_impuestos['iva'] ?? []);
 
-        $retencionesSiigo = $this->retencionesSiigo($factura);
+        $retencionesSiigo = $this->retencionesSiigo($factura, $config);
 
-        $items = $factura->items->map(function ($item) use ($ivaPorPct, $retencionesSiigo) {
+        $items = $factura->items->map(function ($item) use ($ivaPorPct, $retencionesSiigo, $config) {
             $variante = $item->variante;
             $producto = $variante?->producto ?? $item->producto;
-            $codigo = $this->codigoSiigoDe($variante, $producto, $item->descripcion);
+            $codigo = $this->codigoSiigoDe($variante, $producto, $item->descripcion, $config->esPrincipal());
 
             $linea = [
                 'code' => (string) $codigo,
@@ -282,7 +318,9 @@ class SiigoEmisionService
                 if (! $siigoTaxId) {
                     throw new RuntimeException(
                         "El IVA del {$pct}% de la línea «{$linea['description']}» no está mapeado a SIIGO. "
-                        . 'Asigná su «ID Siigo» en Catálogo → Maestras → Impuestos.'
+                        . ($config->esPrincipal()
+                            ? 'Asigná su «ID Siigo» en Catálogo → Maestras → Impuestos.'
+                            : 'Asignalo en los impuestos de la empresa, en Configuración → Empresas.')
                     );
                 }
                 $linea['taxes'] = [['id' => $siigoTaxId]];
@@ -304,7 +342,9 @@ class SiigoEmisionService
         // Si la ubicación no tiene resolución, cae al tipo_documento_id global
         // (comportamiento previo, 100% retrocompatible).
         $documentId = (int) $config->tipo_documento_id;
-        if ($factura->ubicacion && $factura->ubicacion->siigo_resolution_id) {
+        //   Multiempresa · esa resolución vive en la cuenta de Great Baby; en
+        //   otra razón social no existe, así que sólo aplica a la principal.
+        if ($config->esPrincipal() && $factura->ubicacion && $factura->ubicacion->siigo_resolution_id) {
             $documentId = (int) $factura->ubicacion->siigo_resolution_id;
         }
 
@@ -346,15 +386,24 @@ class SiigoEmisionService
      *
      * @return list<int>
      */
-    private function retencionesSiigo(FacturaVenta $factura): array
+    private function retencionesSiigo(FacturaVenta $factura, ?SiigoConfig $config = null): array
     {
+        $config ??= SiigoConfig::current();
         if ((float) $factura->retenciones <= 0) {
             return [];
         }
 
         return $factura->retencionesAplicadas()->with('config')->get()
-            ->map(function ($r) {
-                $taxId = (int) ($r->config?->siigo_tax_id ?? 0);
+            ->map(function ($r) use ($config) {
+                $taxId = $config->esPrincipal()
+                    ? (int) ($r->config?->siigo_tax_id ?? 0)
+                    : (int) ($config->retencionSiigoId((int) $r->config_id) ?? 0);
+                if (! $taxId && ! $config->esPrincipal()) {
+                    throw new RuntimeException(
+                        "La regla de {$r->tipo} «{$r->config?->concepto}» no tiene ID de impuesto en la cuenta de SIIGO "
+                        .'de esta empresa. Asignalo en Configuración → Empresas.'
+                    );
+                }
                 if (! $taxId) {
                     throw new RuntimeException(
                         "La regla de {$r->tipo} «{$r->config?->concepto}» no tiene «ID impuesto SIIGO». "
@@ -730,6 +779,7 @@ class SiigoEmisionService
         }
 
         $p->loadMissing(['factura', 'contacto']);
+        $this->exigirEmpresaPrincipal($p->factura, "El recibo de caja {$p->id}");
 
         if (! $p->factura?->siigo_id) {
             /*
@@ -863,7 +913,7 @@ class SiigoEmisionService
      */
     private function prefijoConsecutivoSiigo(FacturaVenta $f): array
     {
-        $r = $this->cliente->request('GET', '/v1/invoices/'.$f->siigo_id);
+        $r = $this->clientePara($f->empresa_id)->request('GET', '/v1/invoices/'.$f->siigo_id);
 
         if (! $r->successful()) {
             throw new RuntimeException(
@@ -896,10 +946,16 @@ class SiigoEmisionService
      * sincronizado se corta con un mensaje que dice qué falta, en vez de mandar
      * un código inventado y recibir un error críptico.
      */
-    private function codigoSiigoDe($variante, $producto, ?string $descripcion = null): string
+    private function codigoSiigoDe($variante, $producto, ?string $descripcion = null, bool $principal = true): string
     {
         if ($variante?->siigo_code) {
             return (string) $variante->siigo_code;
+        }
+        // Multiempresa · `siigo_id` dice que existe en la cuenta de Great Baby,
+        //   no en la de otra razón social. Allá se manda el mismo código y, si
+        //   el producto no está creado, SIIGO lo rechaza diciendo cuál.
+        if (! $principal && ($variante?->codigo_barras || $producto?->referencia)) {
+            return (string) ($variante?->codigo_barras ?: $producto->referencia);
         }
         if ($variante?->siigo_id && $variante->codigo_barras) {
             return (string) $variante->codigo_barras;
@@ -925,12 +981,17 @@ class SiigoEmisionService
      * No se inventa datos: si falta algo que SIIGO exige, deja que el error
      * suba con el motivo, que es más útil que crear un tercero a medias.
      */
-    private function asegurarClienteEnSiigo(?\App\Models\Contacto $c): void
+    private function asegurarClienteEnSiigo(?\App\Models\Contacto $c, ?SiigoClient $cliente = null): void
     {
         if (! $c) {
             throw new RuntimeException('La factura no tiene cliente asociado.');
         }
-        if ($c->siigo_id) {
+        // Multiempresa · `contactos.siigo_id` es el id en la cuenta de Great
+        //   Baby. En otra cuenta ese id no existe: se busca por documento cada
+        //   vez (una consulta) y no se pisa el id guardado.
+        $principal = $cliente === null || $cliente === $this->cliente;
+        $cliente ??= $this->cliente;
+        if ($principal && $c->siigo_id) {
             return;
         }
 
@@ -940,12 +1001,14 @@ class SiigoEmisionService
         }
 
         // 1 · ¿Ya existe allá?
-        $busca = $this->cliente->request('GET', '/v1/customers?identification='.urlencode($doc));
+        $busca = $cliente->request('GET', '/v1/customers?identification='.urlencode($doc));
         $encontrado = collect($busca->successful() ? ($busca->json('results') ?? []) : [])
             ->firstWhere('identification', $doc);
 
         if ($encontrado && ! empty($encontrado['id'])) {
-            $c->forceFill(['siigo_id' => $encontrado['id'], 'siigo_sync_at' => now()])->save();
+            if ($principal) {
+                $c->forceFill(['siigo_id' => $encontrado['id'], 'siigo_sync_at' => now()])->save();
+            }
 
             return;
         }
@@ -994,7 +1057,8 @@ class SiigoEmisionService
             ]),
         ], fn ($v) => $v !== null && $v !== []);
 
-        $r = $this->cliente->request('POST', '/v1/customers', $payload, 1, "cli:{$c->id}");
+        $r = $cliente->request('POST', '/v1/customers', $payload, 1,
+            $principal ? "cli:{$c->id}" : "cli:{$c->id}:cfg{$cliente->configId()}");
 
         // `successful()` y no `ok()`: SIIGO responde 201 al crear el tercero y
         // `ok()` sólo acepta 200, así que daba por fallido un alta correcta.
@@ -1006,10 +1070,12 @@ class SiigoEmisionService
             );
         }
 
-        $c->forceFill([
-            'siigo_id' => (string) $r->json('id'),
-            'siigo_sync_at' => now(),
-        ])->save();
+        if ($principal) {
+            $c->forceFill([
+                'siigo_id' => (string) $r->json('id'),
+                'siigo_sync_at' => now(),
+            ])->save();
+        }
 
         Log::channel('siigo')->info('Cliente creado en SIIGO', [
             'contacto_id' => $c->id, 'doc' => $doc, 'siigo_id' => $c->siigo_id,
@@ -1057,6 +1123,7 @@ class SiigoEmisionService
         if ($nc->siigo_id) return $nc;
 
         $nc->loadMissing(['factura', 'factura.contacto']);
+        $this->exigirEmpresaPrincipal($nc->factura, "La NC {$nc->numeroCompleto()}");
         if (! $nc->factura?->siigo_id) {
             throw new RuntimeException("La NC {$nc->numeroCompleto()} apunta a factura que aún no está en SIIGO.");
         }
@@ -1254,6 +1321,7 @@ class SiigoEmisionService
         if ($nd->siigo_id) return $nd;
 
         $nd->loadMissing(['factura', 'factura.contacto']);
+        $this->exigirEmpresaPrincipal($nd->factura, "La ND {$nd->numeroCompleto()}");
         if (! $nd->factura?->siigo_id) {
             throw new RuntimeException("La ND {$nd->numeroCompleto()} apunta a factura que aún no está en SIIGO.");
         }
@@ -1612,7 +1680,7 @@ class SiigoEmisionService
         $respuesta = [];
 
         if ($factura->siigo_id) {
-            $resp = $this->cliente->request('POST', "/v1/invoices/{$factura->siigo_id}/annul", []);
+            $resp = $this->clientePara($factura->empresa_id)->request('POST', "/v1/invoices/{$factura->siigo_id}/annul", []);
             if ($resp->failed()) {
                 $msg = (string) ($resp->json('Errors.0.Message') ?? $resp->json('message') ?? "HTTP {$resp->status()}");
                 throw new RuntimeException("SIIGO rechazó anular factura {$factura->numero}: {$msg}");
@@ -1667,7 +1735,7 @@ class SiigoEmisionService
         if (! $destino) {
             throw new RuntimeException("Factura {$factura->numero} sin email destino · pasá uno manualmente.");
         }
-        $resp = $this->cliente->request('POST', "/v1/invoices/{$factura->siigo_id}/mail", ['email' => $destino]);
+        $resp = $this->clientePara($factura->empresa_id)->request('POST', "/v1/invoices/{$factura->siigo_id}/mail", ['email' => $destino]);
         if ($resp->failed()) {
             $msg = (string) ($resp->json('Errors.0.Message') ?? "HTTP {$resp->status()}");
             throw new RuntimeException("SIIGO rechazó reenviar mail de {$factura->numero}: {$msg}");
@@ -1686,7 +1754,7 @@ class SiigoEmisionService
         if (! $factura->siigo_id) {
             throw new RuntimeException("Factura {$factura->numero} no tiene siigo_id.");
         }
-        $resp = $this->cliente->request('GET', "/v1/invoices/{$factura->siigo_id}/pdf");
+        $resp = $this->clientePara($factura->empresa_id)->request('GET', "/v1/invoices/{$factura->siigo_id}/pdf");
         if ($resp->failed()) {
             throw new RuntimeException("SIIGO rechazó PDF de {$factura->numero}: HTTP {$resp->status()}");
         }
@@ -1709,7 +1777,7 @@ class SiigoEmisionService
         if (! $factura->siigo_id) {
             throw new RuntimeException("Factura {$factura->numero} no tiene siigo_id.");
         }
-        $resp = $this->cliente->request('GET', "/v1/invoices/{$factura->siigo_id}/xml");
+        $resp = $this->clientePara($factura->empresa_id)->request('GET', "/v1/invoices/{$factura->siigo_id}/xml");
         if ($resp->failed()) {
             throw new RuntimeException("SIIGO rechazó XML de {$factura->numero}: HTTP {$resp->status()}");
         }
@@ -1733,7 +1801,7 @@ class SiigoEmisionService
         if (! $factura->siigo_id) {
             return ['sin_siigo' => true, 'mensaje' => 'La factura aún no llegó a SIIGO.'];
         }
-        $resp = $this->cliente->request('GET', "/v1/invoices/{$factura->siigo_id}/stamp/errors");
+        $resp = $this->clientePara($factura->empresa_id)->request('GET', "/v1/invoices/{$factura->siigo_id}/stamp/errors");
         if ($resp->failed() && $resp->status() === 404) {
             return ['sin_errores' => true, 'mensaje' => 'DIAN aceptó la factura sin errores.'];
         }

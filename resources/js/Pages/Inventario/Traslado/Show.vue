@@ -1,7 +1,7 @@
 <script setup>
 import { ref, reactive, computed } from 'vue';
 import { Head, Link, router } from '@inertiajs/vue3';
-import { ArrowLeftRight, ArrowLeft, Plus, Trash2, Send, PackageCheck, Ban, Search, Upload } from 'lucide-vue-next';
+import { ArrowLeftRight, ArrowLeft, Plus, Trash2, Send, PackageCheck, Ban, Search, Upload, BadgeCheck, Camera } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import ImportMasivoModal from '@/Components/ImportMasivoModal.vue';
 import { useEscClose } from '@/composables/useEscClose';
@@ -11,7 +11,16 @@ import AppConfirmModal from '@/Components/AppConfirmModal.vue';
 const importMasivoAbierto = ref(false);
 const importMasivoOk = () => { importMasivoAbierto.value = false; router.reload({ only: ['traslado'] }); };
 
-const props = defineProps({ traslado: { type: Object, required: true } });
+const props = defineProps({
+    traslado: { type: Object, required: true },
+    // MKT-5 · sólo llegan cuando el traslado es de muestras de Marketing.
+    equipo_marketing: { type: Array, default: () => [] },
+    estados_mercancia: { type: Object, default: () => ({}) },
+});
+
+const muestra = computed(() => props.traslado.muestra);
+// Las muestras que salen hacia Marketing pasan primero por aprobación.
+const faltaAprobar = computed(() => !!muestra.value?.es_prestamo && !muestra.value.aprobado_at);
 
 // Confirmaciones con el modal propio: el confirm() nativo queda bloqueado
 // dentro del iframe de la app de escritorio y en celular ignora el diseno.
@@ -26,7 +35,8 @@ const badge = (e) => ({
 }[e] || 'bg-surface-100');
 
 const puedeEditar = computed(() => props.traslado.estado === 'borrador');
-const puedeEnviar = computed(() => props.traslado.estado === 'borrador' && props.traslado.items.length > 0);
+const puedeEnviar = computed(() => props.traslado.estado === 'borrador' && props.traslado.items.length > 0 && !faltaAprobar.value);
+const puedeAprobar = computed(() => props.traslado.estado === 'borrador' && faltaAprobar.value);
 const puedeRecibir = computed(() => props.traslado.estado === 'en_transito');
 const puedeAnular = computed(() => ['borrador', 'en_transito', 'recibido'].includes(props.traslado.estado));
 
@@ -106,8 +116,44 @@ const enviar = () => {
     };
 };
 
+const aprobando = ref(false);
+const aprobar = () => {
+    aprobando.value = true;
+    router.post(`/app/inventario/traslados/${props.traslado.id}/aprobar`, {}, { preserveScroll: true, onFinish: () => (aprobando.value = false) });
+};
+
 const recibiendo = ref(false);
+
+/*
+ * MKT-5 · entregar muestras (o recibir la devolución) queda firmado: quién se
+ * la llevó o la trajo, en qué estado y qué novedad hubo. Por eso no va por el
+ * confirm genérico sino por su propio formulario.
+ */
+const modalEntrega = ref(false);
+useEscClose(modalEntrega);
+const entrega = reactive({ recogido_por: '', estado_mercancia: 'completo', observaciones_entrega: '' });
+const erroresEntrega = ref({});
+const abrirEntrega = () => {
+    erroresEntrega.value = {};
+    Object.assign(entrega, {
+        recogido_por: props.equipo_marketing.length === 1 ? props.equipo_marketing[0].id : '',
+        estado_mercancia: 'completo',
+        observaciones_entrega: '',
+    });
+    modalEntrega.value = true;
+};
+const entregar = () => {
+    recibiendo.value = true;
+    router.post(`/app/inventario/traslados/${props.traslado.id}/recibir`, { ...entrega }, {
+        preserveScroll: true,
+        onSuccess: () => { modalEntrega.value = false; },
+        onError: (e) => { erroresEntrega.value = e; },
+        onFinish: () => (recibiendo.value = false),
+    });
+};
+
 const recibir = () => {
+    if (muestra.value) return abrirEntrega();
     const total = props.traslado.items.reduce((s, it) => s + Number(it.cantidad_solicitada || 0), 0);
     modalConfirm.value = {
         titulo: `Confirmar recepción de traslado ${props.traslado.numero}?`,
@@ -170,19 +216,62 @@ const anular = () => {
                         </p>
                         <p v-if="traslado.motivo" class="text-xs text-surface-500 mt-1">Motivo: {{ traslado.motivo }}</p>
                         <p v-if="traslado.observaciones" class="text-xs text-surface-500 mt-1 whitespace-pre-wrap">{{ traslado.observaciones }}</p>
+                        <p v-if="puedeAprobar" class="text-xs text-amber-700 mt-2 font-semibold">
+                            Solicitud de muestras de Marketing: aprobala antes de marcarla lista.
+                        </p>
                     </div>
                     <!-- Botones state-machine -->
                     <div class="flex gap-2 flex-wrap">
+                        <button v-if="puedeAprobar" @click="aprobar" :disabled="aprobando" class="btn-primary min-h-11">
+                            <BadgeCheck class="h-4 w-4" /> {{ aprobando ? 'Aprobando…' : 'Aprobar solicitud' }}
+                        </button>
                         <button v-if="puedeEnviar" @click="enviar" :disabled="enviando" class="btn-primary min-h-11">
-                            <Send class="h-4 w-4" /> {{ enviando ? 'Enviando…' : 'Enviar' }}
+                            <Send class="h-4 w-4" />
+                            {{ enviando ? 'Enviando…' : (muestra?.es_prestamo ? 'Lista para recoger' : 'Enviar') }}
                         </button>
                         <button v-if="puedeRecibir" @click="recibir" :disabled="recibiendo" class="btn-primary min-h-11">
-                            <PackageCheck class="h-4 w-4" /> {{ recibiendo ? 'Recibiendo…' : 'Confirmar recepción' }}
+                            <PackageCheck class="h-4 w-4" />
+                            {{ recibiendo ? 'Recibiendo…' : (muestra ? (muestra.es_prestamo ? 'Entregar a Marketing' : 'Recibir devolución') : 'Confirmar recepción') }}
                         </button>
                         <button v-if="puedeAnular" @click="modalAnular = true" class="btn-danger min-h-11">
                             <Ban class="h-4 w-4" /> Anular
                         </button>
                     </div>
+                </div>
+            </div>
+
+            <!-- MKT-5 · responsables de las muestras -->
+            <div v-if="muestra" class="card p-4">
+                <h3 class="text-sm font-bold flex items-center gap-2 mb-3">
+                    <Camera class="h-4 w-4 text-brand-600" />
+                    {{ muestra.es_prestamo ? 'Muestras para Marketing' : 'Devolución de Marketing' }}
+                    <span v-if="muestra.prestamo" class="text-xs font-normal text-surface-500">· cierra {{ muestra.prestamo }}</span>
+                </h3>
+                <dl class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 text-sm">
+                    <div>
+                        <dt class="text-xs text-surface-500">Solicitó</dt>
+                        <dd class="font-semibold">{{ traslado.solicitante || '—' }}</dd>
+                    </div>
+                    <div v-if="muestra.es_prestamo">
+                        <dt class="text-xs text-surface-500">Aprobó</dt>
+                        <dd class="font-semibold">{{ muestra.aprobado_por || 'Pendiente' }}</dd>
+                        <dd v-if="muestra.aprobado_at" class="text-xs text-surface-500">{{ muestra.aprobado_at }}</dd>
+                    </div>
+                    <div>
+                        <dt class="text-xs text-surface-500">{{ muestra.es_prestamo ? 'Entregó (bodega)' : 'Recibió (bodega)' }}</dt>
+                        <dd class="font-semibold">{{ traslado.ejecutor || '—' }}</dd>
+                    </div>
+                    <div>
+                        <dt class="text-xs text-surface-500">{{ muestra.es_prestamo ? 'Recogió (Marketing)' : 'La trajo (Marketing)' }}</dt>
+                        <dd class="font-semibold">{{ muestra.recogido_por || '—' }}</dd>
+                    </div>
+                </dl>
+                <div v-if="muestra.estado_mercancia" class="mt-3 text-sm">
+                    <span class="px-2 py-0.5 rounded text-xs font-semibold"
+                          :class="muestra.estado_mercancia === 'completo' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-900'">
+                        {{ muestra.estado_mercancia_label }}
+                    </span>
+                    <p v-if="muestra.observaciones_entrega" class="text-xs text-surface-600 mt-1 whitespace-pre-wrap">{{ muestra.observaciones_entrega }}</p>
                 </div>
             </div>
 
@@ -303,6 +392,47 @@ const anular = () => {
                     <button @click="modalAnular = false" class="btn-ghost min-h-11">Cancelar</button>
                     <button @click="anular" :disabled="anulando || motivoAnulacion.trim().length < 5" class="btn-danger min-h-11">
                         {{ anulando ? 'Anulando…' : 'Anular traslado' }}
+                    </button>
+                </div>
+            </div>
+        </div>
+        <!-- Modal entrega de muestras (MKT-5) -->
+        <div v-if="modalEntrega" @click.self="modalEntrega = false" class="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+            <div class="card p-6 max-w-md w-full space-y-3">
+                <h3 class="text-lg font-bold">
+                    {{ muestra.es_prestamo ? 'Entregar muestras a Marketing' : 'Recibir devolución de Marketing' }} · {{ traslado.numero }}
+                </h3>
+                <div>
+                    <label class="text-xs font-semibold">{{ muestra.es_prestamo ? '¿Quién las recoge?' : '¿Quién las trajo?' }}</label>
+                    <select v-model.number="entrega.recogido_por" class="input w-full">
+                        <option value="" disabled>Elegí a la persona de Marketing</option>
+                        <option v-for="u in equipo_marketing" :key="u.id" :value="u.id">{{ u.name }}</option>
+                    </select>
+                    <p v-if="erroresEntrega.recogido_por" class="text-xs text-red-600 mt-1">{{ erroresEntrega.recogido_por }}</p>
+                </div>
+                <div>
+                    <label class="text-xs font-semibold">¿En qué estado {{ muestra.es_prestamo ? 'sale' : 'llegó' }}?</label>
+                    <div class="space-y-1 mt-1">
+                        <label v-for="(label, clave) in estados_mercancia" :key="clave" class="flex items-center gap-2 text-sm">
+                            <input type="radio" :value="clave" v-model="entrega.estado_mercancia" /> {{ label }}
+                        </label>
+                    </div>
+                </div>
+                <div>
+                    <label class="text-xs font-semibold">
+                        Observaciones{{ entrega.estado_mercancia === 'completo' ? ' (opcional)' : '' }}
+                    </label>
+                    <textarea v-model="entrega.observaciones_entrega" rows="3" class="input w-full"
+                              placeholder="Ej: falta 1 body talla 3-6; el triciclo llegó con la caja rota"></textarea>
+                    <p v-if="erroresEntrega.observaciones_entrega" class="text-xs text-red-600 mt-1">{{ erroresEntrega.observaciones_entrega }}</p>
+                </div>
+                <p class="text-xs text-surface-500">
+                    Se ingresan {{ traslado.items.reduce((s, i) => s + Number(i.cantidad_solicitada || 0), 0) }} unidades en {{ traslado.destino.nombre }} y a quien la pidió le llega el aviso.
+                </p>
+                <div class="flex justify-end gap-2 pt-1">
+                    <button @click="modalEntrega = false" class="btn-ghost min-h-11">Cancelar</button>
+                    <button @click="entregar" :disabled="recibiendo || !entrega.recogido_por" class="btn-primary min-h-11">
+                        {{ recibiendo ? 'Guardando…' : (muestra.es_prestamo ? 'Confirmar entrega' : 'Confirmar recepción') }}
                     </button>
                 </div>
             </div>

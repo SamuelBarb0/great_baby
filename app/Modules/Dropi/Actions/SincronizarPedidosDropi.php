@@ -253,6 +253,9 @@ class SincronizarPedidosDropi
         $data = [
             'corte_id' => $corte->id,
             'dropi_orden_id' => $dto->dropiOrdenId,
+            // 8.2 · el plazo de 72 h de Dropi corre desde que nació el pedido
+            // allá, no desde que el ERP lo trajo.
+            'dropi_creado_at' => $dto->creadoAt,
             'transportadora' => $dto->transportadora,
             'tienda' => $dto->tienda,
             'vendedor_nombre' => $dto->vendedorNombre,
