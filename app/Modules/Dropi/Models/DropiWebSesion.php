@@ -11,6 +11,8 @@ class DropiWebSesion extends Model
 {
     public const DESCONECTADO = 'desconectado';
     public const ESPERANDO_CODIGO = 'esperando_codigo';
+    /** La cuenta tiene 2FA: el código sale de la app de autenticación, no del correo. */
+    public const ESPERANDO_APP = 'esperando_app';
     public const CONECTADO = 'conectado';
     public const EXPIRADO = 'expirado';
 

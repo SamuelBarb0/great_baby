@@ -180,9 +180,11 @@ class DropiWebAuth
             $token = $this->reconectarSolo($sesion);
         }
         if (! $token) {
-            throw new DropiSesionNoDisponible($sesion->estado === DropiWebSesion::ESPERANDO_CODIGO
-                ? 'Dropi pidió el código del correo para reconectar. Escríbelo en Dropi → Conexión Dropi.'
-                : 'No hay sesión activa con Dropi. Conéctala en Dropi → Conexión Dropi.');
+            throw new DropiSesionNoDisponible(match ($sesion->estado) {
+                DropiWebSesion::ESPERANDO_CODIGO => 'Dropi pidió el código del correo para reconectar. Escríbelo en Dropi → Conexión Dropi.',
+                DropiWebSesion::ESPERANDO_APP => 'Dropi pidió el código de la app de autenticación para reconectar. Escríbelo en Dropi → Conexión Dropi.',
+                default => 'No hay sesión activa con Dropi. Conéctala en Dropi → Conexión Dropi.',
+            });
         }
 
         $sesion->forceFill(['ultimo_uso_at' => now()])->saveQuietly();
@@ -280,7 +282,19 @@ class DropiWebAuth
 
         $claims = $this->claims($token);
         if (($claims['token_type'] ?? null) === '2FA' && ($claims['aud'] ?? null) === 'CONFIG') {
-            return $this->fallar($sesion, 'Dropi pide configurar la verificación en dos pasos en esta cuenta. Hazlo una vez desde app.dropi.co y reintenta.');
+            // Dropi responde lo mismo si la cuenta aún no configuró el 2FA y si ya lo
+            //   tiene y falta el código de la app: lo distingue `objects.actived`
+            //   (verificado el 26-oct-2026). Con el código, su web repite el login con
+            //   `otp` = el código de la app.
+            if (! ($body['data']['objects']['actived'] ?? false)) {
+                return $this->fallar($sesion, 'Dropi pide configurar la verificación en dos pasos en esta cuenta. Hazlo una vez desde app.dropi.co y reintenta.');
+            }
+            if ($codigo !== null) {
+                return $this->fallar($sesion, 'Dropi no aceptó el código de la app de autenticación. Escribe el que aparece ahora (cambia cada 30 segundos).');
+            }
+            $sesion->update(['estado' => DropiWebSesion::ESPERANDO_APP, 'ultimo_error' => null]);
+
+            return DropiWebSesion::ESPERANDO_APP;
         }
         if (($claims['aud'] ?? null) === 'password_expired') {
             return $this->fallar($sesion, 'La contraseña de la cuenta de Dropi expiró. Cámbiala en app.dropi.co y escríbela aquí, en «Cuenta de Dropi».');
@@ -310,7 +324,7 @@ class DropiWebAuth
     {
         Log::warning('dropi.web.login_fallido', ['motivo' => $mensaje]);
         $sesion->update([
-            'estado' => $sesion->estado === DropiWebSesion::ESPERANDO_CODIGO ? DropiWebSesion::ESPERANDO_CODIGO : DropiWebSesion::DESCONECTADO,
+            'estado' => in_array($sesion->estado, [DropiWebSesion::ESPERANDO_CODIGO, DropiWebSesion::ESPERANDO_APP], true) ? $sesion->estado : DropiWebSesion::DESCONECTADO,
             'ultimo_error' => $mensaje,
         ]);
 
