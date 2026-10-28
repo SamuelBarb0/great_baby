@@ -70,7 +70,13 @@
     </div>
     @endif
 
-    <h2>Detalle de facturas</h2>
+    <h2>Detalle de facturas y abonos</h2>
+    {{--
+        Cada factura trae DEBAJO sus abonos, con fecha, medio y valor.
+        Antes acá sólo iba el saldo vigente, y con eso no se puede sostener la
+        conversación con el cliente cuando dice «yo le pagué»: hay que poder
+        mostrarle cuándo y cuánto, abono por abono.
+    --}}
     <table>
         <thead><tr>
             <th>Número</th>
@@ -78,25 +84,64 @@
             <th>Vence</th>
             <th>Estado</th>
             <th style="text-align: right;">Total</th>
+            <th style="text-align: right;">Abonado</th>
             <th style="text-align: right;">Saldo</th>
         </tr></thead>
         <tbody>
             @foreach($facturas as $f)
+                @php $abonado = (float) $f->pagos->sum('monto_aplicado'); @endphp
                 <tr>
                     <td style="font-family: monospace;">{{ $f->numero }}</td>
                     <td>{{ $f->fecha_emision->format('Y-m-d') }}</td>
-                    <td>{{ $f->fecha_vencimiento->format('Y-m-d') }}</td>
+                    <td>{{ $f->fecha_vencimiento?->format('Y-m-d') ?? '—' }}</td>
                     <td>
                         <span class="badge {{ $f->estado->value === 'pagada' ? 'b-ok' : ($f->estado->value === 'vencida' ? 'b-err' : 'b-warn') }}">
                             {{ $f->estado->label() }}
                         </span>
                     </td>
                     <td style="text-align: right;">${{ number_format((float) $f->total, 0, ',', '.') }}</td>
+                    <td style="text-align: right; color: #059669;">
+                        {{ $abonado > 0 ? '$'.number_format($abonado, 0, ',', '.') : '—' }}
+                    </td>
                     <td style="text-align: right; font-weight: 600;">${{ number_format((float) $f->saldo, 0, ',', '.') }}</td>
                 </tr>
+
+                @forelse($f->pagos as $p)
+                    <tr style="background: #f8fafc;">
+                        <td style="padding-left: 18px; color: #6b7280; font-size: 8pt;">
+                            ↳ abono {{ $loop->iteration }}
+                        </td>
+                        <td colspan="3" style="color: #6b7280; font-size: 8pt;">
+                            {{ $p->fecha?->format('Y-m-d') ?? '—' }}
+                            @if($p->medio_pago) · {{ $p->medio_pago }} @endif
+                            @if($p->banco) · {{ $p->banco }} @endif
+                            @if($p->referencia) · ref. {{ $p->referencia }} @endif
+                        </td>
+                        <td></td>
+                        <td style="text-align: right; color: #059669; font-size: 8pt;">
+                            ${{ number_format((float) $p->monto_aplicado, 0, ',', '.') }}
+                        </td>
+                        <td></td>
+                    </tr>
+                @empty
+                    @if((float) $f->saldo > 0)
+                        <tr style="background: #f8fafc;">
+                            <td colspan="7" style="padding-left: 18px; color: #9ca3af; font-size: 8pt;">
+                                ↳ sin abonos registrados
+                            </td>
+                        </tr>
+                    @endif
+                @endforelse
             @endforeach
         </tbody>
     </table>
+
+    @if($totalAbonado > 0)
+        <div style="margin-top: 8px; text-align: right; font-size: 9pt;">
+            Total abonado en el periodo:
+            <strong style="color: #059669;">${{ number_format($totalAbonado, 0, ',', '.') }}</strong>
+        </div>
+    @endif
 
     <div class="footer">
         Documento generado automáticamente por el ERP GREAT BABY · MYTech Solutions S.A.S.<br>

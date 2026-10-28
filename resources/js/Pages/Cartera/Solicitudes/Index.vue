@@ -5,7 +5,10 @@ import { useMoney } from '@/composables/useMoney';
 import { useEscClose } from '@/composables/useEscClose';
 import { FileCheck, Check, X } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
+import Paginacion from '@/Components/Paginacion.vue';
 
+import PestanasSeccion from '@/Components/PestanasSeccion.vue';
+import { pestanasCobranza } from '@/composables/usePestanasContables';
 const props = defineProps({ solicitudes: { type: Object, required: true }, filtro: { type: String, default: '' } });
 
 const modal = ref(null);
@@ -37,6 +40,8 @@ const badge = (e) => ({ pendiente: 'bg-amber-100 text-amber-800', aprobada: 'bg-
     <Head title="Solicitudes de crédito"/>
     <AppLayout>
         <div class="space-y-4">
+            <PestanasSeccion :pestanas="pestanasCobranza"/>
+
             <h1 class="text-2xl font-bold flex items-center gap-2"><FileCheck class="h-6 w-6 text-brand-600"/>Solicitudes de crédito (excepciones)</h1>
 
             <div v-if="$page.props.flash?.success" class="p-3 rounded-lg bg-emerald-500/15 border-l-4 border-emerald-500 text-emerald-700 text-sm">{{ $page.props.flash.success }}</div>
@@ -76,6 +81,7 @@ const badge = (e) => ({ pendiente: 'bg-amber-100 text-amber-800', aprobada: 'bg-
                     </tbody>
                 </table>
             </div>
+            <Paginacion :pagina="solicitudes" etiqueta="solicitudes"/>
         </div>
 
         <div v-if="modal" @click.self="modal = null" class="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">

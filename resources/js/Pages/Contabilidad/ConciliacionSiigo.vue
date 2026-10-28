@@ -2,6 +2,8 @@
 import { ref } from 'vue';
 import { Head, Link, router } from '@inertiajs/vue3';
 import AppLayout from '@/Layouts/AppLayout.vue';
+import PestanasSeccion from '@/Components/PestanasSeccion.vue';
+import { pestanasSiigo } from '@/composables/usePestanasContables';
 import { ArrowLeft, AlertTriangle, CheckCircle2, Scale, CloudOff, Cloud, TrendingUp } from 'lucide-vue-next';
 
 const props = defineProps({
@@ -23,6 +25,8 @@ const recargar = () => router.get('/app/contabilidad/siigo/conciliacion',
     <Head title="Conciliación ERP ↔ SIIGO"/>
     <AppLayout>
         <div class="space-y-5 max-w-6xl mx-auto">
+            <PestanasSeccion :pestanas="pestanasSiigo"/>
+
 
             <Link href="/app/contabilidad/reportes" class="text-sm text-brand-600 hover:underline inline-flex items-center gap-1">
                 <ArrowLeft class="h-4 w-4"/> Volver a reportes

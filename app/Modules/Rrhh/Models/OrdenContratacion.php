@@ -33,13 +33,60 @@ class OrdenContratacion extends Model
         'cargo', 'salario_propuesto', 'tipo_contrato', 'justificacion',
         'estado', 'solicitada_por_id', 'solicitada_at',
         'decidida_por_id', 'decidida_at', 'motivo_decision',
+        // Fase D1 · lo que pide el formato GH-F-018.
+        'area', 'fecha_inicio', 'horario', 'ciudad', 'periodicidad_pago', 'observaciones',
     ];
 
     protected $casts = [
         'salario_propuesto' => 'decimal:2',
+        'fecha_inicio' => 'date',
         'solicitada_at' => 'datetime',
         'decidida_at' => 'datetime',
     ];
+
+    /** Las dos formas de pago que admite el formato. */
+    public const PERIODICIDADES = ['mensual' => 'Mensual', 'quincenal' => 'Quincenal'];
+
+    /**
+     * Qué le falta al formato para poder imprimirse completo.
+     *
+     * El papel que firma la Junta tiene once casillas. Si alguna va en blanco,
+     * alguien la completa a mano después de la firma — y entonces la Junta
+     * autorizó una cosa y el contrato dice otra. Esto lo dice antes.
+     *
+     * @return array<string> en palabras
+     */
+    public function faltantesDelFormato(): array
+    {
+        $exigidos = [
+            'area' => 'área',
+            'fecha_inicio' => 'fecha de inicio',
+            'horario' => 'horario de trabajo',
+            'ciudad' => 'ciudad donde va a laborar',
+            'periodicidad_pago' => 'tipo de pago',
+            'salario_propuesto' => 'salario a devengar',
+        ];
+
+        return array_values(array_filter(
+            $exigidos,
+            fn (string $campo) => blank($this->{$campo}),
+            ARRAY_FILTER_USE_KEY,
+        ));
+    }
+
+    /**
+     * Quién hace de «LÍDER DE ÁREA» en las dos firmas del formato.
+     *
+     * No se pide una firma nueva: el líder ya actuó dos veces antes de llegar
+     * acá —pidió el personal en la requisición y eligió a esta persona de la
+     * terna— y las dos quedaron con fecha y nombre. El impreso muestra ese
+     * acto, que es el que de verdad ocurrió, en vez de inventar un tercer
+     * botón que alguien tendría que apretar sin mirar nada nuevo.
+     */
+    public function liderDelArea(): ?User
+    {
+        return $this->requisicion?->solicitante;
+    }
 
     public function candidato(): BelongsTo
     {

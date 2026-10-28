@@ -36,10 +36,23 @@ class EstadoCuentaController extends Controller
             abort_unless($tieneFactura, 403, 'Solo puedes ver estados de cuenta de tus propios clientes.');
         }
 
+        /*
+         * Los ABONOS de cada factura, que es lo que faltaba.
+         *
+         * Hasta hoy este informe mostraba sólo el saldo vigente, y eso lo
+         * convertía en inútil para la conversación que de verdad ocurre: el
+         * cliente dice «yo le pagué» y hay que poder responder con la fecha y
+         * el valor de cada abono, factura por factura. Lo pidió la contadora
+         * en la reunión del 21-oct con esas palabras: «ese es el informe que
+         * tenemos vacío con el sistema actual».
+         */
         $facturas = $contacto->facturas()
             ->whereNotIn('estado', [EstadoFactura::Anulada])
+            ->with(['pagos' => fn ($q) => $q->orderBy('fecha')])
             ->orderBy('fecha_emision')
             ->get();
+
+        $totalAbonado = $facturas->sum(fn ($f) => (float) $f->pagos->sum('monto_aplicado'));
         $credito = ConsultarCredito::run($contacto->id);
         $antig = CalcularAntiguedadCartera::run($contacto->id);
 
@@ -48,6 +61,7 @@ class EstadoCuentaController extends Controller
             'facturas' => $facturas,
             'credito' => $credito,
             'antig' => $antig,
+            'totalAbonado' => $totalAbonado,
         ])->setPaper('letter', 'portrait');
 
         return $pdf->stream('estado-cuenta-' . $contacto->numero_documento . '.pdf');

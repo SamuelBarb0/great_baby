@@ -5,6 +5,7 @@ namespace App\Modules\Inventario\Actions;
 // El modelo del kardex vive en el namespace Dropi por historia del proyecto:
 // es el kardex de TODO el inventario, no sólo de ese canal.
 use App\Modules\Cartera\Models\MovimientoContable;
+use App\Modules\Contabilidad\Enums\DestinoFiscal;
 use App\Modules\Dropi\Models\InventarioMovimiento;
 use App\Modules\Inventario\Support\BodegaDeSalida;
 use App\Modules\Inventario\Support\CostoPromedio;
@@ -249,12 +250,39 @@ class DescontarStockPorDespacho
         }
 
         $fecha = now('America/Bogota')->toDateString();
+
+        /*
+         * El costo va donde va su VENTA.
+         *
+         * El origen del asiento es el pedido, y `pedidos_cliente` no tiene los
+         * dos ejes: el estampado de `MovimientoContable` caia en el valor por
+         * defecto («fiscal») SIEMPRE. Resultado medido el 26-oct: los dos
+         * despachos eran de facturas interna y reparto, y su costo estaba en el
+         * libro fiscal. El libro interno mostraba **margen del 100%** —tenia
+         * los ingresos no declarados y ningun costo— y la perdida declarada
+         * ante la DIAN salia inflada por lo mismo.
+         *
+         * El destino estaba a un join de distancia: el pedido conoce su
+         * factura. Un reparto manda su parte interna, que es lo conservador:
+         * el costo de una venta que solo se declara en parte no se puede
+         * descontar entero.
+         */
+        $factura = $pedido->factura_id
+            ? \App\Modules\Cartera\Models\FacturaVenta::find($pedido->factura_id)
+            : null;
+
+        $destino = $factura?->destino_fiscal ?? DestinoFiscal::porDefecto();
+        if ($destino === DestinoFiscal::Reparto) {
+            $destino = DestinoFiscal::Interno;
+        }
+        $linea = $factura?->linea_negocio;
+
         $lineas = [];
 
         foreach ($asiento as $a) {
             $producto = $a['producto'];
-            $ctaCosto = $producto?->cta('costo') ?? setting('contable.cta_costo_default', '6135');
-            $ctaInv = $producto?->cta('inventario') ?? setting('contable.cta_inventario_default', '1435');
+            $ctaCosto = $producto?->cta('costo') ?? setting('contable.cta_costo_default');
+            $ctaInv = $producto?->cta('inventario') ?? setting('contable.cta_inventario_default');
             $ref = $producto?->referencia ?? $a['sku'] ?? 'sin referencia';
 
             $lineas[] = [
@@ -262,6 +290,7 @@ class DescontarStockPorDespacho
                 'debe' => $a['valor'], 'haber' => 0,
                 'origen_type' => PedidoCliente::class, 'origen_id' => $pedido->id,
                 'descripcion' => "Costo de venta {$ref} · despacho {$pedido->numero}",
+                'linea_negocio' => $linea, 'destino_fiscal' => $destino,
                 'user_id' => $userId,
             ];
             $lineas[] = [
@@ -269,6 +298,7 @@ class DescontarStockPorDespacho
                 'debe' => 0, 'haber' => $a['valor'],
                 'origen_type' => PedidoCliente::class, 'origen_id' => $pedido->id,
                 'descripcion' => "Salida inventario {$ref} · despacho {$pedido->numero}",
+                'linea_negocio' => $linea, 'destino_fiscal' => $destino,
                 'user_id' => $userId,
             ];
         }

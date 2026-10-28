@@ -115,12 +115,39 @@ class ContactosController extends Controller implements HasMiddleware
             return response()->json($rows);
         }
 
-        return response()->json(
-            Contacto::where(function ($qq) use ($q) {
+        /*
+         * El `rol` filtra de verdad, y la ficha trae lo que el motor de
+         * retenciones necesita.
+         *
+         * La pantalla de pagos a proveedor llamaba con `rol=proveedor` y esto
+         * lo IGNORABA: devolvia cualquier contacto —clientes, empleados— y
+         * `crear()` solo valida `exists:contactos,id`, asi que se podia
+         * registrar un pago a proveedor contra un CLIENTE.
+         *
+         * Y devolvia solo id/nombre/documento, asi que la ciudad nunca se
+         * autollenaba y el formulario se quedaba con «Bogota» fijo: **se
+         * calculaba ReteICA de Bogota para un proveedor de cualquier ciudad.**
+         * Eso es plata que se retiene mal.
+         */
+        $rol = (string) $request->input('rol', '');
+
+        $contactos = Contacto::query()
+            ->where(function ($qq) use ($q) {
                 $qq->where('nombre_completo', 'like', "%{$q}%")
                     ->orWhere('numero_documento', 'like', "%{$q}%");
-            })->limit(10)->get(['id', 'nombre_completo as nombre', 'numero_documento as documento'])
-        );
+            })
+            ->when($rol === 'proveedor', fn ($qq) => $qq->where('es_proveedor', true))
+            ->when($rol === 'cliente', fn ($qq) => $qq->where('es_cliente', true))
+            ->limit(10)
+            ->get(['id', 'nombre_completo', 'razon_social', 'numero_documento', 'ciudad', 'es_autorretenedor']);
+
+        return response()->json($contactos->map(fn ($c) => [
+            'id' => $c->id,
+            'nombre' => $c->razon_social ?: $c->nombre_completo,
+            'documento' => $c->numero_documento,
+            'ciudad' => $c->ciudad,
+            'es_autorretenedor' => (bool) $c->es_autorretenedor,
+        ]));
     }
 
     public function show(Contacto $contacto): Response

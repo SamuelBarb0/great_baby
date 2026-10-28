@@ -30,11 +30,39 @@ class Requisicion extends Model
     protected $table = 'rrhh_requisiciones';
 
     protected $fillable = [
-        'numero', 'cargo', 'area', 'numero_vacantes', 'motivo', 'funciones',
+        'numero', 'cargo', 'area', 'ciudad', 'razon_comercial', 'tipo_seleccion',
+        'numero_vacantes', 'motivo', 'motivo_seleccion', 'motivo_seleccion_otro',
+        'horario', 'funciones',
         'competencias', 'estudios', 'experiencia', 'salario_min', 'salario_max',
         'tipo_contrato', 'fecha_requerida', 'solicitante_id', 'estado',
         'enviada_at', 'aprobada_por_id', 'aprobada_at', 'rechazada_at',
         'motivo_rechazo', 'observaciones',
+    ];
+
+    /**
+     * Los motivos del papel, en lista cerrada.
+     *
+     * `motivo` sigue siendo el texto libre que explica el caso; esto es para
+     * CONTAR. Con la lista se puede responder «cuántas contrataciones del año
+     * fueron ampliación de planta», que es lo que pregunta una junta, y con
+     * texto libre eso no se puede responder nunca.
+     *
+     * @var array<string, string>
+     */
+    public const MOTIVOS_SELECCION = [
+        'reemplazo_titular' => 'Reemplazo del titular',
+        'ampliacion_planta' => 'Ampliación de planta',
+        'nuevo_proyecto' => 'Nuevo proyecto',
+        'reemplazo_vacaciones' => 'Reemplazo de vacaciones',
+        'reestructuracion' => 'Reestructuración',
+        'cubrimiento_licencia' => 'Cubrimiento de licencias',
+        'otro' => 'Otro',
+    ];
+
+    /** Interna se busca entre quienes ya están; externa se publica. */
+    public const TIPOS_SELECCION = [
+        'interna' => 'Selección interna',
+        'externa' => 'Selección externa',
     ];
 
     protected $casts = [
@@ -99,5 +127,45 @@ class Requisicion extends Model
     public function getVacantesPendientesAttribute(): int
     {
         return max(0, $this->numero_vacantes - $this->vacantes()->count());
+    }
+
+    /** El motivo en palabras, resolviendo el caso «otro». */
+    public function motivoEnPalabras(): ?string
+    {
+        if (blank($this->motivo_seleccion)) {
+            return null;
+        }
+
+        return $this->motivo_seleccion === 'otro'
+            ? ($this->motivo_seleccion_otro ?: 'Otro')
+            : (self::MOTIVOS_SELECCION[$this->motivo_seleccion] ?? $this->motivo_seleccion);
+    }
+
+    /**
+     * Qué casillas del formato quedaron vacías.
+     *
+     * Se avisa, no se frena: el líder pide el personal cuando lo necesita y
+     * no cuando tiene todos los datos. Pero el papel sale con huecos y quien
+     * lo firma debería saberlo antes de firmarlo.
+     *
+     * @return array<string>
+     */
+    public function faltantesDelFormato(): array
+    {
+        $falta = [];
+
+        foreach ([
+            'ciudad' => 'la ciudad',
+            'tipo_seleccion' => 'si la selección es interna o externa',
+            'motivo_seleccion' => 'el motivo de la selección',
+            'horario' => 'el horario',
+            'funciones' => 'las funciones por desempeñar',
+        ] as $campo => $nombre) {
+            if (blank($this->{$campo})) {
+                $falta[] = $nombre;
+            }
+        }
+
+        return $falta;
     }
 }

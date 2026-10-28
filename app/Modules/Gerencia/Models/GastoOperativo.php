@@ -15,8 +15,19 @@ class GastoOperativo extends Model
         'numero', 'fecha', 'categoria', 'descripcion', 'monto',
         'proveedor', 'factura_ref', 'metodo_pago', 'tipo',
         'solicita_id', 'aprueba_id', 'estado', 'notas', 'adjuntos',
+        // Los dos ejes y la cuenta de gasto: las columnas existian desde la
+        // migracion de octubre pero el modelo no las veia, asi que ningun
+        // flujo podia llenarlas.
+        'linea_negocio', 'destino_fiscal', 'motivo_destino', 'cuenta_puc',
     ];
-    protected $casts = ['fecha' => 'date', 'monto' => 'decimal:2', 'adjuntos' => 'array'];
+    protected $casts = [
+        'fecha' => 'date',
+        'monto' => 'decimal:2',
+        'adjuntos' => 'array',
+        // Sin el cast vuelven como string y cualquier `->label()` revienta.
+        'linea_negocio' => \App\Modules\Contabilidad\Enums\LineaNegocio::class,
+        'destino_fiscal' => \App\Modules\Contabilidad\Enums\DestinoFiscal::class,
+    ];
     public function solicita(): BelongsTo { return $this->belongsTo(User::class, 'solicita_id'); }
     public function aprueba(): BelongsTo { return $this->belongsTo(User::class, 'aprueba_id'); }
 }

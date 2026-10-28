@@ -46,7 +46,8 @@ class SeleccionController extends Controller implements HasMiddleware
     {
         $v = Vacante::with('requisicion:id,numero,solicitante_id')->findOrFail($vacante);
 
-        $candidatos = Candidato::where('vacante_id', $v->id)
+        $candidatos = Candidato::with(['pruebasPsicotecnicas', 'entrevistas'])
+            ->where('vacante_id', $v->id)
             ->orderByDesc('id')->get();
 
         /*
@@ -96,6 +97,18 @@ class SeleccionController extends Controller implements HasMiddleware
                 'exige_observacion' => $v->exigeObservacion(),
             ])->values(),
             'terna_llena' => $candidatos->where('etapa', EtapaCandidato::Terna)->count() >= Candidato::TAMANO_TERNA,
+            // Fase C · los catálogos de las psicotécnicas, armados desde los
+            // enums para que agregar un instrumento no exija tocar la pantalla.
+            'instrumentos' => \App\Modules\Rrhh\Enums\InstrumentoPsicotecnico::catalogo(),
+            // Los dos cuestionarios, armados desde el modelo: cambiar una
+            // pregunta es editar una constante, no la pantalla.
+            'cuestionarios' => [
+                'saber_hacer' => \App\Modules\Rrhh\Models\EntrevistaCandidato::SABER_HACER_BLOQUES,
+                'items' => \App\Modules\Rrhh\Models\EntrevistaCandidato::SABER_HACER_ITEMS,
+                'psicologica' => \App\Modules\Rrhh\Models\EntrevistaCandidato::PSICOLOGICA_BLOQUES,
+                'niveles' => \App\Modules\Rrhh\Models\EntrevistaCandidato::NIVELES_EDUCATIVOS,
+            ],
+            'conceptos' => \App\Modules\Rrhh\Enums\ConceptoPsicotecnico::catalogo(),
         ]);
     }
 
@@ -334,6 +347,36 @@ class SeleccionController extends Controller implements HasMiddleware
             'motivo_descarte' => $c->motivo_descarte,
             'elegido' => (bool) $c->elegido_at,
             'desde' => $c->created_at?->format('Y-m-d'),
+            /*
+             * Fase C · Las psicotécnicas.
+             *
+             * Va el CONCEPTO, no el contenido: el informe se abre aparte, por
+             * una ruta que revisa permiso y anota quién lo leyó. Mandar el
+             * texto del informe en el payload del tablero sería repartirlo a
+             * todo el que abra la pantalla.
+             */
+            /*
+             * Fase C · Las entrevistas.
+             *
+             * Va el resumen —tipo, fecha, quién entrevistó y el total—, no
+             * las respuestas: el tablero es una lista de tarjetas y mandar
+             * veinte respuestas de texto por candidato lo volvería lento sin
+             * que nadie las lea desde ahí. El detalle se abre aparte.
+             */
+            'entrevistas' => $c->entrevistas->map(fn ($x) => $x->paraElTablero() + ['id' => $x->id])->values(),
+            'psicotecnicas' => $c->pruebasPsicotecnicas->map(fn ($p) => [
+                'id' => $p->id,
+                'instrumento' => $p->instrumento->value,
+                'prueba' => $p->comoSeLlama(),
+                'concepto' => $p->concepto->value,
+                'concepto_label' => $p->concepto->label(),
+                'color' => $p->concepto->color(),
+                'fecha' => $p->fecha_aplicacion?->toDateString(),
+                'firma' => $p->quienFirma(),
+                'observaciones' => $p->observaciones,
+                'tiene_informe' => $p->tieneSoporte(),
+                'falta' => $p->loQueFalta(),
+            ])->values(),
         ];
     }
 }

@@ -82,12 +82,12 @@ class InventarioUbicacion extends Model
      */
     public function ctaInventarioEfectiva(): string
     {
-        return $this->cta_inventario ?: (string) setting('contable.cta_inventario_default', '1435');
+        return $this->cta_inventario ?: (string) setting('contable.cta_inventario_default');
     }
 
     public function ctaCostoEfectiva(): string
     {
-        return $this->cta_costo ?: (string) setting('contable.cta_costo_default', '6135');
+        return $this->cta_costo ?: (string) setting('contable.cta_costo_default');
     }
 
     protected static function booted(): void

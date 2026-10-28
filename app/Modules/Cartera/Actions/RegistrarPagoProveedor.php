@@ -60,9 +60,18 @@ class RegistrarPagoProveedor
                 'ciudad' => $data['ciudad'] ?? null,
                 'gran_contribuyente' => (bool) ($data['gran_contribuyente'] ?? false),
                 'metodo' => $data['metodo'] ?? 'transferencia',
-                // QA-FIX #10 · leer default desde settings (Silvia lo configura al arranque).
+                /*
+                 * De qué cuenta sale la plata. Silvia la configura en Reglas.
+                 *
+                 * Decía `contabilidad.cta_bancos_default`, y ese grupo no
+                 * existe: todas las reglas contables viven bajo `contable.`.
+                 * Como la clave no estaba registrada, `setting()` devolvía
+                 * siempre el literal '1110' y Silvia no tenía dónde cambiarla
+                 * —el arreglo que decía este comentario nunca llegó a estar
+                 * conectado—.
+                 */
                 'cuenta_puc_egreso' => $data['cuenta_puc_egreso']
-                    ?? setting('contabilidad.cta_bancos_default', '1110'),
+                    ?? setting('contable.cta_bancos_default'),
                 'observaciones' => $data['observaciones'] ?? null,
                 'user_id' => $data['user_id'] ?? auth()->id(),
             ]);

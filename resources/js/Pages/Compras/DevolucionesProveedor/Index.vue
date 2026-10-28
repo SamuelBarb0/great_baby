@@ -2,6 +2,7 @@
 import { Head, Link } from '@inertiajs/vue3';
 import { Undo2, Plus, Eye, Cloud, CloudOff, Clock } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
+import Paginacion from '@/Components/Paginacion.vue';
 import { useMoney } from '@/composables/useMoney';
 
 const { money: formato } = useMoney();
@@ -87,6 +88,7 @@ const badge = (e) => ({
                     </tbody>
                 </table>
             </div>
+            <Paginacion :pagina="items" etiqueta="devoluciones"/>
         </div>
     </AppLayout>
 </template>

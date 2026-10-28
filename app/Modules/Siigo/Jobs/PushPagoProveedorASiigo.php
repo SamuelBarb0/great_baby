@@ -87,6 +87,18 @@ class PushPagoProveedorASiigo implements ShouldQueue
             if (! $p) { $this->log('omitido', 0, "[not-found] pago-prov={$this->pagoId}"); return; }
             if ($p->siigo_voucher_id) { $this->log('omitido', 0, "[idempotente] pago-prov #{$p->id}"); return; }
 
+            /*
+             * Segunda compuerta, por si el job llega por otra via (la red de
+             * seguridad diaria, un reintento viejo en la cola, un
+             * dispatchManual). Un egreso sin revisar no sale a la contabilidad
+             * oficial: esa revision es todo el motivo de que el pago tenga dos
+             * estados. Mismo patron que `PushAsientoManualASiigo`.
+             */
+            if ($p->estado !== 'confirmado') {
+                $this->log('omitido', 0, "[sin-confirmar] pago-prov #{$p->id} esta en «{$p->estado}»");
+                return;
+            }
+
             try {
                 $t0 = microtime(true);
                 $emisor->emitirVoucherEgreso($p);

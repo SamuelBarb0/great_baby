@@ -48,17 +48,31 @@ final class MenuApp
             // MapaColombiaController · puede('mapa_colombia')
             'mapa' => $puede('mapa_colombia'),
             // DashboardController · redirige a su inicio si no es root ni Gerente
-            'torre_control' => $root || $u->hasRole('Gerente'),
+            'torre_control' => $puede('torre_control'),
             // EstacionEmpaqueController · esAracely() || Alistador|AdminBodega
-            'estacion_empaque' => $root || $puede('vista_alistador') || $puede('bodega'),
+            // La estacion de empaque ahora exige `vista_alistador` en su puerta:
+            //   si el menu la ofreciera por `bodega`, volveriamos a ofrecer lo que
+            //   se niega. Es el defecto que este mismo repo ya corrigio cuatro veces.
+            'estacion_empaque' => $puede('vista_alistador'),
 
             // VendedorPedidoController · puede('vendedor')
             'vendedor' => $puede('vendedor'),
 
             // ColaJorgeController · esAracely()||esAdminBodega()||esAlistador()||Despachador
             'cola_alistamiento' => $root || $puede('bodega') || $puede('vista_alistador') || $puede('logistica'),
-            // PedidosB2BController · esEquipoBodega() || Despachador
-            'pedidos_b2b' => $puede('bodega') || $u->hasRole('Despachador'),
+            /*
+             * PedidosB2BController · la puerta ahora deja entrar también a
+             * cartera y a facturación, porque ahí se aprueba y se factura.
+             * El menú tiene que decir lo mismo: al abrirles la puerta sin
+             * tocar esta línea, el Gerente, el Contador y el Facturador
+             * podían entrar a una pantalla que su menú no les ofrecía — la
+             * misma desalineación de siempre, sólo que al revés. Lo cazó
+             * `MenuCoincideConAccesoTest`.
+             */
+            'pedidos_b2b' => $puede('bodega') || $u->hasRole('Despachador')
+                || $puede('contabilidad') || $puede('facturacion')
+                // El vendedor entra acotado a los suyos.
+                || $puede('vendedor'),
 
             // FacturacionController · esAracely() || esFacturador()
             'facturacion' => $puede('facturacion'),
@@ -66,7 +80,7 @@ final class MenuApp
             // Cartera entera (dashboard, facturas, pagos, crédito, notas, etc.) · esContable()
             'cartera' => $puede('contabilidad'),
             // CrmController · esAracely() — no se delega: sólo gerencia.
-            'crm' => $root,
+            'crm' => $puede('crm'),
             // ComisionesController · puede('comisiones') · el cierre mensual
             'comisiones' => $puede('comisiones'),
             // MetodosPagoController · puede('metodos_pago')
@@ -93,22 +107,62 @@ final class MenuApp
             // La PANTALLA de órdenes la abren los dos lados, igual que su
             //   middleware: Gestión Humana pide, la Junta decide.
             'rrhh_ordenes' => $puede('rrhh') || $puede('rrhh_orden_contratacion'),
+            // NovedadesController · el cuadro que se manda al contador.
+            'rrhh_novedades' => $puede('rrhh_novedades'),
+            // La nómina: Gestión Humana, gerencia y tesorería, cada una
+            //   por lo suyo. Es la pantalla donde está el sueldo de todos.
+            'rrhh_nomina' => $puede('rrhh_nomina'),
+            // La bandeja de tesorería la ve quien paga, no quien liquida.
+            'rrhh_tesoreria' => $puede('contabilidad'),
             // IndicadoresRrhhController · los números de toda la empresa, para
             //   Gestión Humana y para la Junta. El líder de área no entra:
             //   esto no es de su equipo.
             'rrhh_indicadores' => $puede('rrhh') || $puede('rrhh_orden_contratacion'),
-            // PortalColaboradorController · el espacio propio del empleado.
-            'portal_colaborador' => $puede('portal_colaborador'),
+            /*
+             * PortalColaboradorController · el espacio propio del empleado.
+             *
+             * No basta el permiso: `miFicha()` responde 403 a quien no esté
+             * enlazado a una ficha de empleado. Y Aracely y Gerencia reciben
+             * TODOS los permisos por el sembrador, así que las dos veían
+             * «👤 Mi espacio» en el menú y se estrellaban contra ese 403.
+             *
+             * Es la misma condición que la puerta: permiso Y ficha.
+             */
+            'portal_colaborador' => $puede('portal_colaborador') && self::tieneFicha($u),
             // AsignacionesController · dotación y herramientas. Lo abren
             //   Gestión Humana (arma el paz y salvo) y el líder (entrega).
             'rrhh_asignaciones' => $puede('rrhh') || $puede('rrhh_requisiciones'),
 
-            // ComprasController (listado de OC) · esContable()
-            'compras_lista' => $puede('contabilidad'),
-            // ComprasGestionController (nueva OC, importación, reporte, recepción) · esEquipoBodega()
-            'compras_gestion' => $puede('bodega'),
+            // ComprasController (listado de OC) · misma puerta que la gestión:
+            //   quien crea una OC tiene que poder ver la lista de las suyas.
+            'compras_lista' => $puede('bodega') || $puede('contabilidad'),
+            /*
+             * ComprasGestionController (nueva OC, importacion, reporte, recepcion).
+             *
+             * La puerta es `esEquipoBodega() || esContable()`: bodega entra para
+             * RECIBIR mercancia y contabilidad porque las OC son de
+             * Aracely/Contador. El menu pedia solo `bodega`, asi que el Gerente
+             * y el Contador PODIAN abrir cuatro pantallas que el menu les
+             * escondia — y no habia como llegar sin escribir la URL.
+             *
+             * Si esta expresion y la del controlador se separan otra vez,
+             * `MenuCoincideConAccesoTest` se pone en rojo. Que es como se
+             * encontro esto.
+             */
+            'compras_gestion' => $puede('bodega') || $puede('contabilidad'),
+            /*
+             * Dentro de Compras, tres pantallas tienen casilla propia desde que
+             * se cablearon: recepcion, importaciones y el reporte. El menu las
+             * ofrece por su casilla, no por el grupo, para que no vuelva a pasar
+             * que la lista las muestre y la pantalla las niegue.
+             */
+            'compras_recepcion' => $puede('compras_recepcion'),
+            'compras_importacion' => $puede('compras_importacion'),
+            'compras_reportes' => $puede('compras_reportes'),
+            'ubicaciones' => $puede('ubicaciones'),
             // DevolucionProveedorController · esEquipoBodega() || Contador
-            'devoluciones_proveedor' => $puede('bodega') || $u->hasRole('Contador'),
+            // Igual que su controlador: por permiso, no por nombre de rol.
+            'devoluciones_proveedor' => $puede('bodega') || $puede('contabilidad'),
 
             // InventarioController / InventarioUbicacionesController · esEquipoBodega()
             'bodega' => $puede('bodega'),
@@ -132,7 +186,7 @@ final class MenuApp
             // Roles, Reglas, Empresa, Plantillas · esAracely()
             'configuracion' => $root,
             // SiigoController · esAracely() || Gerente
-            'siigo' => $root || $u->hasRole('Gerente'),
+            'siigo' => $puede('siigo'),
 
             // El módulo Dropi se opera desde /admin, que ahora es sólo Dropi.
             'dropi' => Permisos::puedeAccederPanel($u),
@@ -143,5 +197,20 @@ final class MenuApp
     public static function clavesDe(?User $u): array
     {
         return array_keys(array_filter(self::permisos($u)));
+    }
+
+    /**
+     * ¿Está esta cuenta enlazada a una ficha de empleado?
+     *
+     * Es lo que «Mi espacio» necesita de verdad, además del permiso.
+     *
+     * Sin memoizar a propósito: un `static` acá sobrevive entre pruebas del
+     * mismo proceso y devolvería «no tiene ficha» después de crearla. Es un
+     * `exists()` sobre columna indexada y el menú se arma una vez por
+     * respuesta; no hay nada que ahorrar.
+     */
+    private static function tieneFicha(User $u): bool
+    {
+        return \App\Modules\Rrhh\Models\Empleado::where('user_id', $u->id)->exists();
     }
 }

@@ -65,11 +65,38 @@ class HandleInertiaRequests extends Middleware
                     ? (int) \App\Modules\Portal\Models\PedidoCliente::where('estado', 'enviado')->count()
                     : 0,
             ],
+            /*
+             * Hay DOS convenciones de aviso conviviendo y una estaba muerta.
+             *
+             * Trece controladores escriben `->with('flash', ['type'=>…, 'message'=>…])`
+             * —61 mensajes— y esta lista fija nunca leia `session('flash')`, asi
+             * que `$page.props.flash.message` era siempre undefined. Los cinco
+             * banners que lo esperan eran HTML muerto desde que se escribieron,
+             * y el toast global tampoco los veia.
+             *
+             * Sintomas reales que no llegaban a nadie: «Debito ≠ Credito, no
+             * cuadra», «Pago #N ya esta en SIIGO», «No se puede eliminar 1105:
+             * tiene subcuentas», y el resumen de importar el PUC entero.
+             *
+             * En vez de reescribir 61 llamadas, se acepta la otra convencion y
+             * ADEMAS se traduce su `type` a la llave que el toast global ya
+             * lee. Asi los mensajes aparecen sin tocar una sola pantalla.
+             */
             'flash' => [
-                'success' => fn () => $request->session()->get('success'),
-                'error' => fn () => $request->session()->get('error'),
-                'warning' => fn () => $request->session()->get('warning'),
-                'info' => fn () => $request->session()->get('info'),
+                'type' => fn () => $request->session()->get('flash')['type'] ?? null,
+                'message' => fn () => $request->session()->get('flash')['message'] ?? null,
+                'success' => fn () => $request->session()->get('success')
+                    ?? (($request->session()->get('flash')['type'] ?? null) === 'success'
+                        ? $request->session()->get('flash')['message'] : null),
+                'error' => fn () => $request->session()->get('error')
+                    ?? (($request->session()->get('flash')['type'] ?? null) === 'error'
+                        ? $request->session()->get('flash')['message'] : null),
+                'warning' => fn () => $request->session()->get('warning')
+                    ?? (($request->session()->get('flash')['type'] ?? null) === 'warning'
+                        ? $request->session()->get('flash')['message'] : null),
+                'info' => fn () => $request->session()->get('info')
+                    ?? (($request->session()->get('flash')['type'] ?? null) === 'info'
+                        ? $request->session()->get('flash')['message'] : null),
                 'empaqueResultado' => fn () => $request->session()->get('empaqueResultado'),
                 'errores' => fn () => $request->session()->get('errores'),
                 'importResumen' => fn () => $request->session()->get('importResumen'),

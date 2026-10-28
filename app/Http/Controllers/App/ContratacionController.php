@@ -12,6 +12,7 @@ use App\Modules\Rrhh\Models\Contratacion;
 use App\Modules\Rrhh\Models\DocumentoEmpleado;
 use App\Modules\Rrhh\Models\Empleado;
 use App\Modules\Rrhh\Models\OrdenContratacion;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controllers\HasMiddleware;
@@ -112,6 +113,15 @@ class ContratacionController extends Controller implements HasMiddleware
                 // el que manda es el autorizado.
                 'salario' => $orden->salario_propuesto,
                 'tipo_contrato' => $orden->tipo_contrato ?: $c->vacante?->tipo_contrato,
+                /*
+                 * La fecha de inicio también sale de la orden.
+                 *
+                 * El formato GH-F-018 la pide junto con el salario, así que es
+                 * parte de lo que la Junta autoriza. Antes se preguntaba
+                 * después, al pactar el acuerdo, y para entonces la firma ya
+                 * estaba puesta sobre un papel sin esa fecha.
+                 */
+                'fecha_ingreso' => $orden->fecha_inicio,
             ],
         );
 
@@ -120,6 +130,68 @@ class ContratacionController extends Controller implements HasMiddleware
         }
 
         return redirect()->route('app.rrhh.contratacion.show', $x->id);
+    }
+
+    /**
+     * Fase D3 · La carta con la lista de papeles que debe traer el aspirante.
+     *
+     * Es GH-F-007. La lista sale del mismo catálogo que ofrece el formulario
+     * de carga y que calcula los pendientes: si fueran listas separadas, la
+     * carta pediría una cosa y la pantalla esperaría otra.
+     *
+     * Marca lo ya recibido, para que en la segunda entrega la persona no
+     * vuelva a traer lo que ya trajo.
+     */
+    public function solicitudDocumentos(Request $r, int $contratacion)
+    {
+        abort_unless(Permisos::puede($r->user(), 'rrhh'), 403);
+
+        $x = Contratacion::with('candidato:id,nombre,documento', 'vacante:id,titulo')
+            ->findOrFail($contratacion);
+
+        $yaEntregados = DocumentoEmpleado::where('candidato_id', $x->candidato_id)
+            ->pluck('tipo')->unique()->values()->all();
+
+        $x->anotar('documentos_solicitados',
+            'Carta de solicitud de documentos generada por '.$r->user()->name);
+
+        return Pdf::loadView('rrhh.pdf.solicitud-documentos', [
+            'persona' => [
+                'nombre' => $x->candidato?->nombre,
+                'documento' => $x->candidato?->documento,
+                'cargo' => $x->vacante?->titulo,
+            ],
+            'documentos' => DocumentoEmpleado::loQueTraeElAspirante(),
+            'yaEntregados' => $yaEntregados,
+            'empresa' => \App\Models\EmpresaConfig::current(),
+            'generadoPor' => $r->user()->name,
+        ])->setPaper('letter')
+            ->stream('solicitud-documentos-'.str($x->candidato?->nombre ?? 'aspirante')->slug().'.pdf');
+    }
+
+    /**
+     * Los papeles obligatorios que todavía no están en la carpeta.
+     *
+     * Sólo los `siempre`: los `si_aplica` dependen del cargo o de la persona
+     * —tarjeta profesional, libreta militar, estudios superiores— y marcarlos
+     * como faltantes llenaría la pantalla de avisos que no son avisos.
+     *
+     * @return array<string> en palabras
+     */
+    private function documentosQueFaltan(Contratacion $x): array
+    {
+        $tiene = DocumentoEmpleado::where('candidato_id', $x->candidato_id)
+            ->pluck('tipo')->unique()->all();
+
+        $faltan = [];
+
+        foreach (DocumentoEmpleado::loQueTraeElAspirante() as $clave => $d) {
+            if ($d['exigencia'] === 'siempre' && ! in_array($clave, $tiene, true)) {
+                $faltan[] = mb_strtolower($d['label']);
+            }
+        }
+
+        return $faltan;
     }
 
     public function show(int $contratacion): Response
@@ -166,6 +238,16 @@ class ContratacionController extends Controller implements HasMiddleware
             'documentos' => $this->documentosDe($x),
             'tipos_documento' => collect(DocumentoEmpleado::TIPOS)
                 ->map(fn ($l, $k) => ['valor' => $k, 'label' => $l])->values(),
+            /*
+             * Lo obligatorio que todavía no llegó.
+             *
+             * NO frena el cierre de la contratación a propósito: hoy nada lo
+             * frenaba y convertirlo en bloqueo de un día para otro dejaría
+             * trabada a la gente que está a mitad de proceso. Avisa, que es lo
+             * que faltaba — antes la carpeta incompleta sólo se notaba cuando
+             * alguien la abría a mirar.
+             */
+            'documentos_faltantes' => $this->documentosQueFaltan($x),
             'resultados_examen' => collect(ValoracionCandidato::cases())->map(fn ($v) => [
                 'valor' => $v->value, 'label' => $v->label(),
             ])->values(),
@@ -327,7 +409,7 @@ class ContratacionController extends Controller implements HasMiddleware
     public function completar(int $contratacion): RedirectResponse
     {
         $x = $this->enProceso($contratacion);
-        $x->load('candidato');
+        $x->load('candidato', 'orden');
 
         if ($x->examenLoFrena()) {
             return back()->withErrors([
@@ -368,6 +450,30 @@ class ContratacionController extends Controller implements HasMiddleware
                 'fecha_ingreso' => $x->fecha_ingreso,
                 'estado' => 'activo',
                 'estado_induccion' => 'pendiente',
+                /*
+                 * Las afiliaciones pasan a la ficha, no se quedan sólo en la
+                 * contratación.
+                 *
+                 * La contratación guarda el TRÁMITE —«se afilió a esta EPS tal
+                 * día»— y eso no responde la pregunta que importa el día de la
+                 * incapacidad, que es en cuál está HOY. Quien cambia de EPS en
+                 * marzo seguía apareciendo con la del ingreso para siempre.
+                 * Acá nace con la del trámite y desde entonces se mantiene en
+                 * la ficha, que es donde Gestión Humana la actualiza.
+                 */
+                'eps' => $x->eps,
+                'arl' => $x->arl,
+                'pension' => $x->pension,
+                'caja' => $x->caja,
+                /*
+                 * Y lo que autorizó la Junta en el formato GH-F-018 pasa a la
+                 * ficha, que es donde el cuadro de novedades lo pide. Antes
+                 * había que volver a digitar el horario y el tipo de pago
+                 * mirando el papel impreso.
+                 */
+                'horario' => $x->orden?->horario,
+                'ciudad' => $x->orden?->ciudad,
+                'periodicidad_pago' => $x->orden?->periodicidad_pago,
             ]);
 
             // La carpeta de papeles lo sigue: ya no es candidato.

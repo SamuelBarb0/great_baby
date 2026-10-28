@@ -24,11 +24,30 @@ const procesando = ref(false);
 const errores = ref({});
 
 const vacio = () => ({
-    cargo: '', area: '', numero_vacantes: 1, motivo: '',
+    cargo: '', area: '', ciudad: '', razon_comercial: '',
+    numero_vacantes: 1, motivo: '',
+    // Las casillas del formato 1 del área. El motivo va en lista cerrada
+    // porque con texto libre no se puede contar nada.
+    tipo_seleccion: '', motivo_seleccion: '', motivo_seleccion_otro: '', horario: '',
     funciones: '', competencias: '', estudios: '', experiencia: '',
     salario_min: null, salario_max: null, tipo_contrato: 'indefinido',
     fecha_requerida: null, observaciones: '',
 });
+
+/* Los dos catálogos del formato, en el mismo orden del papel. */
+const TIPOS_SELECCION = [
+    { valor: 'interna', label: 'Selección interna' },
+    { valor: 'externa', label: 'Selección externa' },
+];
+const MOTIVOS_SELECCION = [
+    { valor: 'reemplazo_titular', label: 'Reemplazo del titular' },
+    { valor: 'ampliacion_planta', label: 'Ampliación de planta' },
+    { valor: 'nuevo_proyecto', label: 'Nuevo proyecto' },
+    { valor: 'reemplazo_vacaciones', label: 'Reemplazo de vacaciones' },
+    { valor: 'reestructuracion', label: 'Reestructuración' },
+    { valor: 'cubrimiento_licencia', label: 'Cubrimiento de licencias' },
+    { valor: 'otro', label: 'Otro' },
+];
 const form = reactive(vacio());
 
 const crear = () => {
@@ -193,6 +212,50 @@ const hayFilas = computed(() => props.requisiciones.data.length > 0);
                             <label class="text-xs font-semibold">¿Cuántas personas? *</label>
                             <input type="number" min="1" v-model.number="form.numero_vacantes" class="input w-full" />
                             <p v-if="errores.numero_vacantes" class="text-xs text-rose-600 mt-1">{{ errores.numero_vacantes }}</p>
+                        </div>
+                    </div>
+
+                    <!-- Las casillas del formato del área -->
+                    <div class="grid sm:grid-cols-3 gap-2">
+                        <div>
+                            <label class="text-xs font-semibold">Ciudad</label>
+                            <input v-model="form.ciudad" class="input w-full" placeholder="Bogotá" />
+                        </div>
+                        <div>
+                            <label class="text-xs font-semibold">Tipo de selección</label>
+                            <select v-model="form.tipo_seleccion" class="input w-full">
+                                <option value="">— sin definir —</option>
+                                <option v-for="t in TIPOS_SELECCION" :key="t.valor" :value="t.valor">
+                                    {{ t.label }}
+                                </option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="text-xs font-semibold">Horario</label>
+                            <input v-model="form.horario" class="input w-full"
+                                placeholder="Lunes a viernes 7:30 a.m. a 5:30 p.m." />
+                        </div>
+                    </div>
+
+                    <div class="grid sm:grid-cols-2 gap-2">
+                        <div>
+                            <label class="text-xs font-semibold">Motivo de la selección</label>
+                            <select v-model="form.motivo_seleccion" class="input w-full">
+                                <option value="">— sin definir —</option>
+                                <option v-for="m in MOTIVOS_SELECCION" :key="m.valor" :value="m.valor">
+                                    {{ m.label }}
+                                </option>
+                            </select>
+                            <p class="text-[11px] text-surface-400 mt-1">
+                                De acá sale «cuántas contrataciones del año fueron ampliación de planta».
+                            </p>
+                        </div>
+                        <div v-if="form.motivo_seleccion === 'otro'">
+                            <label class="text-xs font-semibold">¿Cuál? *</label>
+                            <input v-model="form.motivo_seleccion_otro" class="input w-full" />
+                            <p v-if="errores.motivo_seleccion_otro" class="text-xs text-rose-600 mt-1">
+                                {{ errores.motivo_seleccion_otro }}
+                            </p>
                         </div>
                     </div>
 

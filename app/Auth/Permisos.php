@@ -32,7 +32,9 @@ final class Permisos
         // OPERACIÓN DIARIA
         'torre_control'    => ['Gerente', 'Alistador', 'Contador', 'ServicioCliente', 'Vendedor'],
         'estacion_empaque' => ['Alistador'],
-        'vista_alistador'  => ['Alistador'],
+        // La estacion de empaque la abre `Alistador` o `AdminBodega`: el admin
+        //   de bodega empaca cuando falta gente, y la puerta ya lo dejaba.
+        'vista_alistador'  => ['Alistador', 'AdminBodega'],
         'escanner_camara'  => ['Alistador'],
         'inventario_vivo'  => ['Gerente', 'Alistador', 'Contador'],
 
@@ -74,9 +76,12 @@ final class Permisos
 
         // COMPRAS
         'compras_oc'       => ['Gerente'],
-        'compras_recepcion' => ['Gerente', 'Alistador'],
-        'compras_importacion' => ['Gerente'],
-        'compras_reportes' => ['Gerente', 'Contador'],
+        // Recibir mercancia lo hace bodega, y el Contador la consulta. Los dos
+        //   entraban por `esEquipoBodega() || esContable()`; si no quedan acá,
+        //   el dia que la casilla mande pierden la pantalla.
+        'compras_recepcion' => ['Gerente', 'Alistador', 'AdminBodega', 'Contador'],
+        'compras_importacion' => ['Gerente', 'AdminBodega', 'Contador'],
+        'compras_reportes' => ['Gerente', 'Contador', 'AdminBodega'],
 
         // INVENTARIO
         'traslados'        => ['Gerente', 'Alistador'],
@@ -90,8 +95,10 @@ final class Permisos
         //   piden esRoot aparte en ProductosController, así que el Contador
         //   solo puede leer/editar · lo mínimo para su rol fiscal.
         'productos'        => ['Gerente', 'Contador'],
-        'ubicaciones'      => ['Gerente'],
-        'importar_productos' => ['Gerente'],
+        // Jorge administra sus bodegas: la pantalla ya se le abria.
+        'ubicaciones'      => ['Gerente', 'AdminBodega'],
+        // Entraba por `puede('productos')`, que incluye al Contador.
+        'importar_productos' => ['Gerente', 'Contador'],
         // B3-A5 · llave dedicada para el botón «Sincronizar con SIIGO»
         // (push MANUAL desde ProductoResource). Consume rate limit real y
         // afecta contabilidad en SIIGO, así que la lista es más corta que
@@ -130,12 +137,35 @@ final class Permisos
         //   «solamente los jefes o líderes de área pueden hacer la solicitud».
         'rrhh_requisiciones' => ['Gerente', 'GestionHumana', 'LiderArea'],
         'rrhh_seleccion'     => ['Gerente', 'GestionHumana'],
+        // El cuadro de novedades que se le manda al contador cada mes. Va
+        //   aparte porque es lo único de Gestión Humana que alguien de
+        //   contabilidad podría necesitar abrir sin ver hojas de vida —hoy no
+        //   lo tiene, pero el día que haga falta se reparte desde la pantalla
+        //   de roles en vez de tocar código.
+        'rrhh_novedades'     => ['Gerente', 'GestionHumana'],
         // La orden de contratación la autoriza la JUNTA DIRECTIVA, no Gestión
         //   Humana ni el líder que pidió el personal: «solo ingresa la empresa
         //   realmente a un contrato si viene autorizado por la junta directiva»
         //   (Elena, 19-oct). Por eso es un permiso aparte y NO lo tiene
         //   GestionHumana: si lo tuviera, ella se autorizaría a sí misma.
         'rrhh_orden_contratacion' => ['Gerente'],
+        /*
+         * La nómina es permiso aparte porque es la pantalla donde está el
+         * sueldo de TODO el mundo. Quien lleva requisiciones o selección no
+         * tiene por qué ver cuánto gana el de al lado.
+         *
+         * Contabilidad entra porque le toca pagarla; por eso ve la pantalla
+         * aunque no sea de Gestión Humana.
+         */
+        'rrhh_nomina'        => ['Gerente', 'GestionHumana', 'Contador'],
+        /*
+         * Aprobar es de gerencia y de nadie más, por la misma razón que la
+         * orden de contratación: si Gestión Humana liquidara y aprobara, se
+         * estaría aprobando a sí misma. Son tres manos a propósito —liquida
+         * Gestión Humana, aprueba gerencia, paga tesorería— y un solo botón
+         * de «listo» haría que quien lo apriete firme por las tres.
+         */
+        'rrhh_nomina_aprobar' => ['Gerente'],
         // El portal del propio empleado: sus datos, sus documentos, sus
         //   herramientas y sus avisos. Es lo ÚNICO que abre el rol
         //   `Colaborador`, y nadie más lo necesita —cada quien ve lo suyo
@@ -152,7 +182,9 @@ final class Permisos
 
         // CONFIGURACIÓN — solo root
         'empresa'          => [],
-        'siigo'            => [],
+        // El Gerente monitorea SIIGO desde antes; sin nombrarlo aca lo perderia
+        //   el dia que la casilla mande (Aracely/Gerencia pasan por ser root).
+        'siigo'            => ['Gerente'],
         'usuarios'         => [],
         'plantillas'       => [],
     ];
@@ -188,7 +220,7 @@ final class Permisos
         'Inventario' => ['traslados', 'tomas_fisicas', 'alertas_stock', 'kardex', 'stock_bodegas'],
         'Catálogo' => ['productos', 'ubicaciones', 'importar_productos', 'productos.push_siigo'],
         'Servicio al cliente' => ['garantias', 'servicio_cliente', 'bandeja_importaciones'],
-        'Perfiles operativos' => ['bodega', 'logistica', 'facturacion', 'marketing', 'marketing_parrilla', 'vendedor', 'rrhh', 'rrhh_requisiciones', 'rrhh_seleccion', 'rrhh_orden_contratacion', 'portal_colaborador', 'mapa_colombia'],
+        'Perfiles operativos' => ['bodega', 'logistica', 'facturacion', 'marketing', 'marketing_parrilla', 'vendedor', 'rrhh', 'rrhh_requisiciones', 'rrhh_seleccion', 'rrhh_novedades', 'rrhh_orden_contratacion', 'rrhh_nomina', 'rrhh_nomina_aprobar', 'portal_colaborador', 'mapa_colombia'],
         'Configuración' => ['empresa', 'siigo', 'usuarios', 'plantillas'],
     ];
 
@@ -243,7 +275,10 @@ final class Permisos
         'rrhh' => 'Gestión humana (vacantes y empleados)',
         'rrhh_requisiciones' => 'Solicitar personal y seguir mis solicitudes',
         'rrhh_seleccion' => 'Proceso de selección (candidatos, entrevistas, terna)',
+        'rrhh_novedades' => 'Cuadro de novedades (incapacidades, permisos, horas extra)',
         'rrhh_orden_contratacion' => 'Autorizar contrataciones (Junta Directiva)',
+        'rrhh_nomina' => 'Nómina (liquidar y consultar lo que gana cada quien)',
+        'rrhh_nomina_aprobar' => 'Aprobar la nómina del mes (gerencia)',
         'portal_colaborador' => 'Mi espacio (portal del empleado)',
         'mapa_colombia' => 'Mapa de Colombia',
         'marketing_parrilla' => 'Parrilla de contenido',
@@ -351,6 +386,26 @@ final class Permisos
     /**
      * ¿Es root? (Aracely dueña o Gerencia general)
      */
+    /**
+     * ¿Tiene alguna de estas secciones?
+     *
+     * Para los controladores que atienden varias pantallas con casillas
+     * distintas: la puerta de clase deja entrar si tiene cualquiera, y cada
+     * método exige después la suya. Sin esto habría que elegir una sola clave
+     * por controlador, y las otras volverían a quedar huérfanas — que es
+     * justo lo que estamos arreglando.
+     */
+    public static function tieneAlguno(?User $u, array $secciones): bool
+    {
+        foreach ($secciones as $seccion) {
+            if (self::puede($u, $seccion)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public static function esRoot(?User $u): bool
     {
         return $u && $u->hasAnyRole(['Aracely', 'Gerencia']);

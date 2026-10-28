@@ -5,9 +5,14 @@ import {
     ListTree, Plus, Upload, Download, Search, Pencil, Trash2, X, ArrowLeft,
 } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
+import PestanasSeccion from '@/Components/PestanasSeccion.vue';
+import { pestanasConfigContable } from '@/composables/usePestanasContables';
 import AppConfirmModal from '@/Components/AppConfirmModal.vue';
 
 const props = defineProps({
+    // Eliminar e importar son de gerencia. Antes los botones salian para
+    // cualquier contable y respondian 403.
+    puedeAdministrar: { type: Boolean, default: false },
     filtros: { type: Object, required: true },
     clases: { type: Object, required: true },
     kpis: { type: Object, required: true },
@@ -117,6 +122,8 @@ const colorClase = (clase) => ({
     <Head title="Plan de cuentas (PUC)"/>
     <AppLayout>
         <div class="space-y-4">
+            <PestanasSeccion :pestanas="pestanasConfigContable"/>
+
 
             <Link href="/app/contabilidad" class="text-sm text-brand-600 hover:underline inline-flex items-center gap-1">
                 <ArrowLeft class="h-4 w-4"/> Volver a Contabilidad
@@ -137,7 +144,7 @@ const colorClase = (clase) => ({
                        class="px-3 py-2 text-sm font-semibold rounded border border-surface-300 hover:bg-surface-50 dark:hover:bg-surface-800 inline-flex items-center gap-1.5">
                         <Download class="h-4 w-4"/> Plantilla
                     </a>
-                    <label class="px-3 py-2 text-sm font-semibold rounded bg-blue-600 hover:bg-blue-700 text-white inline-flex items-center gap-1.5 cursor-pointer"
+                    <label v-if="puedeAdministrar" class="px-3 py-2 text-sm font-semibold rounded bg-blue-600 hover:bg-blue-700 text-white inline-flex items-center gap-1.5 cursor-pointer"
                            :class="importando ? 'opacity-50 cursor-wait' : ''">
                         <Upload class="h-4 w-4"/>
                         <span>{{ importando ? 'Importando…' : 'Importar' }}</span>
@@ -236,7 +243,7 @@ const colorClase = (clase) => ({
                                 <button @click="abrirEditar(c)" class="text-brand-600 hover:text-brand-700 p-1" title="Editar">
                                     <Pencil class="h-4 w-4"/>
                                 </button>
-                                <button @click="eliminar(c)" class="text-red-500 hover:text-red-700 p-1 ml-1" title="Eliminar">
+                                <button v-if="puedeAdministrar" @click="eliminar(c)" class="text-red-500 hover:text-red-700 p-1 ml-1" title="Eliminar">
                                     <Trash2 class="h-4 w-4"/>
                                 </button>
                             </td>

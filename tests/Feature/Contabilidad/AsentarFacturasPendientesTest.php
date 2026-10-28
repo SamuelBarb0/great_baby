@@ -73,7 +73,7 @@ it('deja la cuenta de clientes en debe, no en haber', function () {
 
     $this->artisan('contabilidad:asentar-facturas-pendientes');
 
-    $cxc = movimientosDe($f)->where('cuenta_puc', '1305')->first();
+    $cxc = movimientosDe($f)->where('cuenta_puc', cta('cta_cxc_default'))->first();
 
     expect((float) $cxc->debe)->toEqual(320000.0)
         ->and((float) $cxc->haber)->toEqual(0.0);

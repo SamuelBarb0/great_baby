@@ -76,6 +76,14 @@ class RequisicionesController extends Controller implements HasMiddleware
 
         return Inertia::render('Rrhh/Requisiciones/Show', [
             'requisicion' => $this->fila($x) + [
+                'ciudad' => $x->ciudad,
+                'razon_comercial' => $x->razon_comercial,
+                'tipo_seleccion' => $x->tipo_seleccion,
+                'motivo_seleccion' => $x->motivo_seleccion,
+                'motivo_seleccion_otro' => $x->motivo_seleccion_otro,
+                'motivo_en_palabras' => $x->motivoEnPalabras(),
+                'horario' => $x->horario,
+                'faltantes_formato' => $x->faltantesDelFormato(),
                 'motivo' => $x->motivo,
                 'funciones' => $x->funciones,
                 'competencias' => $x->competencias,
@@ -356,11 +364,56 @@ class RequisicionesController extends Controller implements HasMiddleware
         ];
     }
 
+    /**
+     * El formato impreso.
+     *
+     * Era el único de los doce formatos del área que no se podía imprimir:
+     * el flujo estaba completo pero el papel no existía, y el líder que pide
+     * el personal firma papel.
+     */
+    public function pdf(Request $r, int $requisicion)
+    {
+        $x = Requisicion::with('solicitante:id,name')->findOrFail($requisicion);
+
+        abort_unless(
+            Permisos::puede($r->user(), 'rrhh')
+                || $x->solicitante_id === $r->user()->id
+                || Permisos::esRoot($r->user()),
+            403,
+            'Esta requisición es de otra área.',
+        );
+
+        return \Barryvdh\DomPDF\Facade\Pdf::loadView('rrhh.pdf.requisicion', [
+            'x' => $x,
+            'empresa' => \App\Models\EmpresaConfig::current(),
+            'generadoPor' => $r->user()->name,
+        ])->setPaper('letter')
+            ->stream('requisicion-'.$x->numero.'.pdf');
+    }
+
     private function validar(Request $r): array
     {
         return $r->validate([
             'cargo' => ['required', 'string', 'max:160'],
             'area' => ['nullable', 'string', 'max:120'],
+            /*
+             * Las casillas del formato 1 del área. Van `nullable` a propósito:
+             * el líder pide el personal cuando lo necesita, no cuando tiene
+             * todos los datos. El impreso avisa qué quedó en blanco.
+             */
+            'ciudad' => ['nullable', 'string', 'max:80'],
+            'razon_comercial' => ['nullable', 'string', 'max:120'],
+            'tipo_seleccion' => ['nullable', \Illuminate\Validation\Rule::in(
+                array_keys(\App\Modules\Rrhh\Models\Requisicion::TIPOS_SELECCION))],
+            'motivo_seleccion' => ['nullable', \Illuminate\Validation\Rule::in(
+                array_keys(\App\Modules\Rrhh\Models\Requisicion::MOTIVOS_SELECCION))],
+            'motivo_seleccion_otro' => [
+                'nullable', 'string', 'max:120',
+                // «Otro» sin decir cuál no clasifica nada.
+                \Illuminate\Validation\Rule::requiredIf(
+                    fn () => $r->input('motivo_seleccion') === 'otro'),
+            ],
+            'horario' => ['nullable', 'string', 'max:160'],
             'numero_vacantes' => ['required', 'integer', 'min:1', 'max:99'],
             'motivo' => ['nullable', 'string', 'max:500'],
             'funciones' => ['nullable', 'string', 'max:4000'],
@@ -433,6 +486,8 @@ class RequisicionesController extends Controller implements HasMiddleware
             'numero' => $x->numero,
             'cargo' => $x->cargo,
             'area' => $x->area,
+            'ciudad' => $x->ciudad,
+            'motivo_en_palabras' => $x->motivoEnPalabras(),
             'numero_vacantes' => $x->numero_vacantes,
             'estado' => $x->estado->value,
             'estado_label' => $x->estado->label(),

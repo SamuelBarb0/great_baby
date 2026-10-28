@@ -38,6 +38,7 @@ class ReglasController extends Controller implements HasMiddleware
                 'catalogo' => '🏷️ Catálogo',
                 'crm' => '👥 CRM',
                 'contable' => '📚 Contabilidad',
+                'rrhh' => '🧑‍💼 Gestión Humana · novedades',
                 // Faltaba: las 24 reglas de SIIGO se pintaban bajo el título
                 // crudo «siigo», que es justo el grupo donde están los tipos de
                 // documento sin los cuales no sale ni una nota crédito.

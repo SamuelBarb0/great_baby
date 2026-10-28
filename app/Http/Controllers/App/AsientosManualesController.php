@@ -45,7 +45,16 @@ class AsientosManualesController extends Controller implements HasMiddleware
                 'estado' => $estado,
                 'sin_siigo' => $r->boolean('sin_siigo'),
             ],
+            /*
+             * Quién puede aprobar CADA asiento.
+             *
+             * No es una bandera del usuario sino de la fila: nadie aprueba el
+             * suyo propio salvo gerencia. Mandarla por asiento es lo que
+             * permite que el botón no salga donde va a dar 403 — el molde es
+             * el de Gastos, que ya lo hace bien.
+             */
             'asientos' => $q->orderByDesc('fecha')->orderByDesc('id')->paginate(20)->through(fn ($a) => [
+                'puedo_aprobar' => $this->puedeAprobar($r->user(), $a),
                 'id' => $a->id,
                 'fecha' => $a->fecha->format('Y-m-d'),
                 'glosa' => $a->glosa,
@@ -78,7 +87,11 @@ class AsientosManualesController extends Controller implements HasMiddleware
             'fecha' => ['required', 'date'],
             'glosa' => ['required', 'string', 'min:10', 'max:500'],
             'lineas' => ['required', 'array', 'min:2', 'max:50'],
-            'lineas.*.cuenta_puc' => ['required', 'string', 'max:20'],
+            // Tiene que EXISTIR en el plan de cuentas. Sin esto se podia asentar
+            // contra una cuenta inventada: en los reportes salia como «Cuenta
+            // fuera del plan» y el push a SIIGO reventaba despues, cuando ya
+            // nadie recordaba el asiento. `GastosController` ya lo validaba asi.
+            'lineas.*.cuenta_puc' => ['required', 'string', 'max:20', 'exists:plan_cuentas,codigo'],
             'lineas.*.tercero_documento' => ['nullable', 'string', 'max:30'],
             'lineas.*.debe' => ['nullable', 'numeric', 'min:0'],
             'lineas.*.haber' => ['nullable', 'numeric', 'min:0'],
@@ -142,6 +155,29 @@ class AsientosManualesController extends Controller implements HasMiddleware
             ->with('flash', ['type' => 'success', 'message' => "Asiento #{$asiento->id} guardado · cuadrado por $" . number_format($totalDebe, 2) . ". Apruebe para enviar a SIIGO."]);
     }
 
+    /**
+     * ¿Este usuario puede aprobar ESTE asiento?
+     *
+     * La misma condición que aplica `aprobar()`, extraída para que la
+     * pantalla pueda consultarla antes de pintar el botón. Repetirla no sería
+     * un problema; tenerla sólo en la acción sí lo era: el Contador creaba el
+     * asiento, veía el check verde y recibía 403 en su flujo normal.
+     */
+    private function puedeAprobar(?\App\Models\User $u, $asiento): bool
+    {
+        if (! $u || $asiento->estado !== 'cuadrado') {
+            return false;
+        }
+
+        if ($asiento->user_id !== $u->id) {
+            return true;
+        }
+
+        // Es el suyo: sólo gerencia, o si la empresa habilitó la autoaprobación.
+        return $u->esRoot() || $u->hasRole('Gerente')
+            || (bool) setting('contabilidad.permitir_auto_aprobar_asiento');
+    }
+
     public function aprobar(Request $r, AsientoManual $asientoManual): RedirectResponse
     {
         if ($asientoManual->estado !== 'cuadrado') {
@@ -155,9 +191,17 @@ class AsientosManualesController extends Controller implements HasMiddleware
         //   esRoot() = Aracely+Gerencia; agregamos Gerente para preservar el
         //   comportamiento original (3 roles aprobaban antes).
         $esGerencia = $u && ($u->esRoot() || $u->hasRole('Gerente'));
-        $permitirAuto = (bool) (function_exists('setting') ? setting('contabilidad.permitir_auto_aprobar_asiento', true) : true);
+        /*
+         * Mismo default invertido que en las OC: decia `true` contra su propio
+         * comentario, asi que el 403 nunca salia. Y un asiento manual es la
+         * herramienta mas poderosa del modulo —cualquier cuenta, cualquier
+         * monto— y al aprobarlo viaja a SIIGO, que es la contabilidad oficial.
+         */
+        $permitirAuto = (bool) (function_exists('setting') ? setting('contabilidad.permitir_auto_aprobar_asiento', false) : false);
         if ($asientoManual->user_id === $u->id && ! $esGerencia && ! $permitirAuto) {
-            abort(403, 'Segregación de funciones: quien crea un asiento no puede aprobarlo. Solicita aprobación a Gerencia.');
+            abort(403, 'Segregación de funciones: quien crea un asiento no puede aprobarlo. '
+                .'Pedile la aprobación a Gerencia, o desactivá «Permitir que quien crea un asiento manual '
+                .'lo apruebe» en Reglas de negocio → Contable.');
         }
         $asientoManual->update(['estado' => 'aprobado']);
         // A2 FIX · B2 CRÍTICO · afterCommit evita job huérfano si una

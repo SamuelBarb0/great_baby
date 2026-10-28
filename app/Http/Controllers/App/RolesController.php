@@ -29,7 +29,9 @@ class RolesController extends Controller implements HasMiddleware
     {
         return [new Middleware(function (Request $r, \Closure $next) {
             // Repartir accesos es lo más sensible del sistema: sólo root.
-            abort_unless(Permisos::esRoot($r->user()), 403,
+            // Casilla: Usuarios. Es la pantalla donde se reparten los accesos,
+                //   asi que tambien se reparte desde una casilla.
+                abort_unless(Permisos::puede($r->user(), 'usuarios'), 403,
                 'Sólo Aracely o Gerencia pueden administrar roles.');
 
             return $next($r);

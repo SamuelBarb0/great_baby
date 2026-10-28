@@ -34,18 +34,48 @@ class ComprasGestionController extends Controller implements HasMiddleware
     {
         return [
             new Middleware(function (Request $r, \Closure $next) {
-                // LOG · AdminBodega entra para RECIBIR mercancía y gestionar
-                //   devoluciones a proveedor desde el menú Bodega. Las OC y
-                //   el reporte de compras siguen siendo de Aracely/Contador
-                //   (ellos NO aparecen en el menú del AdminBodega).
-                abort_unless($r->user()?->esEquipoBodega(), 403);
+                /*
+                 * Dos equipos trabajan sobre las compras y los dos tienen que
+                 * entrar: bodega para RECIBIR mercancia y gestionar devoluciones
+                 * al proveedor, y contabilidad porque las OC son de
+                 * Aracely/Contador —lo decia el comentario de este mismo guard,
+                 * pero el guard pedia solo bodega—.
+                 *
+                 * El sintoma: el Contador veia el listado de /app/compras
+                 * (guardado por `esContable`), hacia clic en cualquier orden y
+                 * recibia un 403. La puerta de la pantalla y la del detalle
+                 * pedian cosas distintas.
+                 *
+                 * Quien ve que en el menu lo decide el menu, no esta puerta.
+                 */
+                $u = $r->user();
+                /*
+                 * La puerta del modulo. Cada pantalla de adentro exige despues
+                 * su propia casilla.
+                 *
+                 * Se agrego `tieneAlguno`: la matriz le daba `compras_recepcion`
+                 * al Alistador desde siempre —recibir mercancia es su tarea—, y
+                 * esta puerta lo frenaba antes de llegar al metodo, porque pedia
+                 * `bodega` y el alistador tiene `vista_alistador`. El menu se lo
+                 * ofrecia y la pantalla se lo negaba. El propio comentario de
+                 * `recepcionForm` ya describia el sintoma: «quien recibe la
+                 * mercancia chocaba contra un 403 justo en su tarea principal».
+                 */
+                abort_unless(
+                    $u?->esEquipoBodega() || $u?->esContable()
+                        || \App\Auth\Permisos::tieneAlguno($u, [
+                            'compras_oc', 'compras_recepcion',
+                            'compras_importacion', 'compras_reportes',
+                        ]),
+                    403
+                );
                 return $next($r);
             }),
         ];
     }
 
     // ================== ORDEN DE COMPRA ==================
-    public function ocShow(int $orden): Response
+    public function ocShow(Request $r, int $orden): Response
     {
         $o = OrdenCompra::with(['proveedor:id,nombre_completo,razon_social', 'items'])->findOrFail($orden);
 
@@ -65,6 +95,17 @@ class ComprasGestionController extends Controller implements HasMiddleware
         };
 
         return Inertia::render('Compras/OC/Show', [
+            /*
+             * El impreso de la OC es sólo de Aracely/Gerencia (lleva costos
+             * de proveedor). El enlace salía igual para todos: el
+             * Contador, el Gerente y el admin de bodega entran
+             * legítimamente a la OC, ven «PDF» y reciben 403.
+             */
+            'puede_pdf' => $r->user()?->esAracely() ?? false,
+            // Mismo motivo que `puede_pdf`: el botón «Aprobar» salía para
+            // todo el que entrara a la OC, y aprobar compromete plata.
+            'puede_aprobar' => \App\Auth\Permisos::puede($r->user(), 'compras_oc')
+                || ($r->user()?->esAracely() ?? false),
             'orden' => [
                 'id' => $o->id,
                 'numero' => $o->numero,
@@ -81,6 +122,15 @@ class ComprasGestionController extends Controller implements HasMiddleware
                 'total' => (float) $o->total,
                 'descuento' => (float) $o->descuento,
                 'observaciones' => $o->observaciones,
+                // Si la compra se declara o no. La pantalla lo necesita para no
+                // ofrecer «Enviar a SIIGO» en una compra que decidieron no
+                // declarar: el boton existia y el envio reventaba despues.
+                'destino' => ($o->destino_fiscal ?? \App\Modules\Contabilidad\Enums\DestinoFiscal::Siigo)->value,
+                'destino_label' => ($o->destino_fiscal ?? \App\Modules\Contabilidad\Enums\DestinoFiscal::Siigo)->label(),
+                'destino_color' => ($o->destino_fiscal ?? \App\Modules\Contabilidad\Enums\DestinoFiscal::Siigo)->color(),
+                'motivo_destino' => $o->motivo_destino,
+                'linea_label' => ($o->linea_negocio ?? \App\Modules\Contabilidad\Enums\LineaNegocio::GreatBaby)->label(),
+                'va_a_siigo' => ($o->destino_fiscal ?? \App\Modules\Contabilidad\Enums\DestinoFiscal::Siigo)->tieneParteFiscal(),
                 'items' => $o->items->map(fn ($i) => [
                     'id' => $i->id, 'descripcion' => $i->descripcion,
                     'cantidad' => (float) $i->cantidad, 'cantidad_recibida' => (float) $i->cantidad_recibida,
@@ -108,6 +158,15 @@ class ComprasGestionController extends Controller implements HasMiddleware
 
     public function ocForm(): Response
     {
+        /*
+         * La puerta de clase se ensancho para que el Alistador llegara a
+         * recepcion. Las pantallas de la OC conservan su publico de
+         * siempre: bodega y contabilidad arman la orden, y `ocAprobar`
+         * exige ademas la casilla `compras_oc` para firmarla.
+         */
+        abort_unless(request()->user()?->esEquipoBodega() || request()->user()?->esContable(), 403,
+            'Las ordenes de compra las arma bodega o contabilidad.');
+
         return Inertia::render('Compras/OC/Nueva', [
             // COMP-B10 · incluir numero_documento para búsqueda por NIT en el autocomplete.
             'proveedores' => \App\Models\Contacto::where('es_proveedor', true)->where('activo', true)
@@ -125,6 +184,15 @@ class ComprasGestionController extends Controller implements HasMiddleware
 
     public function ocCrear(Request $r): RedirectResponse
     {
+        /*
+         * La puerta de clase se ensancho para que el Alistador llegara a
+         * recepcion. Las pantallas de la OC conservan su publico de
+         * siempre: bodega y contabilidad arman la orden, y `ocAprobar`
+         * exige ademas la casilla `compras_oc` para firmarla.
+         */
+        abort_unless($r->user()?->esEquipoBodega() || $r->user()?->esContable(), 403,
+            'Las ordenes de compra las arma bodega o contabilidad.');
+
         $data = $r->validate([
             'proveedor_id' => ['required', 'integer', 'exists:contactos,id'],
             // Re-audit M2 UX-A4 · bodega ahora obligatoria al crear (antes silenciosa).
@@ -149,8 +217,28 @@ class ComprasGestionController extends Controller implements HasMiddleware
         return redirect()->route('app.compras.oc.show', $oc->id)->with('success', "OC {$oc->numero} creada.");
     }
 
-    public function ocAprobar(int $orden): RedirectResponse
+    public function ocAprobar(Request $r, int $orden): RedirectResponse
     {
+        /*
+         * Aprobar una OC compromete plata con un proveedor.
+         *
+         * La puerta de clase es `esEquipoBodega() || esContable()`, que está
+         * bien para VER compras (bodega recibe mercancía y necesita el
+         * listado), pero dejaba que un admin de bodega aprobara la orden. La
+         * Action sí tiene segregación de funciones, sólo que impide que la
+         * apruebe QUIEN LA CREÓ: si la creaba Aracely, Jorge la aprobaba.
+         *
+         * Y la llave correcta ya estaba declarada en la matriz desde el
+         * principio —`compras_oc => ['Gerente']`— sin que ningún control la
+         * consultara. Es una de las 23 casillas de /app/roles que no
+         * gobernaban nada; ésta ya gobierna.
+         */
+        abort_unless(
+            \App\Auth\Permisos::puede($r->user(), 'compras_oc') || $r->user()?->esAracely(),
+            403,
+            'Aprobar una orden de compra es de Gerencia.'
+        );
+
         $o = OrdenCompra::findOrFail($orden);
         AprobarOrdenCompra::run($o);
         return back()->with('success', "OC {$o->numero} aprobada.");
@@ -162,6 +250,15 @@ class ComprasGestionController extends Controller implements HasMiddleware
      */
     public function ocDuplicar(int $orden): RedirectResponse
     {
+        /*
+         * La puerta de clase se ensancho para que el Alistador llegara a
+         * recepcion. Las pantallas de la OC conservan su publico de
+         * siempre: bodega y contabilidad arman la orden, y `ocAprobar`
+         * exige ademas la casilla `compras_oc` para firmarla.
+         */
+        abort_unless(request()->user()?->esEquipoBodega() || request()->user()?->esContable(), 403,
+            'Las ordenes de compra las arma bodega o contabilidad.');
+
         $o = OrdenCompra::with('items')->findOrFail($orden);
 
         // Reutiliza CrearOrdenCompra armando el payload desde la OC original.
@@ -293,6 +390,10 @@ class ComprasGestionController extends Controller implements HasMiddleware
 
     public function recepcionForm(Request $request): Response
     {
+        // Casilla: Recepcion de mercancia.
+        abort_unless(\App\Auth\Permisos::puede($request->user(), 'compras_recepcion'), 403,
+            'Esta parte de Compras necesita su propio acceso.');
+
         $ocId = (int) $request->input('oc', 0);
         $oc = $ocId ? OrdenCompra::with(['items', 'proveedor:id,nombre_completo,razon_social'])->find($ocId) : null;
 
@@ -331,6 +432,10 @@ class ComprasGestionController extends Controller implements HasMiddleware
 
     public function recepcionCrear(Request $r): RedirectResponse
     {
+        // Casilla: Recepcion de mercancia.
+        abort_unless(\App\Auth\Permisos::puede($r->user(), 'compras_recepcion'), 403,
+            'Esta parte de Compras necesita su propio acceso.');
+
         // Re-audit M2 R3 PATRÓN Q (FUNC-C3) · TX UNIFICADA. Antes había una tx
         //   externa que committeaba `RecepcionCompra` + items, y DESPUÉS otra
         //   tx en `RecibirMercancia::handle`. Si el Action tronaba, quedaba
@@ -462,6 +567,10 @@ class ComprasGestionController extends Controller implements HasMiddleware
      */
     public function importacionIndex(Request $r): Response
     {
+        // Casilla: Importaciones.
+        abort_unless(\App\Auth\Permisos::puede($r->user(), 'compras_importacion'), 403,
+            'Esta parte de Compras necesita su propio acceso.');
+
         $q = Importacion::query();
         if ($busca = trim((string) $r->query('q', ''))) {
             $q->where(function ($qq) use ($busca) {
@@ -542,11 +651,19 @@ class ComprasGestionController extends Controller implements HasMiddleware
      */
     public function importacionForm(): Response
     {
+        // Casilla: Importaciones.
+        abort_unless(\App\Auth\Permisos::puede(request()->user(), 'compras_importacion'), 403,
+            'Esta parte de Compras necesita su propio acceso.');
+
         return Inertia::render('Compras/Importacion/Nueva');
     }
 
     public function importacionCrear(Request $r): RedirectResponse
     {
+        // Casilla: Importaciones.
+        abort_unless(\App\Auth\Permisos::puede($r->user(), 'compras_importacion'), 403,
+            'Esta parte de Compras necesita su propio acceso.');
+
         $data = $r->validate([
             'contenedor' => ['nullable', 'string', 'max:50'],
             'bl_awb' => ['nullable', 'string', 'max:50'],
@@ -570,6 +687,10 @@ class ComprasGestionController extends Controller implements HasMiddleware
 
     public function importacionGastoAgregar(Request $r, int $importacion): RedirectResponse
     {
+        // Casilla: Importaciones.
+        abort_unless(\App\Auth\Permisos::puede($r->user(), 'compras_importacion'), 403,
+            'Esta parte de Compras necesita su propio acceso.');
+
         // Re-audit M2 PATRÓN L (FUNC-A6 / DATOS-A7) · unificado con Action:
         // valor|cantidad|peso|volumen (antes HTTP aceptaba "fob" que caía al
         // default silenciosamente y rechazaba "peso" que Filament sí ofrece).
@@ -603,6 +724,10 @@ class ComprasGestionController extends Controller implements HasMiddleware
 
     public function importacionLiquidar(int $importacion): RedirectResponse
     {
+        // Casilla: Importaciones.
+        abort_unless(\App\Auth\Permisos::puede(request()->user(), 'compras_importacion'), 403,
+            'Esta parte de Compras necesita su propio acceso.');
+
         $imp = Importacion::findOrFail($importacion);
         abort_if($imp->estado === EstadoImportacion::Liquidada, 422, 'Ya liquidada.');
         LiquidarImportacion::run($imp);
@@ -612,6 +737,10 @@ class ComprasGestionController extends Controller implements HasMiddleware
     // ================== REPORTE COMPRAS ==================
     public function reporte(\Illuminate\Http\Request $request): Response
     {
+        // Casilla: Reportes de compras.
+        abort_unless(\App\Auth\Permisos::puede($request->user(), 'compras_reportes'), 403,
+            'Esta parte de Compras necesita su propio acceso.');
+
         // COMP-B9 · filtros fecha editables + comparativa mes anterior.
         $tz = 'America/Bogota';
         $inicio = $request->filled('desde')

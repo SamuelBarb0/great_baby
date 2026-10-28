@@ -7,10 +7,12 @@ use App\Http\Controllers\Controller;
 use App\Models\NotificacionErp;
 use App\Models\User;
 use App\Modules\Rrhh\Models\Empleado;
+use App\Modules\Rrhh\Models\EvaluacionPrueba;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controllers\HasMiddleware;
 use Illuminate\Routing\Controllers\Middleware;
+use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -69,7 +71,28 @@ class MiEquipoController extends Controller implements HasMiddleware
             ])->values(),
             'pendientes' => $gente->filter(fn ($e) => $e->estado === 'activo'
                 && $e->prueba_hasta && ! $e->tieneConceptoDelJefe() && ! $e->prueba_evaluada_at)->count(),
+            // Los nueve aspectos del GH-F-015, del servidor y no escritos en
+            // el Vue: la pantalla y el impreso tienen que calificar lo mismo.
+            'aspectos' => EvaluacionPrueba::catalogo(),
+            // Su propio cargo, para no hacérselo escribir: si está registrado
+            // como empleado, el sistema ya lo sabe.
+            'mi_cargo' => Empleado::where('user_id', $r->user()->id)->value('cargo') ?? '',
         ]);
+    }
+
+    /**
+     * Las nueve notas del formato, de 1 a 5.
+     *
+     * Ninguna es obligatoria: el formato se llena de a poco, y «manejo de
+     * personal» ni siquiera aplica a todos. Lo que sí se valida es el RANGO —
+     * un 7 en una escala de 1 a 5 no es un error de criterio sino de dedo, y
+     * si entra, el promedio que alguien lea después miente.
+     */
+    private function reglasDeAspectos(): array
+    {
+        return collect(array_keys(EvaluacionPrueba::ASPECTOS))
+            ->mapWithKeys(fn (string $a) => [$a => ['nullable', 'integer', 'min:1', 'max:5']])
+            ->all();
     }
 
     /**
@@ -82,7 +105,11 @@ class MiEquipoController extends Controller implements HasMiddleware
         $data = $r->validate([
             'resultado' => ['required', 'in:continua,no_continua'],
             'observacion' => ['nullable', 'string', 'max:500'],
-        ]);
+            // Fase E · el detalle del formato GH-F-015.
+            'aspectos_resaltar' => ['nullable', 'string', 'max:2000'],
+            'aspectos_mejorar' => ['nullable', 'string', 'max:2000'],
+            'jefe_cargo' => ['nullable', 'string', 'max:120'],
+        ] + $this->reglasDeAspectos());
 
         $e = Empleado::with('vacante.requisicion')->findOrFail($empleado);
 
@@ -102,12 +129,35 @@ class MiEquipoController extends Controller implements HasMiddleware
             return back()->withErrors(['observacion' => 'Decí por qué considerás que no continúa.']);
         }
 
-        $e->update([
-            'prueba_jefe_at' => now(),
-            'prueba_jefe_por_id' => $r->user()->id,
-            'prueba_jefe_resultado' => $data['resultado'],
-            'prueba_jefe_observacion' => $observacion,
-        ]);
+        /*
+         * El veredicto y el detalle del formato se escriben juntos.
+         *
+         * El veredicto sigue en el empleado porque es lo que ya leen la
+         * pantalla, los avisos y la decisión de Gestión Humana. El detalle va
+         * aparte porque puede haber más de una evaluación: si el período se
+         * prorroga, la segunda no debe pisar a la primera.
+         */
+        DB::transaction(function () use ($e, $r, $data, $observacion) {
+            $e->update([
+                'prueba_jefe_at' => now(),
+                'prueba_jefe_por_id' => $r->user()->id,
+                'prueba_jefe_resultado' => $data['resultado'],
+                'prueba_jefe_observacion' => $observacion,
+            ]);
+
+            EvaluacionPrueba::create(collect($data)
+                ->only(array_keys(EvaluacionPrueba::ASPECTOS))
+                ->merge([
+                    'empleado_id' => $e->id,
+                    'fecha_evaluacion' => now()->toDateString(),
+                    'jefe_id' => $r->user()->id,
+                    'jefe_cargo' => $data['jefe_cargo'] ?? null,
+                    'aspectos_resaltar' => $data['aspectos_resaltar'] ?? null,
+                    'aspectos_mejorar' => $data['aspectos_mejorar'] ?? null,
+                    'resultado' => $data['resultado'],
+                    'motivo' => $observacion,
+                ])->all());
+        });
         $e->anotar('prueba_concepto_jefe', trim(
             "Concepto del jefe ({$r->user()->name}): ".
             ($data['resultado'] === 'continua' ? 'continúa' : 'no continúa').' · '.$observacion, ' ·'

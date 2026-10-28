@@ -62,7 +62,18 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
 
     // Cartera · Facturas
     Route::get('/facturas', [\App\Http\Controllers\App\FacturasController::class, 'index'])->name('app.facturas.index');
+    /*
+     * F2b · las dos puertas para crear facturas que no vienen de un pedido.
+     * Van ANTES de `/facturas/{factura}`: si quedaran despues, «plantilla-excel»
+     * entraria por el route-model binding y moriria en un 404.
+     */
+    Route::get('/facturas/plantilla-excel', [\App\Http\Controllers\App\FacturasController::class, 'plantillaExcel'])->middleware('throttle:20,1')->name('app.facturas.plantilla');
+    Route::post('/facturas/manual', [\App\Http\Controllers\App\FacturasController::class, 'guardarManual'])->middleware('throttle:30,1')->name('app.facturas.manual');
+    Route::post('/facturas/importar-excel/previa', [\App\Http\Controllers\App\FacturasController::class, 'previsualizarExcel'])->middleware('throttle:20,1')->name('app.facturas.importar.previa');
+    Route::post('/facturas/importar-excel', [\App\Http\Controllers\App\FacturasController::class, 'importarExcel'])->middleware('throttle:10,1')->name('app.facturas.importar');
     Route::get('/facturas/{factura}', [\App\Http\Controllers\App\FacturasController::class, 'show'])->name('app.facturas.show');
+    // F2 · cambiar el destino fiscal de una factura o de varias desde el listado.
+    Route::post('/facturas/destino', [\App\Http\Controllers\App\FacturasController::class, 'cambiarDestino'])->middleware('throttle:30,1')->name('app.facturas.destino');
 
     // Rol Facturador · bandeja de pedidos listos para facturar en SIIGO.
     Route::get('/facturacion/bandeja', [\App\Http\Controllers\App\FacturacionController::class, 'bandeja'])->middleware('throttle:30,1')->name('app.facturacion.bandeja');
@@ -71,6 +82,9 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
 
     // Acciones SIIGO sobre facturas (anular/mail/PDF/XML/errores DIAN).
     Route::post('/facturas/{factura}/siigo/anular', [\App\Http\Controllers\App\FacturasSiigoAccionesController::class, 'anular'])->middleware('throttle:10,1')->name('app.facturas.siigo.anular');
+    // Reencolar la factura a SIIGO. Lo tenian las otras siete entidades que
+    //   viajan y no la factura de venta, que es la unica con plazo legal.
+    Route::post('/facturas/{factura}/reenviar-siigo', [\App\Http\Controllers\App\FacturasSiigoAccionesController::class, 'reenviarSiigo'])->middleware('throttle:20,1')->name('app.facturas.siigo.reenviar');
     Route::post('/facturas/{factura}/siigo/reenviar-mail', [\App\Http\Controllers\App\FacturasSiigoAccionesController::class, 'reenviarMail'])->middleware('throttle:20,1')->name('app.facturas.siigo.reenviar-mail');
     Route::get('/facturas/{factura}/siigo/pdf', [\App\Http\Controllers\App\FacturasSiigoAccionesController::class, 'pdf'])->middleware('throttle:30,1')->name('app.facturas.siigo.pdf');
     Route::get('/facturas/{factura}/siigo/xml', [\App\Http\Controllers\App\FacturasSiigoAccionesController::class, 'xml'])->middleware('throttle:30,1')->name('app.facturas.siigo.xml');
@@ -106,6 +120,7 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     Route::delete('/cartera/comisiones/config/{config}', [\App\Http\Controllers\App\ComisionesController::class, 'eliminarConfig'])->name('app.comisiones.config.eliminar');
 
     Route::get('/pagos', [\App\Http\Controllers\App\PagosController::class, 'index'])->name('app.pagos.index');
+    Route::get('/pagos/csv', [\App\Http\Controllers\App\PagosController::class, 'exportar'])->middleware('throttle:10,1')->name('app.pagos.csv');
     // Registrar plata entrando · antes sólo existía en el panel Filament.
     Route::get('/pagos/facturas-pendientes', [\App\Http\Controllers\App\PagosController::class, 'facturasPendientes'])
         ->middleware('throttle:60,1')->name('app.pagos.facturas');
@@ -121,9 +136,15 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     Route::post('/cartera/solicitudes/{solicitud}/resolver', [\App\Http\Controllers\App\CarteraExtrasController::class, 'solicitudResolver'])->name('app.cartera.solicitud.resolver');
     // Re-audit M5 R4 SEG-M4 · throttle en agregados pesados.
     Route::get('/cartera/movimientos', [\App\Http\Controllers\App\CarteraExtrasController::class, 'movimientos'])->middleware('throttle:30,1')->name('app.cartera.movimientos');
+    // F2c · el export se lleva EL MISMO filtro que pinto la tabla.
+    Route::get('/cartera/movimientos/csv', [\App\Http\Controllers\App\CarteraExtrasController::class, 'movimientosCsv'])->middleware('throttle:10,1')->name('app.cartera.movimientos.csv');
 
     // Compras / Inventario / Contabilidad
     Route::get('/compras', [\App\Http\Controllers\App\ComprasController::class, 'index'])->name('app.compras.index');
+    Route::get('/compras/csv', [\App\Http\Controllers\App\ComprasController::class, 'exportar'])->middleware('throttle:10,1')->name('app.compras.csv');
+    // Si una compra se declara o no. Se decide en la orden y la arrastran
+    // las recepciones que todavia no viajaron a SIIGO.
+    Route::post('/compras/destino', [\App\Http\Controllers\App\ComprasController::class, 'cambiarDestino'])->middleware('throttle:30,1')->name('app.compras.destino');
     // Re-audit M2 R3 PATRÓN R (SEG-A5) · throttle en agregados/mutaciones.
     Route::get('/compras/reporte', [\App\Http\Controllers\App\ComprasGestionController::class, 'reporte'])->middleware('throttle:30,1')->name('app.compras.reporte');
     Route::get('/compras/oc/nueva', [\App\Http\Controllers\App\ComprasGestionController::class, 'ocForm'])->name('app.compras.oc.nueva');
@@ -420,6 +441,8 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     Route::post('/gastos', [\App\Http\Controllers\App\GastosController::class, 'crear'])->name('app.gastos.crear');
     Route::post('/gastos/{gasto}/aprobar', [\App\Http\Controllers\App\GastosController::class, 'aprobar'])->name('app.gastos.aprobar');
     Route::post('/gastos/{gasto}/rechazar', [\App\Http\Controllers\App\GastosController::class, 'rechazar'])->name('app.gastos.rechazar');
+    // Lo que el contador decide: contra que cuenta va el gasto y si se declara.
+    Route::post('/gastos/{gasto}/contabilizar', [\App\Http\Controllers\App\GastosController::class, 'contabilizar'])->middleware('throttle:30,1')->name('app.gastos.contabilizar');
     Route::post('/gastos/{gasto}/pagado', [\App\Http\Controllers\App\GastosController::class, 'marcarPagado'])->name('app.gastos.pagado');
 
     // M9 · Gestión Humana
@@ -430,6 +453,8 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     Route::post('/rrhh/requisiciones', [\App\Http\Controllers\App\RequisicionesController::class, 'store'])->name('app.rrhh.requisicion.crear');
     Route::get('/rrhh/requisiciones/{requisicion}', [\App\Http\Controllers\App\RequisicionesController::class, 'show'])->name('app.rrhh.requisicion.show');
     Route::put('/rrhh/requisiciones/{requisicion}', [\App\Http\Controllers\App\RequisicionesController::class, 'update'])->name('app.rrhh.requisicion.actualizar');
+    // El formato impreso · era el único de los doce sin PDF.
+    Route::get('/rrhh/requisiciones/{requisicion}/pdf', [\App\Http\Controllers\App\RequisicionesController::class, 'pdf'])->name('app.rrhh.requisicion.pdf');
     Route::post('/rrhh/requisiciones/{requisicion}/enviar', [\App\Http\Controllers\App\RequisicionesController::class, 'enviar'])->name('app.rrhh.requisicion.enviar');
     Route::post('/rrhh/requisiciones/{requisicion}/aprobar', [\App\Http\Controllers\App\RequisicionesController::class, 'aprobar'])->name('app.rrhh.requisicion.aprobar');
     Route::post('/rrhh/requisiciones/{requisicion}/rechazar', [\App\Http\Controllers\App\RequisicionesController::class, 'rechazar'])->name('app.rrhh.requisicion.rechazar');
@@ -464,6 +489,16 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     Route::post('/rrhh/reportes/{reporte}/atender', [\App\Http\Controllers\App\AsignacionesController::class, 'atenderReporte'])->name('app.rrhh.reporte.atender');
 
     // F11 · Los indicadores que se le presentan a la Junta Directiva.
+    // Fase B · El cuadro de novedades que se le manda al contador cada mes.
+    //   De acá sale el ausentismo de los indicadores: antes de esto el
+    //   indicador existía pero devolvía «no disponible».
+    Route::get('/rrhh/novedades', [\App\Http\Controllers\App\NovedadesController::class, 'index'])->name('app.rrhh.novedades');
+    Route::post('/rrhh/novedades', [\App\Http\Controllers\App\NovedadesController::class, 'store'])->name('app.rrhh.novedad.crear');
+    Route::put('/rrhh/novedades/{novedad}', [\App\Http\Controllers\App\NovedadesController::class, 'update'])->name('app.rrhh.novedad.actualizar');
+    Route::delete('/rrhh/novedades/{novedad}', [\App\Http\Controllers\App\NovedadesController::class, 'destroy'])->name('app.rrhh.novedad.eliminar');
+    Route::get('/rrhh/novedades/exportar', [\App\Http\Controllers\App\NovedadesController::class, 'exportar'])->name('app.rrhh.novedades.exportar');
+    Route::get('/rrhh/novedades/{novedad}/soporte', [\App\Http\Controllers\App\NovedadesController::class, 'verSoporte'])->name('app.rrhh.novedad.soporte');
+
     Route::get('/rrhh/indicadores', [\App\Http\Controllers\App\IndicadoresRrhhController::class, 'index'])->name('app.rrhh.indicadores');
     Route::get('/rrhh/indicadores/pdf', [\App\Http\Controllers\App\IndicadoresRrhhController::class, 'pdf'])->name('app.rrhh.indicadores.pdf');
     Route::get('/rrhh/indicadores/retiros', [\App\Http\Controllers\App\IndicadoresRrhhController::class, 'retirosExcel'])->name('app.rrhh.indicadores.retiros');
@@ -477,10 +512,58 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     Route::get('/rrhh/exportar/vacantes/{vacante}/candidatos', [\App\Http\Controllers\App\ExportacionRrhhController::class, 'candidatosExcel'])->name('app.rrhh.exportar.candidatos');
     Route::get('/rrhh/exportar/requisiciones', [\App\Http\Controllers\App\ExportacionRrhhController::class, 'requisicionesExcel'])->name('app.rrhh.exportar.requisiciones');
 
+    // F8 · La inducción con temario. Antes era un campo de texto libre que
+    //      de siete personas llenó una.
+    Route::post('/rrhh/empleados/{empleado}/induccion-temario', [\App\Http\Controllers\App\InduccionController::class, 'guardar'])->name('app.rrhh.induccion.guardar');
+    Route::get('/rrhh/empleados/{empleado}/induccion-temario/pdf', [\App\Http\Controllers\App\InduccionController::class, 'pdf'])->name('app.rrhh.induccion.pdf');
+
+    // F10 · La liquidación definitiva del contrato. Vive en la ficha de la
+    //       persona, al lado de la entrevista de retiro y la entrega de
+    //       cargo: las tres son lo que pasa cuando alguien sale.
+    Route::post('/rrhh/empleados/{empleado}/liquidacion', [\App\Http\Controllers\App\LiquidacionController::class, 'calcular'])->name('app.rrhh.liquidacion.calcular');
+    Route::post('/rrhh/empleados/{empleado}/liquidacion/aprobar', [\App\Http\Controllers\App\LiquidacionController::class, 'aprobar'])->name('app.rrhh.liquidacion.aprobar');
+    Route::post('/rrhh/empleados/{empleado}/liquidacion/pagar', [\App\Http\Controllers\App\LiquidacionController::class, 'pagar'])->name('app.rrhh.liquidacion.pagar');
+    Route::get('/rrhh/empleados/{empleado}/liquidacion/pdf', [\App\Http\Controllers\App\LiquidacionController::class, 'pdf'])->name('app.rrhh.liquidacion.pdf');
+
+    // La bandeja de tesorería: su mano de los tres flujos. Los botones
+    //   vivían en pantallas que piden , que el Contador no tiene, así
+    //   que en la práctica los apretaba otro por ella.
+    Route::get('/rrhh/tesoreria', [\App\Http\Controllers\App\TesoreriaRrhhController::class, 'index'])->name('app.rrhh.tesoreria');
+
+    // Nómina · tres manos: Gestión Humana liquida, gerencia aprueba,
+    //          tesorería paga. Quien calcula lo que se paga no autoriza pagarlo.
+    Route::get('/rrhh/nomina', [\App\Http\Controllers\App\NominaController::class, 'index'])->name('app.rrhh.nomina');
+    Route::post('/rrhh/nomina/liquidar', [\App\Http\Controllers\App\NominaController::class, 'liquidar'])->name('app.rrhh.nomina.liquidar');
+    Route::post('/rrhh/nomina/{nomina}/aprobar', [\App\Http\Controllers\App\NominaController::class, 'aprobar'])->name('app.rrhh.nomina.aprobar');
+    Route::post('/rrhh/nomina/{nomina}/pagar', [\App\Http\Controllers\App\NominaController::class, 'pagar'])->name('app.rrhh.nomina.pagar');
+    Route::get('/rrhh/nomina/{nomina}/exportar', [\App\Http\Controllers\App\NominaController::class, 'exportar'])->name('app.rrhh.nomina.exportar');
+    Route::get('/rrhh/nomina/linea/{linea}/desprendible', [\App\Http\Controllers\App\NominaController::class, 'desprendible'])->name('app.rrhh.nomina.desprendible');
+
+    // Fase C · Las dos entrevistas del proceso: saber hacer y psicológica.
+    //          El tablero movía la tarjeta de etapa sin guardar una palabra
+    //          de lo que se preguntó.
+    Route::post('/rrhh/candidatos/{candidato}/entrevista', [\App\Http\Controllers\App\EntrevistaCandidatoController::class, 'guardar'])->name('app.rrhh.candidato.entrevista');
+    Route::get('/rrhh/entrevistas/{entrevista}/pdf', [\App\Http\Controllers\App\EntrevistaCandidatoController::class, 'pdf'])->name('app.rrhh.entrevista.pdf');
+
+    // Fase C · Las psicotécnicas del proceso de selección. Se guarda el
+    //          concepto del profesional y el informe firmado, NUNCA las
+    //          respuestas (dato sensible de salud · Ley 1581/2012).
+    Route::post('/rrhh/candidatos/{candidato}/psicotecnica', [\App\Http\Controllers\App\PruebaPsicotecnicaController::class, 'guardar'])->name('app.rrhh.candidato.psicotecnica');
+    Route::get('/rrhh/psicotecnicas/{prueba}/informe', [\App\Http\Controllers\App\PruebaPsicotecnicaController::class, 'verInforme'])->name('app.rrhh.psicotecnica.informe');
+
+    // Fase G · El listado maestro de formatos. El código, la versión y la
+    //          fecha del recuadro de control de cada impreso, que antes
+    //          estaban escritos dentro de las plantillas.
+    Route::get('/rrhh/formatos', [\App\Http\Controllers\App\FormatoControladoController::class, 'index'])->name('app.rrhh.formatos');
+    Route::put('/rrhh/formatos/{formato}', [\App\Http\Controllers\App\FormatoControladoController::class, 'actualizar'])->name('app.rrhh.formato.actualizar');
+
     // F5a · La orden de contratación que autoriza la Junta Directiva.
     //       Es el control entre «el jefe eligió» y «arranca la contratación».
     Route::get('/rrhh/ordenes', [\App\Http\Controllers\App\OrdenContratacionController::class, 'index'])->name('app.rrhh.ordenes');
     Route::post('/rrhh/candidatos/{candidato}/orden', [\App\Http\Controllers\App\OrdenContratacionController::class, 'solicitar'])->name('app.rrhh.orden.solicitar');
+    // Fase D1 · completar e imprimir el formato GH-F-018.
+    Route::put('/rrhh/ordenes/{orden}', [\App\Http\Controllers\App\OrdenContratacionController::class, 'actualizar'])->name('app.rrhh.orden.actualizar');
+    Route::get('/rrhh/ordenes/{orden}/pdf', [\App\Http\Controllers\App\OrdenContratacionController::class, 'pdf'])->name('app.rrhh.orden.pdf');
     Route::post('/rrhh/ordenes/{orden}/autorizar', [\App\Http\Controllers\App\OrdenContratacionController::class, 'autorizar'])->name('app.rrhh.orden.autorizar');
     Route::post('/rrhh/ordenes/{orden}/negar', [\App\Http\Controllers\App\OrdenContratacionController::class, 'negar'])->name('app.rrhh.orden.negar');
 
@@ -494,6 +577,10 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     Route::get('/rrhh/contrataciones/{contratacion}', [\App\Http\Controllers\App\ContratacionController::class, 'show'])->name('app.rrhh.contratacion.show');
     Route::post('/rrhh/contrataciones/{contratacion}/acuerdo', [\App\Http\Controllers\App\ContratacionController::class, 'acuerdo'])->name('app.rrhh.contratacion.acuerdo');
     Route::post('/rrhh/contrataciones/{contratacion}/examen', [\App\Http\Controllers\App\ContratacionController::class, 'examen'])->name('app.rrhh.contratacion.examen');
+    // Fase D2 · la carta SST-F-001 que la persona lleva a la IPS.
+    Route::get('/rrhh/contrataciones/{contratacion}/emo', [\App\Http\Controllers\App\OrdenExamenMedicoController::class, 'paraContratacion'])->name('app.rrhh.contratacion.emo');
+    // Fase D3 · la carta GH-F-007 con los papeles que debe traer el aspirante.
+    Route::get('/rrhh/contrataciones/{contratacion}/documentos-solicitud', [\App\Http\Controllers\App\ContratacionController::class, 'solicitudDocumentos'])->name('app.rrhh.contratacion.documentos.solicitud');
     Route::post('/rrhh/contrataciones/{contratacion}/firmar', [\App\Http\Controllers\App\ContratacionController::class, 'firmarContrato'])->name('app.rrhh.contratacion.firmar');
     Route::post('/rrhh/contrataciones/{contratacion}/afiliacion', [\App\Http\Controllers\App\ContratacionController::class, 'afiliacion'])->name('app.rrhh.contratacion.afiliacion');
     Route::post('/rrhh/contrataciones/{contratacion}/documento', [\App\Http\Controllers\App\ContratacionController::class, 'subirDocumento'])->name('app.rrhh.contratacion.documento');
@@ -503,9 +590,22 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
 
     // F3 + F4 · La ficha del empleado: historia laboral, inducción y prueba.
     Route::get('/rrhh/empleados/{empleado}', [\App\Http\Controllers\App\EmpleadoController::class, 'show'])->name('app.rrhh.empleado.show');
+    // Fase A · los datos laborales que pide el cuadro de novedades.
+    Route::put('/rrhh/empleados/{empleado}/ficha', [\App\Http\Controllers\App\EmpleadoController::class, 'fichaLaboral'])->name('app.rrhh.empleado.ficha');
+    // El periódico, el de egreso y los demás, para quien ya trabaja acá.
+    Route::get('/rrhh/empleados/{empleado}/emo', [\App\Http\Controllers\App\OrdenExamenMedicoController::class, 'paraEmpleado'])->name('app.rrhh.empleado.emo');
     Route::post('/rrhh/empleados/{empleado}/induccion', [\App\Http\Controllers\App\EmpleadoController::class, 'induccion'])->name('app.rrhh.empleado.induccion');
     Route::post('/rrhh/empleados/{empleado}/prueba', [\App\Http\Controllers\App\EmpleadoController::class, 'periodoDePrueba'])->name('app.rrhh.empleado.prueba');
     Route::post('/rrhh/empleados/{empleado}/prueba/evaluar', [\App\Http\Controllers\App\EmpleadoController::class, 'evaluarPrueba'])->name('app.rrhh.empleado.prueba.evaluar');
+    // Fase E · el formato GH-F-015 de una evaluación concreta.
+    Route::get('/rrhh/empleados/{empleado}/prueba/{evaluacion}/pdf', [\App\Http\Controllers\App\EmpleadoController::class, 'evaluacionPruebaPdf'])->name('app.rrhh.empleado.prueba.pdf');
+    // Fase F1 · entrevista de retiro.
+    Route::post('/rrhh/empleados/{empleado}/entrevista-retiro', [\App\Http\Controllers\App\EntrevistaRetiroController::class, 'guardar'])->name('app.rrhh.empleado.entrevista-retiro');
+    Route::get('/rrhh/empleados/{empleado}/entrevista-retiro/pdf', [\App\Http\Controllers\App\EntrevistaRetiroController::class, 'pdf'])->name('app.rrhh.empleado.entrevista-retiro.pdf');
+    // Fase F2 · entrega de cargo y paz y salvo · tres áreas, tres firmas.
+    Route::post('/rrhh/empleados/{empleado}/entrega-cargo', [\App\Http\Controllers\App\EntregaCargoController::class, 'guardar'])->name('app.rrhh.empleado.entrega-cargo');
+    Route::post('/rrhh/empleados/{empleado}/entrega-cargo/{area}/confirmar', [\App\Http\Controllers\App\EntregaCargoController::class, 'confirmar'])->name('app.rrhh.empleado.entrega-cargo.confirmar');
+    Route::get('/rrhh/empleados/{empleado}/entrega-cargo/pdf', [\App\Http\Controllers\App\EntregaCargoController::class, 'pdf'])->name('app.rrhh.empleado.entrega-cargo.pdf');
     Route::post('/rrhh/empleados/{empleado}/documento', [\App\Http\Controllers\App\EmpleadoController::class, 'subirDocumento'])->name('app.rrhh.empleado.documento');
 
     // LOG-J9 · Marketing (préstamos de productos a bodega)

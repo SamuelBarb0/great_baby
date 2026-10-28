@@ -51,7 +51,7 @@ class AplicarRetencionesVenta
 
         $retenciones = collect($this->calc->calcular(
             base: (float) $factura->subtotal - (float) $factura->descuento,
-            concepto: (string) setting('contable.concepto_retencion_venta', 'compras_generales'),
+            concepto: (string) setting('contable.concepto_retencion_venta'),
             ciudad: $contacto->ciudad,
             iva: (float) $factura->impuestos,
             granContribuyente: in_array('reteiva', $tipos, true),
@@ -79,9 +79,9 @@ class AplicarRetencionesVenta
     private function cuentaVenta(string $tipo): string
     {
         return match ($tipo) {
-            'retefuente' => (string) setting('contable.cta_retefuente_venta', '135515'),
-            'reteiva' => (string) setting('contable.cta_reteiva_venta', '135517'),
-            'reteica' => (string) setting('contable.cta_reteica_venta', '135518'),
+            'retefuente' => (string) setting('contable.cta_retefuente_venta'),
+            'reteiva' => (string) setting('contable.cta_reteiva_venta'),
+            'reteica' => (string) setting('contable.cta_reteica_venta'),
         };
     }
 }

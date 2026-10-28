@@ -7,6 +7,8 @@ import { useEscClose } from '@/composables/useEscClose';
 import { useMoney } from '@/composables/useMoney';
 
 const props = defineProps({
+    // Reescribir los segmentos de TODOS los clientes es de Gerencia.
+    puede_segmentar: { type: Boolean, default: false },
     segmentos: { type: Array, required: true },
     interaccionesRecientes: { type: Array, required: true },
     comisionesUltimoMes: { type: Object, required: true },
@@ -107,7 +109,7 @@ const guardarInteraccion = () => {
                     <p class="text-sm text-surface-500 mt-1">Segmentación de clientes, bitácora de interacciones y comisiones.</p>
                 </div>
                 <div class="flex items-center gap-2">
-                    <button v-if="tab === 'segmentacion'" @click="solicitarSegmentar" :disabled="segmentando"
+                    <button v-if="puede_segmentar && tab === 'segmentacion'" @click="solicitarSegmentar" :disabled="segmentando"
                             class="btn-secondary text-sm">
                         <RefreshCw :class="['h-4 w-4', segmentando ? 'animate-spin' : '']"/>
                         Re-segmentar
@@ -141,7 +143,7 @@ const guardarInteraccion = () => {
                 <div v-if="! segmentos.length" class="card p-12 text-center text-surface-500">
                     <Users class="h-10 w-10 mx-auto opacity-40"/>
                     <div class="text-sm mt-2">Todavía no se ha ejecutado la segmentación.</div>
-                    <button @click="solicitarSegmentar" class="btn-primary mt-4 mx-auto">Ejecutar ahora</button>
+                    <button v-if="puede_segmentar" @click="solicitarSegmentar" class="btn-primary mt-4 mx-auto">Ejecutar ahora</button>
                 </div>
                 <div v-else class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
                     <div v-for="s in segmentos" :key="s.segmento"

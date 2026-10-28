@@ -38,8 +38,17 @@ class DevolucionProveedorController extends Controller implements HasMiddleware
             $u = $r->user();
             // LOG · El AdminBodega también crea devoluciones a proveedor
             //   (es quien detecta la mercancía averiada en recepción).
+            /*
+             * Por PERMISO, no por nombre de rol.
+             *
+             * Decia `hasAnyRole(['Contador'])`, asi que un rol nuevo creado en
+             * /app/roles con la casilla de Contabilidad marcada nunca iba a
+             * entrar, por mas que el mensaje de abajo diga «o contabilidad».
+             * Es el mismo patron que escondia pantallas a quien si podia
+             * abrirlas: la autoridad es la tabla de permisos, no el nombre.
+             */
             abort_unless(
-                $u && ($u->esEquipoBodega() || $u->hasAnyRole(['Contador'])),
+                $u && ($u->esEquipoBodega() || $u->esContable()),
                 403,
                 'Solo gerencia, bodega o contabilidad gestiona devoluciones.'
             );
@@ -267,7 +276,7 @@ class DevolucionProveedorController extends Controller implements HasMiddleware
 
         // Cuenta de inventario efectiva · por ubicación o la global default.
         $ctaInv = $d->ubicacion?->ctaInventarioEfectiva()
-            ?? (string) setting('contable.cta_inventario_default', '1435');
+            ?? (string) setting('contable.cta_inventario_default');
 
         $renglones = [
             [

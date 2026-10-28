@@ -222,13 +222,37 @@ const resetearTodo = () => {
 
 const labelGrupo = (g) => props.gruposLabels[g] || g;
 
-// Filtro de búsqueda: por clave, etiqueta o descripción.
+/*
+ * Selector de área.
+ *
+ * El buscador solo no alcanzaba: con 94 reglas y una caja vacía hay que
+ * ADIVINAR qué escribir, y quien entra por primera vez no sabe qué se puede
+ * configurar. Las reglas ya venían agrupadas por área; lo que faltaba era
+ * poder elegir una y ver nada más esa.
+ *
+ * El buscador se queda para cuando ya se sabe la palabra.
+ */
+const grupoSel = ref('');
+
+const areas = computed(() =>
+    Object.keys(editable)
+        .map((g) => ({ clave: g, label: labelGrupo(g), cuantas: editable[g].length }))
+        .sort((a, b) => a.label.localeCompare(b.label, 'es')),
+);
+
+// Filtro: primero el área elegida, después el texto (clave, etiqueta o descripción).
 const gruposFiltrados = computed(() => {
     const q = busqueda.value.trim().toLowerCase();
-    if (! q) return editable;
+
+    const base = grupoSel.value && editable[grupoSel.value]
+        ? { [grupoSel.value]: editable[grupoSel.value] }
+        : editable;
+
+    if (! q) return base;
+
     const out = {};
-    for (const g in editable) {
-        const filas = editable[g].filter(r =>
+    for (const g in base) {
+        const filas = base[g].filter(r =>
             r.clave.toLowerCase().includes(q)
             || r.etiqueta.toLowerCase().includes(q)
             || (r.descripcion || '').toLowerCase().includes(q)
@@ -237,6 +261,10 @@ const gruposFiltrados = computed(() => {
     }
     return out;
 });
+
+const mostradas = computed(() =>
+    Object.values(gruposFiltrados.value).reduce((s, g) => s + g.length, 0),
+);
 
 const hayResultados = computed(() => Object.keys(gruposFiltrados.value).length > 0);
 const totalReglas = computed(() =>
@@ -282,19 +310,37 @@ const totalReglas = computed(() =>
                 </div>
             </div>
 
-            <!-- Buscador -->
-            <div class="relative">
-                <Search class="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-surface-400" aria-hidden="true"/>
-                <input
-                    v-model="busqueda"
-                    type="search"
-                    placeholder="Buscar regla por nombre, clave o descripción…"
-                    aria-label="Buscar regla"
-                    class="input w-full pl-10"
-                />
-                <div v-if="busqueda" class="text-xs text-surface-500 mt-1">
-                    {{ hayResultados ? `${Object.values(gruposFiltrados).reduce((s,g)=>s+g.length,0)} de ${totalReglas} reglas` : 'Sin resultados' }}
+            <!--
+                Elegir área + buscar.
+
+                El selector va primero porque es el que responde «¿qué puedo
+                configurar acá?». El buscador sirve cuando ya se sabe la
+                palabra, y antes era lo único que había.
+            -->
+            <div class="flex gap-2 flex-wrap items-start">
+                <select v-model="grupoSel" class="input w-full sm:w-72" aria-label="Área de la regla">
+                    <option value="">Todas las áreas ({{ totalReglas }})</option>
+                    <option v-for="a in areas" :key="a.clave" :value="a.clave">
+                        {{ a.label }} ({{ a.cuantas }})
+                    </option>
+                </select>
+
+                <div class="relative flex-1 min-w-[16rem]">
+                    <Search class="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-surface-400" aria-hidden="true"/>
+                    <input
+                        v-model="busqueda"
+                        type="search"
+                        placeholder="…o buscar por nombre, clave o descripción"
+                        aria-label="Buscar regla"
+                        class="input w-full pl-10"
+                    />
                 </div>
+            </div>
+
+            <div v-if="busqueda || grupoSel" class="text-xs text-surface-500 -mt-2">
+                {{ hayResultados ? `${mostradas} de ${totalReglas} reglas` : 'Sin resultados' }}
+                <button v-if="grupoSel || busqueda" @click="grupoSel = ''; busqueda = ''"
+                    class="underline ml-1">ver todas</button>
             </div>
 
             <!-- Errores validación cliente -->

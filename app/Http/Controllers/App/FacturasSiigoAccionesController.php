@@ -52,6 +52,38 @@ class FacturasSiigoAccionesController extends Controller implements HasMiddlewar
         }
     }
 
+    /**
+     * Reencola la factura para que viaje a SIIGO.
+     *
+     * Existía para las otras siete cosas que viajan —órdenes de compra,
+     * recepciones, devoluciones, pagos a proveedor, notas crédito, notas
+     * débito y asientos manuales— y NO para la factura de venta, que es la
+     * única con plazo legal. Si el envío automático fallaba, el único camino
+     * era la consola.
+     *
+     * No reemite a lo bruto: `ReintentarEmisionDian` ya trae lock, backoff de
+     * 1-5-30 minutos y 3 horas, y se devuelve solo si la factura ya está en
+     * SIIGO y aceptada por la DIAN. Acá sólo se vuelve a poner en la cola.
+     */
+    public function reenviarSiigo(FacturaVenta $factura): RedirectResponse
+    {
+        if ($factura->estado === 'anulada') {
+            return back()->with('flash', ['type' => 'error',
+                'message' => "La factura {$factura->numero} está anulada: no se reenvía."]);
+        }
+
+        if ($factura->siigo_id && strtolower((string) $factura->stamp_status) === 'accepted') {
+            return back()->with('flash', ['type' => 'info',
+                'message' => "La factura {$factura->numero} ya está en SIIGO y aceptada por la DIAN."]);
+        }
+
+        \App\Jobs\ReintentarEmisionDian::dispatch($factura->id);
+        $this->log('ok', "Factura {$factura->numero} reencolada a SIIGO a mano", $factura);
+
+        return back()->with('flash', ['type' => 'success',
+            'message' => "Factura {$factura->numero} encolada. Si la cola está corriendo, viaja en segundos."]);
+    }
+
     public function reenviarMail(Request $r, FacturaVenta $factura, SiigoEmisionService $svc): RedirectResponse
     {
         $email = $r->input('email');

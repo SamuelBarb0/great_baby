@@ -3,6 +3,8 @@ import { ref, computed, watch } from 'vue';
 import { Head, router, Link } from '@inertiajs/vue3';
 import { Calculator, TrendingUp, TrendingDown, CheckCircle, AlertCircle, EyeOff, Eye } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
+import PestanasSeccion from '@/Components/PestanasSeccion.vue';
+import { pestanasPanel } from '@/composables/usePestanasContables';
 import KpiCard from '@/Components/KpiCard.vue';
 import { useMoney } from '@/composables/useMoney';
 import { pucLabel } from '@/composables/pucLabels';
@@ -70,6 +72,8 @@ const linkTodosMovs = computed(() =>
     <Head title="Contabilidad"/>
     <AppLayout>
         <div class="space-y-4">
+            <PestanasSeccion :pestanas="pestanasPanel"/>
+
             <div>
                 <h1 class="text-2xl font-bold flex items-center gap-2">
                     <Calculator class="h-6 w-6 text-brand-600"/>

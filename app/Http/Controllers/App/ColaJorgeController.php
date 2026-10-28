@@ -44,8 +44,11 @@ class ColaJorgeController extends Controller implements HasMiddleware
             //   loguearse porque Dashboard lo redirige acá. Lo agregamos.
             new Middleware(function (Request $r, \Closure $next) {
                 $u = $r->user();
+                // Casilla: Cola de alistamiento y despacho. Preguntaba por cuatro
+                //   roles escritos a mano, asi que un rol nuevo nunca podia entrar
+                //   por mas que le marcaran la casilla.
                 abort_unless(
-                    $u && ($u->esAracely() || $u->esAdminBodega() || $u->esAlistador() || $u->hasRole('Despachador')),
+                    \App\Auth\Permisos::puede($u, 'logistica'),
                     403,
                     'Esta cola es de logística.'
                 );
@@ -141,9 +144,16 @@ class ColaJorgeController extends Controller implements HasMiddleware
             'resolucion' => $p->novedad_resolucion,
         ];
 
-        // Alistadores disponibles para el dropdown de asignación.
+        /*
+         * Alistadores disponibles para el dropdown de asignación.
+         *
+         * Decía `'Admin bodega'`, con espacio, y el rol en la base se llama
+         * `AdminBodega`. O sea que el `whereIn` nunca lo encontró: el propio
+         * Jorge no aparecía en la lista de a quién asignarle un pedido, en su
+         * propia pantalla.
+         */
         $alistadores = User::query()
-            ->whereHas('roles', fn ($q) => $q->whereIn('name', ['Alistador', 'Admin bodega']))
+            ->whereHas('roles', fn ($q) => $q->whereIn('name', ['Alistador', 'AdminBodega']))
             ->orderBy('name')
             ->get(['id', 'name']);
 
@@ -158,6 +168,23 @@ class ColaJorgeController extends Controller implements HasMiddleware
                 'puede_resolver' => $u->esAracely() || $u->esAdminBodega(),
                 'yo_id' => $u->id,
             ],
+            /*
+             * LOG-H1 · Por qué está vacía.
+             *
+             * El filtro de arriba es fail-closed a propósito: sin bodegas
+             * asignadas no se ve nada, y eso está bien. El problema era otro:
+             * una cola vacía POR FALTA DE CONFIGURACIÓN se veía idéntica a un
+             * día sin trabajo. El bodeguero de Bogotá se quedaba esperando
+             * pedidos que nunca le iban a llegar, y nadie lo supo hasta que
+             * se revisó a mano.
+             *
+             * Quién lo arregla no es él: ver las ubicaciones puede, pero
+             * asignar el responsable es de gerencia. Así que la pantalla
+             * dice a quién pedírselo en vez de ofrecerle un botón que le
+             * daría 403.
+             */
+            'sin_bodegas' => $misBodegas === [-1],
+            'puede_asignarse_bodegas' => \App\Auth\Permisos::esRoot($u),
             'kpis' => [
                 'total_en_cola' => $enCola->count(),
                 'total_en_curso' => $enAlistamiento->count(),

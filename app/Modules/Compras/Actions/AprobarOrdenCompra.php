@@ -26,9 +26,18 @@ class AprobarOrdenCompra
         $u = auth()->user();
         $mismoUsuario = $orden->creado_por !== null && $u && $orden->creado_por === $u->id;
         $esGerencia = $u && ($u->hasRole('Aracely') || $u->hasRole('Gerencia') || $u->hasRole('Gerente'));
-        $permitirAuto = (bool) (function_exists('setting') ? setting('compras.permitir_auto_aprobar', true) : true);
+        /*
+         * El default decia `true` mientras el comentario de arriba decia
+         * `false`, asi que `! $permitirAuto` era SIEMPRE falso: el control
+         * existia con su mensaje de 403 y NUNCA se disparaba. Y la clave no
+         * estaba registrada en `Reglas::DEFAULTS`, asi que tampoco se podia
+         * arreglar desde la interfaz. Ahora es `false` y esta registrada.
+         */
+        $permitirAuto = (bool) (function_exists('setting') ? setting('compras.permitir_auto_aprobar', false) : false);
         if ($mismoUsuario && ! $esGerencia && ! $permitirAuto) {
-            abort(403, 'Segregación de funciones: quien crea una OC no puede aprobarla. Solicita aprobación a Gerencia.');
+            abort(403, 'Segregación de funciones: quien crea una OC no puede aprobarla. '
+                .'Pedile la aprobación a Gerencia, o desactivá «Permitir que quien crea una OC la apruebe» '
+                .'en Reglas de negocio → Contable.');
         }
         // Re-audit SEG-B5 · exigir total > 0 (no aprobar OC con precios 0).
         if ((float) $orden->total <= 0) {

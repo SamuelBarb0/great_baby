@@ -3,6 +3,8 @@ import { Head, Link } from '@inertiajs/vue3';
 import { CheckCircle, XCircle, AlertTriangle, Settings, Database, Cloud } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
 
+import PestanasSeccion from '@/Components/PestanasSeccion.vue';
+import { pestanasSiigo } from '@/composables/usePestanasContables';
 /*
  * CONT-C5 · Diagnóstico de mapeo PUC → SIIGO.
  * Muestra qué cuentas PUC están siendo usadas por documentos pendientes de
@@ -39,6 +41,8 @@ const viaCls = {
     <Head title="Validación mapeo PUC → SIIGO"/>
     <AppLayout>
         <div class="max-w-6xl mx-auto space-y-4">
+            <PestanasSeccion :pestanas="pestanasSiigo"/>
+
             <div class="card p-5">
                 <div class="flex items-center gap-3 mb-4">
                     <Database class="h-6 w-6 text-brand-600"/>

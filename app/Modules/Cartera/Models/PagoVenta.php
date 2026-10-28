@@ -53,6 +53,26 @@ class PagoVenta extends Model implements AuditableContract
         return $this->belongsTo(FacturaVenta::class, 'factura_id');
     }
 
+    /*
+     * Los dos ejes de un pago son los de SU FACTURA. No son columnas acá a
+     * proposito: un pago con destino propio permitiria un pago «fiscal» de una
+     * factura interna, que no significa nada y deja la CxC fiscal en negativo
+     * —se abonaria en el libro fiscal una deuda que ahi nunca se cargo—.
+     *
+     * Con estos accesores el estampado de `MovimientoContable` los encuentra
+     * solo, sin que cada sitio que asienta un pago tenga que acordarse.
+     */
+
+    public function getLineaNegocioAttribute(): ?\App\Modules\Contabilidad\Enums\LineaNegocio
+    {
+        return $this->factura?->linea_negocio;
+    }
+
+    public function getDestinoFiscalAttribute(): ?\App\Modules\Contabilidad\Enums\DestinoFiscal
+    {
+        return $this->factura?->destino_fiscal;
+    }
+
     public function contacto(): BelongsTo
     {
         return $this->belongsTo(Contacto::class);

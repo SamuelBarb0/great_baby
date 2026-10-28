@@ -1,5 +1,5 @@
 <script setup>
-import { ref, reactive, computed } from 'vue';
+import { ref, reactive, computed, watch } from 'vue';
 import { Head, Link, router } from '@inertiajs/vue3';
 import { ArrowLeft, Package, Plus, Zap, AlertTriangle } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
@@ -10,6 +10,22 @@ import { useEscClose } from '@/composables/useEscClose';
 const props = defineProps({ importacion: { type: Object, required: true } });
 // Re-audit M2 UX-C2 · useMoney en vez de fmtCOP inline (paridad con Cartera/Contabilidad).
 const { money } = useMoney();
+
+/*
+ * El IVA de importacion NUNCA suma al costo del inventario: se paga a la DIAN
+ * y se registra como credito fiscal (1355). Capitalizarlo lo mete dos veces en
+ * el libro y lo descuadra por el monto completo del IVA.
+ *
+ * La casilla venia PREMARCADA para todo concepto, asi que ese era el camino
+ * por defecto — y el texto («suma al costo del inventario») suena justamente a
+ * lo que uno quiere. Ahora se apaga sola y queda bloqueada, con el motivo a la
+ * vista en lugar de un tooltip.
+ */
+const esIvaDeImportacion = computed(() => gastoForm.concepto === 'iva_importacion');
+
+watch(esIvaDeImportacion, (es) => {
+    if (es) gastoForm.capitalizable = false;
+});
 
 const modalGasto = ref(false);
 const modalLiquidar = ref(false);
@@ -239,8 +255,13 @@ const fmtMoneda = (monto, mon) => mon === 'COP'
                     <div><label class="text-xs font-semibold">Factura</label><input v-model="gastoForm.factura_proveedor" class="input w-full"/></div>
                     <div><label class="text-xs font-semibold">Descripción</label><input v-model="gastoForm.descripcion" class="input w-full"/></div>
                     <label class="flex items-center gap-2 text-sm cursor-pointer" :title="'Capitalizable: suma al costo del inventario. Los no capitalizables van a gastos operacionales.'">
-                        <input type="checkbox" v-model="gastoForm.capitalizable"/> Capitalizable (suma al costo)
+                        <input type="checkbox" v-model="gastoForm.capitalizable" :disabled="esIvaDeImportacion"/>
+                        Capitalizable (suma al costo)
                     </label>
+                    <p v-if="esIvaDeImportacion" class="text-[11px] text-amber-600 mt-1">
+                        El IVA de importación no capitaliza: se paga a la DIAN y queda como
+                        crédito fiscal. Sumarlo al costo lo contaría dos veces.
+                    </p>
                 </div>
                 <div class="flex justify-end gap-2 mt-4">
                     <button @click="modalGasto = false" class="btn-ghost" :disabled="procesando">Cancelar</button>

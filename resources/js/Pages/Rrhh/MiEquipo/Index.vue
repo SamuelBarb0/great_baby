@@ -12,16 +12,30 @@ import { Head, router } from '@inertiajs/vue3';
 import { Users, Clock, AlertTriangle } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
 
-defineProps({
+const props = defineProps({
     equipo: { type: Array, default: () => [] },
     pendientes: { type: Number, default: 0 },
+    // Los nueve aspectos del GH-F-015. Vienen del servidor y no escritos acá
+    // para que la pantalla y el impreso no puedan decir cosas distintas.
+    aspectos: { type: Array, default: () => [] },
+    mi_cargo: { type: String, default: '' },
 });
 
 const procesando = ref(false);
 const errores = ref({});
 
 const modal = ref(null);
-const concepto = reactive({ resultado: 'continua', observacion: '' });
+/** El formulario arranca con las nueve notas en blanco, no en cero. */
+const enBlanco = () => ({
+    resultado: 'continua',
+    observacion: '',
+    aspectos_resaltar: '',
+    aspectos_mejorar: '',
+    jefe_cargo: props.mi_cargo ?? '',
+    ...Object.fromEntries(props.aspectos.map((a) => [a.clave, null])),
+});
+
+const concepto = reactive(enBlanco());
 
 const guardar = () => {
     if (procesando.value) return;
@@ -29,7 +43,9 @@ const guardar = () => {
     errores.value = {};
     router.post(`/app/rrhh/mi-equipo/${modal.value.id}/concepto`, { ...concepto }, {
         preserveScroll: true,
-        onSuccess: () => { modal.value = null; Object.assign(concepto, { resultado: 'continua', observacion: '' }); },
+        // Se limpia TODO, no sólo el veredicto: si no, las nueve notas del
+        // anterior quedarían precargadas en el siguiente concepto.
+        onSuccess: () => { modal.value = null; Object.assign(concepto, enBlanco()); },
         onError: (e) => (errores.value = e),
         onFinish: () => (procesando.value = false),
     });
@@ -117,24 +133,82 @@ const tono = (e) => {
 
         <div v-if="modal" @click.self="modal = null"
             class="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-            <div class="card p-6 max-w-lg w-full">
+            <div class="card p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
                 <h3 class="text-lg font-bold">Período de prueba de {{ modal.nombre }}</h3>
-                <p class="text-xs text-surface-500 mb-3">
-                    Tu concepto. Gestión Humana decide después, viendo lo que opinaste.
+                <p class="text-xs text-surface-500 mb-4">
+                    Formato GH-F-015. Tu concepto; Gestión Humana decide después, viendo lo que opinaste.
                 </p>
-                <select v-model="concepto.resultado" class="input w-full">
-                    <option value="continua">Sí, que continúe</option>
-                    <option value="no_continua">No continúa</option>
-                </select>
+
+                <!--
+                    Los nueve aspectos del formato.
+
+                    Antes esto era un «continúa / no continúa» y una nota de
+                    500 caracteres. Un «no continúa · no se adaptó» no sustenta
+                    nada el día que alguien reclama la decisión.
+                -->
+                <div class="space-y-1">
+                    <div class="flex items-center justify-between text-[10px] uppercase text-surface-400 px-1">
+                        <span>Califique de 1 a 5</span>
+                        <span class="flex gap-2 pr-1">
+                            <span v-for="n in 5" :key="n" class="w-6 text-center">{{ n }}</span>
+                        </span>
+                    </div>
+                    <div v-for="a in aspectos" :key="a.clave"
+                        class="flex items-center justify-between gap-3 py-1.5 border-b border-surface-100 dark:border-surface-800">
+                        <span class="text-sm">
+                            {{ a.label }}
+                            <span v-if="a.si_aplica" class="text-[10px] uppercase text-surface-400">· si aplica</span>
+                        </span>
+                        <span class="flex gap-2 shrink-0">
+                            <button v-for="n in 5" :key="n" type="button"
+                                @click="concepto[a.clave] = concepto[a.clave] === n ? null : n"
+                                :class="['w-6 h-6 rounded text-xs font-bold',
+                                         concepto[a.clave] === n
+                                             ? 'bg-brand-600 text-white'
+                                             : 'bg-surface-100 dark:bg-surface-800 text-surface-500 hover:bg-surface-200']">
+                                {{ n }}
+                            </button>
+                        </span>
+                    </div>
+                </div>
+
+                <div class="grid sm:grid-cols-2 gap-3 mt-4">
+                    <label class="block">
+                        <span class="text-xs font-semibold">Aspectos a resaltar</span>
+                        <textarea v-model="concepto.aspectos_resaltar" rows="3" class="input w-full mt-1"
+                            placeholder="Qué hace bien."></textarea>
+                    </label>
+                    <label class="block">
+                        <span class="text-xs font-semibold">Aspectos a mejorar</span>
+                        <textarea v-model="concepto.aspectos_mejorar" rows="3" class="input w-full mt-1"
+                            placeholder="Qué le falta."></textarea>
+                    </label>
+                </div>
+
+                <div class="mt-4 pt-3 border-t">
+                    <label class="text-xs font-semibold">¿La persona pasa su período de prueba?</label>
+                    <select v-model="concepto.resultado" class="input w-full mt-1">
+                        <option value="continua">Sí, que continúe</option>
+                        <option value="no_continua">No continúa</option>
+                    </select>
+                </div>
+
                 <div class="mt-3">
                     <label class="text-xs font-semibold">
-                        Observación
-                        <span v-if="concepto.resultado === 'no_continua'" class="text-rose-600">· obligatoria</span>
+                        ¿Por qué?
+                        <span v-if="concepto.resultado === 'no_continua'" class="text-rose-600">· obligatorio</span>
                     </label>
-                    <textarea v-model="concepto.observacion" rows="3" class="input w-full"
-                        placeholder="Cómo le fue en el puesto, qué hace bien, qué le falta..."></textarea>
+                    <textarea v-model="concepto.observacion" rows="2" class="input w-full"
+                        placeholder="Cómo le fue en el puesto."></textarea>
                     <p v-if="errores.observacion" class="text-xs text-rose-600 mt-1">{{ errores.observacion }}</p>
                 </div>
+
+                <label class="block mt-3">
+                    <span class="text-xs font-semibold">Tu cargo</span>
+                    <input v-model="concepto.jefe_cargo" class="input w-full mt-1"
+                        placeholder="El formato lo pide: dentro de dos años tu nombre solo no dice desde dónde evaluaste." />
+                </label>
+
                 <div class="flex justify-end gap-2 mt-4">
                     <button @click="modal = null" class="btn-secondary">Cancelar</button>
                     <button @click="guardar"

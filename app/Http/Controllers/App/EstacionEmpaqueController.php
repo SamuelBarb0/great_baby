@@ -31,7 +31,10 @@ class EstacionEmpaqueController extends Controller implements HasMiddleware
             new Middleware(function (Request $r, \Closure $next) {
                 $u = $r->user();
                 // A1 FIX · AdminBodega llegaba desde el sidebar y recibía 403.
-                abort_unless($u && ($u->esAracely() || $u->hasAnyRole(['Alistador', 'AdminBodega'])), 403);
+                // La casilla manda. Antes la puerta preguntaba por el rol y la
+                //   casilla de /app/roles no la consultaba nadie: el admin creia
+                //   repartir accesos y solo movia lo que se ve en el menu.
+                abort_unless(\App\Auth\Permisos::puede($u, 'vista_alistador'), 403);
                 return $next($r);
             }),
         ];

@@ -7,7 +7,12 @@ use Illuminate\Support\Facades\Cache;
 
 /**
  * Registro clave/valor de reglas configurables por Aracely.
- * Uso: setting('empaque.min_foto_bytes', 100000)
+ * Uso: setting('empaque.min_foto_bytes')
+ *
+ * SIN segundo argumento cuando la clave está en `Reglas::DEFAULTS`: el default
+ * que se escribe en la llamada GANA sobre el registrado, así que pasarlo anula
+ * la regla mientras no exista la fila en esta tabla. El ejemplo de acá decía
+ * `, 100000` contra un valor registrado de 30000.
  *
  * Cache: usa un `updated_at` global (versioning key). Cualquier proceso o server
  * que lea las reglas revalida cuando ese timestamp cambia — evita ver reglas viejas

@@ -115,6 +115,22 @@ class PagosProveedorController extends Controller implements HasMiddleware
             'confirmado_at' => now(),
             'confirmado_por' => $r->user()->id,
         ])->save();
+
+        /*
+         * Y el ASIENTO, que no existia.
+         *
+         * `RegistrarPagoProveedor` creaba el pago y calculaba las retenciones
+         * sin escribir ni una linea en el libro. La cuenta de proveedores SOLO
+         * CRECIA —la recepcion la acreditaba y el pago nunca la debitaba— y las
+         * retenciones practicadas nunca entraban, que es la base de la
+         * declaracion mensual ante la DIAN.
+         *
+         * Va al CONFIRMAR y no al crear: el pago nace `pendiente` y hasta que
+         * alguien lo revisa la plata no salio.
+         */
+        app(\App\Modules\Cartera\Actions\RegistrarAsientoPagoProveedor::class)
+            ->handle($pagoProveedor->fresh());
+
         PushPagoProveedorASiigo::dispatchManual($pagoProveedor->id);
         return back()->with('flash', [
             'type' => 'success',
