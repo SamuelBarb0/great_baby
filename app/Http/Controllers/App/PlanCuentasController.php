@@ -51,6 +51,15 @@ class PlanCuentasController extends Controller implements HasMiddleware
         $rows = $q->paginate(50)->withQueryString();
 
         return Inertia::render('Contabilidad/PlanCuentas', [
+            /*
+             * Eliminar e importar son de root (`esRoot`), pero la pantalla se
+             * abre con `esContable`: el Contador veia la papelera de cada fila
+             * y el boton «Importar» y recibia un 403 al usarlos. El molde
+             * correcto —el controlador manda la bandera, el Vue la respeta— ya
+             * estaba en uso en otras tres pantallas del proyecto.
+             */
+            'puedeAdministrar' => \App\Auth\Permisos::esRoot($r->user()),
+
             'filtros' => [
                 'q' => $r->query('q', ''),
                 'clase' => $r->query('clase', ''),

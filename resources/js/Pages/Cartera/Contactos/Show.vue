@@ -93,6 +93,18 @@ const abrirWA = () => {
                     <button v-if="contacto.telefono" @click="abrirWA" class="btn-primary bg-emerald-600 hover:bg-emerald-700 text-sm">
                         <Phone class="h-4 w-4"/> WhatsApp
                     </button>
+                    <!--
+                        El estado de cuenta existía construido y NADA en la
+                        interfaz lo enlazaba: sólo se llegaba escribiendo la URL.
+                        Es el informe que la contadora pidió por nombre, así que
+                        va acá, en la ficha del cliente, que es donde se lo
+                        buscaría cualquiera.
+                    -->
+                    <a v-if="contacto.roles?.cliente || contacto.roles?.b2b"
+                       :href="`/cartera/estado-cuenta/${contacto.id}`" target="_blank"
+                       class="btn-ghost border border-surface-300 dark:border-surface-700 text-sm min-h-11">
+                        <FileText class="h-4 w-4"/> Estado de cuenta
+                    </a>
                 </div>
             </div>
 

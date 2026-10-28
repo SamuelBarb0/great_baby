@@ -33,8 +33,11 @@ class SiigoController extends Controller implements HasMiddleware
                 // F8 · ampliado: antes solo Aracely · ahora Aracely + Gerente
                 // (Gerente puede monitorear pero solo Aracely toggleaKillSwitch).
                 $u = $r->user();
+                // Casilla: Integracion SIIGO. Preguntaba por nombre de rol, asi
+                //   que un rol nuevo nunca iba a poder monitorear la integracion
+                //   por mas que le marcaran la casilla.
                 abort_unless(
-                    $u?->esAracely() || $u?->hasAnyRole(['Gerente', 'Gerencia']),
+                    \App\Auth\Permisos::puede($u, 'siigo'),
                     403
                 );
                 return $next($r);

@@ -19,18 +19,81 @@ class PedidosB2BController extends Controller implements HasMiddleware
     /** Ítems descontados del kardex en el último despacho, para el mensaje al usuario. */
     private int $lineasDescontadas = 0;
 
+    /**
+     * Las tres decisiones del pedido, cada una con su dueño.
+     *
+     * Están acá arriba y no sueltas dentro de cada método para que la pantalla
+     * pueda preguntar lo MISMO que después se va a exigir. El defecto que
+     * arreglan era exactamente ese desajuste: la pantalla decidía por estado y
+     * la puerta no decidía nada.
+     */
+    private function puedeAprobar(?\App\Models\User $u): bool
+    {
+        // Aprobar o rechazar un pedido es decisión comercial, y además es el
+        // mismo botón que libera un pedido retenido por cartera.
+        return (bool) $u && ($u->esAracely() || $u->esContable());
+    }
+
+    private function puedeFacturar(?\App\Models\User $u): bool
+    {
+        // La misma puerta que la Bandeja de facturación, para que no vuelvan
+        // a separarse: quien factura allá factura acá.
+        return (bool) $u && ($u->esAracely() || $u->esFacturador());
+    }
+
+    private function puedeDespachar(?\App\Models\User $u): bool
+    {
+        // Esta sí es de bodega: es la salida física al transportador.
+        return (bool) $u && ($u->esAracely() || $u->esEquipoBodega() || $u->hasRole('Despachador'));
+    }
+
+    /**
+     * ¿Este usuario sólo puede ver LOS SUYOS?
+     *
+     * El vendedor entra por una puerta distinta: su propio Panel y su
+     * Seguimiento le pintan enlaces a `/app/pedidos-b2b/{id}`, y hasta ahora
+     * los cuatro le daban 403 — el menú lo ofrecía y la puerta lo negaba, en
+     * su propia pantalla y sobre sus propios pedidos. Pero abrirle la lista
+     * entera sería mostrarle la cartera de sus compañeros, así que entra
+     * acotado: sólo las filas donde él es el vendedor.
+     */
+    private function soloLosSuyos(?\App\Models\User $u): bool
+    {
+        return (bool) $u
+            && ! ($u->esAracely() || $u->esEquipoBodega() || $u->hasRole('Despachador')
+                || $u->esContable() || $u->esFacturador())
+            && \App\Auth\Permisos::puede($u, 'vendedor');
+    }
+
     public static function middleware(): array
     {
         return [
             new Middleware(function (Request $r, \Closure $next) {
-                // LOG · Pedidos B2B: AdminBodega y Despachador también entran
-                //   (necesitan ver qué viene para despachar y en qué estado).
-                //   Las acciones de aprobar/rechazar/facturar siguen siendo
-                //   responsabilidad gerencial, protegidas por su propia
-                //   validación de estado adentro de cada método.
+                /*
+                 * Quién ENTRA a la pantalla. Quién puede APRETAR cada botón se
+                 * decide abajo, acción por acción.
+                 *
+                 * El comentario que estaba acá decía que aprobar/rechazar/
+                 * facturar «siguen siendo responsabilidad gerencial, protegidas
+                 * por su propia validación de estado adentro de cada método».
+                 * Un chequeo de estado no es un chequeo de autorización: lo
+                 * único que exigía `aprobar()` era que el pedido estuviera en
+                 * `enviado` o `retenido`. Se comprobó en pantalla — un
+                 * despachador abría el pedido y veía **Aprobar**, **Rechazar**
+                 * y **Facturar**, y el botón de un retenido le decía «Liberar
+                 * (Gerencia)» mientras le pedía confirmar que «Gerencia
+                 * autoriza vender aunque el semáforo de cartera lo bloqueó».
+                 * Funcionaba: emitía factura real contra la resolución DIAN.
+                 *
+                 * Además entran cartera y facturación, que antes no podían ni
+                 * ver la pantalla donde se toman sus propias decisiones.
+                 */
                 $u = $r->user();
                 abort_unless(
-                    $u && ($u->esEquipoBodega() || $u->hasRole('Despachador')),
+                    $u && ($u->esEquipoBodega() || $u->hasRole('Despachador')
+                        || $u->esContable() || $u->esFacturador() || $u->esAracely()
+                        // El vendedor entra sólo a los suyos; ver `soloLosSuyos()`.
+                        || \App\Auth\Permisos::puede($u, 'vendedor')),
                     403
                 );
                 return $next($r);
@@ -41,7 +104,13 @@ class PedidosB2BController extends Controller implements HasMiddleware
     public function index(Request $request): Response
     {
         $estado = (string) $request->input('estado', '');
+        // El vendedor ve SÓLO los suyos. Fail-closed: si mañana alguien entra
+        // por una puerta nueva sin pasar por acá, ve su propia lista vacía, no
+        // la de todos.
+        $mios = $this->soloLosSuyos($request->user()) ? $request->user()->id : null;
+
         $pedidos = PedidoCliente::with(['contacto:id,nombre_completo,razon_social,email', 'lista:id,nombre'])
+            ->when($mios, fn ($q) => $q->where('vendedor_id', $mios))
             ->when($estado, fn ($q) => $q->where('estado', $estado))
             // LOG-J3 · retenidos y nuevos (enviado) arriba porque son los que
             //   requieren una acción humana; luego por recencia. Si hay filtro
@@ -58,6 +127,7 @@ class PedidosB2BController extends Controller implements HasMiddleware
             ->withQueryString();
 
         $conteos = PedidoCliente::selectRaw('estado, COUNT(*) as total')
+            ->when($mios, fn ($q) => $q->where('vendedor_id', $mios))
             ->groupBy('estado')->pluck('total', 'estado')->all();
 
         return Inertia::render('PedidosB2B/Index', [
@@ -77,7 +147,7 @@ class PedidosB2BController extends Controller implements HasMiddleware
         ]);
     }
 
-    public function show(int $pedido): Response
+    public function show(Request $r, int $pedido): Response
     {
         // LOG-J7 · cargamos siigo_id + cufe para que la UI decida si permite despachar.
         // LOG-J10 · creadoPor/facturadoPor/despachadoPor para armar la línea de tiempo.
@@ -89,7 +159,25 @@ class PedidosB2BController extends Controller implements HasMiddleware
             'alistador:id,name',
         ])->findOrFail($pedido);
 
+        /*
+         * El recorte del vendedor también acá: si no, bastaba con cambiar el
+         * número en la barra de direcciones para leer el pedido de un
+         * compañero. Un filtro que sólo vive en el listado no es un filtro.
+         */
+        abort_if($this->soloLosSuyos($r->user()) && $p->vendedor_id !== $r->user()->id,
+            403, 'Este pedido es de otro vendedor.');
+
         return Inertia::render('PedidosB2B/Show', [
+            /*
+             * Lo que ESTE usuario puede apretar. La pantalla pintaba los
+             * botones mirando sólo `pedido.estado`, así que un despachador
+             * veía «Aprobar», «Rechazar» y «Facturar» — y funcionaban.
+             */
+            'puedo' => [
+                'aprobar' => $this->puedeAprobar($r->user()),
+                'facturar' => $this->puedeFacturar($r->user()),
+                'despachar' => $this->puedeDespachar($r->user()),
+            ],
             'pedido' => [
                 'id' => $p->id,
                 'numero' => $p->numero,
@@ -275,8 +363,11 @@ class PedidosB2BController extends Controller implements HasMiddleware
         return back()->with('success', 'Este pedido lo factura '.\App\Models\EmpresaConfig::porId($p->empresa_id)->nombreCorto().'.');
     }
 
-    public function aprobar(int $pedido): RedirectResponse
+    public function aprobar(Request $r, int $pedido): RedirectResponse
     {
+        abort_unless($this->puedeAprobar($r->user()), 403,
+            'Aprobar o liberar un pedido es decisión de Gerencia o cartera.');
+
         // C-QA-D-3: lock para evitar carrera Aprobar/Rechazar concurrente.
         // LOG-J3 · Gerencia también libera un `retenido` desde este botón —
         //   es el mismo gesto conceptual (aprobar), y así no hay dos endpoints
@@ -317,6 +408,9 @@ class PedidosB2BController extends Controller implements HasMiddleware
 
     public function rechazar(Request $r, int $pedido): RedirectResponse
     {
+        abort_unless($this->puedeAprobar($r->user()), 403,
+            'Rechazar un pedido es decisión de Gerencia o cartera.');
+
         // C-QA-D-Bloque2: mín 10 chars — motivos como "no" son inútiles para el cliente.
         $data = $r->validate(['motivo' => ['required', 'string', 'min:10', 'max:500']]);
         $pre = PedidoCliente::findOrFail($pedido);
@@ -382,6 +476,9 @@ class PedidosB2BController extends Controller implements HasMiddleware
 
     public function despachar(Request $r, int $pedido): RedirectResponse
     {
+        abort_unless($this->puedeDespachar($r->user()), 403,
+            'Despachar es de bodega.');
+
         $data = $r->validate([
             'guia_transportadora' => ['required', 'string', 'max:60'],
             'transportadora' => ['nullable', 'string', 'max:80'],
@@ -449,8 +546,16 @@ class PedidosB2BController extends Controller implements HasMiddleware
         return back()->with('success', $msg);
     }
 
-    public function facturar(int $pedido): RedirectResponse
+    public function facturar(Request $r, int $pedido): RedirectResponse
     {
+        /*
+         * Facturar emite un documento real contra la resolución DIAN de la
+         * empresa y consume consecutivo. La misma puerta que la Bandeja de
+         * facturación.
+         */
+        abort_unless($this->puedeFacturar($r->user()), 403,
+            'Facturar es del equipo de facturación.');
+
         // ── GATE DE CRÉDITO (flujo bodega F2) ────────────────────────────────
         // Corre ANTES de la tx de facturación: si el pedido es a crédito, valida
         // cupo / mora / factura vencida. Si retiene, crea la excepción (que se
@@ -544,6 +649,20 @@ class PedidosB2BController extends Controller implements HasMiddleware
                 'total' => $p->total,
                 'saldo' => $p->total,
                 'es_electronica' => (bool) $siigoActivo,
+                /*
+                 * El vendedor y la bodega VIAJAN del pedido a la factura.
+                 *
+                 * No se copiaban, y las dos columnas existen en
+                 * `facturas_venta` con su llave foránea. Resultado: las 24
+                 * facturas del sistema tenían `vendedor_id` en NULL, y
+                 * `CalcularComisionMensual` filtra justo por esa columna
+                 * (`FacturaVenta::where('vendedor_id', ...)`), así que toda
+                 * comisión daba $0 por construcción, sobre todo lo facturado.
+                 * `ubicacion_id` deja sin efecto la resolución DIAN y las
+                 * cuentas PUC por bodega, que se configuran por ubicación.
+                 */
+                'vendedor_id' => $p->vendedor_id,
+                'ubicacion_id' => $p->ubicacion_origen_id,
                 'origen_type' => \App\Modules\Portal\Models\PedidoCliente::class,
                 'origen_id' => $p->id,
                 'observaciones' => 'Pedido B2B ' . $p->numero,

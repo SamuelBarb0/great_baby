@@ -138,9 +138,9 @@ class ContabilizarDevolucionDropi
 
             // Fix H-3 · fallback polimórfico item agregado (sin variante).
             $producto = $item->variante?->producto ?? $item->producto;
-            $ctaDev = $producto?->cta('devolucion') ?? setting('contable.cta_devolucion_default', '4175');
-            $ctaInv = $producto?->cta('inventario') ?? setting('contable.cta_inventario_default', '1435');
-            $ctaCosto = $producto?->cta('costo') ?? setting('contable.cta_costo_default', '6135');
+            $ctaDev = $producto?->cta('devolucion') ?? setting('contable.cta_devolucion_default');
+            $ctaInv = $producto?->cta('inventario') ?? setting('contable.cta_inventario_default');
+            $ctaCosto = $producto?->cta('costo') ?? setting('contable.cta_costo_default');
             $cc = $producto?->centroCosto();
             $desc = "Dev guía {$pedido->guia} · " . ($producto?->referencia ?? 'sin-ref') . ($cc ? " [CC:{$cc}]" : '');
 
@@ -185,7 +185,7 @@ class ContabilizarDevolucionDropi
         }
 
         // Contrapartida CxC (FUNC C3 · con tercero_id).
-        $ctaCxC = setting('contable.cta_cxc_default', '1305');
+        $ctaCxC = setting('contable.cta_cxc_default');
         $lineas[] = [
             'fecha' => $fecha, 'cuenta_puc' => $ctaCxC,
             'tercero_type' => $terceroId ? $terceroTipo : null, 'tercero_id' => $terceroId,

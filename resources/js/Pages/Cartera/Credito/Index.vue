@@ -5,6 +5,8 @@ import { useMoney } from '@/composables/useMoney';
 import { CreditCard, MessageCircle, ShieldAlert, Check, Clock } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
 
+import PestanasSeccion from '@/Components/PestanasSeccion.vue';
+import { pestanasCobranza } from '@/composables/usePestanasContables';
 const props = defineProps({
     tab: { type: String, default: 'condiciones' },
     condiciones: { type: Array, required: true },
@@ -32,6 +34,8 @@ const badgeEstado = (e) => {
     <Head title="Crédito y cobranza"/>
     <AppLayout>
         <div class="space-y-4">
+            <PestanasSeccion :pestanas="pestanasCobranza"/>
+
             <div>
                 <h1 class="text-2xl font-bold flex items-center gap-2">
                     <CreditCard class="h-6 w-6 text-brand-600"/>

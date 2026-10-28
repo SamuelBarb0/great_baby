@@ -22,7 +22,10 @@ class PlantillasController extends Controller implements HasMiddleware
     {
         return [
             new Middleware(function (Request $r, \Closure $next) {
-                abort_unless($r->user()?->esAracely(), 403);
+                // La casilla manda. Antes la puerta preguntaba por el rol y la
+                //   casilla de /app/roles no la consultaba nadie: el admin creia
+                //   repartir accesos y solo movia lo que se ve en el menu.
+                abort_unless(\App\Auth\Permisos::puede($r->user(), 'plantillas'), 403);
                 return $next($r);
             }),
         ];

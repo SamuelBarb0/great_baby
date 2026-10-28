@@ -4,6 +4,7 @@ namespace App\Http\Controllers\App;
 
 use App\Http\Controllers\Controller;
 use App\Modules\Cartera\Models\MovimientoContable;
+use App\Modules\Contabilidad\Support\FiltroEjes;
 use App\Modules\Contabilidad\Models\AsientoManual;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controllers\HasMiddleware;
@@ -26,7 +27,10 @@ class ContabilidadExtrasController extends Controller implements HasMiddleware
     public static function middleware(): array
     {
         return [new Middleware(function (Request $r, \Closure $next) {
-            abort_unless($r->user()?->esContable(), 403);
+            // La casilla manda. Antes la puerta preguntaba por el rol y la
+            //   casilla de /app/roles no la consultaba nadie: el admin creia
+            //   repartir accesos y solo movia lo que se ve en el menu.
+            abort_unless(\App\Auth\Permisos::puede($r->user(), 'reportes_contables'), 403);
             return $next($r);
         })];
     }
@@ -278,10 +282,21 @@ class ContabilidadExtrasController extends Controller implements HasMiddleware
      *
      * @return \Illuminate\Support\Collection<int, array{codigo:string, nombre:string, debe:float, haber:float}>
      */
-    private function saldosPorCuenta(?string $desde, string $hasta, bool $incluirAnulados): \Illuminate\Support\Collection
+    /**
+     * Los saldos por cuenta, opcionalmente de un solo libro.
+     *
+     * Antes no aceptaba los ejes, y este metodo alimenta el Balance general Y
+     * el Estado de resultados: **no habia forma de sacar el balance fiscal**,
+     * que es justo lo que tiene que cuadrar contra SIIGO. Medido el 26-oct:
+     * activo total 23.677.750 contra 18.453.050 del lado fiscal — 5.224.700 de
+     * diferencia sin pantalla que la mostrara. El libro diario si filtraba, asi
+     * que dos pantallas daban numeros distintos del mismo mes.
+     */
+    private function saldosPorCuenta(?string $desde, string $hasta, bool $incluirAnulados, ?FiltroEjes $ejes = null): \Illuminate\Support\Collection
     {
         $filas = MovimientoContable::query()
             ->when($incluirAnulados, fn ($q) => $q->withTrashed())
+            ->when($ejes, fn ($q) => $ejes->aplicar($q))
             ->when($desde, fn ($q) => $q->where('fecha', '>=', $desde))
             ->where('fecha', '<=', $hasta)
             ->selectRaw('cuenta_puc, SUM(debe) AS debe, SUM(haber) AS haber')
@@ -340,11 +355,14 @@ class ContabilidadExtrasController extends Controller implements HasMiddleware
         $data = $r->validate([
             'hasta' => ['nullable', 'date'],
             'incluir_anulados' => ['nullable', 'boolean'],
+            'linea' => ['nullable', 'string', 'max:20'],
+            'destino' => ['nullable', 'string', 'max:20'],
         ]);
         $hasta = $data['hasta'] ?? now('America/Bogota')->toDateString();
         $incluirAnulados = (bool) ($data['incluir_anulados'] ?? false);
+        $ejes = FiltroEjes::deRequest($r);
 
-        $saldos = $this->saldosPorCuenta(null, $hasta, $incluirAnulados);
+        $saldos = $this->saldosPorCuenta(null, $hasta, $incluirAnulados, $ejes);
 
         $activo = $this->agruparClase($saldos, '1', 'debito');
         $pasivo = $this->agruparClase($saldos, '2', 'credito');
@@ -361,7 +379,8 @@ class ContabilidadExtrasController extends Controller implements HasMiddleware
         $descuadre = round($activo['total'] - $pasivo['total'] - $totalPatrimonio, 2);
 
         return Inertia::render('Contabilidad/BalanceGeneral', [
-            'filtros' => ['hasta' => $hasta, 'incluir_anulados' => $incluirAnulados],
+            'filtros' => array_merge(['hasta' => $hasta, 'incluir_anulados' => $incluirAnulados], $ejes->aParametros()),
+            'opcionesEjes' => FiltroEjes::opciones(),
             'activo' => $activo,
             'pasivo' => $pasivo,
             'patrimonio' => $patrimonio,
@@ -388,12 +407,15 @@ class ContabilidadExtrasController extends Controller implements HasMiddleware
             'desde' => ['nullable', 'date'],
             'hasta' => ['nullable', 'date', 'after_or_equal:desde'],
             'incluir_anulados' => ['nullable', 'boolean'],
+            'linea' => ['nullable', 'string', 'max:20'],
+            'destino' => ['nullable', 'string', 'max:20'],
         ]);
         $desde = $data['desde'] ?? now('America/Bogota')->startOfMonth()->toDateString();
         $hasta = $data['hasta'] ?? now('America/Bogota')->toDateString();
         $incluirAnulados = (bool) ($data['incluir_anulados'] ?? false);
+        $ejes = FiltroEjes::deRequest($r);
 
-        $saldos = $this->saldosPorCuenta($desde, $hasta, $incluirAnulados);
+        $saldos = $this->saldosPorCuenta($desde, $hasta, $incluirAnulados, $ejes);
 
         $ingresos = $this->agruparClase($saldos, '4', 'credito');
         $costoVentas = $this->agruparClase($saldos, '6', 'debito');
@@ -407,7 +429,8 @@ class ContabilidadExtrasController extends Controller implements HasMiddleware
             : null;
 
         return Inertia::render('Contabilidad/EstadoResultados', [
-            'filtros' => ['desde' => $desde, 'hasta' => $hasta, 'incluir_anulados' => $incluirAnulados],
+            'filtros' => array_merge(['desde' => $desde, 'hasta' => $hasta, 'incluir_anulados' => $incluirAnulados], $ejes->aParametros()),
+            'opcionesEjes' => FiltroEjes::opciones(),
             'ingresos' => $ingresos,
             'costo_ventas' => $costoVentas,
             'costos_produccion' => $costosProd,

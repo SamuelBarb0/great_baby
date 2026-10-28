@@ -9,6 +9,7 @@ use App\Modules\Rrhh\Models\Concerns\RegistraBitacora;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 /**
@@ -49,6 +50,23 @@ class Candidato extends Model
     public function elegidoPor(): BelongsTo
     {
         return $this->belongsTo(User::class, 'elegido_por_id');
+    }
+
+    /**
+     * Las psicotécnicas que le aplicaron.
+     *
+     * Lo que vive ahí es el concepto del profesional y el informe firmado, no
+     * las respuestas — ver `InstrumentoPsicotecnico` para el porqué.
+     */
+    /** Las dos entrevistas del proceso: saber hacer y psicológica. */
+    public function entrevistas(): HasMany
+    {
+        return $this->hasMany(EntrevistaCandidato::class, 'candidato_id')->orderBy('fecha');
+    }
+
+    public function pruebasPsicotecnicas(): HasMany
+    {
+        return $this->hasMany(PruebaPsicotecnica::class)->orderBy('fecha_aplicacion');
     }
 
     public function scopeEnTablero(Builder $q): Builder

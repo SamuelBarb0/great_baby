@@ -6,6 +6,7 @@ use App\Mail\FacturaClienteMail;
 use App\Models\NotificacionErp;
 use App\Modules\Cartera\Enums\EstadoFactura;
 use App\Modules\Cartera\Models\FacturaVenta;
+use App\Modules\Contabilidad\Enums\DestinoFiscal;
 use App\Modules\Siigo\Clients\SiigoClient;
 use App\Modules\Siigo\Exceptions\PagoSinFacturaEnSiigo;
 use App\Modules\Siigo\Models\SiigoConfig;
@@ -246,6 +247,21 @@ class SiigoEmisionService
         if (empty($factura->contacto?->numero_documento)) {
             throw new RuntimeException('El cliente no tiene identificación — obligatoria para DIAN.');
         }
+
+        /*
+         * Una factura que alguien decidio NO declarar no se emite, aunque el
+         * job la encuentre por otro lado. Sin esta guarda bastaba con que algo
+         * disparara la emision para mandar a la DIAN justo lo que se habia
+         * decidido dejar afuera, y eso no se deshace: se corrige con nota
+         * credito.
+         */
+        $destino = $factura->destino_fiscal ?? DestinoFiscal::Siigo;
+        if (! $destino->tieneParteFiscal()) {
+            throw new RuntimeException(
+                "La factura {$factura->numero} esta marcada como «{$destino->label()}»: no va a SIIGO. "
+                .'Si tiene que ir, cambiale el destino en Facturas de venta.'
+            );
+        }
     }
 
     private function validarConfig(?int $empresaId = null): SiigoConfig
@@ -335,6 +351,11 @@ class SiigoEmisionService
             return $linea;
         })->all();
 
+        // Reparto · a SIIGO va solo la porcion declarada.
+        if ($this->esReparto($factura)) {
+            $items = $this->escalarAlMontoDeclarado($factura, $items);
+        }
+
         // UBIC-5 · Si la factura está ligada a una ubicación con resolución
         // DIAN propia, usamos ESA resolución en el document.id. Esto hace que
         // SIIGO timbre con el prefijo/numeración correctos para la bodega
@@ -358,7 +379,10 @@ class SiigoEmisionService
                 'id' => (int) $config->payment_type_id,
                 // Neto de retenciones: SIIGO exige que los pagos sumen el
                 // total MENOS lo retenido, si no responde invalid_total_payments.
-                'value' => round((float) $factura->total - (float) $factura->retenciones, 2),
+                // En un reparto el pago es por lo DECLARADO, y las retenciones
+                // van en la misma proporcion: SIIGO las calcula sobre las
+                // lineas, que ya viajan escaladas.
+                'value' => $this->valorAPagarEnSiigo($factura),
                 'due_date' => $factura->fecha_vencimiento?->format('Y-m-d')
                     ?? $factura->fecha_emision->format('Y-m-d'),
             ]],
@@ -479,6 +503,19 @@ class SiigoEmisionService
             throw new RuntimeException("La recepción {$r->numero} no está confirmada.");
         }
 
+        /*
+         * Una compra que se decidio no declarar no viaja a SIIGO. Mandarla
+         * significaria descontar un IVA que no tiene factura con que soportarse
+         * —y eso no se deshace con un boton—.
+         */
+        $destino = $r->destino_fiscal ?? DestinoFiscal::Siigo;
+        if (! $destino->tieneParteFiscal()) {
+            throw new RuntimeException(
+                "La recepción {$r->numero} está marcada como «{$destino->label()}»: no va a SIIGO. "
+                .'Si tiene que ir, cambiale el destino en Compras.'
+            );
+        }
+
         // Agrupación por factura_proveedor: si hay hermanas sin siigo_id,
         // consolidamos. Si r es la única con ese nº de factura, cae al flujo
         // individual original (misma función, pero $hermanas queda vacía).
@@ -487,6 +524,10 @@ class SiigoEmisionService
             ->where('estado', 'confirmada')
             ->where('id', '!=', $r->id)
             ->where('factura_proveedor', $r->factura_proveedor)
+            // Solo se consolidan hermanas que TAMBIEN van a SIIGO: si no, una
+            // recepcion interna entraria de contrabando dentro de la compra
+            // fiscal de su hermana y nadie lo veria.
+            ->where('destino_fiscal', DestinoFiscal::Siigo->value)
             ->when($r->factura_proveedor, function ($q) use ($r) {
                 $q->whereHas('orden', fn ($qq) => $qq->where('proveedor_id', $r->orden->proveedor_id));
             }, fn ($q) => $q->whereRaw('1=0'))
@@ -542,7 +583,15 @@ class SiigoEmisionService
             throw new RuntimeException("La recepción {$r->numero} no tiene ítems recibidos.");
         }
 
-        $total = (float) ($r->orden?->total ?? 0);
+        /*
+         * El pago sale de las LINEAS QUE SE MANDAN, no del total de la orden.
+         *
+         * Antes era `$r->orden->total`: en una recepcion parcial los items
+         * sumaban lo recibido y el pago el total de la orden entera, asi que
+         * SIIGO rechazaba con `invalid_total_payments`. Recepcion parcial e
+         * importacion por contenedores es el flujo habitual de este negocio.
+         */
+        $total = $this->totalAPagarDeLineas($items, $ivaTaxId);
         $paymentId = (int) setting('siigo.payment_type_compra_default', 0);
 
         $payload = [
@@ -678,7 +727,6 @@ class SiigoEmisionService
 
         $ivaTaxId = (int) setting('siigo.tax_id_iva_19');
         $items = [];
-        $totalPagar = 0.0;
         foreach ($recepciones as $r) {
             foreach ($r->items as $i) {
                 $ordenItem = $i->ordenItem;
@@ -698,14 +746,24 @@ class SiigoEmisionService
                     'price' => $precio,
                     'discount' => 0,
                 ];
-                if ($ivaTaxId > 0) $line['taxes'] = [['id' => $ivaTaxId]];
+                // Mismo criterio que la ruta individual: el IVA se adjunta
+                // SOLO si la linea de la orden lo lleva. Pegarselo a toda
+                // linea hacia que una compra exenta saliera gravada al 19%.
+                if ($ivaTaxId > 0 && (float) ($ordenItem?->iva_pct ?? 0) > 0) {
+                    $line['taxes'] = [['id' => $ivaTaxId]];
+                }
                 $items[] = $line;
-                $totalPagar += $cant * $precio;
             }
         }
         if (empty($items)) {
             throw new RuntimeException('Consolidación sin ítems recibidos > 0.');
         }
+
+        // La MISMA regla que la ruta individual. Antes esto sumaba la base sin
+        // IVA mientras las lineas si lo llevaban, y SIIGO rechazaba todo con
+        // `invalid_total_payments`. Eran los dos bugs que ya se habian
+        // arreglado en la otra ruta y no se replicaron aca.
+        $totalPagar = $this->totalAPagarDeLineas($items, $ivaTaxId);
 
         $paymentId = (int) setting('siigo.payment_type_compra_default', 0);
         $numeros = $recepciones->pluck('numero')->implode(', ');
@@ -818,13 +876,39 @@ class SiigoEmisionService
             throw new RuntimeException("El pago {$p->id} tiene monto_aplicado 0.");
         }
 
+        /*
+         * En un REPARTO, a SIIGO va solo la parte declarada del abono.
+         *
+         * Alla la factura vale `monto_fiscal`, no el total: mandarle el pago
+         * entero o la rechaza, o la acepta y le deja al cliente un saldo a
+         * favor inventado por la diferencia. El ejemplo del propio enum —una
+         * factura de $100 M de la que se declaran $20 M— terminaria con un
+         * recibo de $100 M contra una factura de $20 M.
+         *
+         * Se cubre primero lo declarado, con la MISMA cuenta que usa el
+         * asiento: una sola regla, en un solo sitio.
+         */
+        if ($this->esReparto($p->factura)) {
+            $declarado = (new \App\Modules\Cartera\Actions\RegistrarAsientoContable())
+                ->parteDeclaradaDelPago($p);
+
+            if ($declarado <= 0.009) {
+                throw new \App\Modules\Siigo\Exceptions\PagoTotalmenteInterno(
+                    "El pago {$p->id} de la factura {$p->factura->numero} no toca la parte declarada: "
+                    .'lo declarado ya quedo cubierto por abonos anteriores. En SIIGO esa factura ya esta pagada.'
+                );
+            }
+
+            $monto = $declarado;
+        }
+
         // El tipo de documento del recibo vive en `siigo.doc_type_recibo`.
         // Hubo un tiempo en que acá se leía `siigo.doc_type_recibo_caja`, que
         // no estaba declarado en ningún lado: daba 0, el bloque `document` se
         // descartaba y SIIGO respondía «The field document is required». Se
         // dejó un respaldo con el nombre viejo, pero esa clave nunca existió
         // ni se puede crear desde el panel, así que sólo escondía el problema.
-        $docRecibo = (int) setting('siigo.doc_type_recibo', 0);
+        $docRecibo = (int) setting('siigo.doc_type_recibo');
 
         $siigoFactura = $this->prefijoConsecutivoSiigo($p->factura);
 
@@ -1143,7 +1227,11 @@ class SiigoEmisionService
                 'code' => 'NC-' . $nc->numero,
                 'description' => $nc->motivo ?: 'Nota crédito manual',
                 'quantity' => 1,
-                'price' => (float) $nc->valor,
+                // En un REPARTO la NC viaja escalada: alla la factura vale
+                // `monto_fiscal`, no el total. Mandar el valor completo
+                // produce una nota credito MAYOR que la factura que anula.
+                // Mismo bug que tenia el recibo de caja.
+                'price' => $this->valorDeclaradoDeLaNota($nc),
                 'discount' => 0,
             ]],
             'observations' => "NC manual ERP #{$nc->id} · " . ($nc->motivo ?: 'sin motivo'),
@@ -1236,7 +1324,7 @@ class SiigoEmisionService
             // valor; la cuenta la pone SIIGO al cruzar la CxP. Mandarle `account`
             // o `invoice_id` acá hace que rechace el documento con un 400 seco.
             $payload = [
-                'document' => ['id' => (int) setting('siigo.doc_type_egreso', 0)],
+                'document' => ['id' => (int) setting('siigo.doc_type_egreso')],
                 'date' => $p->fecha->format('Y-m-d'),
                 'type' => 'DebtPayment',
                 'supplier' => ['identification' => (string) $p->proveedor->numero_documento, 'branch_office' => 0],
@@ -1265,7 +1353,7 @@ class SiigoEmisionService
                 $itemBase,
             ];
             $payload = [
-                'document' => ['id' => (int) setting('siigo.doc_type_egreso', 0)],
+                'document' => ['id' => (int) setting('siigo.doc_type_egreso')],
                 'date' => $p->fecha->format('Y-m-d'),
                 'type' => 'Detailed',
                 'supplier' => ['identification' => (string) $p->proveedor->numero_documento, 'branch_office' => 0],
@@ -1564,8 +1652,8 @@ class SiigoEmisionService
         // donde DB=CR=1435 global dejaba el asiento sin efecto neto · ahora
         // cada bodega mueve SU subcuenta y los saldos por ubicación cuadran.
         $m->loadMissing('ubicacion');
-        $ctaInvUbic = $m->ubicacion?->ctaInventarioEfectiva() ?? setting('contable.cta_inventario_default', '1435');
-        $ctaInvGlobal = (string) setting('contable.cta_inventario_default', '1435');
+        $ctaInvUbic = $m->ubicacion?->ctaInventarioEfectiva() ?? setting('contable.cta_inventario_default');
+        $ctaInvGlobal = (string) setting('contable.cta_inventario_default');
         // INV-A1 · PUC alineado con CerrarTomaFisica local:
         //   5299 = Pérdida por baja de inventario (correcto para faltantes/mermas)
         //   4295 = Diversos (aprovechamientos para sobrantes)
@@ -1809,5 +1897,217 @@ class SiigoEmisionService
             throw new RuntimeException("SIIGO rechazó consulta errores DIAN de {$factura->numero}: HTTP {$resp->status()}");
         }
         return (array) $resp->json();
+    }
+
+    /**
+     * Cuánto tiene que decir `payments.value` para las líneas que se mandan.
+     *
+     * SIIGO calcula el total de la compra a partir de las líneas y lo compara
+     * con los pagos: si no coinciden rechaza todo con
+     * `invalid_total_payments · The total purchase calculated is X`.
+     *
+     * Existe como función compartida a propósito. Las dos rutas de compra
+     * —individual y consolidada— calculaban esto cada una por su cuenta, y
+     * cuando se arregló la primera la segunda se quedó con los bugs viejos:
+     * mandaba la base sin IVA mientras sus líneas sí lo llevaban. Con una sola
+     * regla en un solo sitio eso no se puede repetir.
+     *
+     * @param  array<int,array<string,mixed>>  $items  las líneas tal como viajan
+     */
+    private function totalAPagarDeLineas(array $items, int $ivaTaxId): float
+    {
+        $pct = (float) setting('siigo.iva_pct_default', 19);
+        $total = 0.0;
+
+        foreach ($items as $l) {
+            $base = (float) $l['quantity'] * (float) $l['price']
+                * (1 - ((float) ($l['discount'] ?? 0)) / 100);
+
+            // Lleva IVA sólo si la línea trae el impuesto adjunto. Mirar eso y
+            // no la configuración global es lo que hace que una compra exenta
+            // no salga gravada.
+            $gravada = $ivaTaxId > 0 && ! empty($l['taxes']);
+
+            $total += $gravada ? $base * (1 + $pct / 100) : $base;
+        }
+
+        return round($total, 2);
+    }
+
+    /**
+     * Cuanto de esta nota credito viaja a SIIGO.
+     *
+     * Si la factura es un reparto, alla vale `monto_fiscal` y no el total: una
+     * NC por el valor completo seria una nota credito **mayor que la factura
+     * que anula**. Se manda la misma proporcion que se declaro.
+     *
+     * Es el gemelo del bug que tenia el recibo de caja, y por el mismo motivo:
+     * el reparto se construyo en la factura y las piezas que cuelgan de ella
+     * —pagos y notas— no se enteraron.
+     */
+    private function valorDeclaradoDeLaNota($nc): float
+    {
+        $valor = (float) $nc->valor;
+        $factura = $nc->factura;
+
+        if (! $this->esReparto($factura)) {
+            return $valor;
+        }
+
+        $total = (float) $factura->total;
+        $declarado = (float) $factura->monto_fiscal;
+
+        if ($total <= 0 || $declarado <= 0) {
+            throw new RuntimeException(
+                "La NC {$nc->numeroCompleto()} cuelga de un reparto sin monto declarado valido. "
+                .'Corregi el destino de la factura antes de emitirla.'
+            );
+        }
+
+        return round($valor * ($declarado / $total), 2);
+    }
+
+    /** ¿Esta factura va a SIIGO sólo por una parte? */
+    private function esReparto(FacturaVenta $factura): bool
+    {
+        return $factura->destino_fiscal === DestinoFiscal::Reparto;
+    }
+
+    /**
+     * Las líneas que viajan a SIIGO cuando la factura es un REPARTO.
+     *
+     * El ERP conserva la venta completa —es lo que el cliente debe y lo que
+     * movió inventario— y a SIIGO va sólo la porción declarada. Para que el
+     * balance fiscal cuadre contra SIIGO, la factura de allá tiene que sumar
+     * EXACTAMENTE `monto_fiscal`, que es lo que postea el asiento fiscal.
+     *
+     * Hay dos formas de componer esa porción, y la diferencia la ve la DIAN:
+     *
+     *   · `cantidad` (por defecto) — menos unidades al PRECIO REAL. El precio
+     *     unitario queda igual al de cualquier otra factura del mismo producto,
+     *     que es lo que se compara si alguien cruza precios entre clientes. El
+     *     costo es que la cantidad sale fraccionada.
+     *
+     *   · `precio` — las MISMAS unidades a precio menor. El conteo de unidades
+     *     cuadra con lo despachado, pero el precio unitario queda falseado.
+     *
+     * Se dejó `cantidad` porque un precio inventado es más difícil de sostener
+     * que un conteo que no cuadra, y porque el inventario real vive en el ERP y
+     * no en SIIGO. Es una decisión contable, no técnica: se cambia con el ajuste
+     * `siigo.reparto_modo` sin tocar código.
+     *
+     * Se escala el importe ANTES de impuestos y SIIGO calcula el IVA sobre eso.
+     * Como las tarifas por línea no cambian, el IVA sale escalado en la misma
+     * proporción y el total declarado cae solo donde tiene que caer.
+     *
+     * @param  array<int,array<string,mixed>>  $items
+     * @return array<int,array<string,mixed>>
+     */
+    private function escalarAlMontoDeclarado(FacturaVenta $factura, array $items): array
+    {
+        $total = (float) $factura->total;
+        $declarado = (float) $factura->monto_fiscal;
+
+        if ($total <= 0 || $declarado <= 0 || $declarado >= $total) {
+            throw new RuntimeException(
+                "La factura {$factura->numero} está marcada como reparto pero el monto declarado no es "
+                .'una porción válida del total. Corregilo en Facturas de venta → columna «Destino».'
+            );
+        }
+
+        if ($items === []) {
+            throw new RuntimeException("La factura {$factura->numero} no tiene líneas que repartir.");
+        }
+
+        $proporcion = $declarado / $total;
+        $modo = setting('siigo.reparto_modo', 'cantidad') === 'precio' ? 'precio' : 'cantidad';
+
+        $neto = fn (array $l) => (float) $l['quantity'] * (float) $l['price']
+            * (1 - ((float) ($l['discount'] ?? 0)) / 100);
+
+        // A cuánto tiene que sumar la base gravable declarada.
+        $baseObjetivo = round(((float) $factura->subtotal - (float) $factura->descuento) * $proporcion, 2);
+
+        $netos = [];
+        foreach ($items as $i => $l) {
+            $netos[$i] = round($neto($l) * $proporcion, 2);
+        }
+
+        /*
+         * La última línea absorbe el centavo del redondeo. Sin esto la suma de
+         * las líneas puede quedar a un peso de lo declarado, y ese peso es la
+         * diferencia que después aparece en la conciliación sin que nadie sepa
+         * de dónde salió.
+         */
+        $ultima = array_key_last($items);
+        $netos[$ultima] = round($netos[$ultima] + ($baseObjetivo - array_sum($netos)), 2);
+
+        foreach ($items as $i => &$l) {
+            $divisor = $modo === 'precio' ? (float) $l['quantity'] : (float) $l['price'];
+
+            if ($divisor <= 0) {
+                throw new RuntimeException(
+                    "La línea «{$l['description']}» de {$factura->numero} no se puede repartir: "
+                    .'tiene la cantidad o el precio en cero.'
+                );
+            }
+
+            $bruto = $netos[$i] / (1 - ((float) ($l['discount'] ?? 0)) / 100);
+
+            if ($modo === 'precio') {
+                $l['price'] = round($bruto / $divisor, 2);
+            } else {
+                $l['quantity'] = round($bruto / $divisor, 6);
+            }
+        }
+        unset($l);
+
+        /*
+         * Comprobacion final: lo que SIIGO va a calcular tiene que ser lo que
+         * postea el asiento fiscal. No siempre se puede — en modo «precio» el
+         * precio solo tiene dos decimales, asi que con 10 unidades los totales
+         * alcanzables van de nueve en nueve centavos y el objetivo puede quedar
+         * en el medio.
+         *
+         * Antes que mandar una diferencia de centavos que despues aparece en la
+         * conciliacion sin explicacion, se corta diciendo exactamente cuanto
+         * sobra y cual es la salida.
+         */
+        $baseReal = 0.0;
+        foreach ($items as $l) {
+            $baseReal += (float) $l['quantity'] * (float) $l['price']
+                * (1 - ((float) ($l['discount'] ?? 0)) / 100);
+        }
+
+        $diferencia = round($baseReal - $baseObjetivo, 2);
+        if (abs($diferencia) > 0.01) {
+            throw new RuntimeException(sprintf(
+                'El reparto de %s no da exacto en modo «%s»: la factura de SIIGO quedaria %s $%s '
+                .'respecto de los $%s declarados. Cambia «SIIGO · Como se declara un reparto» a '
+                .'«cantidad» en Reglas de negocio, o ajusta el monto declarado.',
+                $factura->numero,
+                $modo,
+                $diferencia > 0 ? 'por encima' : 'por debajo',
+                number_format(abs($diferencia), 2, ',', '.'),
+                number_format($declarado, 2, ',', '.'),
+            ));
+        }
+
+        return $items;
+    }
+
+    /** Lo que SIIGO tiene que ver como total a pagar. */
+    private function valorAPagarEnSiigo(FacturaVenta $factura): float
+    {
+        $total = (float) $factura->total;
+        $retenciones = (float) $factura->retenciones;
+
+        if (! $this->esReparto($factura) || $total <= 0) {
+            return round($total - $retenciones, 2);
+        }
+
+        $proporcion = (float) $factura->monto_fiscal / $total;
+
+        return round((float) $factura->monto_fiscal - $retenciones * $proporcion, 2);
     }
 }

@@ -149,8 +149,19 @@ class FacturaVenta extends Model implements AuditableContract
         return $this->hasMany(NotaCredito::class, 'factura_id');
     }
 
+    /** Lo que se le cobra DE MAS al cliente sobre esta factura. */
+    public function notasDebito(): HasMany
+    {
+        return $this->hasMany(NotaDebito::class, 'factura_id');
+    }
+
     protected $casts = [
         'estado' => EstadoFactura::class,
+        // F1 · los dos ejes. Sin el cast vuelven como string y cualquier
+        // `->label()` revienta con «Call to a member function label() on string».
+        'linea_negocio' => \App\Modules\Contabilidad\Enums\LineaNegocio::class,
+        'destino_fiscal' => \App\Modules\Contabilidad\Enums\DestinoFiscal::class,
+        'monto_fiscal' => 'decimal:2',
         'fecha_emision' => 'date',
         'fecha_vencimiento' => 'date',
         'ari_enviada_at' => 'datetime',
@@ -266,7 +277,16 @@ class FacturaVenta extends Model implements AuditableContract
             ->sum('valor');
         // Lo que el cliente retiene no lo va a pagar nunca: el saldo parte del
         // neto, si no un cliente que paga completo quedaría debiendo lo retenido.
-        $this->saldo = max(0, (float) $this->total - (float) $this->retenciones - $totalPagado - $totalNc);
+        /*
+         * Y lo que se le cobra de MAS. La nota debito no entraba por ningun
+         * lado: aumentaba la deuda ante la DIAN y el saldo del ERP seguia
+         * igual, asi que el cliente quedaba debiendo menos de lo que debia.
+         */
+        $totalNd = (float) $this->notasDebito()
+            ->whereNotIn('estado', ['rechazada', 'anulada'])
+            ->sum('valor');
+
+        $this->saldo = max(0, (float) $this->total - (float) $this->retenciones - $totalPagado - $totalNc + $totalNd);
 
         if ($this->saldo <= 0.009) {
             $this->estado = EstadoFactura::Pagada;

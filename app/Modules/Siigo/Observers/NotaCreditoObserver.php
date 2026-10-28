@@ -22,6 +22,19 @@ class NotaCreditoObserver
         // mandando WhatsApp cobrando una deuda ya devuelta.
         $nc->factura?->recalcular();
 
+        /*
+         * Y el ASIENTO, que no existia.
+         *
+         * `recalcular()` baja el saldo de la factura, y su comentario afirma
+         * que «el asiento ya habia reducido 1305 via observer NC» — cierto
+         * SOLO para las NC de Dropi. Para una NC manual no habia ni una linea:
+         * cartera decia que el cliente ya no debia y el libro mantenia la CxC
+         * completa. Se rompia la unica cifra que coincide exacto.
+         *
+         * Idempotente: si ya tiene asiento no vuelve a escribir.
+         */
+        app(\App\Modules\Cartera\Actions\RegistrarAsientoNota::class)->credito($nc->fresh());
+
         // Solo NC manuales · las de Dropi tienen su propio flujo.
         if ($nc->devolucion_dropi_id) return;
         if ($nc->siigo_id) return;

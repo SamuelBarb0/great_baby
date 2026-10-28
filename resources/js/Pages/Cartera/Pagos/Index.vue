@@ -5,11 +5,13 @@ import { useMoney } from '@/composables/useMoney';
 import { useDebounceFn } from '@vueuse/core';
 import { CreditCard, Search, Calendar, Plus, X } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
+import FiltroEjes from '@/Components/FiltroEjes.vue';
 import KpiCard from '@/Components/KpiCard.vue';
 
 const props = defineProps({
     pagos: { type: Object, required: true },
     filtros: { type: Object, required: true },
+    opcionesEjes: { type: Object, default: () => ({ lineas: [], destinos: [] }) },
     totales: { type: Object, required: true },
     mediosPago: { type: Array, required: true },
     clasificaciones: { type: Array, default: () => [] },
@@ -73,6 +75,25 @@ const abrirFormulario = () => {
     if (! facturas.value.length) buscarFacturas();
 };
 
+/*
+ * Como se va a partir este pago si la factura es un reparto.
+ *
+ * Se calcula igual que en el backend —fiscal primero, mirando lo que ya
+ * cubrieron los abonos anteriores— para que lo que se ve sea lo que se guarda.
+ */
+const repartoDelPago = computed(() => {
+    const f = facturaSel.value;
+    if (! f || f.destino !== 'reparto' || ! f.monto_fiscal) return null;
+
+    const aplicado = Number(form.value.monto_aplicado || 0);
+    if (aplicado <= 0) return null;
+
+    const pendienteDeclarado = Math.max(0, Number(f.monto_fiscal) - Number(f.declarado_cubierto || 0));
+    const fiscal = Math.min(aplicado, pendienteDeclarado);
+
+    return { fiscal, interno: Math.round((aplicado - fiscal) * 100) / 100 };
+});
+
 const elegirFactura = (f) => {
     facturaSel.value = f;
     // Lo normal es que paguen la factura completa: se precarga el saldo y
@@ -118,15 +139,28 @@ const q = ref(props.filtros.q || '');
 const medio = ref(props.filtros.medio || 'todos');
 const desde = ref(props.filtros.desde || '');
 const hasta = ref(props.filtros.hasta || '');
+const linea = ref(props.filtros.linea || 'todas');
+const destino = ref(props.filtros.destino || 'todas');
+
+const parametros = () => ({
+    q: q.value, medio: medio.value, desde: desde.value, hasta: hasta.value,
+    linea: linea.value, destino: destino.value,
+});
+
+const badgeDestino = (color) => ({
+    success: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200',
+    info: 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200',
+    warning: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200',
+}[color] || 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200');
 
 const filtrar = () => {
-    router.get('/app/pagos', { q: q.value, medio: medio.value, desde: desde.value, hasta: hasta.value }, {
+    router.get('/app/pagos', parametros(), {
         preserveScroll: true, preserveState: true, replace: true,
     });
 };
 const buscarDebounced = useDebounceFn(filtrar, 400);
 watch(q, buscarDebounced);
-watch([medio, desde, hasta], filtrar);
+watch([medio, desde, hasta, linea, destino], filtrar);
 
 const { money: fmtCOP } = useMoney();
 
@@ -189,6 +223,11 @@ const badgeDif = (clas, dif) => {
                                 <div class="text-xs text-surface-500 truncate">
                                     {{ f.cliente }} <span v-if="f.vence">· vence {{ f.vence }}</span>
                                 </div>
+                                <!-- A donde va el pago. Se ve antes de elegir,
+                                     no despues de registrar. -->
+                                <span :class="['inline-block mt-1 px-2 py-0.5 rounded text-[10px] font-bold', badgeDestino(f.destino_color)]">
+                                    {{ f.destino_label }}
+                                </span>
                             </div>
                             <div class="text-right shrink-0">
                                 <div class="text-xs text-surface-500">debe</div>
@@ -210,6 +249,38 @@ const badgeDif = (clas, dif) => {
                             <div class="font-bold">{{ fmtCOP(facturaSel.saldo) }}</div>
                         </div>
                         <button @click="facturaSel = null" class="btn-ghost text-xs min-h-11">Cambiar factura</button>
+                    </div>
+
+                    <!--
+                        Para donde va este pago. No se elige: lo hereda de la
+                        factura, porque un pago «fiscal» de una factura interna
+                        dejaria la CxC fiscal en negativo. Lo que si hace falta
+                        es VERLO antes de registrar.
+                    -->
+                    <div :class="['text-xs p-3 rounded-lg border-l-4',
+                                  facturaSel.destino === 'siigo'
+                                      ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-500'
+                                      : 'bg-amber-50 dark:bg-amber-900/20 border-amber-500']">
+                        <template v-if="repartoDelPago">
+                            Esta factura es un <strong>reparto</strong>: de este abono
+                            <strong>{{ fmtCOP(repartoDelPago.fiscal) }}</strong> entran al libro fiscal
+                            <span v-if="repartoDelPago.interno > 0">
+                                y <strong>{{ fmtCOP(repartoDelPago.interno) }}</strong> quedan internos</span>.
+                            Se cubre primero lo declarado, igual que en SIIGO, donde la factura vale
+                            {{ fmtCOP(facturaSel.monto_fiscal) }}.
+                        </template>
+                        <template v-else-if="facturaSel.destino === 'siigo'">
+                            Este pago entra al <strong>libro fiscal</strong> ({{ facturaSel.linea_label }}) y
+                            viaja a SIIGO como recibo de caja.
+                        </template>
+                        <template v-else>
+                            Esta factura es <strong>{{ facturaSel.destino_label }}</strong>: el pago
+                            <strong>no</strong> entra al libro fiscal ni viaja a SIIGO.
+                        </template>
+                        <div class="mt-1 text-[11px] opacity-75">
+                            A dónde va se decide en la factura, no acá. Para cambiarlo:
+                            Facturas de venta → columna «Destino».
+                        </div>
                     </div>
 
                     <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -301,6 +372,12 @@ const badgeDif = (clas, dif) => {
                     <input v-model="desde" type="date" class="input flex-1" title="Desde"/>
                     <input v-model="hasta" type="date" class="input flex-1" title="Hasta"/>
                 </div>
+                <!-- Los ejes son los de la FACTURA, no del pago: un pago no
+                     tiene destino propio. -->
+                <div class="md:col-span-4">
+                    <FiltroEjes v-model:linea="linea" v-model:destino="destino" :opciones="opcionesEjes"
+                                url-export="/app/pagos/csv" :params-export="parametros()"/>
+                </div>
             </div>
 
             <!-- Tabla -->
@@ -316,6 +393,7 @@ const badgeDif = (clas, dif) => {
                                 <th class="text-left px-4 py-2">Fecha</th>
                                 <th class="text-left">Factura</th>
                                 <th class="text-left">Cliente</th>
+                                <th class="text-center">Destino</th>
                                 <th class="text-left">Medio</th>
                                 <th class="text-left">Referencia</th>
                                 <th class="text-right">Recibido</th>
@@ -332,6 +410,12 @@ const badgeDif = (clas, dif) => {
                                     <span v-else>—</span>
                                 </td>
                                 <td class="text-surface-800 dark:text-surface-200">{{ p.cliente || '—' }}</td>
+                                <td class="text-center whitespace-nowrap">
+                                    <span :class="['inline-block px-2 py-0.5 rounded text-[10px] font-bold', badgeDestino(p.destino_color)]">
+                                        {{ p.destino }}
+                                    </span>
+                                    <div class="text-[10px] text-surface-400">{{ p.linea }}</div>
+                                </td>
                                 <td class="capitalize">{{ p.medio_pago || '—' }}</td>
                                 <td class="font-mono text-xs text-surface-500">
                                     <div>{{ p.referencia || '—' }}</div>

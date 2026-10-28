@@ -29,7 +29,10 @@ class GarantiasController extends Controller implements HasMiddleware
             $u = $r->user();
             // C-F-QA5 · Fix CRÍTICO auditor roles: el rol se llama 'ServicioCliente' (no 'SAC').
             // Antes: hasAnyRole(['SAC','Gerente']) → ServicioCliente NUNCA pasaba.
-            abort_unless($u && ($u->esAracely() || $u->hasAnyRole(['ServicioCliente', 'Gerente'])), 403);
+            // La casilla manda. Antes la puerta preguntaba por el rol y la
+            //   casilla de /app/roles no la consultaba nadie: el admin creia
+            //   repartir accesos y solo movia lo que se ve en el menu.
+            abort_unless(\App\Auth\Permisos::puede($u, 'servicio_cliente'), 403);
             return $next($r);
         })];
     }

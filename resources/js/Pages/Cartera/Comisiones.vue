@@ -9,6 +9,8 @@ import { useMoney } from '@/composables/useMoney';
 import { Calculator, Plus, X, Trash2, Pencil, CheckCircle, Wallet } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
 
+import PestanasSeccion from '@/Components/PestanasSeccion.vue';
+import { pestanasConfigContable } from '@/composables/usePestanasContables';
 const props = defineProps({
     periodo: { type: Object, required: true },
     anios: { type: Array, required: true },
@@ -80,6 +82,8 @@ const eliminarCfg = (c) => router.delete(`/app/cartera/comisiones/config/${c.id}
     <Head title="Comisiones"/>
     <AppLayout>
         <div class="space-y-4 max-w-6xl">
+            <PestanasSeccion :pestanas="pestanasConfigContable"/>
+
             <div>
                 <h1 class="text-2xl font-bold flex items-center gap-2">
                     <Calculator class="h-6 w-6 text-brand-600"/> Comisiones de vendedores

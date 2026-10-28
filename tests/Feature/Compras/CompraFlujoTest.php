@@ -87,9 +87,9 @@ it('flujo completo: aprobar → recibir → asiento contable → stock', functio
 
     $movs = MovimientoContable::where('origen_type', \App\Modules\Compras\Models\RecepcionCompra::class)->get();
     expect($movs)->toHaveCount(3);
-    expect($movs->firstWhere('cuenta_puc', '1435')->debe)->not->toBeNull();
-    expect($movs->firstWhere('cuenta_puc', '2408')->debe)->not->toBeNull();
-    expect($movs->firstWhere('cuenta_puc', '2205')->haber)->not->toBeNull();
+    expect($movs->firstWhere('cuenta_puc', cta('cta_inventario_default'))->debe)->not->toBeNull();
+    expect($movs->firstWhere('cuenta_puc', cta('cta_iva_compra_default'))->debe)->not->toBeNull();
+    expect($movs->firstWhere('cuenta_puc', cta('cta_proveedores_default'))->haber)->not->toBeNull();
 });
 
 it('liquida importación prorrateando gastos por valor', function () {
@@ -157,10 +157,10 @@ it('liquida importación prorrateando gastos por valor', function () {
     //   2205 crédito 500k (CxP agente aduanero)
     //   2205 crédito 2M (CxP proveedor del flete)
     $movs = \App\Modules\Cartera\Models\MovimientoContable::where('origen_type', Importacion::class)->get();
-    expect($movs->firstWhere('cuenta_puc', '1435')->debe + 0)->toBe(2400000.0)
+    expect($movs->firstWhere('cuenta_puc', cta('cta_inventario_default'))->debe + 0)->toBe(2400000.0)
         ->and($movs->firstWhere('cuenta_puc', '1465')->haber + 0)->toBe(400000.0)
         ->and($movs->firstWhere('cuenta_puc', '1355')->debe + 0)->toBe(500000.0)
-        ->and((float) $movs->where('cuenta_puc', '2205')->sum('haber'))->toBe(2500000.0);
+        ->and((float) $movs->where('cuenta_puc', cta('cta_proveedores_default'))->sum('haber'))->toBe(2500000.0);
 
     // Fix bug auditor #7: la importación DEBE haber entrado al kardex al liquidar.
     expect((int) \App\Modules\Dropi\Models\InventarioMovimiento::where('tipo', 'entrada_importacion')

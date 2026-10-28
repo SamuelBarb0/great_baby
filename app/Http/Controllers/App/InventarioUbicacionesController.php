@@ -36,10 +36,12 @@ class InventarioUbicacionesController extends Controller
         // LOG · El index es READ-ONLY para AdminBodega (solo mira sus racks).
         //   Crear/editar/eliminar sigue siendo root (los otros métodos del
         //   controller mantienen el esRoot original).
+        // Casilla: Ubicaciones y bodegas. Ver la pantalla; administrar sigue
+        //   siendo de gerencia en cada accion de escritura.
         abort_unless(
-            \App\Auth\Permisos::esRoot($r->user()) || $r->user()?->esAdminBodega(),
+            \App\Auth\Permisos::puede($r->user(), 'ubicaciones'),
             403,
-            'Solo gerencia administra ubicaciones.'
+            'Esta pantalla es de quien administra las bodegas.'
         );
 
         // UBIC-8 · Mapa user_id → nombre para pintar el admin de bodega sin N+1.

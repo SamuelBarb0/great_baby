@@ -3,6 +3,8 @@ import { ref, reactive, computed } from 'vue';
 import { Head, router } from '@inertiajs/vue3';
 import { CreditCard, Plus, Search, X, Calculator } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
+import Paginacion from '@/Components/Paginacion.vue';
+import { useDestacar } from '@/composables/useDestacar';
 import { useMoney } from '@/composables/useMoney';
 import AppConfirmModal from '@/Components/AppConfirmModal.vue';
 
@@ -11,6 +13,10 @@ const props = defineProps({
     pagos: { type: Object, required: true },
     kpis: { type: Object, required: true },
 });
+
+// La Torre SIIGO enlaza aca con `?destacar=<id>` cuando el documento no tiene
+// pantalla de detalle propia. Senala la fila en vez de dar un 404.
+const { clasesDe } = useDestacar();
 
 // Confirmaciones con el modal propio: el confirm() nativo queda bloqueado
 // dentro del iframe de la app de escritorio y en celular ignora el diseno.
@@ -101,13 +107,33 @@ const buscarProv = () => {
     }, 300);
 };
 
+// Lo informa la ficha del proveedor: si es autorretenedor no se le practica
+// retefuente, y conviene verlo ANTES de guardar.
+const autorretenedor = ref(false);
+
 const seleccionarProv = (p) => {
     form.contacto_id = p.id;
+
+    /*
+     * La ciudad decide el ReteICA. El buscador NO la devolvia —ignoraba el
+     * `rol=proveedor` y mandaba solo id/nombre/documento— asi que el formulario
+     * se quedaba con «Bogota» fijo y se le retenia ReteICA de Bogota a
+     * cualquier proveedor del pais.
+     */
     if (p.ciudad) form.ciudad = p.ciudad;
-    if (p.gran_contribuyente !== undefined) form.gran_contribuyente = !!p.gran_contribuyente;
+
+    /*
+     * «Gran contribuyente» NO viene del contacto: no existe esa columna. Es una
+     * casilla que marca quien registra el pago. Antes esta linea leia
+     * `p.gran_contribuyente`, que siempre era undefined — parecia que se
+     * autollenaba y nunca lo hizo.
+     */
+    autorretenedor.value = !! p.es_autorretenedor;
+
     buscar.value = `${p.nombre || p.nombre_completo} · NIT ${p.documento || '—'}`;
     encontrados.value = [];
 };
+
 
 const abrir = () => {
     modal.value = true;
@@ -241,7 +267,7 @@ const guardar = () => {
                         </tr>
                     </thead>
                     <tbody class="divide-y">
-                        <tr v-for="p in pagos.data" :key="p.id" class="hover:bg-surface-50">
+                        <tr v-for="p in pagos.data" :key="p.id" :class="['hover:bg-surface-50', clasesDe(p.id)]">
                             <td class="p-2 text-xs">{{ p.fecha }}</td>
                             <td class="p-2 text-xs">{{ p.proveedor }} <span class="text-surface-400">· {{ p.ciudad }}</span></td>
                             <td class="p-2 text-right font-mono">{{ money(p.monto_bruto) }}</td>
@@ -293,6 +319,7 @@ const guardar = () => {
                     </tbody>
                 </table>
             </div>
+            <Paginacion :pagina="pagos" etiqueta="pagos"/>
 
             <div v-if="modal" @click.self="modal = false" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
                 <div class="card p-5 w-full max-w-2xl space-y-3 max-h-[90vh] overflow-y-auto">
@@ -342,6 +369,11 @@ const guardar = () => {
                             <div>
                                 <label class="text-xs font-semibold">Ciudad</label>
                                 <input v-model="form.ciudad" placeholder="Bogotá" class="input w-full text-sm"/>
+                                <!-- La ciudad decide el ReteICA: se trae de la
+                                     ficha del proveedor, no se asume Bogotá. -->
+                                <p v-if="autorretenedor" class="text-[11px] text-amber-600 mt-1">
+                                    Este proveedor es autorretenedor: no se le practica retefuente.
+                                </p>
                             </div>
                             <div>
                                 <label class="text-xs font-semibold">Método *</label>

@@ -3,6 +3,9 @@ import { ref, reactive, watch } from 'vue';
 import { Head, router } from '@inertiajs/vue3';
 import { MessageSquare, Plus } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
+import Paginacion from '@/Components/Paginacion.vue';
+import PestanasSeccion from '@/Components/PestanasSeccion.vue';
+import { pestanasCobranza } from '@/composables/usePestanasContables';
 import { useEscClose } from '@/composables/useEscClose';
 
 const props = defineProps({ cobros: { type: Object, required: true } });
@@ -76,6 +79,8 @@ const badgeCanal = (c) => ({
     <Head title="Registros de cobranza"/>
     <AppLayout>
         <div class="space-y-4">
+            <PestanasSeccion :pestanas="pestanasCobranza"/>
+
             <div class="flex items-start justify-between">
                 <h1 class="text-2xl font-bold flex items-center gap-2"><MessageSquare class="h-6 w-6 text-brand-600"/>Registros de cobranza</h1>
                 <button @click="modal = true" class="btn-primary"><Plus class="h-4 w-4"/> Nuevo</button>
@@ -116,6 +121,7 @@ const badgeCanal = (c) => ({
                     </tbody>
                 </table>
             </div>
+            <Paginacion :pagina="cobros" etiqueta="gestiones"/>
         </div>
 
         <div v-if="modal" @click.self="modal = false" class="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">

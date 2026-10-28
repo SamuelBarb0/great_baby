@@ -108,10 +108,23 @@ const badge = (color) => ({
                         {{ requisicion.numero_vacantes }} × <strong>{{ requisicion.cargo }}</strong>
                         <span v-if="requisicion.area"> · {{ requisicion.area }}</span>
                     </p>
-                    <p class="text-xs text-surface-400">Solicita: {{ requisicion.solicitante || '—' }}</p>
+                    <p class="text-xs text-surface-400">
+                        Solicita: {{ requisicion.solicitante || '—' }}
+                        <span v-if="requisicion.ciudad"> · {{ requisicion.ciudad }}</span>
+                        <span v-if="requisicion.motivo_en_palabras"> · {{ requisicion.motivo_en_palabras }}</span>
+                    </p>
+                    <!--
+                        Si el papel va a salir con huecos, que lo sepa quien lo
+                        va a firmar antes de firmarlo.
+                    -->
+                    <p v-if="requisicion.faltantes_formato?.length" class="text-xs text-amber-700 mt-1">
+                        El impreso sale sin {{ requisicion.faltantes_formato.join(', ') }}.
+                    </p>
                 </div>
 
                 <div class="flex gap-2 flex-wrap">
+                    <a :href="`/app/rrhh/requisiciones/${requisicion.id}/pdf`" target="_blank"
+                        class="btn-secondary">Imprimir</a>
                     <button v-if="puede.enviar" @click="enviar" :disabled="procesando" class="btn-primary">
                         <Send class="h-4 w-4" /> Enviar a Gestión Humana
                     </button>

@@ -18,7 +18,8 @@ class CreditoController extends Controller implements HasMiddleware
     {
         return [
             new Middleware(function (Request $r, \Closure $next) {
-                abort_unless($r->user()?->esContable(), 403);  // A1/A3 FIX · unificado con sidebar (Contador/Gerente)
+                // Casilla: Condiciones de credito.
+                abort_unless(\App\Auth\Permisos::puede($r->user(), 'condiciones_credito'), 403);
                 return $next($r);
             }),
         ];

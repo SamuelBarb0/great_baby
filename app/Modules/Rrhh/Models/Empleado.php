@@ -31,6 +31,13 @@ class Empleado extends Model
         'activacion_token', 'activacion_expira_at', 'acceso_creado_at',
         'email', 'telefono', 'cargo', 'area', 'tipo_contrato', 'salario',
         'fecha_ingreso', 'fecha_retiro', 'tipo_retiro', 'motivo_retiro', 'retirado_por_id',
+        // Fase A · lo que el cuadro de novedades pide de cada persona.
+        'fecha_nacimiento', 'grupo_sanguineo', 'direccion', 'ciudad',
+        'auxilio_excluido', 'auxilio_excluido_motivo',
+        'empresa_afiliadora', 'horario', 'periodicidad_pago',
+        'valor_adicional', 'concepto_adicional',
+        'banco', 'tipo_cuenta', 'cuenta_bancaria',
+        'eps', 'pension', 'cesantias', 'caja', 'arl', 'arl_nivel_riesgo',
         'estado', 'estado_induccion', 'notas',
         'induccion_at', 'induccion_por_id', 'induccion_temas',
         'prueba_hasta', 'prueba_evaluada_at', 'prueba_evaluada_por_id',
@@ -41,7 +48,10 @@ class Empleado extends Model
     protected $casts = [
         'fecha_ingreso' => 'date',
         'fecha_retiro' => 'date',
+        'fecha_nacimiento' => 'date',
         'salario' => 'decimal:2',
+        'valor_adicional' => 'decimal:2',
+        'auxilio_excluido' => 'boolean',
         'induccion_at' => 'datetime',
         'prueba_hasta' => 'date',
         'prueba_evaluada_at' => 'datetime',
@@ -169,6 +179,97 @@ class Empleado extends Model
     public function asignaciones(): HasMany
     {
         return $this->hasMany(Asignacion::class)->latest('id');
+    }
+
+    /** Sus incapacidades, permisos, ausencias y horas extra. */
+    public function novedades(): HasMany
+    {
+        return $this->hasMany(Novedad::class)->latest('fecha_inicio');
+    }
+
+    /**
+     * Lo que gana en total al mes, salario más lo que venga aparte.
+     *
+     * En prestación de servicios el Excel lo escribe «$2.000.000 + $500.000
+     * (SSI)»: el segundo valor es el aporte a seguridad social, que se paga
+     * pero no es salario. Se suman para informar y se guardan separados para
+     * que ningún promedio los confunda.
+     */
+    public function pagoMensual(): float
+    {
+        return (float) $this->salario + (float) $this->valor_adicional;
+    }
+
+    /**
+     * ¿Tiene derecho a auxilio de transporte?
+     *
+     * Hasta dos salarios mínimos. De esto depende si una incapacidad genera
+     * descuento o no, así que la respuesta vive acá y no repetida en cada
+     * cálculo.
+     */
+    public function devengaAuxilioTransporte(): bool
+    {
+        /*
+         * La excepción va primero porque es la que el salario no puede ver:
+         * el auxilio compensa el transporte AL TRABAJO, así que no lo devenga
+         * quien vive en el lugar de trabajo ni aquel a quien la empresa le
+         * pone la ruta. Son casos reales y el sueldo no los distingue.
+         */
+        if ($this->auxilio_excluido) {
+            return false;
+        }
+
+        $minimo = (float) setting('rrhh.salario_minimo');
+
+        return $minimo > 0 && (float) $this->salario > 0 && (float) $this->salario <= 2 * $minimo;
+    }
+
+    /** Por qué no lo devenga, en palabras, para el desprendible y la ficha. */
+    public function porQueNoDevengaAuxilio(): ?string
+    {
+        if ($this->auxilio_excluido) {
+            return $this->auxilio_excluido_motivo ?: 'Excluido del auxilio de transporte.';
+        }
+
+        $minimo = (float) setting('rrhh.salario_minimo');
+
+        if ($minimo > 0 && (float) $this->salario > 2 * $minimo) {
+            return 'Gana más de dos salarios mínimos ($'
+                .number_format(2 * $minimo, 0, ',', '.').').';
+        }
+
+        return null;
+    }
+
+    /**
+     * Qué le falta a la ficha para que el cuadro de novedades salga completo.
+     *
+     * El cuadro se arma con dieciséis datos por persona. Si falta alguno, la
+     * celda llega vacía al contador y alguien lo persigue por WhatsApp. Esto
+     * lo dice ANTES, en la pantalla del empleado.
+     *
+     * @return array<string> los campos que faltan, en palabras
+     */
+    public function faltantesDeFicha(): array
+    {
+        $exigidos = [
+            'fecha_nacimiento' => 'fecha de nacimiento',
+            'grupo_sanguineo' => 'grupo sanguíneo y RH',
+            'direccion' => 'dirección',
+            'telefono' => 'teléfono',
+            'empresa_afiliadora' => 'empresa que afilia',
+            'cuenta_bancaria' => 'cuenta bancaria',
+            'eps' => 'EPS',
+            'pension' => 'fondo de pensiones',
+            'cesantias' => 'fondo de cesantías',
+            'arl_nivel_riesgo' => 'nivel de riesgo ARL',
+        ];
+
+        return array_values(array_filter(
+            $exigidos,
+            fn (string $campo) => blank($this->{$campo}),
+            ARRAY_FILTER_USE_KEY,
+        ));
     }
 
     /**

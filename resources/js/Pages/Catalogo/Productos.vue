@@ -13,6 +13,17 @@ import { mensajeDeError } from '@/composables/useMensajeError';
 
 const props = defineProps({
     filtros: { type: Object, required: true },
+    /*
+     * Si quien mira puede ESCRIBIR en el catálogo. La pantalla se abre con
+     * lectura para más gente de la que puede eliminar, clonar, importar o
+     * empujar a SIIGO: sin esta bandera, los botones salían para todos y
+     * daban 403 uno por uno.
+     */
+    puede_administrar: { type: Boolean, default: false },
+    // «Traer de SIIGO» y «Por código» van a /app/siigo/*, con su propia puerta.
+    puede_siigo: { type: Boolean, default: false },
+    // Importar el catálogo tiene su propia casilla.
+    puede_importar: { type: Boolean, default: false },
     kpis: { type: Object, required: true },
     productos: { type: Object, required: true },
     lineas: { type: Array, required: true },
@@ -456,7 +467,8 @@ onUnmounted(() => { if (typeof stopNav === 'function') stopNav(); });
                 </div>
                 <div class="flex items-center gap-2 flex-wrap">
                     <!-- Grupo SIIGO · sincronización bidireccional -->
-                    <div class="flex items-center gap-0.5 rounded-lg border border-emerald-200 bg-emerald-50/40 p-0.5"
+                    <div v-if="puede_siigo"
+                         class="flex items-center gap-0.5 rounded-lg border border-emerald-200 bg-emerald-50/40 p-0.5"
                          title="Traer datos desde SIIGO al ERP">
                         <button type="button" @click="abrirConfirmarReconciliar" :disabled="sincronizandoTodo"
                                 class="text-sm inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-emerald-700 hover:bg-emerald-100 disabled:opacity-50">
@@ -472,14 +484,14 @@ onUnmounted(() => { if (typeof stopNav === 'function') stopNav(); });
                     </div>
 
                     <!-- Excel SIIGO · botón único que abre el modal con todas las acciones -->
-                    <button type="button" @click="abrirImportarExcel()"
+                    <button v-if="puede_importar" type="button" @click="abrirImportarExcel()"
                             class="text-sm inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-amber-200 bg-amber-50/40 text-amber-700 hover:bg-amber-100">
                         <FileSpreadsheet class="h-4 w-4"/>
                         Excel SIIGO
                     </button>
 
                     <!-- Papelera · acción secundaria discreta -->
-                    <Link href="/app/catalogo/productos-papelera"
+                    <Link v-if="puede_administrar" href="/app/catalogo/productos-papelera"
                           class="text-sm inline-flex items-center gap-1.5 px-2.5 py-2 rounded-lg text-surface-600 hover:bg-surface-100"
                           title="Papelera · productos eliminados en los últimos 30 días">
                         <Trash2 class="h-4 w-4"/>
@@ -749,11 +761,11 @@ onUnmounted(() => { if (typeof stopNav === 'function') stopNav(); });
                         Ajustar precio %
                     </button>
                     <!-- PROD-13 · bulk push a SIIGO (solo si hay al menos uno para pushear) -->
-                    <button @click="abrirBulkPushSiigo" :disabled="bulkCargando"
+                    <button v-if="puede_administrar" @click="abrirBulkPushSiigo" :disabled="bulkCargando"
                             class="text-xs px-2 py-1 rounded border border-sky-500 text-sky-700 hover:bg-sky-50 disabled:opacity-50 inline-flex items-center gap-1">
                         <Cloud class="h-3.5 w-3.5"/> Enviar a SIIGO ({{ seleccionados.length }})
                     </button>
-                    <button @click="abrirBulkEliminar" :disabled="bulkCargando"
+                    <button v-if="puede_administrar" @click="abrirBulkEliminar" :disabled="bulkCargando"
                             class="text-xs px-2 py-1 rounded border border-red-500 text-red-700 hover:bg-red-50 disabled:opacity-50">
                         🗑 Eliminar ({{ seleccionados.length }})
                     </button>
@@ -854,7 +866,7 @@ onUnmounted(() => { if (typeof stopNav === 'function') stopNav(); });
                                 <Link :href="`/app/catalogo/productos/${p.id}`" class="text-brand-600 hover:text-brand-700 p-1 inline-block" title="Ver/Editar">
                                     <Pencil class="h-4 w-4"/>
                                 </Link>
-                                <button @click="eliminar(p)" class="text-red-500 hover:text-red-700 p-1" title="Eliminar">
+                                <button v-if="puede_administrar" @click="eliminar(p)" class="text-red-500 hover:text-red-700 p-1" title="Eliminar">
                                     <Trash2 class="h-4 w-4"/>
                                 </button>
                             </td>

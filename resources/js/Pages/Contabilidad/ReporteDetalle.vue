@@ -3,6 +3,8 @@ import { ref, watch, computed, nextTick } from 'vue';
 import { Head, router, Link } from '@inertiajs/vue3';
 import { FileSearch, ArrowLeft, Search, AlertTriangle, Eye, EyeOff, Cloud, CloudOff, ExternalLink } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
+import PestanasSeccion from '@/Components/PestanasSeccion.vue';
+import { pestanasReportes } from '@/composables/usePestanasContables';
 import { useMoney } from '@/composables/useMoney';
 import { pucLabel } from '@/composables/pucLabels';
 import { fechaCorta } from '@/composables/useFecha';
@@ -77,6 +79,8 @@ const tieneMeta = computed(() => props.meta && props.meta.numero);
     <Head :title="`Asiento ${meta?.numero || ''}`"/>
     <AppLayout>
         <div class="max-w-4xl mx-auto space-y-4">
+            <PestanasSeccion :pestanas="pestanasReportes"/>
+
             <Link href="/app/contabilidad/reportes" class="text-sm text-brand-600 hover:underline inline-flex items-center gap-1">
                 <ArrowLeft class="h-4 w-4"/> Volver a Reportes
             </Link>

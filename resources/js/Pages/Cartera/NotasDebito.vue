@@ -3,6 +3,10 @@ import { ref, reactive } from 'vue';
 import { Head, router } from '@inertiajs/vue3';
 import { FilePlus, Plus, Search, Cloud, CloudOff, RefreshCw, X } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
+import Paginacion from '@/Components/Paginacion.vue';
+import { useDestacar } from '@/composables/useDestacar';
+import PestanasSeccion from '@/Components/PestanasSeccion.vue';
+import { pestanasNotas } from '@/composables/usePestanasContables';
 import { useMoney } from '@/composables/useMoney';
 import AppConfirmModal from '@/Components/AppConfirmModal.vue';
 
@@ -11,6 +15,10 @@ const props = defineProps({
     notas: { type: Object, required: true },
     kpis: { type: Object, required: true },
 });
+
+// La Torre SIIGO enlaza aca con `?destacar=<id>` cuando el documento no tiene
+// pantalla de detalle propia. Senala la fila en vez de dar un 404.
+const { clasesDe } = useDestacar();
 
 // Confirmaciones con el modal propio: el confirm() nativo queda bloqueado
 // dentro del iframe de la app de escritorio y en celular ignora el diseno.
@@ -92,6 +100,8 @@ const reenviar = (nd) => {
     <Head title="Notas débito · manuales + SIIGO"/>
     <AppLayout>
         <div class="space-y-4 max-w-7xl">
+            <PestanasSeccion :pestanas="pestanasNotas"/>
+
             <div class="flex items-start justify-between gap-3 flex-wrap">
                 <div>
                     <h1 class="text-2xl font-bold flex items-center gap-2">
@@ -145,7 +155,7 @@ const reenviar = (nd) => {
                         </tr>
                     </thead>
                     <tbody class="divide-y">
-                        <tr v-for="n in notas.data" :key="n.id" class="hover:bg-surface-50">
+                        <tr v-for="n in notas.data" :key="n.id" :class="['hover:bg-surface-50', clasesDe(n.id)]">
                             <td class="p-2 font-mono font-bold text-brand-600">{{ n.numero }}</td>
                             <td class="p-2 font-mono text-xs">{{ n.factura_numero }}</td>
                             <td class="p-2 text-xs">{{ n.cliente }}</td>
@@ -171,6 +181,7 @@ const reenviar = (nd) => {
                     </tbody>
                 </table>
             </div>
+            <Paginacion :pagina="notas" etiqueta="notas debito"/>
 
             <div v-if="modal" @click.self="modal = false" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
                 <div class="card p-5 w-full max-w-lg space-y-3">

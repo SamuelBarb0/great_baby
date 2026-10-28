@@ -8,7 +8,12 @@ import { fechaCorta } from '@/composables/useFecha';
 import { useEscClose } from '@/composables/useEscClose';
 import AppConfirmModal from '@/Components/AppConfirmModal.vue';
 
-const props = defineProps({ orden: { type: Object, required: true } });
+const props = defineProps({
+    orden: { type: Object, required: true },
+    // El impreso lleva costos de proveedor y es sólo de gerencia.
+    puede_pdf: { type: Boolean, default: false },
+    puede_aprobar: { type: Boolean, default: false },
+});
 
 const modalAnular = ref(false);
 const modalAprobar = ref(false);
@@ -19,6 +24,12 @@ const procesando = ref(false);
 
 // Re-audit M2 UX-C2 · useMoney (paridad con Cartera/Contabilidad).
 const { money } = useMoney();
+
+const badgeDestino = (color) => ({
+    success: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200',
+    info: 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200',
+    warning: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200',
+}[color] || 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200');
 
 // Re-audit M2 UX-C4 · modal propio en lugar de confirm() nativo (consistencia
 // con Anular). Muestra el monto que se compromete al aprobar.
@@ -123,7 +134,7 @@ const reenviarRecepcion = (rec) => {
                 </div>
 
                 <div class="flex items-center gap-2 border-t border-surface-200 dark:border-surface-800 pt-3 flex-wrap">
-                    <button v-if="orden.estado === 'borrador' || orden.estado === 'enviada'" @click="abrirAprobar" :disabled="procesando" class="btn-primary">
+                    <button v-if="puede_aprobar && (orden.estado === 'borrador' || orden.estado === 'enviada')" @click="abrirAprobar" :disabled="procesando" class="btn-primary">
                         <CheckCircle class="h-4 w-4"/> Aprobar
                     </button>
                     <Link v-if="['aprobada','parcial'].includes(orden.estado)" :href="`/app/compras/recepcion/nueva?oc=${orden.id}`" class="btn-primary bg-emerald-600 hover:bg-emerald-700">
@@ -132,7 +143,8 @@ const reenviarRecepcion = (rec) => {
                     <button v-if="!['recibida','cerrada','anulada'].includes(orden.estado)" @click="modalAnular = true" class="btn-ghost text-red-600 border border-red-300">
                         <XCircle class="h-4 w-4"/> Anular
                     </button>
-                    <a :href="`/compras/orden/${orden.id}/pdf`" target="_blank" rel="noopener" class="btn-ghost">PDF</a>
+                    <a v-if="puede_pdf" :href="`/compras/orden/${orden.id}/pdf`" target="_blank" rel="noopener"
+                        class="btn-ghost">PDF</a>
                 </div>
             </div>
 
@@ -164,8 +176,27 @@ const reenviarRecepcion = (rec) => {
                 </div>
             </div>
 
+            <!--
+                Si la compra no se declara, no hay nada que mandar a SIIGO: el
+                bloque entero sobra. Antes el boton existia igual y el envio
+                reventaba despues, que es la peor forma de enterarse.
+            -->
+            <div v-if="orden.va_a_siigo === false" class="card p-4">
+                <div class="flex items-center gap-2 flex-wrap">
+                    <span :class="['px-3 py-1 rounded-full text-xs font-bold uppercase', badgeDestino(orden.destino_color)]">
+                        {{ orden.destino_label }}
+                    </span>
+                    <span class="text-sm text-surface-600 dark:text-surface-300">
+                        Esta compra no se declara: no viaja a SIIGO y su IVA no se descuenta.
+                    </span>
+                </div>
+                <p v-if="orden.motivo_destino" class="text-xs text-surface-500 mt-2">
+                    Motivo: {{ orden.motivo_destino }}
+                </p>
+            </div>
+
             <!-- COMP-B6 · Semáforo SIIGO + recepciones asociadas (+ reenvío manual COMP-B8). -->
-            <div v-if="orden.siigo" class="card p-4">
+            <div v-else-if="orden.siigo" class="card p-4">
                 <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
                     <div class="flex items-center gap-2">
                         <component :is="siigoBadge(orden.siigo.estado).icon" class="h-5 w-5"/>

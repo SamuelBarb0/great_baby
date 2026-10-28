@@ -54,7 +54,26 @@
 
     <h2>Ausentismo</h2>
     @if($i['ausentismo']['disponible'])
-        <div>{{ $i['ausentismo']['valor'] ?? '—' }}</div>
+        {{-- Decía `['valor']`, una clave que el indicador nunca devolvió: el
+             PDF que se lleva a la Junta imprimía un guion. Ahora salen los
+             números del cuadro de novedades, y debajo por qué falta la gente,
+             que es la pregunta que sigue al porcentaje. --}}
+        <div style="font-size: 9pt;">
+            <strong style="font-size: 14pt;">{{ $i['ausentismo']['porcentaje'] }}%</strong> ·
+            {{ $i['ausentismo']['dias_perdidos'] }} día(s) perdidos sobre
+            {{ $i['ausentismo']['dias_disponibles'] }} disponibles
+            ({{ $i['ausentismo']['novedades'] }} novedad(es) registradas).
+        </div>
+        @if(! empty($i['ausentismo']['por_clase']))
+            <table style="margin-top: 6px;">
+                <thead><tr><th>Motivo</th><th style="text-align: right;">Días</th></tr></thead>
+                <tbody>
+                @foreach($i['ausentismo']['por_clase'] as $clase => $dias)
+                    <tr><td>{{ $clase }}</td><td style="text-align: right;">{{ $dias }}</td></tr>
+                @endforeach
+                </tbody>
+            </table>
+        @endif
     @else
         {{-- Se dice que falta y por qué. Un número sin respaldo en una junta
              es peor que un hueco, porque el inventado se cree. --}}

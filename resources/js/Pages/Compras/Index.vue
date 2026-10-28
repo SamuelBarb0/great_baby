@@ -1,9 +1,10 @@
 <script setup>
-import { ref } from 'vue';
+import { ref, computed, watch } from 'vue';
 import { Head, Link, router } from '@inertiajs/vue3';
+import { useDebounceFn } from '@vueuse/core';
 import {
     ShoppingCart, Ship, Package, DollarSign, Plus, Globe,
-    Eye, Copy, Ban, Truck, Cloud, RefreshCw,
+    Eye, Copy, Ban, Truck, Cloud, RefreshCw, Search, Download,
 } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import KpiCard from '@/Components/KpiCard.vue';
@@ -14,10 +15,20 @@ import AppPromptModal from '@/Components/AppPromptModal.vue';
 
 const props = defineProps({
     tab: { type: String, default: 'ordenes' },
+    // Si el eje fiscal es editable para quien mira. Por defecto no: mejor que
+    // se vea de sólo lectura a que se ofrezca y despues de 403.
+    puede_destino: { type: Boolean, default: false },
     kpis: { type: Object, required: true },
-    ordenes: { type: Array, required: true },
-    importaciones: { type: Array, required: true },
-    recepciones: { type: Array, required: true },
+    // Paginadores. Solo llega el de la pestana activa: antes se armaban las
+    // tres consultas en cada carga, con sus relaciones, para mostrar una.
+    ordenes: { type: Object, default: null },
+    importaciones: { type: Object, default: null },
+    recepciones: { type: Object, default: null },
+    filtros: { type: Object, default: () => ({ q: '', desde: null, hasta: null, estado: 'todos' }) },
+    estados: { type: Object, default: () => ({ ordenes: [], importaciones: [], recepciones: [] }) },
+    opcionesEjes: { type: Object, default: () => ({ lineas: [], destinos: [] }) },
+    // Sin «reparto»: en compras es fiscal o interna.
+    destinosDeCompra: { type: Array, default: () => [] },
 });
 
 // Confirmaciones con el modal propio: el confirm() nativo queda bloqueado
@@ -27,6 +38,87 @@ const modalConfirm = ref(null);
 const modalMotivo = ref(null);
 const tabAct = ref(props.tab);
 const { money } = useMoney();
+
+/*
+ * F2c · Filtros de verdad.
+ *
+ * Antes cada pestana traia las ultimas 30 o 50 filas y nada mas: buscar una OC
+ * de marzo era imposible desde aca. El filtro se aplica a la pestana ACTIVA, y
+ * cambiar de pestana ahora va al servidor porque solo se consulta la que se ve.
+ */
+const q = ref(props.filtros.q || '');
+const desde = ref(props.filtros.desde || '');
+const hasta = ref(props.filtros.hasta || '');
+const estado = ref(props.filtros.estado || 'todos');
+const linea = ref(props.filtros.linea || 'todas');
+const destino = ref(props.filtros.destino || 'todas');
+
+const parametros = () => ({
+    tab: tabAct.value, q: q.value, desde: desde.value, hasta: hasta.value, estado: estado.value,
+    linea: linea.value, destino: destino.value,
+});
+
+const consultar = () => router.get('/app/compras', parametros(), {
+    preserveState: true, preserveScroll: true, replace: true,
+});
+
+const buscar = useDebounceFn(consultar, 400);
+watch(q, buscar);
+watch([desde, hasta, estado, linea, destino], consultar);
+
+const irA = (tab) => {
+    tabAct.value = tab;
+    // El estado es de cada entidad: «aprobada» no existe en importaciones, y
+    // arrastrarlo deja la pestana nueva vacia sin motivo visible.
+    estado.value = 'todos';
+    consultar();
+};
+
+const pagina = computed(() => props[tabAct.value] ?? null);
+const estadosDeLaPestana = computed(() => props.estados[tabAct.value] ?? []);
+
+/*
+ * Una importacion es un contenedor en ruta: lo que se declara o no son las
+ * compras que vienen adentro, no el viaje. Por eso el filtro de los dos ejes
+ * no se muestra en esa pestana.
+ */
+const tieneEjes = computed(() => tabAct.value !== 'importaciones');
+
+/* ── Cambiar si una compra se declara ────────────────────────────────────── */
+const modalDestino = ref(null);   // { orden, destino }
+const motivoDestino = ref('');
+const guardandoDestino = ref(false);
+
+const pedirDestino = (orden, nuevoDestino) => {
+    if (orden.destino === nuevoDestino) return;
+    motivoDestino.value = '';
+    modalDestino.value = { orden, destino: nuevoDestino };
+};
+
+const confirmarDestino = () => {
+    if (! modalDestino.value || guardandoDestino.value) return;
+    guardandoDestino.value = true;
+    router.post('/app/compras/destino', {
+        orden_id: modalDestino.value.orden.id,
+        destino: modalDestino.value.destino,
+        motivo: motivoDestino.value || null,
+    }, {
+        preserveScroll: true,
+        onFinish: () => { guardandoDestino.value = false; },
+        onSuccess: () => { modalDestino.value = null; },
+    });
+};
+
+const labelDestino = (valor) => props.destinosDeCompra.find(d => d.valor === valor)?.label ?? valor;
+
+const hrefExport = computed(() => {
+    const p = new URLSearchParams();
+    for (const [k, v] of Object.entries(parametros())) {
+        if (v && v !== 'todos') p.set(k, v);
+    }
+    p.set('tab', tabAct.value);
+    return `/app/compras/csv?${p.toString()}`;
+});
 
 const badge = (color) => ({
     warning: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200',
@@ -137,22 +229,68 @@ const iconoSiigo = (color) => ({
                 <KpiCard label="Recepciones del mes" :value="kpis.recepciones_mes" color="emerald" :icon="Package"/>
             </div>
 
-            <!-- Tabs -->
+            <!-- Tabs · navegan al servidor: solo se consulta la que se ve -->
             <div class="flex items-center gap-2 border-b border-surface-200 dark:border-surface-800">
-                <button @click="tabAct='ordenes'" :class="['px-4 py-2 text-sm font-semibold border-b-2', tabAct==='ordenes' ? 'border-brand-500 text-brand-600' : 'border-transparent text-surface-500']">
-                    Órdenes ({{ ordenes.length }})
-                </button>
-                <button @click="tabAct='importaciones'" :class="['px-4 py-2 text-sm font-semibold border-b-2', tabAct==='importaciones' ? 'border-brand-500 text-brand-600' : 'border-transparent text-surface-500']">
-                    Importaciones ({{ importaciones.length }})
-                </button>
-                <button @click="tabAct='recepciones'" :class="['px-4 py-2 text-sm font-semibold border-b-2', tabAct==='recepciones' ? 'border-brand-500 text-brand-600' : 'border-transparent text-surface-500']">
-                    Recepciones ({{ recepciones.length }})
+                <button v-for="tb in [['ordenes','Órdenes'],['importaciones','Importaciones'],['recepciones','Recepciones']]"
+                        :key="tb[0]" @click="irA(tb[0])"
+                        :class="['px-4 py-2 text-sm font-semibold border-b-2', tabAct===tb[0] ? 'border-brand-500 text-brand-600' : 'border-transparent text-surface-500 hover:text-surface-800 dark:hover:text-surface-200']">
+                    {{ tb[1] }}
                 </button>
             </div>
 
+            <!-- Filtros de la pestaña activa -->
+            <div class="card p-3 flex flex-wrap items-end gap-3">
+                <div class="flex-1 min-w-[220px]">
+                    <label class="text-xs font-semibold text-surface-500">Buscar</label>
+                    <div class="relative mt-1">
+                        <Search class="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-surface-400"/>
+                        <input v-model="q" type="search" class="input w-full pl-10"
+                               placeholder="Número, proveedor, contenedor…"/>
+                    </div>
+                </div>
+                <div>
+                    <label class="text-xs font-semibold text-surface-500">Estado</label>
+                    <select v-model="estado" class="input mt-1">
+                        <option v-for="e in estadosDeLaPestana" :key="e.valor" :value="e.valor">{{ e.label }}</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="text-xs font-semibold text-surface-500">Desde</label>
+                    <input v-model="desde" type="date" class="input mt-1"/>
+                </div>
+                <div>
+                    <label class="text-xs font-semibold text-surface-500">Hasta</label>
+                    <input v-model="hasta" type="date" class="input mt-1"/>
+                </div>
+                <template v-if="tieneEjes">
+                    <div>
+                        <label class="text-xs font-semibold text-surface-500">Línea de negocio</label>
+                        <select v-model="linea" class="input mt-1">
+                            <option value="todas">Todas</option>
+                            <option v-for="l in opcionesEjes.lineas" :key="l.valor" :value="l.valor">{{ l.label }}</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="text-xs font-semibold text-surface-500">Destino fiscal</label>
+                        <select v-model="destino" class="input mt-1">
+                            <option v-for="d in opcionesEjes.destinos" :key="d.valor" :value="d.valor">{{ d.label }}</option>
+                        </select>
+                    </div>
+                </template>
+                <a :href="hrefExport" class="btn-secondary text-sm inline-flex items-center gap-1"
+                   title="Baja exactamente lo que estás viendo, con el filtro aplicado">
+                    <Download class="h-4 w-4"/> Exportar
+                </a>
+            </div>
+
+            <div v-if="pagina" class="text-xs text-surface-500">
+                {{ pagina.total.toLocaleString('es-CO') }} resultado(s)
+                <span v-if="pagina.total > pagina.data.length"> · mostrando {{ pagina.from }}–{{ pagina.to }}</span>
+            </div>
+
             <!-- Órdenes con acciones CRUD -->
-            <div v-if="tabAct==='ordenes'" class="card overflow-hidden">
-                <div v-if="!ordenes.length" class="text-center py-12 text-surface-500 text-sm">Sin órdenes de compra registradas.</div>
+            <div v-if="tabAct==='ordenes' && ordenes" class="card overflow-hidden">
+                <div v-if="!ordenes.data.length" class="text-center py-12 text-surface-500 text-sm">Ninguna orden de compra coincide con el filtro.</div>
                 <div v-else class="overflow-x-auto">
                     <table v-tabla-movil class="w-full min-w-[900px] text-sm">
                         <thead class="bg-surface-50 dark:bg-surface-900"><tr class="text-surface-500 text-xs uppercase">
@@ -163,10 +301,11 @@ const iconoSiigo = (color) => ({
                             <th class="text-right">Esperada</th>
                             <th class="text-right">Total</th>
                             <th class="text-center">Estado</th>
+                            <th class="text-center">Destino</th>
                             <th class="text-right pr-4">Acciones</th>
                         </tr></thead>
                         <tbody>
-                            <tr v-for="o in ordenes" :key="o.id" class="border-t border-surface-100 dark:border-surface-900 hover:bg-surface-50 dark:hover:bg-surface-900/50">
+                            <tr v-for="o in ordenes.data" :key="o.id" class="border-t border-surface-100 dark:border-surface-900 hover:bg-surface-50 dark:hover:bg-surface-900/50">
                                 <td class="px-4 py-2 font-mono font-semibold">
                                     <Link :href="`/app/compras/oc/${o.id}`" class="text-brand-600 hover:underline">{{ o.numero }}</Link>
                                 </td>
@@ -176,6 +315,22 @@ const iconoSiigo = (color) => ({
                                 <td class="text-right text-surface-500 text-xs">{{ fechaCorta(o.fecha_esperada) }}</td>
                                 <td class="text-right font-bold font-mono">{{ money(o.total) }}</td>
                                 <td class="text-center"><span :class="['px-2 py-0.5 rounded text-xs font-bold', badge(o.estado_color)]">{{ o.estado_label }}</span></td>
+                                <!--
+                                    Si la compra se declara o no. Se decide aca,
+                                    en la orden, que es cuando se sabe si el
+                                    proveedor va a facturar; las recepciones que
+                                    todavia no viajaron a SIIGO lo heredan.
+                                -->
+                                <td class="text-center">
+                                    <select :value="o.destino"
+                                            :disabled="! puede_destino"
+                                            :title="puede_destino ? 'Cambiar si esta compra se declara' : 'Sólo contabilidad decide si una compra se declara'"
+                                            @change="pedirDestino(o, $event.target.value)"
+                                            :class="['text-xs font-bold rounded px-2 py-1 border-0 cursor-pointer', badge(o.destino_color)]">
+                                        <option v-for="d in destinosDeCompra" :key="d.valor" :value="d.valor">{{ d.label }}</option>
+                                    </select>
+                                    <div class="text-[10px] text-surface-400">{{ o.linea_label }}</div>
+                                </td>
                                 <td class="text-right pr-4 whitespace-nowrap">
                                     <Link :href="`/app/compras/oc/${o.id}`" class="text-brand-600 hover:text-brand-700 p-1 inline-block" title="Ver detalle">
                                         <Eye class="h-4 w-4"/>
@@ -197,9 +352,9 @@ const iconoSiigo = (color) => ({
             </div>
 
             <!-- Importaciones -->
-            <div v-if="tabAct==='importaciones'" class="card overflow-hidden">
-                <div v-if="!importaciones.length" class="text-center py-12 text-surface-500 text-sm">
-                    Sin importaciones registradas.
+            <div v-if="tabAct==='importaciones' && importaciones" class="card overflow-hidden">
+                <div v-if="!importaciones.data.length" class="text-center py-12 text-surface-500 text-sm">
+                    Ninguna importación coincide con el filtro.
                     <div class="mt-3"><Link href="/app/compras/importacion/nueva" class="btn-primary text-xs"><Plus class="h-3 w-3"/> Crear la primera</Link></div>
                 </div>
                 <div v-else class="overflow-x-auto">
@@ -215,7 +370,7 @@ const iconoSiigo = (color) => ({
                             <th class="text-center">Estado</th>
                         </tr></thead>
                         <tbody>
-                            <tr v-for="i in importaciones" :key="i.id" class="border-t border-surface-100 dark:border-surface-900 hover:bg-surface-50 dark:hover:bg-surface-900/50">
+                            <tr v-for="i in importaciones.data" :key="i.id" class="border-t border-surface-100 dark:border-surface-900 hover:bg-surface-50 dark:hover:bg-surface-900/50">
                                 <td class="px-4 py-2 font-mono font-semibold">
                                     <Link :href="`/app/compras/importacion/${i.id}`" class="text-brand-600 hover:underline">{{ i.numero }}</Link>
                                 </td>
@@ -233,27 +388,38 @@ const iconoSiigo = (color) => ({
             </div>
 
             <!-- Recepciones · con badge SIIGO y botón reenviar (D.1) -->
-            <div v-if="tabAct==='recepciones'" class="card overflow-hidden">
-                <div v-if="!recepciones.length" class="text-center py-12 text-surface-500 text-sm">Sin recepciones registradas.</div>
+            <div v-if="tabAct==='recepciones' && recepciones" class="card overflow-hidden">
+                <div v-if="!recepciones.data.length" class="text-center py-12 text-surface-500 text-sm">Ninguna recepción coincide con el filtro.</div>
                 <div v-else class="overflow-x-auto">
                     <table v-tabla-movil class="w-full min-w-[900px] text-sm">
                         <thead class="bg-surface-50 dark:bg-surface-900"><tr class="text-surface-500 text-xs uppercase">
                             <th class="text-left px-4 py-2">Fecha</th>
                             <th class="text-left">OC</th>
                             <th class="text-left">Estado</th>
+                            <th class="text-center">Destino</th>
                             <th class="text-left">Recibió</th>
                             <th class="text-left">SIIGO</th>
                             <th class="text-left">Observaciones</th>
                             <th class="text-right pr-4">Acciones</th>
                         </tr></thead>
                         <tbody>
-                            <tr v-for="r in recepciones" :key="r.id" class="border-t border-surface-100 dark:border-surface-900 hover:bg-surface-50 dark:hover:bg-surface-900/50">
+                            <tr v-for="r in recepciones.data" :key="r.id" class="border-t border-surface-100 dark:border-surface-900 hover:bg-surface-50 dark:hover:bg-surface-900/50">
                                 <td class="px-4 py-2 text-surface-500">{{ fechaCorta(r.fecha_recepcion) }}</td>
                                 <td class="font-mono">
                                     <Link :href="`/app/compras/recepcion/${r.id}`" class="text-brand-600 hover:underline">{{ r.orden_numero || 'R#'+r.id }}</Link>
                                 </td>
                                 <td class="capitalize">
                                     <span class="px-2 py-0.5 rounded text-xs font-bold" :class="r.estado === 'confirmada' ? badge('success') : badge('warning')">{{ r.estado }}</span>
+                                </td>
+                                <!-- Solo lectura: lo manda la orden. Cambiarlo
+                                     recepcion por recepcion dejaria una orden
+                                     mitad declarada y mitad no, sin decision
+                                     detras. -->
+                                <td class="text-center">
+                                    <span :class="['px-2 py-0.5 rounded text-[10px] font-bold', badge(r.destino_color)]">
+                                        {{ r.destino_label }}
+                                    </span>
+                                    <div class="text-[10px] text-surface-400">{{ r.linea_label }}</div>
                                 </td>
                                 <td class="text-xs">{{ r.receptor }}</td>
                                 <td class="text-xs">
@@ -279,7 +445,60 @@ const iconoSiigo = (color) => ({
                     </table>
                 </div>
             </div>
+
+            <!-- Paginación · una sola para las tres pestañas, porque sólo hay
+                 un paginador vivo a la vez -->
+            <div v-if="pagina && pagina.total > pagina.data.length"
+                 class="card flex items-center justify-between px-4 py-3 text-sm">
+                <div class="text-surface-500">{{ pagina.from }}–{{ pagina.to }} de {{ pagina.total.toLocaleString('es-CO') }}</div>
+                <div class="flex items-center gap-1">
+                    <template v-for="link in pagina.links" :key="link.label">
+                        <Link v-if="link.url" :href="link.url" preserve-scroll
+                              :class="['px-2 py-1 rounded text-xs',
+                                       link.active ? 'bg-brand-600 text-white' : 'text-surface-700 dark:text-surface-300 hover:bg-surface-100 dark:hover:bg-surface-800']"
+                              v-html="link.label"/>
+                        <span v-else class="px-2 py-1 rounded text-xs text-surface-400" v-html="link.label"/>
+                    </template>
+                </div>
+            </div>
         </div>
+        <!-- Sacar una compra de lo fiscal exige decir por que -->
+        <div v-if="modalDestino" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+             @click.self="modalDestino = null">
+            <div class="card p-5 w-full max-w-md space-y-3">
+                <h3 class="font-bold text-lg">
+                    Orden {{ modalDestino.orden.numero }} → {{ labelDestino(modalDestino.destino) }}
+                </h3>
+
+                <div v-if="modalDestino.destino !== 'siigo'"
+                     class="text-sm bg-amber-50 dark:bg-amber-900/20 border-l-4 border-amber-500 p-3">
+                    Esta compra deja de ir a SIIGO: no se va a poder descontar su IVA, porque no hay
+                    factura del proveedor con qué soportarlo. Escribí por qué — es lo que permite
+                    explicarlo dentro de tres meses.
+                </div>
+                <div v-else class="text-sm bg-emerald-50 dark:bg-emerald-900/20 border-l-4 border-emerald-500 p-3">
+                    Esta compra vuelve a lo fiscal y va a viajar a SIIGO cuando se confirme la recepción.
+                </div>
+
+                <div>
+                    <label class="text-xs font-semibold text-surface-500">
+                        Motivo {{ modalDestino.destino === 'siigo' ? '(opcional)' : '*' }}
+                    </label>
+                    <textarea v-model="motivoDestino" rows="3" maxlength="300" class="input w-full mt-1"
+                              placeholder="Ej.: proveedor sin RUT · compra de contado sin factura"></textarea>
+                </div>
+
+                <div class="flex justify-end gap-2 pt-1">
+                    <button @click="modalDestino = null" class="btn-secondary text-sm">Cancelar</button>
+                    <button @click="confirmarDestino"
+                            :disabled="guardandoDestino || (modalDestino.destino !== 'siigo' && ! motivoDestino.trim())"
+                            class="btn-primary text-sm disabled:opacity-40">
+                        {{ guardandoDestino ? 'Guardando…' : 'Confirmar' }}
+                    </button>
+                </div>
+            </div>
+        </div>
+
         <AppConfirmModal :cfg="modalConfirm" @cerrar="modalConfirm = null"/>
         <AppPromptModal :cfg="modalMotivo" @cerrar="modalMotivo = null"/>
     </AppLayout>

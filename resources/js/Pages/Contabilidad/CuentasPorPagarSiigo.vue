@@ -1,6 +1,8 @@
 <script setup>
 import { Head, Link } from '@inertiajs/vue3';
 import AppLayout from '@/Layouts/AppLayout.vue';
+import PestanasSeccion from '@/Components/PestanasSeccion.vue';
+import { pestanasSiigo } from '@/composables/usePestanasContables';
 import { ArrowLeft, AlertTriangle, Landmark, CalendarClock } from 'lucide-vue-next';
 
 const props = defineProps({
@@ -19,6 +21,8 @@ const vencida = (f) => f && f < hoy;
     <Head title="Cuentas por pagar · SIIGO"/>
     <AppLayout>
         <div class="space-y-5 max-w-6xl mx-auto">
+            <PestanasSeccion :pestanas="pestanasSiigo"/>
+
 
             <Link href="/app/contabilidad/reportes" class="text-sm text-brand-600 hover:underline inline-flex items-center gap-1">
                 <ArrowLeft class="h-4 w-4"/> Volver a reportes
@@ -44,6 +48,23 @@ const vencida = (f) => f && f < hoy;
             </div>
 
             <template v-else>
+                <!--
+                    El mismo aviso que ya trae la pantalla de conciliación. Sin él,
+                    acá se lee «SALDO TOTAL POR PAGAR SEGÚN SIIGO $386.974.114» en
+                    letra grande y cualquiera entiende que la empresa debe eso.
+                    En el sandbox de SIIGO la cuenta es compartida y esos saldos son
+                    de otras empresas: el 22-oct-2026 los 25 documentos que trajo
+                    eran de proveedores ajenos a Great Baby.
+                -->
+                <div class="card p-3 bg-amber-50 border-l-4 border-amber-500 text-amber-900 flex items-start gap-2">
+                    <AlertTriangle class="h-4 w-4 shrink-0 mt-0.5"/>
+                    <p class="text-xs">
+                        Estos saldos vienen tal cual de SIIGO. <b>En el ambiente de pruebas la cuenta
+                        es compartida con otros usuarios</b>, así que acá pueden aparecer documentos
+                        y proveedores que no son de Great Baby. En producción sólo saldrán los suyos.
+                    </p>
+                </div>
+
                 <div class="card p-4">
                     <div class="text-xs uppercase font-semibold text-surface-500">Saldo total por pagar según SIIGO</div>
                     <div class="text-3xl font-black text-brand-700 mt-1">{{ money(total) }}</div>

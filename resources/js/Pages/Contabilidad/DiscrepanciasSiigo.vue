@@ -2,6 +2,8 @@
 import { ref } from 'vue';
 import { Head, Link, router } from '@inertiajs/vue3';
 import AppLayout from '@/Layouts/AppLayout.vue';
+import PestanasSeccion from '@/Components/PestanasSeccion.vue';
+import { pestanasSiigo } from '@/composables/usePestanasContables';
 import { mensajeDeError } from '@/composables/useMensajeError';
 import { AlertTriangle, RefreshCw, Eye, Activity, CheckCircle2, Ghost, Scale, XCircle } from 'lucide-vue-next';
 
@@ -54,6 +56,8 @@ const reintentar = (id) => {
     <Head title="Discrepancias contables SIIGO"/>
     <AppLayout>
         <div class="space-y-5 max-w-7xl mx-auto">
+            <PestanasSeccion :pestanas="pestanasSiigo"/>
+
             <!-- Header + filtros -->
             <div class="flex items-start justify-between flex-wrap gap-3">
                 <div>

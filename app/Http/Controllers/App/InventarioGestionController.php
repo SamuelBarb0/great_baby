@@ -51,6 +51,9 @@ class InventarioGestionController extends Controller implements HasMiddleware
         // ProductoVariante era navegable desde kardex; los agregados no
         // tenían historial consultable aunque sí movimientos en la BD.
         $productoAgregado = null;
+        // LOG-H3 · aviso cuando la variante existe pero lo recibido quedó
+        // asentado a nivel producto.
+        $hayMovimientosSinRepartir = null;
         $movimientos = [];
         $saldoTotal = 0;
         $costoPromedio = 0;
@@ -61,10 +64,22 @@ class InventarioGestionController extends Controller implements HasMiddleware
             $variante = ProductoVariante::with('producto:id,referencia,nombre')
                 ->where('codigo_barras', $codigo)
                 ->first();
-            // 2. Si no hay variante, probar como producto AGREGADO por referencia.
+            /*
+             * 2. Si no hay variante, buscar el PRODUCTO por referencia.
+             *
+             * LOG-H3 · antes esto exigía `desglose_stock = false`, y ahí se
+             * perdía lo recién recibido: la orden de compra enlaza a nivel
+             * producto, así que la recepción asienta el movimiento con
+             * `variante_id = NULL` AUNQUE el producto tenga variantes. Con 20
+             * unidades en bodega y su entrada registrada, buscar la referencia
+             * respondía «Variante no encontrada».
+             *
+             * No se le inventa una variante al movimiento —la recepción
+             * genuinamente no sabe cuál es—: se muestra lo que hay y se dice
+             * que está a nivel producto, sin repartir.
+             */
             if (! $variante) {
                 $productoAgregado = \App\Modules\Dropi\Models\Producto::where('referencia', $codigo)
-                    ->where('desglose_stock', false)
                     ->first(['id', 'referencia', 'nombre', 'desglose_stock']);
             }
 
@@ -86,6 +101,27 @@ class InventarioGestionController extends Controller implements HasMiddleware
                     }
                 }
                 $movs = $q->orderBy('created_at')->limit(500)->get();
+
+                /*
+                 * LOG-H3 · La otra mitad del mismo defecto.
+                 *
+                 * Buscando por el código de barras SÍ aparece la variante,
+                 * pero su kardex sale vacío porque la entrada quedó a nivel
+                 * producto. Un kardex vacío se lee como «nunca se movió», y
+                 * acá hay unidades en bodega.
+                 */
+                if ($variante && $movs->isEmpty()) {
+                    $sueltos = InventarioMovimiento::whereNull('variante_id')
+                        ->where('producto_id', $variante->producto_id)
+                        ->count();
+
+                    if ($sueltos > 0) {
+                        $hayMovimientosSinRepartir = [
+                            'cuantos' => $sueltos,
+                            'referencia' => $variante->producto?->referencia,
+                        ];
+                    }
+                }
 
                 // Sprint 3 · Kardex FORMATO SIIGO · calcula:
                 //   1. Costo promedio ponderado tras cada entrada.
@@ -158,11 +194,19 @@ class InventarioGestionController extends Controller implements HasMiddleware
             ] : ($productoAgregado ? [
                 'id' => $productoAgregado->id, 'codigo' => $productoAgregado->referencia,
                 'producto' => $productoAgregado->nombre, 'referencia' => $productoAgregado->referencia,
-                'detalle' => 'Producto agregado · sin variantes',
+                // Decir cuál de los dos casos es. Un producto con desglose
+                // que muestra movimientos sin variante no es lo mismo que uno
+                // que nunca tuvo variantes, y confundirlos haría creer que el
+                // kardex de la variante está completo.
+                'detalle' => $productoAgregado->desglose_stock
+                    ? 'Movimientos a nivel producto · todavía sin repartir por variante'
+                    : 'Producto agregado · sin variantes',
                 'siigo_id' => null, 'siigo_code' => null,
                 'es_agregado' => true,
+                'con_desglose' => (bool) $productoAgregado->desglose_stock,
             ] : null),
             'movimientos' => $movimientos,
+            'sin_repartir' => $hayMovimientosSinRepartir,
             'saldoTotal' => $saldoTotal,
             'costoPromedio' => $costoPromedio,
             'valorStock' => $valorStock,
@@ -493,6 +537,10 @@ class InventarioGestionController extends Controller implements HasMiddleware
         // siigo_journal_id → verde (asientos ya en SIIGO); si alguno falta → ámbar;
         // sin movs todavía → gris.
         $siigoBadge = $this->resumirBadgeSiigo(
+            // La columna es `referencia_tipo`. Con `referencia_type` esta
+            // consulta lanza «Unknown column» y la pantalla de detalle da 500
+            // antes de pintar nada. Mismo error que tenía la devolución a
+            // proveedor; no se notaba porque no hay traslados ni conteos todavía.
             \App\Modules\Dropi\Models\InventarioMovimiento::where('referencia_tipo', Traslado::class)
                 ->where('referencia_id', $t->id)
                 ->get(['id', 'siigo_journal_id', 'siigo_sync_at'])
@@ -723,6 +771,10 @@ class InventarioGestionController extends Controller implements HasMiddleware
         // INV-A2 · badge SIIGO del conteo · ajuste_toma_fisica dispara journal
         // en SIIGO (post BUG-INV). Mostramos el estado del asiento aquí.
         $siigoBadge = $this->resumirBadgeSiigo(
+            // La columna es `referencia_tipo`. Con `referencia_type` esta
+            // consulta lanza «Unknown column» y la pantalla de detalle da 500
+            // antes de pintar nada. Mismo error que tenía la devolución a
+            // proveedor; no se notaba porque no hay traslados ni conteos todavía.
             \App\Modules\Dropi\Models\InventarioMovimiento::where('referencia_tipo', TomaFisica::class)
                 ->where('referencia_id', $toma->id)
                 ->get(['id', 'siigo_journal_id', 'siigo_sync_at'])
