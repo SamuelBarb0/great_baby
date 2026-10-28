@@ -129,8 +129,12 @@ class CerrarCorte
             // Generar remisiones 1:1 y prepararlas para ARI (§21)
             $r = $this->generarRemisiones->handle($corteId);
 
-            // §21 híbrido: generar facturas B2B automáticas para vendedores del sondeo
-            $b2b = \App\Modules\Cartera\Actions\GenerarFacturasB2BDeCorte::run($corteId);
+            // La factura ya no sale del corte: cada pedido se factura a
+            // consumidor final al despacharse (FacturarAlDespachar, decisión
+            // del 2026-10-20). Facturar aquí también por vendedor duplicaba la
+            // venta ante la DIAN. GenerarFacturasB2BDeCorte queda para un
+            // vendedor que pida factura a su nombre, a mano.
+            $b2b = ['facturas_creadas' => 0, 'valor_total' => 0.0];
 
             return [
                 'corte_id' => $corte->id,

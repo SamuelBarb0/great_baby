@@ -5,6 +5,7 @@
         $colores = [
             'conectado' => ['#10b981', 'Conectado'],
             'esperando_codigo' => ['#f59e0b', 'Esperando el código del correo'],
+            'esperando_app' => ['#f59e0b', 'Esperando el código de la app'],
             'expirado' => ['#ef4444', 'Sesión vencida'],
             'desconectado' => ['#94a3b8', 'Desconectado'],
             'sin_configurar' => ['#ef4444', 'Falta configurar la cuenta de Dropi'],
@@ -51,11 +52,15 @@
         </div>
     </x-filament::section>
 
-    @if($estado === 'esperando_codigo')
+    @if(in_array($estado, ['esperando_codigo', 'esperando_app'], true))
         <x-filament::section>
             <x-slot name="heading">Código de verificación</x-slot>
             <x-slot name="description">
-                Dropi mandó un código al correo {{ $s->email }}. Escríbelo aquí; vence en pocos minutos.
+                @if($estado === 'esperando_app')
+                    La cuenta tiene verificación en dos pasos. Abre la app de autenticación (Google Authenticator, Authy…) en el celular de la cuenta y escribe el código de 6 dígitos de Dropi; cambia cada 30 segundos.
+                @else
+                    Dropi mandó un código al correo {{ $s->email }}. Escríbelo aquí; vence en pocos minutos.
+                @endif
             </x-slot>
             <form wire:submit="confirmarCodigo" style="display:flex;gap:.75rem;flex-wrap:wrap;align-items:center;">
                 <x-filament::input.wrapper style="max-width:14rem;">

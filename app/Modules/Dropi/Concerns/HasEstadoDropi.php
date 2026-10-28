@@ -6,6 +6,7 @@ use App\Modules\Dropi\Enums\EstadoCorte;
 use App\Modules\Dropi\Enums\EstadoPedidoDropi;
 use App\Modules\Dropi\Events\PedidoDropiTransicionado;
 use App\Modules\Dropi\Models\DropiEstadoBitacora;
+use App\Modules\Dropi\Support\Trazabilidad;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
@@ -79,14 +80,17 @@ trait HasEstadoDropi
             }
             $pedido->save();
 
+            // Quién ya estaba; desde dónde (GPS) y con qué equipo (IP,
+            // navegador) son las capas de seguridad del empaque/despacho.
+            // El GPS va en columnas propias, no duplicado en el payload.
             DropiEstadoBitacora::create([
                 'pedido_id' => $pedido->id,
                 'estado_desde' => $actual?->value,
                 'estado_hasta' => $nuevo->value,
                 'fuente' => $fuente,
-                'payload' => $payload ?: null,
+                'payload' => array_diff_key($payload, ['gps' => true]) ?: null,
                 'user_id' => $userId,
-            ]);
+            ] + Trazabilidad::columnas($payload, $fuente));
 
             // Side-effects van por listener del evento.
             PedidoDropiTransicionado::dispatch(

@@ -217,3 +217,17 @@ it('el cruce separa atrasos, entregados en plazo y en camino', function () {
     \Filament\Facades\Filament::setCurrentPanel('admin');
     \Livewire\Livewire::test(\App\Modules\Dropi\Filament\Pages\CruceWalletPedidos::class)->assertOk()->assertSee('Atrasos');
 });
+
+it('sin sesión web la wallet se salta sin fallar: los pagos siguen por la API', function () {
+    // Con el driver api la sesión web solo hace falta para la wallet completa;
+    //   con 2FA vence cada 4 h y esperaba el código de la app → el cron fallaba
+    //   cada 30 min.
+    DropiWebSesion::query()->update(['estado' => DropiWebSesion::ESPERANDO_APP, 'token' => null]);
+    Http::fake();
+
+    $this->artisan('dropi:web-wallet-sync', ['--desde' => '2026-09-01'])
+        ->expectsOutputToContain('siguen entrando por la API')
+        ->assertSuccessful();
+
+    Http::assertNothingSent();
+});

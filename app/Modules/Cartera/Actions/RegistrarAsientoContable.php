@@ -281,9 +281,12 @@ class RegistrarAsientoContable
         return DB::transaction(function () use ($pago) {
             $this->limpiarPrevios($pago);
             $terceroTipo = 'App\\Models\\Contacto';
-            $cuentaCaja = $pago->medio_pago === 'efectivo'
-                ? setting('contable.cta_caja_default')
-                : setting('contable.cta_bancos_default');
+            $cuentaCaja = match ($pago->medio_pago) {
+                'efectivo' => setting('contable.cta_caja_default'),
+                // 9.3 · el pago de Dropi entra a la wallet, no al banco.
+                'wallet_dropi' => \App\Modules\Dropi\Listeners\RegistrarAsientoWalletDropi::CUENTA_WALLET,
+                default => setting('contable.cta_bancos_default'),
+            };
             $userId = auth()->id();
 
             $recibido = (float) $pago->monto_recibido;

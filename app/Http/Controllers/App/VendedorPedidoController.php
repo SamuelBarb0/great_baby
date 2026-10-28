@@ -248,7 +248,8 @@ class VendedorPedidoController extends Controller implements HasMiddleware
             ->with(['producto' => fn ($q) => $q->select('id', 'referencia', 'nombre', 'impuesto_id')
                 ->with('impuesto:id,porcentaje')])
             ->whereIn('id', $precios->keys())
-            ->whereHas('producto', fn ($q) => $q->where('activo', true))
+            // MKT-1 · activo y publicado: lo que Marketing ocultó no se ofrece.
+            ->whereHas('producto', fn ($q) => $q->visibleParaVentas())
             ->orderBy('id')
             ->get(['id', 'producto_id', 'codigo_barras', 'color_nombre', 'talla'])
             ->map(fn ($v) => [
@@ -275,7 +276,7 @@ class VendedorPedidoController extends Controller implements HasMiddleware
             ->vigentes()
             ->with(['producto' => fn ($q) => $q->select('id', 'referencia', 'nombre', 'impuesto_id', 'activo', 'desglose_stock')
                 ->with('impuesto:id,porcentaje')])
-            ->whereHas('producto', fn ($q) => $q->where('activo', true)->where('desglose_stock', false))
+            ->whereHas('producto', fn ($q) => $q->visibleParaVentas()->where('desglose_stock', false))
             ->get()
             ->map(fn ($pp) => [
                 'variante_id' => null,
@@ -334,6 +335,9 @@ class VendedorPedidoController extends Controller implements HasMiddleware
                 'cupo' => (float) ($credito['cupo'] ?? 0),
                 'dias_mora_max' => (int) ($credito['dias_mora_max'] ?? 0),
             ],
+            // Multiempresa · con quién se factura. La primera es la principal.
+            'empresas' => \App\Models\EmpresaConfig::activas()
+                ->map(fn ($e) => ['id' => $e->id, 'nombre' => $e->nombreCorto()])->values(),
         ]);
     }
 
@@ -399,6 +403,8 @@ class VendedorPedidoController extends Controller implements HasMiddleware
             'items.*.producto_id' => ['nullable', 'integer', 'exists:productos,id', 'required_without:items.*.variante_id'],
             'items.*.cantidad' => ['required', 'integer', 'min:1', 'max:9999'],
             'notas' => ['nullable', 'string', 'max:1000'],
+            // Multiempresa · sólo una razón social activa; sin elegir, la principal.
+            'empresa_id' => ['nullable', 'integer', \Illuminate\Validation\Rule::exists('empresa_config', 'id')->where('activa', true)],
         ]);
 
         $cliente = Contacto::whereKey($contactoId)->whereNotNull('lista_precios_id')->firstOrFail();
@@ -418,6 +424,7 @@ class VendedorPedidoController extends Controller implements HasMiddleware
             items: $data['items'],
             notas: $data['notas'] ?? null,
             vendedorId: $r->user()->id,
+            empresaId: $data['empresa_id'] ?? null,
         );
 
         return redirect()->route('app.vendedor.index')->with(

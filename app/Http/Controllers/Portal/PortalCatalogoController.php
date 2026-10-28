@@ -26,8 +26,9 @@ class PortalCatalogoController extends Controller implements HasMiddleware
         $q = trim((string) $request->input('q', ''));
         $marca = (int) $request->input('marca_id', 0);
 
+        // MKT-1 · Lo que Marketing ocultó mientras prepara el contenido no sale.
         $productos = Producto::query()
-            ->where('activo', true)
+            ->visibleParaVentas()
             ->when($q, fn ($qb) => $qb->where(function ($w) use ($q) {
                 $w->where('referencia', 'like', "%{$q}%")
                     ->orWhere('nombre', 'like', "%{$q}%");
@@ -109,7 +110,7 @@ class PortalCatalogoController extends Controller implements HasMiddleware
 
         $p = Producto::with(['variantes' => fn ($q) => $q->orderBy('talla')->orderBy('color_nombre')])
             ->findOrFail($producto);
-        abort_unless($p->activo, 404);
+        abort_unless($p->activo && $p->publicado, 404);
 
         $precios = $listaId
             ? PrecioVariante::whereIn('variante_id', $p->variantes->pluck('id'))

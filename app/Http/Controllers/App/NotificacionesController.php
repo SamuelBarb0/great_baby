@@ -69,7 +69,10 @@ class NotificacionesController extends Controller implements HasMiddleware
         }
 
         // 2. Pagos recibidos
+        //    Sin los cobros automáticos de Dropi (uno por pedido, cientos al
+        //    día): taparían todo lo demás. Esos se ven en la wallet.
         $pagos = PagoVenta::where('created_at', '>', $cutoff)
+            ->where(fn ($q) => $q->whereNull('medio_pago')->orWhere('medio_pago', '!=', 'wallet_dropi'))
             ->orderByDesc('id')->limit(10)->get();
         foreach ($pagos as $pg) {
             $eventos[] = [
@@ -99,7 +102,10 @@ class NotificacionesController extends Controller implements HasMiddleware
         }
 
         // 4. Facturas emitidas
+        //    Tampoco las de Dropi: una por pedido despachado.
         $facts = FacturaVenta::where('created_at', '>', $cutoff)
+            ->where(fn ($q) => $q->whereNull('origen_type')
+                ->orWhere('origen_type', '!=', \App\Modules\Dropi\Models\DropiPedido::class))
             ->orderByDesc('id')->limit(5)->get();
         foreach ($facts as $f) {
             $eventos[] = [

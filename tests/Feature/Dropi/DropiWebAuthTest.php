@@ -98,6 +98,33 @@ it('no guarda un token de configuración de 2FA como sesión', function () {
         ->and(DropiWebSesion::first()->token)->toBeNull();
 });
 
+it('con el 2FA ya activo pide el código de la app y conecta con él', function () {
+    // 26-oct-2026: Dropi devuelve el mismo token CONFIG con el 2FA ya activo;
+    // solo `objects.actived` lo distingue, y el ERP decía «configúralo».
+    $config = ['is_successful' => true, 'data' => [
+        'token' => jwtDePrueba(['token_type' => '2FA', 'aud' => 'CONFIG']),
+        'objects' => ['required' => true, 'actived' => true],
+    ]];
+    $exp = now()->addHours(4)->timestamp;
+    Http::fake([
+        'bff.test/auth/core/beforeLoginUnknownDevice' => Http::response(['is_successful' => true, 'data' => []]),
+        'bff.test/auth/core/login' => fn (Request $r) => $r['otp'] === '654321'
+            ? Http::response(['is_successful' => true, 'data' => ['token' => jwtDePrueba(['exp' => $exp])]])
+            : Http::response($config),
+    ]);
+
+    $auth = app(DropiWebAuth::class);
+
+    expect($auth->iniciar())->toBe(DropiWebSesion::ESPERANDO_APP)
+        ->and(DropiWebSesion::first()->ultimo_error)->toBeNull();
+
+    expect($auth->confirmarCodigo('111111'))->toBe(DropiWebSesion::ESPERANDO_APP)
+        ->and(DropiWebSesion::first()->ultimo_error)->toContain('código de la app');
+
+    expect($auth->confirmarCodigo('654 321'))->toBe(DropiWebSesion::CONECTADO)
+        ->and(DropiWebSesion::first()->tokenVigente())->not->toBeNull();
+});
+
 it('manda el token en X-Authorization, aguanta un 403 y marca la sesión vencida con un 401', function () {
     DropiWebSesion::create([
         'email' => 'Cuenta@Ejemplo.com', 'estado' => DropiWebSesion::CONECTADO,

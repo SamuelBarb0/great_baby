@@ -43,6 +43,11 @@
              mueren con "Credenciales SIIGO no configuradas". En `fake` el cliente
              responde simulado y el flujo se ejercita igual. -->
         <env name="SIIGO_DRIVER" value="fake"/>
+        <!-- Nunca heredar el driver ni el token de Dropi del .env local: con
+             DROPI_DRIVER=api los tests del driver web hablaban con Dropi real. -->
+        <env name="DROPI_DRIVER" value="mock"/>
+        <env name="DROPI_API_KEY" value=""/>
+        <env name="DROPI_WEB_SYNC" value="false"/>
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="NIGHTWATCH_ENABLED" value="false"/>

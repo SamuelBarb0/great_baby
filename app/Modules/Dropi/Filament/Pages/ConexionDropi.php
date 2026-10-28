@@ -100,7 +100,7 @@ class ConexionDropi extends Page
     public function confirmarCodigo(): void
     {
         if (trim($this->codigo) === '') {
-            Notification::make()->title('Escribe el código que llegó al correo.')->warning()->send();
+            Notification::make()->title('Escribe el código primero.')->warning()->send();
             return;
         }
         $this->ejecutar(fn (DropiWebAuth $auth) => $auth->confirmarCodigo($this->codigo, auth()->id()));
@@ -136,6 +136,7 @@ class ConexionDropi extends Page
         match (true) {
             $estado === DropiWebSesion::CONECTADO => Notification::make()->title('Conectado con Dropi.')->success()->send(),
             $estado === DropiWebSesion::ESPERANDO_CODIGO && ! $sesion?->ultimo_error => Notification::make()->title('Dropi mandó un código al correo de la cuenta.')->body('Escríbelo abajo para terminar de conectar.')->info()->send(),
+            $estado === DropiWebSesion::ESPERANDO_APP && ! $sesion?->ultimo_error => Notification::make()->title('Dropi pide el código de la app de autenticación.')->body('Ábrela en el celular de la cuenta y escribe abajo el código de 6 dígitos.')->info()->send(),
             default => Notification::make()->title('Dropi no dejó conectar')->body($sesion?->ultimo_error)->danger()->send(),
         };
     }

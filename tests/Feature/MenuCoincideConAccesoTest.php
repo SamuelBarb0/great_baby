@@ -63,6 +63,8 @@ const MENU_APP = [
     '/app/garantias/nueva' => 'garantias',
     '/app/marketing' => 'marketing',
     '/app/marketing/parrilla' => 'marketing_parrilla',
+    '/app/marketing/tablero' => 'marketing_tablero',
+    '/app/marketing/creativos' => 'marketing_material',
     /*
      * Gestión Humana entero. Estaban sólo vacantes y empleados, así que las
      * otras ocho entradas del grupo no las cubría nadie —y es el grupo con más

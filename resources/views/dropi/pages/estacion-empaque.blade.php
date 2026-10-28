@@ -112,7 +112,11 @@
                             style="padding:.75rem 1.25rem;background:{{ $registroActivo?->foto_path ? '#374151' : 'linear-gradient(90deg,#f59e0b,#b45309)' }};color:white;border:0;border-radius:.5rem;font-weight:700;font-size:.95rem;cursor:pointer;box-shadow:0 4px 12px rgba(245,158,11,.35);">
                         📸 {{ $registroActivo?->foto_path ? 'Cambiar foto' : 'Foto paquete' }}
                     </button>
-                    <button wire:click="confirmarYSiguiente"
+                    {{-- Capa de seguridad: manda la ubicación del equipo con la confirmación (ver Trazabilidad). --}}
+                    <button type="button"
+                            x-data="{ ocupado: false }"
+                            x-on:click="if (ocupado) return; ocupado = true; window.gbUbicacion().then(g => $wire.confirmarYSiguiente(g)).finally(() => ocupado = false)"
+                            x-bind:disabled="ocupado"
                             wire:loading.attr="disabled" wire:target="confirmarYSiguiente"
                             aria-label="Confirmar empaque y pasar al siguiente pedido"
                             style="padding:.75rem 1.5rem;background:linear-gradient(90deg,#10b981,#059669);color:white;border:0;border-radius:.5rem;font-weight:700;font-size:1rem;cursor:pointer;box-shadow:0 4px 12px rgba(16,185,129,.4);disabled:opacity:.6;disabled:cursor:wait;">
@@ -245,6 +249,19 @@
 
     {{-- Sonidos + voz + flash + auto-focus --}}
     <script>
+        // Ubicación del equipo para la trazabilidad. Nunca rechaza: si se niega
+        // el permiso o no hay GPS, manda el motivo y el servidor decide.
+        window.gbUbicacion = window.gbUbicacion || function (timeoutMs = 8000) {
+            return new Promise((resolve) => {
+                if (!navigator.geolocation) return resolve({ estado: 'no_disponible' });
+                navigator.geolocation.getCurrentPosition(
+                    (p) => resolve({ estado: 'ok', lat: p.coords.latitude, lng: p.coords.longitude, precision: Math.round(p.coords.accuracy) }),
+                    (e) => resolve({ estado: e && e.code === 1 ? 'denegado' : 'no_disponible' }),
+                    { enableHighAccuracy: true, timeout: timeoutMs, maximumAge: 60000 },
+                );
+            });
+        };
+
         // === Voz TTS en español para operador (manos-libres) ===
         // Elige explícitamente una voz es-* para evitar que Windows lea en inglés
         let vozEs = null;

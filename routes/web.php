@@ -260,6 +260,7 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     Route::post('/inventario/traslados/{id}/enviar', [\App\Http\Controllers\App\InventarioGestionController::class, 'trasladoEnviar'])->middleware('throttle:30,1')->name('app.inventario.traslado.enviar');
     Route::post('/inventario/traslados/{id}/recibir', [\App\Http\Controllers\App\InventarioGestionController::class, 'trasladoRecibir'])->middleware('throttle:30,1')->name('app.inventario.traslado.recibir');
     Route::post('/inventario/traslados/{id}/anular', [\App\Http\Controllers\App\InventarioGestionController::class, 'trasladoAnular'])->middleware('throttle:30,1')->name('app.inventario.traslado.anular');
+    Route::post('/inventario/traslados/{id}/aprobar', [\App\Http\Controllers\App\InventarioGestionController::class, 'trasladoAprobar'])->middleware('throttle:30,1')->name('app.inventario.traslado.aprobar');
     // PATRÓN α · UI captura conteo físico (Show + iniciar + guardar item + cerrar).
     Route::get('/inventario/conteos/{id}', [\App\Http\Controllers\App\InventarioGestionController::class, 'conteoShow'])->middleware('throttle:60,1')->name('app.inventario.conteo.show');
     Route::post('/inventario/conteos/{id}/iniciar', [\App\Http\Controllers\App\InventarioGestionController::class, 'conteoIniciar'])->middleware('throttle:20,1')->name('app.inventario.conteo.iniciar');
@@ -385,6 +386,9 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     Route::get('/catalogo', [\App\Http\Controllers\App\CatalogoController::class, 'index'])->name('app.catalogo.index');
     Route::get('/empresa', [\App\Http\Controllers\App\EmpresaController::class, 'index'])->name('app.empresa.index');
     Route::post('/empresa', [\App\Http\Controllers\App\EmpresaController::class, 'guardar'])->name('app.empresa.guardar');
+    // Multiempresa · cuenta de SIIGO de cada razón social que no es la principal.
+    Route::post('/empresa/{empresa}/siigo', [\App\Http\Controllers\App\EmpresaController::class, 'guardarSiigo'])->name('app.empresa.siigo');
+    Route::post('/empresa/{empresa}/siigo/probar', [\App\Http\Controllers\App\EmpresaController::class, 'probarSiigo'])->middleware('throttle:10,1')->name('app.empresa.siigo.probar');
     Route::get('/siigo', [\App\Http\Controllers\App\SiigoController::class, 'index'])->name('app.siigo.index');
     // F8 · panel de control del sync SIIGO
     Route::post('/siigo/kill-switch', [\App\Http\Controllers\App\SiigoController::class, 'toggleKillSwitch'])->name('app.siigo.kill-switch');
@@ -627,6 +631,17 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     Route::delete('/marketing/parrilla/{post}', [\App\Http\Controllers\App\MarketingController::class, 'postEliminar'])->name('app.marketing.post.eliminar');
     Route::get('/marketing/producto/{producto}/ficha', [\App\Http\Controllers\App\MarketingController::class, 'fichaEditar'])->name('app.marketing.ficha');
     Route::match(['put', 'post'], '/marketing/producto/{producto}/ficha', [\App\Http\Controllers\App\MarketingController::class, 'fichaGuardar'])->name('app.marketing.ficha.guardar');
+    // MKT-1 a MKT-4 · publicación, piezas, tablero por contenedor y producción
+    Route::post('/marketing/producto/{producto}/publicar', [\App\Http\Controllers\App\MarketingController::class, 'publicar'])->name('app.marketing.publicar');
+    Route::put('/marketing/producto/{producto}/piezas', [\App\Http\Controllers\App\MarketingController::class, 'piezas'])->name('app.marketing.piezas');
+    Route::get('/marketing/tablero', [\App\Http\Controllers\App\MarketingController::class, 'tablero'])->name('app.marketing.tablero');
+    Route::post('/marketing/parrilla/{post}/etapa', [\App\Http\Controllers\App\MarketingController::class, 'postEtapa'])->name('app.marketing.post.etapa');
+    Route::get('/marketing/creativos', [\App\Http\Controllers\App\MarketingCreativosController::class, 'index'])->name('app.marketing.creativos');
+    Route::post('/marketing/creativos', [\App\Http\Controllers\App\MarketingCreativosController::class, 'subir'])->middleware('throttle:60,1')->name('app.marketing.creativo.subir');
+    Route::put('/marketing/creativos/{creativo}', [\App\Http\Controllers\App\MarketingCreativosController::class, 'actualizar'])->name('app.marketing.creativo.actualizar');
+    Route::delete('/marketing/creativos/{creativo}', [\App\Http\Controllers\App\MarketingCreativosController::class, 'eliminar'])->name('app.marketing.creativo.eliminar');
+    Route::get('/marketing/creativos/{creativo}/ver', [\App\Http\Controllers\App\MarketingCreativosController::class, 'ver'])->name('app.marketing.creativo.ver');
+    Route::get('/marketing/creativos/{creativo}/descargar', [\App\Http\Controllers\App\MarketingCreativosController::class, 'descargar'])->name('app.marketing.creativo.descargar');
 
     // M7 · Garantías
     Route::get('/garantias', [\App\Http\Controllers\App\GarantiasController::class, 'index'])->name('app.garantias.index');
@@ -643,6 +658,7 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     Route::post('/pedidos-b2b/{pedido}/aprobar', [\App\Http\Controllers\App\PedidosB2BController::class, 'aprobar'])->name('app.pedidos-b2b.aprobar');
     Route::post('/pedidos-b2b/{pedido}/rechazar', [\App\Http\Controllers\App\PedidosB2BController::class, 'rechazar'])->name('app.pedidos-b2b.rechazar');
     Route::post('/pedidos-b2b/{pedido}/facturar', [\App\Http\Controllers\App\PedidosB2BController::class, 'facturar'])->name('app.pedidos-b2b.facturar');
+    Route::post('/pedidos-b2b/{pedido}/empresa', [\App\Http\Controllers\App\PedidosB2BController::class, 'cambiarEmpresa'])->name('app.pedidos-b2b.empresa');
     // LOG-J7 · gate duro: no se despacha sin factura (raíz inventario negativo que reportó Don Jorge).
     Route::post('/pedidos-b2b/{pedido}/despachar', [\App\Http\Controllers\App\PedidosB2BController::class, 'despachar'])->middleware('throttle:30,1')->name('app.pedidos-b2b.despachar');
 
@@ -809,6 +825,9 @@ Route::middleware(['web', 'auth'])->group(function () {
         ->middleware('throttle:60,1')->name('dropi.escaner.analizar');
     Route::post('/dropi/escaner/despachar', [EscanerController::class, 'despachar'])
         ->middleware('throttle:30,1')->name('dropi.escaner.despachar');
+    // 4.6 · escanear guía → facturar el pedido despachado que quedó sin factura.
+    Route::post('/dropi/escaner/facturar', [EscanerController::class, 'facturar'])
+        ->middleware('throttle:30,1')->name('dropi.escaner.facturar');
 
     // Re-audit SEG C1 · rate-limit para bloquear enumeración de estados de cuenta.
     Route::get('/cartera/estado-cuenta/{contacto}', [EstadoCuentaController::class, 'pdf'])

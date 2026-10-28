@@ -5,7 +5,9 @@ namespace App\Http\Controllers\App;
 use App\Http\Controllers\Controller;
 use App\Modules\Dropi\Enums\CategoriaUbicacion;
 use App\Modules\Dropi\Models\InventarioUbicacion;
+use App\Modules\Inventario\Enums\EstadoTraslado;
 use App\Modules\Inventario\Models\Traslado;
+use App\Modules\Marketing\Services\MuestrasMarketing;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controllers\HasMiddleware;
 use Illuminate\Routing\Controllers\Middleware;
@@ -62,12 +64,15 @@ class MarketingPrestamosController extends Controller implements HasMiddleware
             // `solicitante` es la RELACIÓN belongsTo(User,'solicitado_por'),
             // no una columna · pedirla en el select tumbaba la pantalla con
             // "Unknown column 'solicitante'".
-            ->with(['solicitante:id,name', 'origen:id,codigo', 'destino:id,codigo'])
+            ->with(['solicitante:id,name', 'origen:id,codigo', 'destino:id,codigo',
+                    'aprobador:id,name', 'enviador:id,name', 'recogedor:id,name', 'prestamo:id,numero'])
             ->withCount('items')
             ->orderByDesc('created_at')
             ->limit(100)
             ->get(['id', 'numero', 'origen_id', 'destino_id', 'estado', 'motivo',
-                   'solicitado_por', 'fecha_solicitud', 'fecha_ejecucion', 'observaciones', 'created_at'])
+                   'solicitado_por', 'fecha_solicitud', 'fecha_ejecucion', 'observaciones', 'created_at',
+                   'aprobado_por', 'aprobado_at', 'enviado_por', 'recogido_por', 'estado_mercancia',
+                   'observaciones_entrega', 'prestamo_id'])
             ->map(fn ($t) => [
                 'id' => $t->id,
                 'numero' => $t->numero,
@@ -84,6 +89,15 @@ class MarketingPrestamosController extends Controller implements HasMiddleware
                 // Hacia el almacén de Marketing = salida de bodega (préstamo);
                 // desde el almacén = devolución.
                 'es_prestamo' => in_array($t->destino_id, $ids, true),
+                // MKT-5 · el paso en palabras de Marketing y quién firmó cada uno.
+                'paso' => $this->paso($t, in_array($t->destino_id, $ids, true)),
+                'aprobado_por' => $t->aprobador?->name,
+                'entregado_por' => $t->enviador?->name,
+                'recogido_por' => $t->recogedor?->name,
+                'estado_mercancia' => $t->estado_mercancia,
+                'estado_mercancia_label' => Traslado::ESTADOS_MERCANCIA[$t->estado_mercancia] ?? null,
+                'observaciones_entrega' => $t->observaciones_entrega,
+                'prestamo' => $t->prestamo?->numero,
             ])
             ->toArray();
 
@@ -113,7 +127,29 @@ class MarketingPrestamosController extends Controller implements HasMiddleware
             'en_mi_almacen' => $this->enMiAlmacen($ids),
             'bodegas_comerciales' => $this->bodegasComerciales()->get(['id', 'codigo', 'nombre'])->toArray(),
             'es_super' => (bool) $r->user()?->esAracely(),
+            // Préstamos ya entregados, para decir qué cierra una devolución.
+            'para_devolver' => array_values(array_map(
+                fn ($p) => ['id' => $p['id'], 'numero' => $p['numero'], 'observaciones' => $p['observaciones']],
+                array_filter($prestamos, fn ($p) => $p['es_prestamo'] && $p['estado'] === 'recibido'),
+            )),
         ]);
+    }
+
+    /**
+     * MKT-5 · en qué va la solicitud, dicho como lo vive Marketing. El estado
+     * del traslado (borrador, en tránsito…) es el de bodega y no lo dice:
+     * «borrador» no distingue entre «nadie la ha mirado» y «ya la aprobaron».
+     */
+    private function paso(Traslado $t, bool $esPrestamo): string
+    {
+        return match ($t->estado) {
+            EstadoTraslado::Borrador => ! $esPrestamo ? 'Por recibir en bodega'
+                : ($t->aprobado_at ? 'Aprobada · bodega alistando' : 'Por aprobar'),
+            EstadoTraslado::EnTransito => $esPrestamo ? 'Lista para recoger' : 'En camino a bodega',
+            EstadoTraslado::Recibido => $esPrestamo ? 'Entregada' : 'Recibida en bodega',
+            EstadoTraslado::Anulado => 'Rechazada o anulada',
+            default => $t->estado?->label() ?? '—',
+        };
     }
 
     /**
@@ -128,7 +164,10 @@ class MarketingPrestamosController extends Controller implements HasMiddleware
 
         return \App\Modules\Dropi\Models\InventarioMovimiento::query()
             ->whereIn('ubicacion_id', $ids)
-            ->with(['variante:id,sku,producto_id,color,talla', 'variante.producto:id,nombre',
+            // `producto_variantes` no tiene `sku` ni `color`: pedirlas tumbaba el
+            // panel con 500 en cuanto Marketing tenía algo en su almacén, o sea
+            // justo después del primer préstamo entregado.
+            ->with(['variante:id,codigo_barras,producto_id,color_nombre,talla', 'variante.producto:id,nombre',
                     'producto:id,referencia,nombre'])
             ->get(['id', 'variante_id', 'producto_id', 'cantidad'])
             ->groupBy(fn ($m) => $m->variante_id ? 'v:'.$m->variante_id : 'p:'.$m->producto_id)
@@ -138,8 +177,8 @@ class MarketingPrestamosController extends Controller implements HasMiddleware
 
                 return [
                     'nombre' => $v?->producto?->nombre ?? $m->producto?->nombre ?? '—',
-                    'sku' => $v?->sku ?? $m->producto?->referencia ?? '—',
-                    'detalle' => trim(($v?->color ?? '').' '.($v?->talla ?? '')) ?: null,
+                    'sku' => $v?->codigo_barras ?? $m->producto?->referencia ?? '—',
+                    'detalle' => trim(($v?->color_nombre ?? '').' '.($v?->talla ?? '')) ?: null,
                     'cantidad' => (int) $movs->sum('cantidad'),
                 ];
             })
@@ -174,6 +213,7 @@ class MarketingPrestamosController extends Controller implements HasMiddleware
             'origen_id' => ['required', 'integer', 'exists:inventario_ubicaciones,id'],
             'destino_id' => ['required', 'integer', 'exists:inventario_ubicaciones,id', 'different:origen_id'],
             'observaciones' => ['nullable', 'string', 'max:500'],
+            'prestamo_id' => ['nullable', 'integer', 'exists:traslados_inventario,id'],
         ], [], [
             'origen_id' => 'bodega de origen',
             'destino_id' => 'bodega de destino',
@@ -193,19 +233,34 @@ class MarketingPrestamosController extends Controller implements HasMiddleware
         abort_unless($esPrestamo || $esDevolucion, 403,
             'Un préstamo va de una bodega de venta a un almacén de Marketing, o al revés.');
 
+        // La devolución dice qué préstamo cierra: uno entregado a ese mismo
+        // almacén de Marketing. Así queda la pareja préstamo ↔ devolución, que
+        // antes sólo se podía adivinar por el texto de las observaciones.
+        $prestamoId = null;
+        if ($esDevolucion && ! empty($data['prestamo_id'])) {
+            $prestamo = Traslado::findOrFail($data['prestamo_id']);
+            abort_unless($prestamo->motivo === 'prestamo' && (int) $prestamo->destino_id === $origen
+                && $prestamo->estado === EstadoTraslado::Recibido, 422,
+                'Ese préstamo no salió hacia este almacén o todavía no se entregó.');
+            $prestamoId = $prestamo->id;
+        }
+
         $t = Traslado::create([
             'numero' => Traslado::siguienteNumero(),
             'origen_id' => $origen,
             'destino_id' => $destino,
             'motivo' => 'prestamo',
+            'prestamo_id' => $prestamoId,
             'observaciones' => $data['observaciones'] ?? null,
             'solicitado_por' => $r->user()->id,
             'fecha_solicitud' => now('America/Bogota')->toDateString(),
-            'estado' => \App\Modules\Inventario\Enums\EstadoTraslado::Borrador,
+            'estado' => EstadoTraslado::Borrador,
         ]);
 
+        app(MuestrasMarketing::class)->avisarSolicitudNueva($t->load(['origen', 'destino', 'solicitante']));
+
         return back()->with('success', $esPrestamo
-            ? "Solicitud {$t->numero} creada. Bodega la surte y te avisa."
+            ? "Solicitud {$t->numero} creada. Cuando la aprueben y bodega la aliste, te llega el aviso."
             : "Devolución {$t->numero} creada. Llevá la mercancía a bodega para que la reciban.");
     }
 

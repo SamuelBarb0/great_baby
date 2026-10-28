@@ -2,7 +2,7 @@
     @php
         /** @var \App\Modules\Dropi\Models\DropiPedido $pedido */
         $pedido = $this->record;
-        $bitacora = $pedido->bitacoraEstados()->with('user')->orderBy('created_at')->get();
+        $eventos = \App\Modules\Dropi\Support\Trazabilidad::lineaDeTiempo($pedido);
     @endphp
 
     <div style="display:grid;grid-template-columns:2fr 1fr;gap:1.5rem;">
@@ -54,41 +54,61 @@
             </x-filament::section>
         </div>
 
-        {{-- Columna derecha: timeline de la bitácora --}}
+        {{-- Columna derecha: trazabilidad del envío --}}
         <x-filament::section>
-            <x-slot name="heading">Historia del pedido</x-slot>
-            <x-slot name="description">Bitácora completa · fuente y autor de cada cambio</x-slot>
+            <x-slot name="heading">Trazabilidad del envío</x-slot>
+            <x-slot name="description">Quién, cuándo, desde dónde y con qué equipo · empaque, foto e inventario</x-slot>
             <div style="position:relative;padding-left:1.5rem;">
                 {{-- Línea vertical de la timeline --}}
                 <div style="position:absolute;left:.375rem;top:.5rem;bottom:.5rem;width:2px;background:rgba(156,163,175,.25);"></div>
 
-                @forelse($bitacora as $entry)
+                @forelse($eventos as $ev)
                     @php
-                        $isSistema = $entry->fuente === 'sistema';
-                        $isApi = $entry->fuente === 'api';
-                        $isManual = $entry->fuente === 'manual';
-                        $color = $isApi ? '#3b82f6' : ($isSistema ? '#10b981' : '#f59e0b');
+                        $color = match (true) {
+                            $ev['tipo'] === 'inventario' => '#8b5cf6',
+                            $ev['tipo'] === 'foto' => '#ec4899',
+                            $ev['fuente'] === 'api' => '#3b82f6',
+                            $ev['fuente'] === 'sistema' => '#10b981',
+                            default => '#f59e0b',
+                        };
+                        $gps = $ev['gps'];
                     @endphp
                     <div style="position:relative;margin-bottom:1rem;">
                         <div style="position:absolute;left:-1.5rem;top:.375rem;width:.875rem;height:.875rem;border-radius:9999px;background:{{ $color }};border:2px solid rgba(0,0,0,.9);"></div>
                         <div>
                             <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;">
-                                <span style="font-weight:600;font-size:.9rem;">{{ ucfirst($entry->estado_hasta) }}</span>
-                                <span style="font-size:.7rem;padding:.125rem .375rem;background:rgba(156,163,175,.15);border-radius:.25rem;text-transform:uppercase;letter-spacing:.05em;">{{ $entry->fuente }}</span>
-                            </div>
-                            <div style="font-size:.75rem;color:#9ca3af;margin-top:.25rem;">
-                                {{ $entry->created_at->format('Y-m-d H:i') }}
-                                @if($entry->user)
-                                    · {{ $entry->user->name }}
+                                <span style="font-weight:600;font-size:.9rem;">{{ $ev['titulo'] }}</span>
+                                @if($ev['fuente'])
+                                    <span style="font-size:.7rem;padding:.125rem .375rem;background:rgba(156,163,175,.15);border-radius:.25rem;text-transform:uppercase;letter-spacing:.05em;">{{ $ev['fuente'] }}</span>
                                 @endif
                             </div>
-                            @if($entry->estado_desde)
-                                <div style="font-size:.7rem;color:#6b7280;margin-top:.125rem;">Desde: {{ $entry->estado_desde }}</div>
+                            <div style="font-size:.75rem;color:#9ca3af;margin-top:.25rem;">
+                                {{ $ev['at'] ? \Illuminate\Support\Carbon::parse($ev['at'])->timezone('America/Bogota')->format('Y-m-d H:i:s') : '—' }}
+                                @if($ev['quien']) · {{ $ev['quien'] }} @endif
+                            </div>
+                            @if($ev['detalle'])
+                                <div style="font-size:.75rem;color:#6b7280;margin-top:.125rem;">{{ $ev['detalle'] }}</div>
+                            @endif
+                            @if($gps)
+                                <div style="font-size:.75rem;margin-top:.125rem;">
+                                    @if($gps['mapa'])
+                                        📍 <a href="{{ $gps['mapa'] }}" target="_blank" rel="noopener" style="color:#3b82f6;text-decoration:underline;">Ver en el mapa</a>
+                                        @if($gps['precision']) <span style="color:#9ca3af;">(± {{ $gps['precision'] }} m)</span> @endif
+                                    @else
+                                        <span style="color:#ef4444;">📍 Sin ubicación: {{ ['denegado' => 'permiso negado', 'no_disponible' => 'GPS no disponible', 'sin_dato' => 'no se envió'][$gps['estado']] ?? $gps['estado'] }}</span>
+                                    @endif
+                                </div>
+                            @endif
+                            @if($ev['equipo'] || $ev['ip'])
+                                <div style="font-size:.7rem;color:#9ca3af;margin-top:.125rem;">💻 {{ $ev['equipo'] }}@if($ev['ip']) · IP {{ $ev['ip'] }}@endif</div>
+                            @endif
+                            @if($ev['foto_url'])
+                                <div style="font-size:.75rem;margin-top:.125rem;">📸 <a href="{{ $ev['foto_url'] }}" target="_blank" rel="noopener" style="color:#3b82f6;text-decoration:underline;">Ver foto</a></div>
                             @endif
                         </div>
                     </div>
                 @empty
-                    <div style="color:#9ca3af;font-size:.85rem;">Sin registros en la bitácora.</div>
+                    <div style="color:#9ca3af;font-size:.85rem;">Sin registros todavía.</div>
                 @endforelse
             </div>
         </x-filament::section>

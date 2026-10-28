@@ -14,6 +14,7 @@ class Reglas
         'empaque.foto_obligatoria' => ['grupo' => 'empaque', 'tipo' => 'bool', 'valor' => '1', 'etiqueta' => 'Foto obligatoria para confirmar empaque', 'descripcion' => 'Bloquea el confirmar si no hay foto'],
         'empaque.tiempo_objetivo_seg' => ['grupo' => 'empaque', 'tipo' => 'int', 'valor' => 180, 'etiqueta' => 'Tiempo objetivo por empaque (segundos)', 'descripcion' => 'Base para semáforos y ranking'],
         'empaque.rate_limit_min' => ['grupo' => 'empaque', 'tipo' => 'int', 'valor' => 120, 'etiqueta' => 'Escaneos máximos por minuto', 'descripcion' => 'Throttle en la estación'],
+        'empaque.gps_obligatorio' => ['grupo' => 'empaque', 'tipo' => 'bool', 'valor' => '0', 'etiqueta' => 'Ubicación (GPS) obligatoria para empacar y despachar Dropi', 'descripcion' => 'Si el navegador no entrega la ubicación, no deja confirmar. Apagada: se registra si la hay y se anota por qué no'],
         'empaque.retention_foto_dias' => ['grupo' => 'empaque', 'tipo' => 'int', 'valor' => 180, 'etiqueta' => 'Días retención foto empaque', 'descripcion' => 'Purga automática de fotos más antiguas que N días post-empaque (Habeas Data)'],
 
         // ============ DASHBOARD (alertas) ============
@@ -32,6 +33,9 @@ class Reglas
         'dropi.dias_retorno_mercancia' => ['grupo' => 'dropi', 'tipo' => 'int', 'valor' => 20, 'etiqueta' => 'Días máx. mercancía en tránsito antes de sospechosa', 'descripcion' => 'Al superar: alertar Aracely y marcar sospechoso'],
         'dropi.dias_tolerancia_devolucion' => ['grupo' => 'dropi', 'tipo' => 'int', 'valor' => 7, 'etiqueta' => 'Días tolerancia devolución física post-marca', 'descripcion' => 'Si Dropi marca devuelto pero no llega en N días → mercancía fantasma'],
         'dropi.dias_espera_cobro' => ['grupo' => 'dropi', 'tipo' => 'int', 'valor' => 40, 'etiqueta' => 'Días máx. entregado sin cobro antes de discrepancia', 'descripcion' => 'Un pedido entregado y sin movimiento wallet tras N días aparece en Discrepancias'],
+        'dropi.facturacion_automatica' => ['grupo' => 'dropi', 'tipo' => 'bool', 'valor' => '0', 'etiqueta' => 'Facturar cada pedido Dropi al despacharlo', 'descripcion' => 'Remisión 1:1 + factura a consumidor final por el valor de proveedor, y a SIIGO si está activo. Apagada: no se factura nada'],
+        'dropi.facturar_desde' => ['grupo' => 'dropi', 'tipo' => 'string', 'valor' => '', 'etiqueta' => 'Facturar pedidos Dropi despachados desde (AAAA-MM-DD)', 'descripcion' => 'Corte para no facturar la historia al prender la facturación automática'],
+        'dropi.nit_tercero' => ['grupo' => 'dropi', 'tipo' => 'string', 'valor' => '', 'etiqueta' => 'NIT de Dropi (tercero de comisiones y sanciones)', 'descripcion' => 'Los gastos que cobra Dropi (fletes de garantía, tarjeta, sanciones) se asientan con este tercero'],
         'dropi.auto_nota_credito' => ['grupo' => 'dropi', 'tipo' => 'bool', 'valor' => '1', 'etiqueta' => 'Auto-generar Nota Crédito al devolver', 'descripcion' => 'Al marcar DropiPedido como Devuelto emite NC'],
         'dropi.auto_nc_envia_siigo' => ['grupo' => 'dropi', 'tipo' => 'bool', 'valor' => '1', 'etiqueta' => 'Auto-enviar NC a SIIGO', 'descripcion' => ''],
 
@@ -45,7 +49,8 @@ class Reglas
         // confirmadas con Silvia (contadora) porque dependen de la línea (accesorios/ropa/etc).
         // Dejamos GRUPO de 4 dígitos como default; en la ficha contable de cada producto
         // se puede sobrescribir con la subcuenta específica (6 dígitos).
-        'contable.cta_cxc_default' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '130505', 'etiqueta' => 'Cuenta CxC por defecto (Clientes nacionales)', 'descripcion' => 'PUC Great Baby · 130505 Clientes nacionales'],
+        'contable.cta_cxc_default' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '1305', 'etiqueta' => 'Cuenta CxC por defecto (Clientes)', 'descripcion' => 'PUC Great Baby · 1305 Clientes (cuenta real en uso por Dropi/ventas). Confirmar subcuenta movible con Silvia si el plan la exige.'],
+        'dropi.empresa' => ['grupo' => 'dropi', 'tipo' => 'string', 'valor' => 'ecommerce', 'etiqueta' => 'Razón social que factura lo de Dropi', 'descripcion' => 'Código de EmpresaConfig (canal e-commerce) con el que se factura lo de Dropi.'],
         'contable.cta_ingreso_default' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '4135', 'etiqueta' => 'Cuenta ingreso por defecto', 'descripcion' => '⚠ Confirmar subcuenta específica con Silvia (4135xx según categoría)'],
         'contable.cta_iva_venta_default' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '240805', 'etiqueta' => 'Cuenta IVA venta por defecto', 'descripcion' => 'PUC Great Baby · 240805 IVA generado en ventas'],
         'contable.cta_iva_compra_default' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '240810', 'etiqueta' => 'Cuenta IVA compra descontable', 'descripcion' => 'PUC Great Baby · 240810 IVA descontable por compras'],

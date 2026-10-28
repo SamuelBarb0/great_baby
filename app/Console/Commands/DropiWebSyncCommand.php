@@ -11,7 +11,7 @@ use Illuminate\Support\Facades\Log;
 class DropiWebSyncCommand extends Command
 {
     protected $signature = 'dropi:web-sync
-        {modo=recientes : recientes | ventana | transito}
+        {modo=recientes : recientes | ventana | transito | pagos}
         {--dias=3 : Ventana en días para el modo ventana}
         {--max-detalles=120 : Máximo de pedidos a detallar por vuelta}';
 
@@ -36,8 +36,8 @@ class DropiWebSyncCommand extends Command
         if ($r['cambiados'] > 0 || $this->output->isVerbose()) {
             Log::info('dropi.web.sync', $r);
         }
-        $this->line(sprintf('[%s] vistos %d · cambiados %d · nuevos %d · actualizados %d · errores %d',
-            $r['modo'], $r['vistos'], $r['cambiados'], $r['nuevos'], $r['actualizados'], $r['errores']));
+        $this->line(sprintf('[%s] vistos %d · cambiados %d · nuevos %d · actualizados %d · pagos %d · errores %d',
+            $r['modo'], $r['vistos'], $r['cambiados'], $r['nuevos'], $r['actualizados'], $r['pagos'] ?? 0, $r['errores']));
 
         return self::SUCCESS;
     }

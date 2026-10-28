@@ -49,6 +49,10 @@ class Producto extends Model implements AuditableContract, HasMedia
         'reference_fabrica', 'stock_minimo',
         // FASE F2.A4 · override por producto del grupo SIIGO (si vacío → categoría)
         'siigo_account_group_override',
+        // MKT-1/4 · Publicación (el «listo para publicar» y la visibilidad para
+        //   Ventas) y las piezas de contenido que lleva el producto.
+        'publico_objetivo', 'listo_publicar', 'publicado', 'publicado_cambiado_en', 'publicado_cambiado_por',
+        'piezas_video', 'piezas_reel', 'piezas_imagenes',
     ];
 
     protected $casts = [
@@ -81,7 +85,29 @@ class Producto extends Model implements AuditableContract, HasMedia
         // FASE H · Paridad SIIGO form
         'visible_en_facturas' => 'boolean',
         'stock_minimo' => 'decimal:4',
+        'listo_publicar' => 'boolean',
+        'publicado' => 'boolean',
+        'publicado_cambiado_en' => 'datetime',
+        'piezas_video' => 'boolean',
+        'piezas_reel' => 'boolean',
+        'piezas_imagenes' => 'integer',
     ];
+
+    /**
+     * Lo que ve Ventas (vendedores y portal de clientes): activo y publicado.
+     * Marketing lo apaga mientras prepara el contenido; el catálogo interno lo
+     * sigue mostrando, marcado como oculto.
+     */
+    public function scopeVisibleParaVentas($q)
+    {
+        return $q->where('activo', true)->where('publicado', true);
+    }
+
+    /** MKT-2 · Creativos de marketing del producto (fotos, videos, reels). */
+    public function creativos(): HasMany
+    {
+        return $this->hasMany(\App\Modules\Marketing\Models\MarketingCreativo::class);
+    }
 
     public function variantes(): HasMany { return $this->hasMany(ProductoVariante::class); }
 

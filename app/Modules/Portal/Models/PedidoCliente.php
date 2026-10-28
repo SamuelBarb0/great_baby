@@ -23,9 +23,13 @@ class PedidoCliente extends Model implements AuditableContract
         // LOG-J1 · si el pedido lo levantó un vendedor en terreno,
         //   queda su user_id en vendedor_id para comisiones y auditoría.
         'vendedor_id',
+        // Multiempresa · razón social que factura el pedido (NULL = Great Baby).
+        'empresa_id',
         // LOG-J4 · ubicación origen auto-asignada por la regla de ruteo.
         'ubicacion_origen_id',
         'numero', 'contacto_id', 'lista_precios_id', 'estado',
+        // MKT-6 · fuente del contacto al momento de crear el pedido.
+        'fuente',
         'subtotal', 'iva', 'total', 'notas_cliente', 'notas_internas',
         'enviado_at', 'aprobado_at', 'rechazado_at',
         'facturado_por_id', 'facturado_at', 'factura_id', 'motivo_rechazo',
@@ -60,6 +64,20 @@ class PedidoCliente extends Model implements AuditableContract
     public function alistador(): BelongsTo { return $this->belongsTo(User::class, 'alistador_id'); }
     public function vendedor(): BelongsTo { return $this->belongsTo(User::class, 'vendedor_id'); }
     public function ubicacionOrigen(): BelongsTo { return $this->belongsTo(\App\Modules\Dropi\Models\InventarioUbicacion::class, 'ubicacion_origen_id'); }
+
+    /**
+     * MKT-6 · El pedido nace con la fuente que tenía su contacto. Se copia (y
+     * no se lee en vivo) para que el reporte por fuente no cambie cuando
+     * alguien corrige después la ficha del contacto.
+     */
+    protected static function booted(): void
+    {
+        static::creating(function (self $pedido) {
+            if (blank($pedido->fuente) && $pedido->contacto_id) {
+                $pedido->fuente = Contacto::whereKey($pedido->contacto_id)->value('fuente');
+            }
+        });
+    }
 
     public function contacto(): BelongsTo { return $this->belongsTo(Contacto::class); }
     public function lista(): BelongsTo { return $this->belongsTo(ListaPrecios::class, 'lista_precios_id'); }
