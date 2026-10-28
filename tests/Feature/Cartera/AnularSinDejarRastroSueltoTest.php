@@ -36,9 +36,33 @@ use Spatie\Permission\Models\Role;
 beforeEach(function () {
     Illuminate\Support\Facades\Queue::fake();
 
-    $this->contable = User::factory()->create(['name' => 'Contador Demo']);
-    $this->contable->assignRole(Role::firstOrCreate(['name' => 'Contador', 'guard_name' => 'web']));
+    /*
+     * Los permisos se siembran a propósito, y el rol recibe los suyos.
+     *
+     * Sin esto la prueba pasaba o fallaba según QUÉ HUBIERA CORRIDO ANTES.
+     * `Permisos::puede()` decide por permisos sólo si `permisosSembrados()`
+     * dice que sí, y esa función guarda su respuesta en una `static`: una vez
+     * por PROCESO, no por prueba. En producción está bien —un request, un
+     * proceso— pero la suite entera corre en uno solo, así que en cuanto
+     * cualquier prueba siembra permisos la static queda en `true` para todas
+     * las demás, aunque RefreshDatabase vacíe la tabla.
+     *
+     * Con un rol creado a pelo, el resultado era: sola, caía al respaldo
+     * `hasAnyRole()` y el Contador entraba; detrás de una prueba que sembraba,
+     * se le pedía el permiso que nadie le dio y respondía 403. El orden
+     * decidía. Sembrando acá, siempre se ejercita el camino de producción.
+     */
+    $this->seed(Database\Seeders\PermisosSeeder::class);
 
+    $rolContador = Role::firstOrCreate(['name' => 'Contador', 'guard_name' => 'web']);
+    $rolContador->syncPermissions(collect(App\Auth\Permisos::MATRIZ)
+        ->filter(fn ($roles) => in_array('Contador', $roles, true))
+        ->keys()->map(fn ($s) => App\Auth\Permisos::permiso($s))->all());
+
+    $this->contable = User::factory()->create(['name' => 'Contador Demo']);
+    $this->contable->assignRole($rolContador);
+
+    // Aracely es root: `puede()` le corta el paso antes de mirar permisos.
     $this->revisora = User::factory()->create(['name' => 'Aracely']);
     $this->revisora->assignRole(Role::firstOrCreate(['name' => 'Aracely', 'guard_name' => 'web']));
 
