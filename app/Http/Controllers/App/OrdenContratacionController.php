@@ -74,8 +74,17 @@ class OrdenContratacionController extends Controller implements HasMiddleware
     /**
      * Gestión Humana pide la autorización para contratar a quien se eligió.
      *
-     * Idempotente: si ya se pidió, lleva a la que hay. El botón se puede
-     * apretar dos veces sin dejar dos órdenes de la misma persona.
+     * Idempotente mientras la orden esté PENDIENTE: el botón se puede apretar
+     * dos veces sin mandarle dos papeles iguales a la Junta.
+     *
+     * Después de una NEGATIVA sí deja pedir otra, y es el arreglo principal de
+     * este método. Antes usaba `firstOrNew(['candidato_id' => ...])`: con una
+     * orden negada en la tabla encontraba esa, el `if` no entraba, no se creaba
+     * nada, no se avisaba a nadie — y aun así devolvía «Orden ODC-… enviada a
+     * la Junta Directiva». Gestión Humana se quedaba esperando una respuesta a
+     * una solicitud que nunca salió, con la persona atascada en `seleccionado`:
+     * ni contratable ni descartable. Negar con motivo existe justamente para
+     * que se pueda insistir o bajar el salario; ahora se puede.
      */
     public function solicitar(Request $r, int $candidato): RedirectResponse
     {
@@ -89,43 +98,58 @@ class OrdenContratacionController extends Controller implements HasMiddleware
 
         $data = $r->validate($this->reglasDelFormato());
 
-        $o = OrdenContratacion::firstOrNew(['candidato_id' => $c->id]);
+        // La ÚLTIMA, no la primera: después de una negativa hay más de una.
+        $ultima = OrdenContratacion::where('candidato_id', $c->id)
+            ->orderByDesc('id')->first();
 
-        if (! $o->exists) {
-            $o->fill([
-                'numero' => OrdenContratacion::siguienteNumero(),
-                'requisicion_id' => $c->vacante?->requisicion_id,
-                'vacante_id' => $c->vacante_id,
-                'cargo' => $c->vacante?->titulo ?? 'Sin cargo',
-                'tipo_contrato' => $c->vacante?->tipo_contrato,
-                // Lo que se propone sale de la requisición, pero se puede
-                // ajustar: lo que la junta autoriza es ESTE número.
-                'salario_propuesto' => $data['salario_propuesto']
-                    ?? $c->vacante?->requisicion?->salario_min,
-                'justificacion' => $data['justificacion'] ?? null,
-                'estado' => 'pendiente',
-                'solicitada_por_id' => $r->user()->id,
-                'solicitada_at' => now(),
-                /*
-                 * Lo que el formato GH-F-018 pide además del cargo y el
-                 * salario. Lo que no venga escrito se hereda de la vacante,
-                 * que es de donde salió el cargo: así la casilla llega con el
-                 * valor que de verdad rige y no en blanco.
-                 */
-                'area' => $data['area'] ?? $c->vacante?->area,
-                'fecha_inicio' => $data['fecha_inicio'] ?? null,
-                'horario' => $data['horario'] ?? null,
-                // La ciudad no se hereda: la requisición todavía no la pide.
-                // El formato #1 sí la tiene («Ciudad que solicita el cargo»),
-                // y entra en la Fase C.
-                'ciudad' => $data['ciudad'] ?? null,
-                'periodicidad_pago' => $data['periodicidad_pago'] ?? null,
-                'observaciones' => $data['observaciones'] ?? null,
-            ])->save();
-
-            $o->anotar('solicitada', "Orden {$o->numero} solicitada para {$c->nombre}");
-            $this->avisarALaJunta($o, $c);
+        if ($ultima && $ultima->estado === 'pendiente') {
+            return redirect()->route('app.rrhh.ordenes')
+                ->with('success', "La orden {$ultima->numero} de {$c->nombre} ya está con la Junta Directiva.");
         }
+
+        if ($ultima && $ultima->autoriza()) {
+            return redirect()->route('app.rrhh.ordenes')
+                ->with('success', "La orden {$ultima->numero} de {$c->nombre} ya fue autorizada. Seguí con la contratación.");
+        }
+
+        // No hay ninguna, o la última fue negada: se presenta una nueva, con
+        // su propio consecutivo. La negada queda en la tabla tal como la firmó
+        // la Junta, que es lo que un documento firmado tiene que hacer.
+        $o = new OrdenContratacion(['candidato_id' => $c->id]);
+
+        $o->fill([
+            'numero' => OrdenContratacion::siguienteNumero(),
+            'requisicion_id' => $c->vacante?->requisicion_id,
+            'vacante_id' => $c->vacante_id,
+            'cargo' => $c->vacante?->titulo ?? 'Sin cargo',
+            'tipo_contrato' => $c->vacante?->tipo_contrato,
+            // Lo que se propone sale de la requisición, pero se puede
+            // ajustar: lo que la junta autoriza es ESTE número.
+            'salario_propuesto' => $data['salario_propuesto']
+                ?? $c->vacante?->requisicion?->salario_min,
+            'justificacion' => $data['justificacion'] ?? null,
+            'estado' => 'pendiente',
+            'solicitada_por_id' => $r->user()->id,
+            'solicitada_at' => now(),
+            /*
+             * Lo que el formato GH-F-018 pide además del cargo y el
+             * salario. Lo que no venga escrito se hereda de la vacante,
+             * que es de donde salió el cargo: así la casilla llega con el
+             * valor que de verdad rige y no en blanco.
+             */
+            'area' => $data['area'] ?? $c->vacante?->area,
+            'fecha_inicio' => $data['fecha_inicio'] ?? null,
+            'horario' => $data['horario'] ?? null,
+            // La ciudad no se hereda: la requisición todavía no la pide.
+            // El formato #1 sí la tiene («Ciudad que solicita el cargo»),
+            // y entra en la Fase C.
+            'ciudad' => $data['ciudad'] ?? null,
+            'periodicidad_pago' => $data['periodicidad_pago'] ?? null,
+            'observaciones' => $data['observaciones'] ?? null,
+        ])->save();
+
+        $o->anotar('solicitada', "Orden {$o->numero} solicitada para {$c->nombre}");
+        $this->avisarALaJunta($o, $c);
 
         return redirect()->route('app.rrhh.ordenes')
             ->with('success', "Orden {$o->numero} enviada a la Junta Directiva.");

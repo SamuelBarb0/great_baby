@@ -110,6 +110,31 @@ class PagosProveedorController extends Controller implements HasMiddleware
         if ($pagoProveedor->estado === 'anulado') {
             return back()->with('flash', ['type' => 'error', 'message' => "Pago #{$pagoProveedor->id} está anulado · no se puede confirmar."]);
         }
+
+        /*
+         * Cuatro ojos, que es lo que el comentario de arriba prometía y el
+         * código no cumplía.
+         *
+         * La puerta de la clase es `esContable()` y `confirmar` no agregaba
+         * NADA: la misma persona que registraba el pago lo confirmaba un
+         * segundo después. El estado `pendiente` existía, el botón existía, y
+         * el control no, porque revisar lo propio no es revisar. Y lo que se
+         * aprueba acá no es un trámite: al confirmar sale la plata, se escribe
+         * el asiento y el documento viaja a SIIGO.
+         *
+         * No hay excepción para Aracely ni para Gerencia. Un control que la
+         * jefa puede saltarse es un control que se salta siempre, y justo en
+         * el pago que importa. Hoy seis usuarios pasan `esContable()`, así que
+         * siempre hay quien revise.
+         */
+        if ((int) $pagoProveedor->user_id === (int) $r->user()->id) {
+            return back()->with('flash', [
+                'type' => 'error',
+                'message' => "Pago #{$pagoProveedor->id}: vos lo registraste, así que no lo podés confirmar. "
+                    .'Lo tiene que revisar otra persona del equipo contable.',
+            ]);
+        }
+
         $pagoProveedor->forceFill([
             'estado' => 'confirmado',
             'confirmado_at' => now(),
@@ -138,13 +163,60 @@ class PagosProveedorController extends Controller implements HasMiddleware
         ]);
     }
 
-    public function anular(PagoProveedor $pagoProveedor): RedirectResponse
+    /**
+     * Anular deja el libro como estaba, no sólo la casilla.
+     *
+     * Antes ponía `estado = 'anulado'` y se iba. Si el pago estaba confirmado
+     * —y sólo se anula lo que se confirmó por error— su asiento seguía vivo:
+     * el pasivo con el proveedor cancelado, la plata salida del banco y las
+     * retenciones practicadas, todo en el libro, respaldando un pago que ya no
+     * existe. Las retenciones son lo grave: son la base de la declaración
+     * mensual ante la DIAN, y quedaban declarando una retención que nunca se
+     * le hizo a nadie.
+     *
+     * Se borran las líneas en vez de contra-asentar, que es lo que ya hace la
+     * anulación de factura en este mismo sistema. El rastro de quién lo hizo y
+     * por qué queda en el pago.
+     */
+    public function anular(PagoProveedor $pagoProveedor, Request $r): RedirectResponse
     {
         if ($pagoProveedor->siigo_voucher_id) {
             return back()->with('flash', ['type' => 'error', 'message' => "Pago #{$pagoProveedor->id} ya está en SIIGO · usar nota de ajuste allá."]);
         }
-        $pagoProveedor->update(['estado' => 'anulado']);
-        return back()->with('flash', ['type' => 'success', 'message' => "Pago #{$pagoProveedor->id} anulado."]);
+
+        // Anular dos veces borraría un asiento que ya no está y pisaría el
+        // motivo del primero.
+        if ($pagoProveedor->estado === 'anulado') {
+            return back()->with('flash', ['type' => 'info', 'message' => "Pago #{$pagoProveedor->id} ya estaba anulado."]);
+        }
+
+        $data = $r->validate(
+            ['motivo' => ['required', 'string', 'min:5', 'max:500']],
+            [],
+            ['motivo' => 'motivo'],
+        );
+
+        $borradas = \Illuminate\Support\Facades\DB::transaction(function () use ($pagoProveedor, $r, $data) {
+            $n = \App\Modules\Cartera\Models\MovimientoContable::query()
+                ->where('origen_type', PagoProveedor::class)
+                ->where('origen_id', $pagoProveedor->id)
+                ->forceDelete();
+
+            $pagoProveedor->forceFill([
+                'estado' => 'anulado',
+                'anulado_at' => now(),
+                'anulado_por' => $r->user()->id,
+                'motivo_anulacion' => $data['motivo'],
+            ])->save();
+
+            return $n;
+        });
+
+        return back()->with('flash', [
+            'type' => 'success',
+            'message' => "Pago #{$pagoProveedor->id} anulado."
+                .($borradas > 0 ? " Se revirtieron {$borradas} línea(s) del libro." : ''),
+        ]);
     }
 
     // QA-FIX #7 · reenviar manualmente si el push automático falló.

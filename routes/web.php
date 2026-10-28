@@ -464,6 +464,10 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
 
     Route::get('/rrhh/vacantes', [\App\Http\Controllers\App\RrhhController::class, 'vacantesIndex'])->name('app.rrhh.vacantes');
     Route::post('/rrhh/vacantes', [\App\Http\Controllers\App\RrhhController::class, 'vacanteCrear'])->name('app.rrhh.vacante.crear');
+    // Una vacante abierta lo quedaba para siempre: el enum tenía «cerrada»
+    // desde el principio y no había con qué escribirla.
+    Route::post('/rrhh/vacantes/{vacante}/cerrar', [\App\Http\Controllers\App\RrhhController::class, 'vacanteCerrar'])->whereNumber('vacante')->name('app.rrhh.vacante.cerrar');
+    Route::post('/rrhh/vacantes/{vacante}/reabrir', [\App\Http\Controllers\App\RrhhController::class, 'vacanteReabrir'])->whereNumber('vacante')->name('app.rrhh.vacante.reabrir');
     // F2 · La vacante se abre directo en su tablero de selección: la pantalla
     //      vieja escribía etapas que ya no existen y rompía al leerlas.
     Route::get('/rrhh/vacantes/{vacante}', [\App\Http\Controllers\App\SeleccionController::class, 'tablero'])->name('app.rrhh.vacante.show');

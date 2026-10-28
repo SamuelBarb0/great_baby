@@ -1697,6 +1697,39 @@ class SiigoEmisionService
         \App\Modules\Cartera\Models\FacturaVenta $factura,
         ?string $motivo = null,
     ): array {
+        /*
+         * Si la mercancía ya salió, esto no se anula: se le hace nota crédito.
+         *
+         * Anular borra el asiento de la factura —abajo, el `forceDelete()`— y
+         * pone el saldo en cero. Para un pedido ya despachado eso deja el libro
+         * contando una historia imposible: el despacho escribió su propio
+         * asiento de costo (debe costo de ventas, haber inventario) con origen
+         * en el PEDIDO, no en la factura, así que ese no se borra. Queda el
+         * costo sin el ingreso, el kardex abajo, la mercancía en la casa del
+         * cliente y nada que cobrarle. Pérdida limpia en el estado de
+         * resultados, sin un solo documento detrás.
+         *
+         * Devolver el inventario automáticamente tampoco sirve: el sistema no
+         * sabe si la mercancía volvió a la bodega o se quedó allá, y adivinar
+         * mal descuadra el estante igual.
+         *
+         * La salida correcta ya existe en el ERP y es la de la DIAN: nota
+         * crédito en /app/cartera/notas-credito. Reversa el ingreso dejando
+         * rastro, que es justo lo que anular no hace.
+         */
+        $pedido = \App\Modules\Portal\Models\PedidoCliente::query()
+            ->where('factura_id', $factura->id)
+            ->first(['id', 'numero', 'despachado_at']);
+
+        if ($pedido && $pedido->despachado_at) {
+            throw new RuntimeException(
+                "El pedido {$pedido->numero} de esta factura ya se despachó el "
+                .$pedido->despachado_at->format('Y-m-d')
+                .'. Una factura con mercancía entregada no se anula: hacele una nota crédito '
+                .'(Cartera → Notas crédito), que reversa la venta y deja el rastro.'
+            );
+        }
+
         $respuesta = [];
 
         if ($factura->siigo_id) {

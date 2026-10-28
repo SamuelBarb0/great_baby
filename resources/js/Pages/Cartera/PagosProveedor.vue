@@ -37,51 +37,57 @@ const filtrar = () => {
 const modal = ref(false);
 const proc = ref(false);
 
-// COMP-B5 · acciones por fila. Usamos fetch directo porque los endpoints
-// confirmar/anular/reenviar devuelven back() con flash, igual que Inertia espera.
+/*
+ * COMP-B5 · acciones por fila, por Inertia y no por `fetch` crudo.
+ *
+ * Antes iban con un `fetch` a mano y después un `router.reload()`. El fetch
+ * seguía el 302 de `back()` por su cuenta, renderizaba la página en una
+ * respuesta que se tiraba a la basura y ahí se consumía el flash: para cuando
+ * el reload llegaba, el mensaje ya no existía. Así que confirmar, anular y
+ * reenviar NUNCA mostraron su resultado — ni el bueno ni el malo.
+ *
+ * Se notó al probar el control de cuatro ojos: el pago correctamente no se
+ * confirmaba y la pantalla no decía nada, que es la peor manera de negar algo.
+ * `router.post` maneja el redirect y el flash como corresponde.
+ */
 const trabajando = ref(null);
-const postConCsrf = (url) => fetch(url, {
-    method: 'POST',
-    headers: {
-        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '',
-        'X-Requested-With': 'XMLHttpRequest',
-        'Accept': 'application/json',
-    },
-    credentials: 'same-origin',
-});
+const accionDeFila = (id, url, datos = {}) => {
+    trabajando.value = id;
+    router.post(url, datos, {
+        preserveScroll: true,
+        onFinish: () => (trabajando.value = null),
+    });
+};
 const confirmar = async (p) => {
     modalConfirm.value = {
         titulo: `¿Confirmar el pago #${p.id}?`,
         mensaje: `Se registra por $${p.monto_neto.toLocaleString()} y se envía a SIIGO.`,
         color: 'emerald',
         textoConfirmar: 'Confirmar pago',
-        onConfirmar: async () => {
+        onConfirmar: () => {
             modalConfirm.value = null;
-            trabajando.value = p.id;
-            try { await postConCsrf(`/app/cartera/pagos-proveedor/${p.id}/confirmar`); }
-            finally { trabajando.value = null; setTimeout(() => router.reload({ preserveScroll: true }), 400); }
+            accionDeFila(p.id, `/app/cartera/pagos-proveedor/${p.id}/confirmar`);
         },
     };
 };
 const anular = async (p) => {
     modalConfirm.value = {
         titulo: `¿Anular el pago #${p.id}?`,
-        mensaje: 'No vas a poder volver atrás.',
+        // Si estaba confirmado, anularlo además revierte su asiento: la
+        // cancelación del pasivo, la salida de banco y las retenciones.
+        mensaje: p.estado === 'confirmado'
+            ? 'No vas a poder volver atrás. También se revierten las líneas que este pago escribió en el libro, incluidas las retenciones.'
+            : 'No vas a poder volver atrás.',
         color: 'rose',
         textoConfirmar: 'Anular',
-        onConfirmar: async () => {
+        pedirMotivo: { etiqueta: '¿Por qué se anula?', minimo: 5 },
+        onConfirmar: (motivo) => {
             modalConfirm.value = null;
-            trabajando.value = p.id;
-            try { await postConCsrf(`/app/cartera/pagos-proveedor/${p.id}/anular`); }
-            finally { trabajando.value = null; setTimeout(() => router.reload({ preserveScroll: true }), 400); }
+            accionDeFila(p.id, `/app/cartera/pagos-proveedor/${p.id}/anular`, { motivo });
         },
     };
 };
-const reenviar = async (p) => {
-    trabajando.value = p.id;
-    try { await postConCsrf(`/app/cartera/pagos-proveedor/${p.id}/reenviar-siigo`); }
-    finally { trabajando.value = null; setTimeout(() => router.reload({ preserveScroll: true }), 400); }
-};
+const reenviar = (p) => accionDeFila(p.id, `/app/cartera/pagos-proveedor/${p.id}/reenviar-siigo`);
 const form = reactive({
     fecha: new Date().toISOString().slice(0, 10),
     contacto_id: null,
@@ -297,22 +303,31 @@ const guardar = () => {
                                 </span>
                             </td>
                             <td class="p-2 whitespace-nowrap">
-                                <!-- COMP-B5 · botones solo visibles cuando aún no está confirmado -->
-                                <template v-if="p.estado === 'pendiente'">
-                                    <button @click="confirmar(p)" :disabled="trabajando === p.id"
-                                            class="px-2 py-1 text-[11px] rounded bg-emerald-600 text-white font-bold hover:bg-emerald-700 disabled:opacity-50">
-                                        {{ trabajando === p.id ? '…' : '✓ Confirmar y enviar a SIIGO' }}
-                                    </button>
-                                    <button @click="anular(p)" :disabled="trabajando === p.id"
-                                            class="ml-1 px-2 py-1 text-[11px] rounded bg-red-100 text-red-700 hover:bg-red-200 disabled:opacity-50">
-                                        Anular
-                                    </button>
-                                </template>
-                                <button v-else-if="!p.siigo_voucher_id && p.estado === 'confirmado'" @click="reenviar(p)"
+                                <button v-if="p.estado === 'pendiente'" @click="confirmar(p)" :disabled="trabajando === p.id"
+                                        class="px-2 py-1 text-[11px] rounded bg-emerald-600 text-white font-bold hover:bg-emerald-700 disabled:opacity-50">
+                                    {{ trabajando === p.id ? '…' : '✓ Confirmar y enviar a SIIGO' }}
+                                </button>
+                                <button v-if="p.estado === 'confirmado' && !p.siigo_voucher_id" @click="reenviar(p)"
                                         class="px-2 py-1 text-[11px] rounded bg-amber-100 text-amber-700 hover:bg-amber-200">
                                     Reenviar
                                 </button>
-                                <span v-else class="text-[10px] text-surface-400">—</span>
+                                <!--
+                                    Anular también cuando ya está confirmado.
+
+                                    Sólo salía en los pendientes, y un pendiente
+                                    todavía no escribió nada: el caso que de
+                                    verdad hay que poder deshacer —el pago
+                                    confirmado por error, que ya canceló el
+                                    pasivo y registró retenciones— no tenía
+                                    botón. El corte real es haber llegado a
+                                    SIIGO: de ahí en adelante se arregla allá
+                                    con nota de ajuste, y el servidor lo frena.
+                                -->
+                                <button v-if="!p.siigo_voucher_id && p.estado !== 'anulado'" @click="anular(p)" :disabled="trabajando === p.id"
+                                        class="ml-1 px-2 py-1 text-[11px] rounded bg-red-100 text-red-700 hover:bg-red-200 disabled:opacity-50">
+                                    Anular
+                                </button>
+                                <span v-if="p.siigo_voucher_id || p.estado === 'anulado'" class="text-[10px] text-surface-400">—</span>
                             </td>
                         </tr>
                         <tr v-if="!pagos.data.length"><td colspan="10" class="p-6 text-center text-surface-500 text-sm">Sin pagos.</td></tr>

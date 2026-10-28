@@ -92,7 +92,12 @@ class ContratacionController extends Controller implements HasMiddleware
          * (Elena, 19-oct). Que el jefe haya elegido de la terna NO alcanza: lo
          * que la junta autoriza es el gasto.
          */
-        $orden = OrdenContratacion::where('candidato_id', $c->id)->first();
+        // La ÚLTIMA orden, no la primera. Desde que una negativa deja volver a
+        // presentar el caso, una persona puede tener varias: con `first()`,
+        // quien fue negado en octubre y autorizado en noviembre seguiría sin
+        // poder contratarse, porque se leería siempre la negada.
+        $orden = OrdenContratacion::where('candidato_id', $c->id)
+            ->orderByDesc('id')->first();
 
         if (! $orden || ! $orden->autoriza()) {
             return redirect()->route('app.rrhh.ordenes')->withErrors([

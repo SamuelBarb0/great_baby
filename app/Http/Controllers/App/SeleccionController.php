@@ -116,6 +116,12 @@ class SeleccionController extends Controller implements HasMiddleware
     {
         $v = Vacante::findOrFail($vacante);
 
+        // Cerrar una vacante no significa nada si se le siguen cargando hojas
+        // de vida: la persona quedaría en un proceso que ya terminó, esperando
+        // una llamada que no va a llegar.
+        abort_if($v->estado === 'cerrada', 422,
+            "La vacante «{$v->titulo}» está cerrada. Reabrila si vas a seguir recibiendo candidatos.");
+
         $data = $r->validate([
             'nombre' => ['required', 'string', 'max:150'],
             'documento' => ['nullable', 'string', 'max:20'],
@@ -198,7 +204,29 @@ class SeleccionController extends Controller implements HasMiddleware
         ], [], ['motivo' => 'motivo del descarte']);
 
         $c = Candidato::findOrFail($candidato);
-        abort_if($c->etapa->esFinal(), 422, 'Este candidato ya salió del proceso.');
+
+        /*
+         * Antes frenaba con `esFinal()`, que mete en la misma bolsa a
+         * `descartado` y a `seleccionado`. Lo segundo era un error: estar
+         * seleccionado no es haber salido del proceso, es estar en el último
+         * tramo. Y dejaba sin salida a quien el jefe eligió pero la Junta no
+         * autorizó: no se podía contratar —la orden no autoriza— ni descartar
+         * —«ya salió del proceso»—, así que la persona quedaba ahí para
+         * siempre, ocupando el puesto de elegido de una vacante que seguía
+         * abierta. Lo mismo pasa con quien se arrepiente o no contesta más.
+         *
+         * Lo que de verdad cierra la puerta es haber empezado la contratación:
+         * si ya hay un contrato en curso, esto no se deshace descartando a la
+         * persona.
+         */
+        abort_if($c->etapa === EtapaCandidato::Descartado, 422,
+            "{$c->nombre} ya estaba descartado.");
+
+        abort_if(
+            \App\Modules\Rrhh\Models\Contratacion::where('candidato_id', $c->id)->exists(),
+            422,
+            "{$c->nombre} ya tiene una contratación abierta: no se descarta desde acá.",
+        );
 
         $c->motivo_descarte = $data['motivo'];
         $c->moverA(EtapaCandidato::Descartado, "Descartado: {$data['motivo']}");

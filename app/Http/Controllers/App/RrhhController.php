@@ -43,6 +43,7 @@ class RrhhController extends Controller implements HasMiddleware
                 'modalidad' => $v->modalidad, 'tipo_contrato' => $v->tipo_contrato,
                 'estado' => $v->estado, 'candidatos_count' => (int) $v->candidatos_count,
                 'apertura' => $v->fecha_apertura?->toDateString(),
+                'cierre' => $v->fecha_cierre?->toDateString(),
                 'salario_min' => (float) $v->salario_min, 'salario_max' => (float) $v->salario_max,
             ]),
         ]);
@@ -62,6 +63,67 @@ class RrhhController extends Controller implements HasMiddleware
         ]);
         Vacante::create([...$data, 'estado' => 'abierta', 'fecha_apertura' => now(), 'creado_por' => auth()->id()]);
         return back()->with('success', 'Vacante creada.');
+    }
+
+    /**
+     * Cerrar la vacante, que hasta hoy no se podía.
+     *
+     * La columna `estado` siempre admitió `abierta · en_seleccion · cerrada` y
+     * había hasta un color preparado para cada una en la pantalla, pero NADIE
+     * escribía nunca otra cosa que `abierta`: no existía ruta, ni método, ni
+     * botón. Una vacante abierta lo quedaba para siempre, aunque la persona ya
+     * estuviera contratada o el cargo se hubiera cancelado. La lista crecía
+     * sola y dejaba de servir para saber qué se está buscando de verdad.
+     *
+     * Cerrar es además una de las tres salidas que la Junta deja cuando niega
+     * una contratación —«insistir, bajar el salario o cerrar la vacante»— y era
+     * justo la que el sistema no tenía.
+     *
+     * El motivo es obligatorio: dentro de seis meses, «cerrada» a secas no
+     * distingue entre se contrató a alguien y se quedó sin presupuesto.
+     */
+    public function vacanteCerrar(Request $r, int $vacante): RedirectResponse
+    {
+        $v = Vacante::withCount('candidatos')->findOrFail($vacante);
+
+        if ($v->estado === 'cerrada') {
+            return back()->with('success', "La vacante «{$v->titulo}» ya estaba cerrada.");
+        }
+
+        $data = $r->validate(
+            ['motivo' => ['required', 'string', 'min:5', 'max:300']],
+            [],
+            ['motivo' => 'motivo'],
+        );
+
+        $v->update([
+            'estado' => 'cerrada',
+            'fecha_cierre' => now()->toDateString(),
+        ]);
+        $v->anotar('cerrada', "Vacante cerrada por {$r->user()->name}: {$data['motivo']}");
+
+        return back()->with('success', "Vacante «{$v->titulo}» cerrada. Ya no admite candidatos nuevos.");
+    }
+
+    /**
+     * Y volver a abrirla.
+     *
+     * Sin esto, cerrar sería el mismo callejón sin salida que vengo a quitar:
+     * un clic de más y la única opción es crear otra vacante desde cero,
+     * perdiendo los candidatos que ya estaban en el tablero.
+     */
+    public function vacanteReabrir(Request $r, int $vacante): RedirectResponse
+    {
+        $v = Vacante::findOrFail($vacante);
+
+        if ($v->estado !== 'cerrada') {
+            return back()->with('success', "La vacante «{$v->titulo}» ya estaba abierta.");
+        }
+
+        $v->update(['estado' => 'abierta', 'fecha_cierre' => null]);
+        $v->anotar('reabierta', "Vacante reabierta por {$r->user()->name}");
+
+        return back()->with('success', "Vacante «{$v->titulo}» reabierta.");
     }
 
     /*

@@ -465,7 +465,30 @@ const badge = (color) => ({
                         <span v-else-if="c.orden.estado === 'pendiente'" class="text-xs text-amber-600">
                             Esperando a la Junta
                         </span>
-                        <span v-else class="text-xs text-rose-600">No autorizada</span>
+                        <!--
+                            Negada: las dos salidas que la Junta deja abiertas.
+
+                            Acá sólo decía «No autorizada», en rojo y sin nada
+                            más. La persona quedaba atascada: ni contratable
+                            —la orden no autoriza— ni descartable —el botón de
+                            descarte vive en las columnas del embudo y los
+                            seleccionados ya no están ahí—, así que seguía
+                            ocupando el puesto de elegido para siempre. El
+                            propio diálogo de la Junta promete que Gestión
+                            Humana puede «insistir, bajar el salario o cerrar
+                            la vacante»; las tres estaban cerradas.
+                        -->
+                        <div v-else class="flex items-center gap-2">
+                            <span class="text-xs text-rose-600">No autorizada</span>
+                            <button @click="pedirOrden(c)" :disabled="procesando"
+                                class="btn-secondary text-xs py-1 px-3">
+                                Volver a pedirla
+                            </button>
+                            <button @click="modalDescarte = c"
+                                class="text-xs py-1 px-3 rounded border border-surface-300 text-surface-600 hover:bg-surface-50">
+                                Descartar
+                            </button>
+                        </div>
                     </li>
                 </ul>
             </div>
