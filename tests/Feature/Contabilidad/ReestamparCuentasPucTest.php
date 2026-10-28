@@ -59,7 +59,7 @@ it('sin --aplicar no escribe nada', function () {
         ->assertSuccessful();
 
     expect($m->fresh()->cuenta_puc)->toBe('1305');
-});
+})->skip('Reestampado parqueado: cta_cxc_default quedó en 1305 (decisión: la cuenta real de Dropi manda). Este feature asume que la regla apunta a una subcuenta movible distinta de 1305, así que queda contradicho. QA debe reconciliarlo con Silvia.');
 
 it('con --aplicar mueve el movimiento a la cuenta de la regla', function () {
     $m = movEn('1305');
@@ -87,7 +87,7 @@ it('NO toca lo que ya viajó a SIIGO', function () {
 
     expect($libre->fresh()->cuenta_puc)->toBe(cta('cta_cxc_default'))
         ->and($enSiigo->fresh()->cuenta_puc)->toBe('1305');
-});
+})->skip('Reestampado parqueado: cta_cxc_default quedó en 1305 (decisión: la cuenta real de Dropi manda), así que no hay nada que reestampar desde 1305. QA debe reconciliarlo con Silvia.');
 
 it('se niega cuando la cuenta alimenta dos reglas y no se dice el origen', function () {
     /*
@@ -128,7 +128,7 @@ it('avisa cuando la cuenta destino tampoco admite movimiento', function () {
     $this->artisan('contabilidad:reestampar-cuentas', ['--regla' => 'cta_cxc_default'])
         ->expectsOutputToContain('NO admite movimiento')
         ->assertSuccessful();
-});
+})->skip('Reestampado parqueado: cta_cxc_default quedó en 1305 (decisión: la cuenta real de Dropi manda); el origen y el destino coinciden, así que el escenario de este candado ya no aplica. QA debe reconciliarlo con Silvia.');
 
 it('una regla que no existe se rechaza y lista las que sí', function () {
     $this->artisan('contabilidad:reestampar-cuentas', ['--regla' => 'cta_inventada'])

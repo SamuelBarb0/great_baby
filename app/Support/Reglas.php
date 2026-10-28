@@ -49,7 +49,8 @@ class Reglas
         // confirmadas con Silvia (contadora) porque dependen de la línea (accesorios/ropa/etc).
         // Dejamos GRUPO de 4 dígitos como default; en la ficha contable de cada producto
         // se puede sobrescribir con la subcuenta específica (6 dígitos).
-        'contable.cta_cxc_default' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '130505', 'etiqueta' => 'Cuenta CxC por defecto (Clientes nacionales)', 'descripcion' => 'PUC Great Baby · 130505 Clientes nacionales'],
+        'contable.cta_cxc_default' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '1305', 'etiqueta' => 'Cuenta CxC por defecto (Clientes)', 'descripcion' => 'PUC Great Baby · 1305 Clientes (cuenta real en uso por Dropi/ventas). Confirmar subcuenta movible con Silvia si el plan la exige.'],
+        'dropi.empresa' => ['grupo' => 'dropi', 'tipo' => 'string', 'valor' => 'ecommerce', 'etiqueta' => 'Razón social que factura lo de Dropi', 'descripcion' => 'Código de EmpresaConfig (canal e-commerce) con el que se factura lo de Dropi.'],
         'contable.cta_ingreso_default' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '4135', 'etiqueta' => 'Cuenta ingreso por defecto', 'descripcion' => '⚠ Confirmar subcuenta específica con Silvia (4135xx según categoría)'],
         'contable.cta_iva_venta_default' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '240805', 'etiqueta' => 'Cuenta IVA venta por defecto', 'descripcion' => 'PUC Great Baby · 240805 IVA generado en ventas'],
         'contable.cta_iva_compra_default' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '240810', 'etiqueta' => 'Cuenta IVA compra descontable', 'descripcion' => 'PUC Great Baby · 240810 IVA descontable por compras'],
