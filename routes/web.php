@@ -208,6 +208,8 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     // Sprint 4 · B.3 · CRUD Retenciones (Retefuente/Reteica/Reteiva).
     Route::get('/cartera/retenciones', [\App\Http\Controllers\App\RetencionesController::class, 'index'])->name('app.cartera.retenciones');
     Route::post('/cartera/retenciones', [\App\Http\Controllers\App\RetencionesController::class, 'guardar']);
+    // El interruptor de la lista: prender y apagar sin abrir el formulario.
+    Route::post('/cartera/retenciones/{regla}/activa', [\App\Http\Controllers\App\RetencionesController::class, 'alternar']);
     Route::delete('/cartera/retenciones/{regla}', [\App\Http\Controllers\App\RetencionesController::class, 'eliminar']);
     // Sprint 4 · B.1 · Notas crédito manuales.
     Route::get('/cartera/notas-credito', [\App\Http\Controllers\App\NotasCreditoController::class, 'index'])->name('app.cartera.notas-credito');

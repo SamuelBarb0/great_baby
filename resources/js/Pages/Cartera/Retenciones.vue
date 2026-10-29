@@ -67,7 +67,53 @@ const eliminar = (id) => {
     };
 };
 
+const alternando = ref(null);
+
+/*
+ * Lo que le falta a la regla para poder prenderse — el mismo seguro que el
+ * servidor, repetido acá a propósito.
+ *
+ * De las 33 reglas del catálogo de la DIAN, 11 entraron sin cuenta del PUC. Si
+ * el interruptor se ofreciera igual para todas, un tercio de los clics se
+ * comería un error en vez de hacer algo: ofrecer y después negar es el defecto
+ * que este ERP arrastra. Acá el interruptor se ve apagado y dice por qué, y el
+ * «⚠ falta cuenta» de al lado abre el formulario para completarla.
+ */
+const faltaParaActivar = (r) => {
+    if (! r.cuenta_puc) return 'Falta la cuenta del PUC: sin ella el asiento de la retención sale mal.';
+    if (esAutorretencion(r.tipo) && ! r.cuenta_puc_contrapartida) {
+        return 'Falta la cuenta de activo (13…): una autorretención mueve dos cuentas.';
+    }
+    return null;
+};
+
+/*
+ * Apagar nunca se bloquea: una regla incompleta que quedó prendida tiene que
+ * poder apagarse, que es justo cuando más urge.
+ */
+const bloqueado = (r) => ! r.activa && !! faltaParaActivar(r);
+
+const tituloInterruptor = (r) => {
+    if (r.activa) return 'Está activa · clic para apagarla';
+    return faltaParaActivar(r) || 'Está apagada · clic para activarla';
+};
+
+/*
+ * El estado nuevo no se manda: lo calcula el servidor sobre lo que hay guardado.
+ * Si esta pantalla quedó abierta un rato, un `activa` enviado desde acá pisaría
+ * con lo viejo lo que alguien más haya cambiado.
+ */
+const alternar = (r) => {
+    if (alternando.value || bloqueado(r)) return;
+    alternando.value = r.id;
+    router.post(`/app/cartera/retenciones/${r.id}/activa`, {}, {
+        preserveScroll: true,
+        onFinish: () => { alternando.value = null; },
+    });
+};
+
 const cuenta = (t) => props.reglas.filter(r => r.tipo === t).length;
+const activas = computed(() => filtradas.value.filter(r => r.activa).length);
 
 const tabs = [
     { key: 'retefuente', label: `Retefuente (${cuenta('retefuente')})` },
@@ -122,7 +168,14 @@ const tabs = [
 
             <div class="card overflow-hidden">
                 <div class="p-3 border-b flex justify-between items-center">
-                    <div class="text-xs uppercase font-bold text-brand-600">Reglas · {{ tab }}</div>
+                    <div class="text-xs uppercase font-bold text-brand-600">
+                        Reglas · {{ tab }}
+                        <!-- Con 33 reglas cargadas y una sola prendida, saber cuántas se
+                             están aplicando de verdad no debería exigir recorrer la lista. -->
+                        <span class="normal-case font-normal text-surface-500">
+                            · {{ activas }} de {{ filtradas.length }} activa{{ activas === 1 ? '' : 's' }}
+                        </span>
+                    </div>
                     <button @click="abrir()" class="btn-primary text-xs inline-flex items-center gap-1">
                         <Plus class="h-3 w-3"/> Nueva regla
                     </button>
@@ -150,12 +203,34 @@ const tabs = [
                                 <span v-if="r.cuenta_puc">{{ r.cuenta_puc }}</span>
                                 <!-- Las reglas cargadas desde la tabla del contador pueden venir
                                      sin cuenta: se ven así, no se esconden. -->
-                                <span v-else class="text-amber-600 text-xs font-sans font-semibold">⚠ falta cuenta</span>
+                                <!-- Avisaba y dejaba a la persona buscando dónde arreglarlo: ahora
+                                     el aviso es el camino. -->
+                                <button v-else type="button" @click="abrir(r)"
+                                        class="text-amber-600 hover:text-amber-700 text-xs font-sans font-semibold underline decoration-dotted"
+                                        title="Sin cuenta del PUC la regla no se puede activar · clic para ponerla">
+                                    ⚠ falta cuenta
+                                </button>
                                 <div v-if="r.cuenta_puc_contrapartida" class="text-[10px] text-surface-500">
                                     ↳ {{ r.cuenta_puc_contrapartida }}
                                 </div>
                             </td>
-                            <td class="p-2 text-center"><span :class="r.activa ? 'text-emerald-600' : 'text-red-500'" class="text-lg">●</span></td>
+                            <td class="p-2 text-center">
+                                <button type="button" @click="alternar(r)"
+                                        :disabled="bloqueado(r) || alternando === r.id"
+                                        :title="tituloInterruptor(r)"
+                                        :aria-pressed="r.activa ? 'true' : 'false'"
+                                        class="relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition
+                                               focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-1
+                                               disabled:opacity-40 disabled:cursor-not-allowed"
+                                        :class="r.activa ? 'bg-emerald-600' : 'bg-surface-300 dark:bg-surface-600'">
+                                    <span class="sr-only">{{ r.activa ? 'Apagar' : 'Activar' }} {{ r.concepto }}</span>
+                                    <span class="h-4 w-4 rounded-full bg-white shadow transition-transform"
+                                          :class="r.activa ? 'translate-x-[1.1rem]' : 'translate-x-0.5'"></span>
+                                </button>
+                                <div class="text-[10px] mt-0.5" :class="r.activa ? 'text-emerald-600 font-semibold' : 'text-surface-400'">
+                                    {{ r.activa ? 'se aplica' : (bloqueado(r) ? 'incompleta' : 'apagada') }}
+                                </div>
+                            </td>
                             <td class="p-2 text-xs text-surface-500 max-w-xs truncate" :title="r.notas">{{ r.notas || '—' }}</td>
                             <td class="p-2 text-right whitespace-nowrap">
                                 <button @click="abrir(r)" class="text-brand-600 hover:text-brand-700 p-1"><Pencil class="h-4 w-4"/></button>
