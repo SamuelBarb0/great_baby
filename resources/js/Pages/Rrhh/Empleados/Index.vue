@@ -1,15 +1,26 @@
 <script setup>
 import { ref, reactive } from 'vue';
+import { useBogotaDate } from '@/composables/useBogotaDate';
 import { Head, Link, router } from '@inertiajs/vue3';
 import { Users, Plus, GraduationCap, Download } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
+
+/*
+ * La fecha de HOY en Colombia, no en UTC.
+ *
+ * `toISOString()` convierte a UTC antes de recortar, asi que entre las
+ * 19:00 y la medianoche hora Bogota devuelve el dia siguiente. Las fechas
+ * de esta pantalla quedan escritas en registros, no son un filtro: un dia
+ * de corrimiento cambia lo que dice el documento.
+ */
+const { hoy: hoyBogota } = useBogotaDate();
 
 const props = defineProps({ empleados: { type: Object, required: true }, filtro: { type: String, default: 'activo' } });
 
 const modal = ref(false);
 const form = reactive({
     nombre: '', tipo_documento: 'CC', numero_documento: '', email: '', telefono: '',
-    cargo: '', area: '', tipo_contrato: 'indefinido', salario: null, fecha_ingreso: new Date().toISOString().slice(0, 10),
+    cargo: '', area: '', tipo_contrato: 'indefinido', salario: null, fecha_ingreso: hoyBogota(),
 });
 const procesando = ref(false);
 const crear = () => {

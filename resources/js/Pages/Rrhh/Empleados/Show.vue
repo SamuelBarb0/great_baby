@@ -7,12 +7,23 @@
  * se puede sin justa causa ni indemnización. Por eso va arriba y en color.
  */
 import { ref, reactive, computed } from 'vue';
+import { useBogotaDate } from '@/composables/useBogotaDate';
 import { Head, Link, router } from '@inertiajs/vue3';
 import {
     ArrowLeft, User, Clock, GraduationCap, FileText, Upload, History, AlertTriangle, Printer, LogOut, KeyRound,
     IdCard, Package, Trash2, Wallet,
 } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
+
+/*
+ * La fecha de HOY en Colombia, no en UTC.
+ *
+ * `toISOString()` convierte a UTC antes de recortar, asi que entre las
+ * 19:00 y la medianoche hora Bogota devuelve el dia siguiente. Las fechas
+ * de esta pantalla quedan escritas en registros, no son un filtro: un dia
+ * de corrimiento cambia lo que dice el documento.
+ */
+const { hoy: hoyBogota } = useBogotaDate();
 
 const props = defineProps({
     empleado: { type: Object, required: true },
@@ -48,7 +59,7 @@ const url = (s = '') => `/app/rrhh/empleados/${props.empleado.id}${s}`;
  */
 const modalLiquidacion = ref(false);
 const modalPagoLiq = ref(false);
-const pagoLiq = reactive({ fecha_pago: new Date().toISOString().slice(0, 10) });
+const pagoLiq = reactive({ fecha_pago: hoyBogota() });
 const liq = reactive({
     vacaciones_tomadas: 0, cesantias_ya_pagadas: 0,
     indemnizacion: 0, indemnizacion_concepto: '',
@@ -164,7 +175,7 @@ const quitarFila = (fila) => entrega.items.splice(entrega.items.indexOf(fila), 1
 
 const abrirEntrega = () => {
     Object.assign(entrega, {
-        fecha: props.entrega_cargo?.fecha ?? new Date().toISOString().slice(0, 10),
+        fecha: props.entrega_cargo?.fecha ?? hoyBogota(),
         recibe_id: props.entrega_cargo?.recibe_id ?? null,
         recibe_nombre: props.entrega_cargo?.recibe_nombre ?? '',
         observaciones: props.entrega_cargo?.observaciones ?? '',
@@ -201,7 +212,7 @@ const entrevista = reactive({});
 
 const abrirEntrevista = () => {
     const vacio = {
-        fecha_entrevista: new Date().toISOString().slice(0, 10),
+        fecha_entrevista: hoyBogota(),
         salida: null, motivo_principal: null, motivo_otro: '', detalle_motivo: '',
         que_valoro: '', que_mejorar: '',
         funciones_correspondian: null, funciones_explicacion: '',
@@ -261,7 +272,7 @@ const temasVistos = computed(() => ind.temas.filter((t) => t.cubierto).length);
 const abrirInduccion = () => {
     errores.value = {};
     Object.assign(ind, {
-        fecha: props.induccion?.fecha ?? new Date().toISOString().slice(0, 10),
+        fecha: props.induccion?.fecha ?? hoyBogota(),
         responsable_nombre: props.induccion?.responsable_nombre ?? '',
         responsable_cargo: props.induccion?.responsable_cargo ?? '',
         // El temario guardado si ya existe; el vigente si es la primera vez.
@@ -316,7 +327,7 @@ const crearAcceso = () => enviar('/acceso', { email: emailAcceso.value },
 
 const modalRetiro = ref(false);
 const retiro = reactive({
-    fecha_retiro: new Date().toISOString().slice(0, 10),
+    fecha_retiro: hoyBogota(),
     tipo_retiro: 'renuncia',
     motivo_retiro: '',
 });

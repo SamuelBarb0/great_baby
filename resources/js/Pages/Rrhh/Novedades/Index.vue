@@ -15,10 +15,21 @@
  * que es lo que se muestra en la tabla.
  */
 import { ref, reactive, computed } from 'vue';
+import { useBogotaDate } from '@/composables/useBogotaDate';
 import { Head, router } from '@inertiajs/vue3';
 import { ClipboardList, Plus, Download, AlertTriangle, Paperclip, Trash2, Pencil } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import AppConfirmModal from '@/Components/AppConfirmModal.vue';
+
+/*
+ * La fecha de HOY en Colombia, no en UTC.
+ *
+ * `toISOString()` convierte a UTC antes de recortar, asi que entre las
+ * 19:00 y la medianoche hora Bogota devuelve el dia siguiente. Las fechas
+ * de esta pantalla quedan escritas en registros, no son un filtro: un dia
+ * de corrimiento cambia lo que dice el documento.
+ */
+const { hoy: hoyBogota } = useBogotaDate();
 
 const props = defineProps({
     periodo: { type: String, required: true },
@@ -49,7 +60,7 @@ const vacio = () => ({
     empleado_id: null,
     tipo: 'incapacidad',
     clase: 'EG',
-    fecha_inicio: new Date().toISOString().slice(0, 10),
+    fecha_inicio: hoyBogota(),
     fecha_fin: '',
     fecha_reintegro: '',
     dias: null,

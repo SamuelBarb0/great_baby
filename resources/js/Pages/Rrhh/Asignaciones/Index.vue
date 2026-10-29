@@ -10,9 +10,20 @@
  * Gestión Humana, que arma el paz y salvo cuando alguien se va.
  */
 import { ref, reactive, computed } from 'vue';
+import { useBogotaDate } from '@/composables/useBogotaDate';
 import { Head, router } from '@inertiajs/vue3';
 import { Wrench, Plus, AlertTriangle, Download } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
+
+/*
+ * La fecha de HOY en Colombia, no en UTC.
+ *
+ * `toISOString()` convierte a UTC antes de recortar, asi que entre las
+ * 19:00 y la medianoche hora Bogota devuelve el dia siguiente. Las fechas
+ * de esta pantalla quedan escritas en registros, no son un filtro: un dia
+ * de corrimiento cambia lo que dice el documento.
+ */
+const { hoy: hoyBogota } = useBogotaDate();
 
 const props = defineProps({
     asignaciones: { type: Array, default: () => [] },
@@ -47,7 +58,7 @@ const filtrar = () => router.get('/app/rrhh/asignaciones', { estado: estado.valu
 const modalEntrega = ref(false);
 const entrega = reactive({
     empleado_id: null, tipo: 'herramienta', descripcion: '', identificador: '',
-    cantidad: 1, valor: null, fecha_entrega: new Date().toISOString().slice(0, 10),
+    cantidad: 1, valor: null, fecha_entrega: hoyBogota(),
     observaciones: '',
 });
 const guardarEntrega = () => enviar('/app/rrhh/asignaciones', { ...entrega }, {
@@ -61,7 +72,7 @@ const guardarEntrega = () => enviar('/app/rrhh/asignaciones', { ...entrega }, {
 const modalDevolucion = ref(null);
 const devolucion = reactive({
     estado: 'devuelta',
-    fecha_devolucion: new Date().toISOString().slice(0, 10),
+    fecha_devolucion: hoyBogota(),
     estado_devolucion: '',
 });
 const exigeDetalle = computed(() => devolucion.estado !== 'devuelta');

@@ -10,9 +10,20 @@
  * de novedades: el número solo obliga a creerle al sistema.
  */
 import { ref, reactive, computed } from 'vue';
+import { useBogotaDate } from '@/composables/useBogotaDate';
 import { Head, router } from '@inertiajs/vue3';
 import { Wallet, Download, Printer, AlertTriangle, RefreshCw, Check, Banknote } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
+
+/*
+ * La fecha de HOY en Colombia, no en UTC.
+ *
+ * `toISOString()` convierte a UTC antes de recortar, asi que entre las
+ * 19:00 y la medianoche hora Bogota devuelve el dia siguiente. Las fechas
+ * de esta pantalla quedan escritas en registros, no son un filtro: un dia
+ * de corrimiento cambia lo que dice el documento.
+ */
+const { hoy: hoyBogota } = useBogotaDate();
 
 const props = defineProps({
     periodo: { type: String, required: true },
@@ -53,7 +64,7 @@ const liquidar = () => accion('/app/rrhh/nomina/liquidar', { periodo: props.peri
 const aprobar = () => accion(`/app/rrhh/nomina/${props.nomina.id}/aprobar`);
 
 const modalPago = ref(false);
-const pago = reactive({ fecha_pago: new Date().toISOString().slice(0, 10) });
+const pago = reactive({ fecha_pago: hoyBogota() });
 const pagar = () => {
     accion(`/app/rrhh/nomina/${props.nomina.id}/pagar`, { ...pago });
     modalPago.value = false;

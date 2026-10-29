@@ -1,9 +1,20 @@
 <script setup>
 import { Head, Link } from '@inertiajs/vue3';
+import { useBogotaDate } from '@/composables/useBogotaDate';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import PestanasSeccion from '@/Components/PestanasSeccion.vue';
 import { pestanasSiigo } from '@/composables/usePestanasContables';
 import { ArrowLeft, AlertTriangle, Landmark, CalendarClock } from 'lucide-vue-next';
+
+/*
+ * La fecha de HOY en Colombia, no en UTC.
+ *
+ * `toISOString()` convierte a UTC antes de recortar, asi que entre las
+ * 19:00 y la medianoche hora Bogota devuelve el dia siguiente. Las fechas
+ * de esta pantalla quedan escritas en registros, no son un filtro: un dia
+ * de corrimiento cambia lo que dice el documento.
+ */
+const { hoy: hoyBogota } = useBogotaDate();
 
 const props = defineProps({
     filas: Array,
@@ -13,7 +24,7 @@ const props = defineProps({
 
 const money = (n) => new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n || 0);
 
-const hoy = new Date().toISOString().slice(0, 10);
+const hoy = hoyBogota();
 const vencida = (f) => f && f < hoy;
 </script>
 

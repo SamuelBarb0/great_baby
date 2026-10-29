@@ -1,11 +1,22 @@
 <script setup>
 import { ref, reactive } from 'vue';
+import { useBogotaDate } from '@/composables/useBogotaDate';
 import { Head, router } from '@inertiajs/vue3';
 import { AlertTriangle, DollarSign, HelpCircle, Plus } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import { useMoney } from '@/composables/useMoney';
 import { usePedidoBadge } from '@/composables/usePedidoBadge';
 import { useEscClose } from '@/composables/useEscClose';
+
+/*
+ * La fecha de HOY en Colombia, no en UTC.
+ *
+ * `toISOString()` convierte a UTC antes de recortar, asi que entre las
+ * 19:00 y la medianoche hora Bogota devuelve el dia siguiente. Las fechas
+ * de esta pantalla quedan escritas en registros, no son un filtro: un dia
+ * de corrimiento cambia lo que dice el documento.
+ */
+const { hoy: hoyBogota } = useBogotaDate();
 
 const props = defineProps({
     pedidosSinCobro: { type: Array, required: true },
@@ -29,7 +40,7 @@ const modalAjuste = ref(false);
 useEscClose(modalAjuste);
 const ajusteForm = reactive({
     pedido_id: null, guia: '', monto: 0, categoria: 'ajuste_discrepancia',
-    fecha: new Date().toISOString().slice(0, 10), tipo: 'pago_guia',
+    fecha: hoyBogota(), tipo: 'pago_guia',
 });
 const abrirAjuste = (p) => {
     ajusteForm.pedido_id = p.id;
@@ -37,7 +48,7 @@ const abrirAjuste = (p) => {
     ajusteForm.monto = p.monto;
     // Re-audit UX#11 · refrescar fecha al abrir (evita quedar con fecha de ayer
     // si la pestaña quedó abierta cruzando medianoche).
-    ajusteForm.fecha = new Date().toISOString().slice(0, 10);
+    ajusteForm.fecha = hoyBogota();
     modalAjuste.value = true;
 };
 const procesandoAjuste = ref(false);
