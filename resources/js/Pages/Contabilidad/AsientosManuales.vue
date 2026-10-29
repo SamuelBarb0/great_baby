@@ -1,5 +1,6 @@
 <script setup>
 import { ref, reactive, computed, watch } from 'vue';
+import { useBogotaDate } from '@/composables/useBogotaDate';
 import { Head, router } from '@inertiajs/vue3';
 import { useDebounceFn } from '@vueuse/core';
 import { BookOpen, Plus, Search, Cloud, CloudOff, RefreshCw, X, Check, Trash2, Link2 } from 'lucide-vue-next';
@@ -10,6 +11,16 @@ import PestanasSeccion from '@/Components/PestanasSeccion.vue';
 import { pestanasLibro } from '@/composables/usePestanasContables';
 import { useMoney } from '@/composables/useMoney';
 import AppConfirmModal from '@/Components/AppConfirmModal.vue';
+
+/*
+ * La fecha de HOY en Colombia, no en UTC.
+ *
+ * `new Date().toISOString().slice(0,10)` convierte a UTC antes de
+ * recortar: entre las 19:00 y la medianoche hora Bogotá devuelve el día
+ * siguiente. Acá eso no era un filtro incómodo sino la fecha que queda
+ * escrita en el documento.
+ */
+const { hoy: hoyBogota } = useBogotaDate();
 
 const props = defineProps({
     filtros: { type: Object, required: true },
@@ -45,7 +56,7 @@ const filtrar = () => {
 const modal = ref(false);
 const procesando = ref(false);
 const nuevo = reactive({
-    fecha: new Date().toISOString().slice(0, 10),
+    fecha: hoyBogota(),
     glosa: '',
     lineas: [],
 });
@@ -114,7 +125,7 @@ const elegirFactura = (i, f) => {
 const abrir = () => {
     modal.value = true;
     Object.assign(nuevo, {
-        fecha: new Date().toISOString().slice(0, 10),
+        fecha: hoyBogota(),
         glosa: '',
         lineas: [nuevaLinea(), nuevaLinea()],
     });

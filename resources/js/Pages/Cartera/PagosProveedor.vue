@@ -1,5 +1,6 @@
 <script setup>
 import { ref, reactive, computed } from 'vue';
+import { useBogotaDate } from '@/composables/useBogotaDate';
 import { Head, router } from '@inertiajs/vue3';
 import { CreditCard, Plus, Search, X, Calculator } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
@@ -89,7 +90,7 @@ const anular = async (p) => {
 };
 const reenviar = (p) => accionDeFila(p.id, `/app/cartera/pagos-proveedor/${p.id}/reenviar-siigo`);
 const form = reactive({
-    fecha: new Date().toISOString().slice(0, 10),
+    fecha: hoyBogota(),
     contacto_id: null,
     monto_bruto: 0,
     iva: 0,
@@ -144,7 +145,7 @@ const seleccionarProv = (p) => {
 const abrir = () => {
     modal.value = true;
     Object.assign(form, {
-        fecha: new Date().toISOString().slice(0, 10),
+        fecha: hoyBogota(),
         contacto_id: null, monto_bruto: 0, iva: 0,
         concepto_retencion: 'compras_generales', ciudad: 'Bogotá',
         gran_contribuyente: false, metodo: 'transferencia',
@@ -156,6 +157,16 @@ const abrir = () => {
 // QA-FIX #11 · preview desde motor REAL vía API (evita hardcodes que mienten
 // si Aracely edita las reglas de retenciones).
 import { watch } from 'vue';
+
+/*
+ * La fecha de HOY en Colombia, no en UTC.
+ *
+ * `new Date().toISOString().slice(0,10)` convierte a UTC antes de
+ * recortar: entre las 19:00 y la medianoche hora Bogotá devuelve el día
+ * siguiente. Acá eso no era un filtro incómodo sino la fecha que queda
+ * escrita en el documento.
+ */
+const { hoy: hoyBogota } = useBogotaDate();
 const preview = ref({ lineas: [], total: 0, neto: 0, es_autorretenedor: false });
 let debPreview;
 const cargarPreview = () => {

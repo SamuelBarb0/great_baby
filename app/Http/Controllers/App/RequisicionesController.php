@@ -111,7 +111,12 @@ class RequisicionesController extends Controller implements HasMiddleware
             'puede' => [
                 'editar' => $x->estado === EstadoRequisicion::Borrador && $x->solicitante_id === $r->user()->id,
                 'enviar' => $x->estado === EstadoRequisicion::Borrador && $x->solicitante_id === $r->user()->id,
-                'decidir' => $this->esGestionHumana($r) && $x->estado === EstadoRequisicion::Enviada,
+                // El mismo «quien la pidió no la aprueba» de `paraDecidir()`.
+                // Si acá no se repite, la pantalla muestra Aprobar/Rechazar y
+                // el servidor los rechaza: ofrecer y después negar.
+                'decidir' => $this->esGestionHumana($r)
+                    && $x->estado === EstadoRequisicion::Enviada
+                    && $x->solicitante_id !== $r->user()->id,
                 'abrir_vacante' => $this->esGestionHumana($r) && $x->estado->permiteVacante() && $x->vacantes_pendientes > 0,
             ],
         ]);
@@ -446,6 +451,30 @@ class RequisicionesController extends Controller implements HasMiddleware
         $x = Requisicion::findOrFail($id);
         abort_unless($x->estado === EstadoRequisicion::Enviada, 422,
             'Sólo se decide sobre una solicitud enviada.');
+
+        /*
+         * Quien la pidió no la aprueba.
+         *
+         * La pantalla dice «Lo que piden los líderes de área. Acá se aprueba»,
+         * pero le mostraba el botón de crear a quien aprueba: con la misma
+         * cuenta se podía pedir personal, enviárselo a uno mismo y
+         * autorizarlo. Probado el 28-oct con Elena: tres clics y la bitácora
+         * quedó diciendo «Elena Gestión Humana envió la solicitud a Gestión
+         * Humana».
+         *
+         * Pedir personal es comprometer un sueldo todos los meses; el control
+         * es el mismo que el del pago a proveedor y por la misma razón.
+         *
+         * Operable sin problema: hoy siete personas pueden aprobar —Gerencia,
+         * Gerente y Gestión Humana— así que nunca queda una solicitud sin
+         * quien la mire. Y si la pidió un líder de área, nada cambia: él no
+         * aprueba de todos modos.
+         */
+        abort_if(
+            $x->solicitante_id === $r->user()->id,
+            422,
+            'Vos pediste esta solicitud, así que no la podés aprobar ni rechazar. La revisa otra persona.',
+        );
 
         return $x;
     }

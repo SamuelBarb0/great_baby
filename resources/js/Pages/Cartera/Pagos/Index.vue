@@ -1,5 +1,6 @@
 <script setup>
 import { ref, watch, computed } from 'vue';
+import { useBogotaDate } from '@/composables/useBogotaDate';
 import { Head, router, Link } from '@inertiajs/vue3';
 import { useMoney } from '@/composables/useMoney';
 import { useDebounceFn } from '@vueuse/core';
@@ -7,6 +8,16 @@ import { CreditCard, Search, Calendar, Plus, X } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import FiltroEjes from '@/Components/FiltroEjes.vue';
 import KpiCard from '@/Components/KpiCard.vue';
+
+/*
+ * La fecha de HOY en Colombia, no en UTC.
+ *
+ * `new Date().toISOString().slice(0,10)` convierte a UTC antes de
+ * recortar: entre las 19:00 y la medianoche hora Bogotá devuelve el día
+ * siguiente. Acá eso no era un filtro incómodo sino la fecha que queda
+ * escrita en el documento.
+ */
+const { hoy: hoyBogota } = useBogotaDate();
 
 const props = defineProps({
     pagos: { type: Object, required: true },
@@ -41,7 +52,7 @@ const qFactura = ref('');
 const facturas = ref([]);
 const facturaSel = ref(null);
 
-const hoy = new Date().toISOString().slice(0, 10);
+const hoy = hoyBogota();
 const form = ref({
     fecha: hoy,
     monto_recibido: '',

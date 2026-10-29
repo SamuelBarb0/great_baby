@@ -12,6 +12,7 @@ import {
     ArrowLeft, ClipboardCheck, Check, AlertTriangle, FileText, Upload, History, X, Stethoscope,
 } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
+import AppConfirmModal from '@/Components/AppConfirmModal.vue';
 
 const props = defineProps({
     contratacion: { type: Object, required: true },
@@ -80,8 +81,23 @@ const subirDoc = () => {
 };
 
 /* cierre y cancelación */
+
+/*
+ * `confirm()` nativo está bloqueado dentro del iframe de la app de escritorio:
+ * devuelve false sin avisar y el botón no hace nada. Cerrar la contratación es
+ * lo que CREA al empleado, así que un botón mudo acá deja a alguien contratado
+ * en el papel y sin ficha en el sistema.
+ */
+const modalConfirm = ref(null);
+
 const completar = () => {
-    if (confirm('¿Cerrar la contratación y crear al empleado?')) enviar('/completar');
+    modalConfirm.value = {
+        titulo: '¿Cerrar la contratación y crear al empleado?',
+        mensaje: 'Se le abre la ficha de empleado con lo pactado. Después esto no se deshace.',
+        color: 'emerald',
+        textoConfirmar: 'Cerrar y crear',
+        onConfirmar: () => { modalConfirm.value = null; enviar('/completar'); },
+    };
 };
 const modalCancelar = ref(false);
 const motivo = ref('');
@@ -415,5 +431,7 @@ const money = (n) => (n ? '$' + Number(n).toLocaleString('es-CO', { maximumFract
                 </div>
             </div>
         </div>
+
+        <AppConfirmModal :cfg="modalConfirm" @cerrar="modalConfirm = null"/>
     </AppLayout>
 </template>

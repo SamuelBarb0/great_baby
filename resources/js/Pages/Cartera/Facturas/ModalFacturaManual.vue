@@ -7,10 +7,21 @@
  * listado, y al guardar vuelve ahí con la factura nueva arriba.
  */
 import { computed, reactive, ref, watch } from 'vue';
+import { useBogotaDate } from '@/composables/useBogotaDate';
 import { router } from '@inertiajs/vue3';
 import { useDebounceFn } from '@vueuse/core';
 import { Trash2, Search, X } from 'lucide-vue-next';
 import { useMoney } from '@/composables/useMoney';
+
+/*
+ * La fecha de HOY en Colombia, no en UTC.
+ *
+ * `new Date().toISOString().slice(0,10)` convierte a UTC antes de
+ * recortar: entre las 19:00 y la medianoche hora Bogotá devuelve el día
+ * siguiente. Acá eso no era un filtro incómodo sino la fecha que queda
+ * escrita en el documento.
+ */
+const { hoy: hoyBogota } = useBogotaDate();
 
 const props = defineProps({
     opciones: { type: Object, default: () => ({ destinos: [], lineas: [], ivas: [] }) },
@@ -19,10 +30,28 @@ const emit = defineEmits(['cerrar']);
 
 const { money } = useMoney();
 
-const ivaPorDefecto = computed(() => {
-    const diecinueve = props.opciones.ivas?.find((i) => Number(i.valor) === 19);
-    return diecinueve ? 19 : Number(props.opciones.ivas?.[0]?.valor ?? 0);
-});
+/*
+ * Una línea nueva nace SIN impuesto, no en 19%.
+ *
+ * Esto elegía 19 «si existe la opción 19», y como ningún producto del
+ * catálogo tiene impuesto asignado (0 de 30 el 29-oct), el `??` caía siempre
+ * acá. Resultado medido sobre el MISMO producto: por pedido B2B la factura
+ * salía con IVA $0 —ese camino lee `producto->impuesto?->porcentaje ?? 0`— y
+ * por factura manual con IVA 19%. Dos documentos fiscales distintos según la
+ * puerta por la que se entró.
+ *
+ * Ninguna de las dos tarifas se puede dar por buena desde el código: la ropa
+ * infantil tiene reglas propias y eso lo dice la contadora, no un `??`. Así
+ * que ahora las dos puertas leen lo mismo —el impuesto del producto— y cuando
+ * el producto no lo tiene se queda en cero A LA VISTA, con el aviso de abajo,
+ * en vez de inventar un 19 que nadie escribió.
+ */
+const ivaPorDefecto = computed(() => 0);
+
+/** Líneas con producto del catálogo que no traen impuesto configurado. */
+const lineasSinImpuesto = computed(
+    () => form.items.filter((l) => l.producto_id && ! Number(l.impuesto_pct)).length,
+);
 
 const lineaNueva = () => ({
     producto_id: null, descripcion: '', cantidad: 1,
@@ -30,7 +59,7 @@ const lineaNueva = () => ({
     sinSiigo: false,
 });
 
-const hoy = new Date().toISOString().slice(0, 10);
+const hoy = hoyBogota();
 
 const form = reactive({
     contacto_id: null,
@@ -411,6 +440,17 @@ const guardar = () => {
             <p v-if="errorServidor" class="text-sm text-red-600 font-semibold">{{ errorServidor }}</p>
 
             <div class="flex items-center justify-end gap-3 pt-1">
+                <!--
+                    No frena la factura: avisa. Que un producto no tenga
+                    impuesto configurado puede ser correcto (hay exenciones) o
+                    puede ser un olvido del catálogo, y quien factura es quien
+                    sabe cuál de las dos. Lo que no puede pasar es que se
+                    decida solo.
+                -->
+                <p v-if="! problema && lineasSinImpuesto" class="text-xs text-amber-700 font-semibold mr-auto">
+                    {{ lineasSinImpuesto }} línea(s) van sin impuesto porque el producto no lo tiene configurado en el catálogo.
+                    Si corresponde IVA, ponelo a mano o cargalo en la ficha del producto.
+                </p>
                 <p v-if="problema" class="text-xs text-red-600 font-semibold mr-auto">{{ problema }}</p>
                 <button @click="emit('cerrar')" class="btn-secondary text-sm">Cancelar</button>
                 <button @click="guardar" :disabled="guardando || !! problema"

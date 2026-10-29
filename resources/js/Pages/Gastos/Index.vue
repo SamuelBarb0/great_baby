@@ -1,10 +1,21 @@
 <script setup>
 import { ref, reactive } from 'vue';
+import { useBogotaDate } from '@/composables/useBogotaDate';
 import { Head, router } from '@inertiajs/vue3';
 import { Receipt, Plus, CheckCircle, XCircle, CreditCard, BookOpen } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import Paginacion from '@/Components/Paginacion.vue';
 import AppConfirmModal from '@/Components/AppConfirmModal.vue';
+
+/*
+ * La fecha de HOY en Colombia, no en UTC.
+ *
+ * `new Date().toISOString().slice(0,10)` convierte a UTC antes de
+ * recortar: entre las 19:00 y la medianoche hora Bogotá devuelve el día
+ * siguiente. Acá eso no era un filtro incómodo sino la fecha que queda
+ * escrita en el documento.
+ */
+const { hoy: hoyBogota } = useBogotaDate();
 
 const props = defineProps({
     gastos: Object, conteos: Object, esAdmin: Boolean, filtros: Object,
@@ -56,7 +67,7 @@ const badgeDestino = (color) => ({
 
 const modal = ref(false);
 const form = reactive({
-    fecha: new Date().toISOString().slice(0, 10),
+    fecha: hoyBogota(),
     categoria: 'papeleria', descripcion: '', monto: 0, proveedor: '', factura_ref: '',
     metodo_pago: 'transferencia', tipo: 'gasto', notas: '',
 });

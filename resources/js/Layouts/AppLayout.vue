@@ -452,7 +452,18 @@ const groups = [
         label: 'Dropi',
         items: [
             // El módulo Dropi se opera en /admin, que quedó siendo sólo Dropi.
-            { name: '🚚 Abrir módulo Dropi', href: '/admin/dropi-pedidos', icon: LayoutDashboard, external: true, permiso: 'dropi' },
+            /*
+             * Apunta a `/admin`, no a una pantalla concreta.
+             *
+             * Iba derecho a `/admin/dropi-pedidos`, que exige
+             * `esAracely() || esAlistador()`. Gerente, Contador y Servicio al
+             * Cliente entran al panel sin problema pero NO a ese recurso: el
+             * menú les ofrecía la entrada y la pantalla les respondía 403.
+             * Filament ya sabe mandar a cada quien a una página que sí puede
+             * ver —al Contador lo deja en el dashboard de Dropi—, así que
+             * basta con dejarlo decidir.
+             */
+            { name: '🚚 Abrir módulo Dropi', href: '/admin', icon: LayoutDashboard, external: true, permiso: 'dropi' },
         ],
     },
     {
@@ -478,7 +489,9 @@ const groups = [
         label: 'Configuración',
         items: [
             { name: '🛡 Roles y permisos', href: '/app/roles', icon: Users, permiso: 'configuracion' },
-            { name: 'Reglas de negocio', href: '/app/reglas', icon: Settings, permiso: 'configuracion' },
+            // Clave propia, no `configuracion`: el contador entra a ver el
+            // grupo contable sin que eso le abra Roles, Empresa ni Plantillas.
+            { name: 'Reglas de negocio', href: '/app/reglas', icon: Settings, permiso: 'reglas' },
             { name: 'Empresa', href: '/app/empresa', icon: Home, permiso: 'configuracion' },
             { name: 'Plantillas PDF', href: '/app/plantillas', icon: FileText, permiso: 'configuracion' },
             { name: 'SIIGO', href: '/app/siigo', icon: Settings, permiso: 'siigo' },

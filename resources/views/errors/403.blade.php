@@ -51,16 +51,39 @@
 <body>
     <div class="wrap">
         <div class="card">
-            <div class="brand">GREAT BABY ERP</div>
+            @php
+                /*
+                 * Quién está adentro puede NO ser un usuario del ERP.
+                 *
+                 * `@auth` resuelve contra el guard activo, y en el Portal B2B
+                 * ese guard devuelve un `Contacto`, que no tiene roles. La
+                 * página pedía `getRoleNames()` a secas y reventaba con
+                 * «Call to undefined method Contacto::getRoleNames()»: el
+                 * cliente que intentaba abrir una factura ajena —cosa que el
+                 * sistema hace bien en negarle— recibía un error 500 en vez
+                 * del «esto no es tuyo». La puerta estaba bien; la explicación
+                 * era la que se caía.
+                 */
+                $quien = auth()->user() ?: auth('cliente')->user();
+                $esDelErp = $quien && method_exists($quien, 'getRoleNames');
+                $roles = $esDelErp ? $quien->getRoleNames() : collect();
+                $nombre = $quien?->name ?? $quien?->nombre_completo;
+            @endphp
+
+            <div class="brand">{{ $esDelErp ? 'GREAT BABY ERP' : 'PORTAL GREAT BABY' }}</div>
             <p class="code">403</p>
             <h1>Esta parte no es tuya</h1>
 
             <p>
                 @if (! empty($exception) && $exception->getMessage())
                     {{ $exception->getMessage() }}
-                @else
+                @elseif ($esDelErp)
                     No es un error: esta pantalla pertenece a otra área. Si la necesitás para tu
                     trabajo, pedile a Gerencia que te habilite el acceso desde Roles y permisos.
+                @else
+                    {{-- Al cliente no se le habla de roles ni de áreas internas. --}}
+                    Este documento es de otra cuenta. Si creés que deberías verlo,
+                    escribinos por el WhatsApp comercial y lo revisamos.
                 @endif
             </p>
 
@@ -69,20 +92,22 @@
                 sesión de otro usuario que quedó abierta, y saberlo ahorra el
                 rodeo entero.
             --}}
-            @auth
+
+            @if ($nombre)
                 <p class="quien">
-                    Estás dentro como <strong>{{ auth()->user()->name }}</strong>
-                    @if (auth()->user()->getRoleNames()->isNotEmpty())
-                        · {{ auth()->user()->getRoleNames()->implode(', ') }}
+                    Estás dentro como <strong>{{ $nombre }}</strong>
+                    @if ($roles->isNotEmpty())
+                        · {{ $roles->implode(', ') }}
                     @endif
                 </p>
-            @endauth
+            @endif
 
             <div class="acciones">
-                <a class="btn" href="{{ url('/app') }}">Volver a lo mío</a>
-                @auth
+                {{-- Cada quien vuelve a SU casa, no siempre al ERP. --}}
+                <a class="btn" href="{{ url($esDelErp ? '/app' : '/portal') }}">Volver a lo mío</a>
+                @if ($esDelErp)
                     <a class="btn sec" href="{{ url('/app/mi-espacio') }}">Mi espacio</a>
-                @endauth
+                @endif
             </div>
         </div>
     </div>

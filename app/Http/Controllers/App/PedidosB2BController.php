@@ -154,7 +154,7 @@ class PedidosB2BController extends Controller implements HasMiddleware
         $p = PedidoCliente::with([
             'items.variante:id,codigo_barras', 'contacto', 'lista:id,nombre',
             'factura:id,numero,siigo_id,cufe',
-            'facturadoPor:id,name', 'despachadoPor:id,name',
+            'aprobadoPor:id,name', 'facturadoPor:id,name', 'despachadoPor:id,name',
             // LOG-J5 · incluimos el alistador para el timeline + Show card.
             'alistador:id,name',
         ])->findOrFail($pedido);
@@ -241,7 +241,9 @@ class PedidosB2BController extends Controller implements HasMiddleware
                     ] : null,
                     $p->aprobado_at ? [
                         'hito' => 'Pedido aprobado',
-                        'actor' => 'Gerencia',
+                        // Decía «Gerencia» fijo. Dejó de ser impreciso y pasó
+                        // a ser falso cuando el Contador también pudo aprobar.
+                        'actor' => $p->aprobadoPor?->name ?? 'Gerencia',
                         'at' => $p->aprobado_at->format('Y-m-d H:i'),
                         'icon' => '✓',
                         'color' => 'emerald',
@@ -375,13 +377,18 @@ class PedidosB2BController extends Controller implements HasMiddleware
         $pre = PedidoCliente::findOrFail($pedido);
         $eraRetenido = $pre->estado === 'retenido';
 
-        DB::transaction(function () use ($pedido) {
+        $aprobadorId = $r->user()->id;
+
+        DB::transaction(function () use ($pedido, $aprobadorId) {
             $p = PedidoCliente::whereKey($pedido)->lockForUpdate()->firstOrFail();
             abort_unless(in_array($p->estado, ['enviado', 'retenido'], true), 422,
                 'Sólo se aprueban pedidos enviados o retenidos por cartera.');
             $p->update([
                 'estado' => 'aprobado',
                 'aprobado_at' => now(),
+                // Quién aprobó, que no se guardaba. Era el único paso de la
+                // cadena sin autor, justo el que autoriza que salga mercancía.
+                'aprobado_por_id' => $aprobadorId,
                 // LOG-J3 · si venía retenido, dejamos el motivo como huella para
                 //   el timeline (hito 'retenido') pero el pedido ya está vivo.
             ]);

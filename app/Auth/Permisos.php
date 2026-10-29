@@ -73,6 +73,22 @@ final class Permisos
         'contabilidad'     => ['Gerente', 'Contador'],
         'libro_diario'     => ['Gerente', 'Contador'],
         'reportes_contables' => ['Gerente', 'Contador'],
+        /*
+         * Las reglas CONTABLES, y solo esas.
+         *
+         * Reglas de negocio es de administracion y asi se queda: ahi viven
+         * 140 reglas en 11 grupos —SIIGO, RRHH, Dropi, CRM— y abrirle la
+         * pantalla entera al contador le daria mucho mas que cuentas.
+         *
+         * Pero las 45 de 'contable.*' son suyas: dicen a que cuenta postea
+         * cada transaccion, y hoy tres de ellas apuntan a cuentas que el
+         * plan prohibe mover (6135, 1435, 1305). Silvia sabe cual es la
+         * correcta y no podia escribirla: tenia que dictarsela a Aracely.
+         *
+         * Esta clave abre solo ese grupo. El filtro va en el servidor, no
+         * en la pantalla.
+         */
+        'reglas_contables' => ['Contador'],
 
         // COMPRAS
         'compras_oc'       => ['Gerente'],
@@ -218,7 +234,7 @@ final class Permisos
         'Operación' => ['torre_control', 'estacion_empaque', 'vista_alistador', 'escanner_camara', 'inventario_vivo'],
         'Dropi' => ['dropi_dashboard', 'dropi_pedidos', 'dropi_cortes', 'dropi_wallet', 'dropi_devoluciones', 'dropi_discrepancias', 'dropi_reportes'],
         'Cartera y CRM' => ['facturas', 'pagos', 'contactos', 'cartera_dashboard', 'condiciones_credito', 'cobranzas', 'excepciones_credito', 'crm', 'comisiones', 'comisiones_config', 'metodos_pago'],
-        'Contabilidad' => ['contabilidad', 'libro_diario', 'reportes_contables'],
+        'Contabilidad' => ['contabilidad', 'libro_diario', 'reportes_contables', 'reglas_contables'],
         'Compras' => ['compras_oc', 'compras_recepcion', 'compras_importacion', 'compras_reportes'],
         'Inventario' => ['traslados', 'tomas_fisicas', 'alertas_stock', 'kardex', 'stock_bodegas'],
         'Catálogo' => ['productos', 'ubicaciones', 'importar_productos', 'productos.push_siigo'],

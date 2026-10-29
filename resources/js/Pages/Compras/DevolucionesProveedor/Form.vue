@@ -1,5 +1,6 @@
 <script setup>
 import { ref, reactive, computed } from 'vue';
+import { useBogotaDate } from '@/composables/useBogotaDate';
 import { Head, Link, router } from '@inertiajs/vue3';
 import { Undo2, ArrowLeft, Plus, Trash2, Search, Send, Cloud, Clock, RefreshCw, X, Eye, CheckCircle2, AlertCircle } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
@@ -7,6 +8,16 @@ import { useMoney } from '@/composables/useMoney';
 import AppConfirmModal from '@/Components/AppConfirmModal.vue';
 import { mensajeDeError } from '@/composables/useMensajeError';
 import axios from 'axios';
+
+/*
+ * La fecha de HOY en Colombia, no en UTC.
+ *
+ * `new Date().toISOString().slice(0,10)` convierte a UTC antes de
+ * recortar: entre las 19:00 y la medianoche hora Bogotá devuelve el día
+ * siguiente. Acá eso no era un filtro incómodo sino la fecha que queda
+ * escrita en el documento.
+ */
+const { hoy: hoyBogota } = useBogotaDate();
 
 const { money: formato } = useMoney();
 
@@ -30,7 +41,7 @@ const header = reactive({
     id: props.devolucion?.id ?? null,
     proveedor_id: props.devolucion?.proveedor_id ?? null,
     ubicacion_id: props.devolucion?.ubicacion_id ?? null,
-    fecha: props.devolucion?.fecha ?? new Date().toISOString().slice(0, 10),
+    fecha: props.devolucion?.fecha ?? hoyBogota(),
     motivo: props.devolucion?.motivo ?? '',
 });
 

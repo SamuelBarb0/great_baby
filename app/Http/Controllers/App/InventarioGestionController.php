@@ -527,7 +527,7 @@ class InventarioGestionController extends Controller implements HasMiddleware
     // ---------- TRASLADO SHOW (repeater items + acciones state machine) ----------
     public function trasladoShow(int $id): Response
     {
-        $t = Traslado::with(['items.variante.producto', 'origen', 'destino', 'solicitante', 'ejecutor',
+        $t = Traslado::with(['items.variante.producto', 'items.producto', 'origen', 'destino', 'solicitante', 'ejecutor',
                 'aprobador', 'enviador', 'recogedor', 'prestamo'])
             ->findOrFail($id);
         $esMuestra = $t->esMuestra();
@@ -572,12 +572,17 @@ class InventarioGestionController extends Controller implements HasMiddleware
                     'observaciones_entrega' => $t->observaciones_entrega,
                     'prestamo' => $t->prestamo?->numero,
                 ] : null,
+                // Mismo caso que el conteo: un ítem agregado no tiene variante
+                // y salía sin SKU ni nombre. El guardar ya los aceptaba
+                // (INV-A7); faltaba que la pantalla supiera mostrarlos.
                 'items' => $t->items->map(fn ($it) => [
                     'id' => $it->id,
                     'variante_id' => $it->variante_id,
-                    'sku' => $it->variante?->codigo_barras,
-                    'producto' => $it->variante?->producto?->nombre,
-                    'detalle' => trim(($it->variante?->color_nombre ?? '') . ' ' . ($it->variante?->talla ?? '')),
+                    'sku' => $it->variante?->codigo_barras ?? $it->producto?->referencia,
+                    'producto' => $it->variante?->producto?->nombre ?? $it->producto?->nombre,
+                    'detalle' => $it->variante
+                        ? trim(($it->variante->color_nombre ?? '').' '.($it->variante->talla ?? ''))
+                        : 'todas las presentaciones',
                     'cantidad_solicitada' => (float) $it->cantidad_solicitada,
                     'cantidad_ejecutada' => (float) $it->cantidad_ejecutada,
                     'notas' => $it->notas,
@@ -765,7 +770,7 @@ class InventarioGestionController extends Controller implements HasMiddleware
     // ---------- CONTEO SHOW + ACCIONES ----------
     public function conteoShow(int $id): Response
     {
-        $toma = TomaFisica::with(['items.variante.producto', 'ubicacion', 'creador', 'cerrador'])->findOrFail($id);
+        $toma = TomaFisica::with(['items.variante.producto', 'items.producto', 'ubicacion', 'creador', 'cerrador'])->findOrFail($id);
         $estado = is_object($toma->estado) ? $toma->estado->value : $toma->estado;
 
         // INV-A2 · badge SIIGO del conteo · ajuste_toma_fisica dispara journal
@@ -793,11 +798,21 @@ class InventarioGestionController extends Controller implements HasMiddleware
                 'cerrada_at' => optional($toma->cerrada_at)->format('Y-m-d H:i'),
                 'items_diferentes' => (int) $toma->items_diferentes,
                 'valor_ajuste' => (float) $toma->valor_ajuste,
+                /*
+                 * El renglón tiene que decir QUÉ se está contando.
+                 *
+                 * Esto leía sólo `$it->variante`. Un ítem agregado —que no
+                 * tiene variante— salía con SKU y producto en blanco: la
+                 * persona en bodega veía una fila que decía «19» y nada más.
+                 * No se puede contar lo que no se sabe qué es.
+                 */
                 'items' => $toma->items->map(fn ($it) => [
                     'id' => $it->id,
-                    'sku' => $it->variante?->codigo_barras,
-                    'producto' => $it->variante?->producto?->nombre,
-                    'detalle' => trim(($it->variante?->color_nombre ?? '') . ' ' . ($it->variante?->talla ?? '')),
+                    'sku' => $it->variante?->codigo_barras ?? $it->producto?->referencia,
+                    'producto' => $it->variante?->producto?->nombre ?? $it->producto?->nombre,
+                    'detalle' => $it->variante
+                        ? trim(($it->variante->color_nombre ?? '').' '.($it->variante->talla ?? ''))
+                        : 'todas las presentaciones',
                     'saldo_sistema' => (float) $it->saldo_sistema,
                     'cantidad_contada' => $it->cantidad_contada === null ? null : (float) $it->cantidad_contada,
                     'diferencia' => (float) $it->diferencia,
@@ -1153,10 +1168,40 @@ class InventarioGestionController extends Controller implements HasMiddleware
     }
 
     // ---------- AUTOCOMPLETE VARIANTES ----------
+    /**
+     * Busca lo que se puede trasladar: variantes Y productos agregados.
+     *
+     * Miraba sólo `ProductoVariante`. Los productos cuyo saldo vive sin
+     * variante —46 unidades de GB-DEMO-002, 20 de AND2512-79/154 el 29-oct—
+     * no aparecían jamás, así que el traslado se quedaba en borrador sin
+     * manera de agregarles un ítem. El guardar ya los aceptaba desde INV-A7;
+     * lo que faltaba era poder encontrarlos.
+     *
+     * Devuelve las dos cosas en una lista: la variante trae `id`, el agregado
+     * trae `producto_id`, y el front manda el que venga lleno.
+     */
     public function buscarVariantes(Request $r)
     {
         $q = trim((string) $r->input('q', ''));
         if (strlen($q) < 2) return response()->json([]);
+
+        $agregados = Producto::query()
+            ->where(fn ($p) => $p->where('nombre', 'like', "%{$q}%")->orWhere('referencia', 'like', "%{$q}%"))
+            // Lo que de verdad tiene saldo sin variante, lo diga la bandera o no:
+            // es el mismo desacuerdo entre `desglose_stock` y el kardex que
+            // dejaba sin contar media bodega.
+            ->whereHas('movimientos', fn ($m) => $m->whereNull('variante_id'))
+            ->limit(15)
+            ->get(['id', 'referencia', 'nombre'])
+            ->map(fn ($p) => [
+                'id' => null,
+                'producto_id' => $p->id,
+                'sku' => $p->referencia,
+                'producto' => $p->nombre,
+                'detalle' => 'todas las presentaciones',
+                'label' => trim($p->nombre.' ['.$p->referencia.']'),
+            ]);
+
         $vars = ProductoVariante::query()
             ->with('producto:id,referencia,nombre')
             ->where(function ($x) use ($q) {
@@ -1164,13 +1209,17 @@ class InventarioGestionController extends Controller implements HasMiddleware
                   ->orWhereHas('producto', fn ($p) => $p->where('nombre', 'like', "%{$q}%")->orWhere('referencia', 'like', "%{$q}%"));
             })
             ->limit(15)->get();
-        return response()->json($vars->map(fn ($v) => [
+        $porVariante = $vars->map(fn ($v) => [
             'id' => $v->id,
+            'producto_id' => null,
             'sku' => $v->codigo_barras,
             'producto' => $v->producto?->nombre,
             'detalle' => trim(($v->color_nombre ?? '') . ' ' . ($v->talla ?? '')),
             'label' => trim(($v->producto?->nombre ?? '?') . ' · ' . ($v->color_nombre ?? '') . ' ' . ($v->talla ?? '') . ' [' . $v->codigo_barras . ']'),
-        ]));
+        ]);
+
+        // Los agregados primero: son los que faltaban y los que más se buscan.
+        return response()->json($agregados->concat($porVariante)->values());
     }
 
     // ---------- INV-B2 · IMPORT EXCEL MASIVO (Conteos, Traslados, Alertas) ----------

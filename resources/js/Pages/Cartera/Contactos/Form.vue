@@ -32,6 +32,7 @@ const form = ref({
     es_cliente: props.contacto?.es_cliente ?? true,
     es_cliente_b2b: props.contacto?.es_cliente_b2b ?? false,
     es_proveedor: props.contacto?.es_proveedor ?? false,
+    es_autorretenedor: props.contacto?.es_autorretenedor ?? false,
     es_empleado: props.contacto?.es_empleado ?? false,
     regimen_iva: props.contacto?.regimen_iva ?? '',
     retenciones_default: {
@@ -260,6 +261,26 @@ const guardar = () => {
                             <option value="no_responsable">No responsable</option>
                         </select>
                     </div>
+                </div>
+
+                <!--
+                    La casilla que no existía. El motor de retenciones ya la
+                    respetaba, pero nadie podía marcarla: sólo se leía.
+                    Practicarle retefuente a un autorretenedor es doble
+                    retención, o sea sanción.
+                -->
+                <div v-if="form.es_proveedor" class="rounded-lg border border-surface-200 dark:border-surface-700 p-3">
+                    <label class="flex items-start gap-2 cursor-pointer">
+                        <input type="checkbox" v-model="form.es_autorretenedor" class="h-4 w-4 mt-0.5"/>
+                        <span>
+                            <span class="text-sm font-semibold">Es autorretenedor</span>
+                            <span class="block text-xs text-surface-500">
+                                Si se autorretiene, al pagarle NO se le practica retefuente.
+                                Dejarlo marcado por error retiene de menos; dejarlo sin marcar
+                                cuando sí lo es, retiene de más y hay que devolvérselo.
+                            </span>
+                        </span>
+                    </label>
                 </div>
 
                 <div v-if="form.es_cliente || form.es_cliente_b2b">

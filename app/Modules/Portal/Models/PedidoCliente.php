@@ -31,7 +31,7 @@ class PedidoCliente extends Model implements AuditableContract
         // MKT-6 · fuente del contacto al momento de crear el pedido.
         'fuente',
         'subtotal', 'iva', 'total', 'notas_cliente', 'notas_internas',
-        'enviado_at', 'aprobado_at', 'rechazado_at',
+        'enviado_at', 'aprobado_at', 'aprobado_por_id', 'rechazado_at',
         'facturado_por_id', 'facturado_at', 'factura_id', 'motivo_rechazo',
         // LOG-J2 · si cae en retenido por cartera, guardamos el porqué.
         'motivo_retencion',
@@ -82,6 +82,8 @@ class PedidoCliente extends Model implements AuditableContract
     public function contacto(): BelongsTo { return $this->belongsTo(Contacto::class); }
     public function lista(): BelongsTo { return $this->belongsTo(ListaPrecios::class, 'lista_precios_id'); }
     public function items(): HasMany { return $this->hasMany(PedidoClienteItem::class, 'pedido_id'); }
+    public function aprobadoPor(): BelongsTo { return $this->belongsTo(User::class, 'aprobado_por_id'); }
+
     public function facturadoPor(): BelongsTo { return $this->belongsTo(User::class, 'facturado_por_id'); }
     public function factura(): BelongsTo { return $this->belongsTo(FacturaVenta::class, 'factura_id'); }
 }

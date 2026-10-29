@@ -242,6 +242,7 @@ class ContactosController extends Controller implements HasMiddleware
                 'es_cliente' => (bool) $contacto->es_cliente,
                 'es_cliente_b2b' => (bool) $contacto->es_cliente_b2b,
                 'es_proveedor' => (bool) $contacto->es_proveedor,
+                'es_autorretenedor' => (bool) $contacto->es_autorretenedor,
                 'es_empleado' => (bool) $contacto->es_empleado,
                 'regimen_iva' => $contacto->regimen_iva,
                 'retenciones_default' => (array) ($contacto->retenciones_default ?? []),
@@ -313,6 +314,20 @@ class ContactosController extends Controller implements HasMiddleware
             'es_proveedor' => ['boolean'],
             'es_empleado' => ['boolean'],
             'regimen_iva' => ['nullable', 'in:responsable,no_responsable'],
+            /*
+             * Si el proveedor se autorretiene, nosotros NO le retenemos.
+             *
+             * El motor ya lo respeta —probado el 29-oct: $5.000.000 a un
+             * autorretenedor dan retención $0 y a uno normal $125.000— pero
+             * esta columna sólo se LEÍA. No había casilla, ni regla de
+             * validación, ni una sola línea en todo el código que la
+             * escribiera: la única forma de marcarla era por base de datos.
+             *
+             * Y practicarle retefuente a un autorretenedor es doble retención,
+             * que es sanción. La regla estaba bien programada y era
+             * inalcanzable.
+             */
+            'es_autorretenedor' => ['boolean'],
             // Qué nos retiene este cliente al pagar (AplicarRetencionesVenta).
             'retenciones_default' => ['nullable', 'array:fuente,ica,iva'],
             'retenciones_default.*' => ['boolean'],

@@ -187,8 +187,11 @@ final class MenuApp
             // BandejaImportacionesController · esAracely()
             'bandeja_importaciones' => $root,
 
-            // Roles, Reglas, Empresa, Plantillas · esAracely()
+            // Roles, Empresa, Plantillas · esAracely()
             'configuracion' => $root,
+            // Reglas de negocio: administracion ve todo; el contador ve
+            // solo el grupo contable (el controlador lo filtra).
+            'reglas' => $root || $puede('reglas_contables'),
             // SiigoController · esAracely() || Gerente
             'siigo' => $puede('siigo'),
 

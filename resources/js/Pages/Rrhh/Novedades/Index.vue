@@ -18,6 +18,7 @@ import { ref, reactive, computed } from 'vue';
 import { Head, router } from '@inertiajs/vue3';
 import { ClipboardList, Plus, Download, AlertTriangle, Paperclip, Trash2, Pencil } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
+import AppConfirmModal from '@/Components/AppConfirmModal.vue';
 
 const props = defineProps({
     periodo: { type: String, required: true },
@@ -133,9 +134,25 @@ const guardar = () => {
     });
 };
 
+/*
+ * `confirm()` nativo no funciona dentro del iframe de la app de escritorio:
+ * devuelve false sin avisar. Acá eso dejaba el botón de borrar inerte, que es
+ * el lado menos malo del fallo — pero igual significa que alguien aprieta y no
+ * pasa nada, sin entender por qué.
+ */
+const modalConfirm = ref(null);
+
 const eliminar = (n) => {
-    if (!confirm(`¿Eliminar esta ${n.clase_label.toLowerCase()} de ${n.persona}? Queda escrita en su bitácora.`)) return;
-    router.delete(`/app/rrhh/novedades/${n.id}`, { preserveScroll: true });
+    modalConfirm.value = {
+        titulo: `¿Eliminar esta ${n.clase_label.toLowerCase()} de ${n.persona}?`,
+        mensaje: 'Queda escrita en su bitácora: se borra de la lista, no del historial.',
+        color: 'rose',
+        textoConfirmar: 'Eliminar',
+        onConfirmar: () => {
+            modalConfirm.value = null;
+            router.delete(`/app/rrhh/novedades/${n.id}`, { preserveScroll: true });
+        },
+    };
 };
 
 const colorBloque = {
@@ -480,5 +497,7 @@ const colorBloque = {
                 </div>
             </div>
         </div>
+
+        <AppConfirmModal :cfg="modalConfirm" @cerrar="modalConfirm = null"/>
     </AppLayout>
 </template>

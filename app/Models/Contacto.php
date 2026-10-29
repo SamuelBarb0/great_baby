@@ -36,7 +36,10 @@ class Contacto extends Model implements AuditableContract, AuthenticatableContra
         'tipo_documento', 'numero_documento', 'nombre_completo', 'razon_social',
         'email', 'telefono', 'direccion', 'ciudad', 'departamento',
         'es_cliente', 'es_cliente_b2b', 'es_proveedor', 'es_empleado', 'es_vendedor_dropi',
-        'regimen_iva', 'retenciones_default', 'activo',
+        // `es_autorretenedor` es operativo, no sensible: decide si al pagarle
+        // se le practica retefuente. Faltaba acá, así que aunque el formulario
+        // lo mandara, `update()` lo descartaba sin decir nada.
+        'regimen_iva', 'es_autorretenedor', 'retenciones_default', 'activo',
         // MKT-6 · de dónde llegó (WhatsApp, página, referido…) y el detalle
         //   libre (quién lo refirió, qué campaña, qué feria).
         'fuente', 'fuente_detalle',

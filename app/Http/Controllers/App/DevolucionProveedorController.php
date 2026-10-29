@@ -388,6 +388,54 @@ class DevolucionProveedorController extends Controller implements HasMiddleware
             return response()->json([]);
         }
 
+        /*
+         * 0. Productos AGREGADOS con saldo en esta bodega.
+         *
+         * Esto miraba sólo variantes, así que una devolución de un producto
+         * cuyo saldo vive sin variante no se podía armar: el buscador no
+         * devolvía nada y el borrador se quedaba sin ítems para siempre.
+         * Medido el 29-oct: «TEST-1» en PPAL daba 30 resultados y «Pijama» en
+         * BOG-DEMO daba 0, teniendo 19 unidades ahí.
+         *
+         * El saldo y el costo promedio se calculan igual que abajo pero por
+         * producto, usando los movimientos sin variante.
+         */
+        $agregados = collect();
+        if (mb_strlen($q) >= 2) {
+            $prods = Producto::query()
+                ->where(fn ($p) => $p->where('nombre', 'like', "%{$q}%")->orWhere('referencia', 'like', "%{$q}%"))
+                ->limit(30)
+                ->get(['id', 'referencia', 'nombre']);
+
+            $saldosAgg = InventarioMovimiento::whereIn('producto_id', $prods->pluck('id')->all())
+                ->whereNull('variante_id')
+                ->where('ubicacion_id', $ubicacionId)
+                ->selectRaw('producto_id, SUM(cantidad) as saldo, '
+                          .'CASE WHEN SUM(cantidad) > 0 '
+                          .'THEN SUM(CASE WHEN cantidad > 0 THEN cantidad * COALESCE(costo_unit, 0) ELSE 0 END) '
+                          .'   / NULLIF(SUM(CASE WHEN cantidad > 0 THEN cantidad ELSE 0 END), 0) '
+                          .'ELSE 0 END as costo_prom')
+                ->groupBy('producto_id')
+                ->get()
+                ->keyBy('producto_id');
+
+            $agregados = $prods->map(function ($p) use ($saldosAgg) {
+                $row = $saldosAgg->get($p->id);
+
+                return [
+                    'variante_id' => null,
+                    'producto_id' => $p->id,
+                    'sku' => $p->referencia,
+                    'referencia' => $p->referencia,
+                    'nombre' => $p->nombre,
+                    'detalle' => 'todas las presentaciones',
+                    'stock_actual' => (int) ($row?->saldo ?? 0),
+                    'costo_promedio' => round((float) ($row?->costo_prom ?? 0), 2),
+                    'label' => trim($p->nombre.' ['.$p->referencia.']'),
+                ];
+            })->filter(fn ($r) => $r['stock_actual'] > 0)->values();
+        }
+
         // 1. Variantes candidatas por búsqueda textual.
         $vars = ProductoVariante::query()
             ->with('producto:id,referencia,nombre')
@@ -433,7 +481,8 @@ class DevolucionProveedorController extends Controller implements HasMiddleware
         ->filter(fn ($r) => $r['stock_actual'] > 0)
         ->values();
 
-        return response()->json($out);
+        // Los agregados primero: son los que faltaban.
+        return response()->json($agregados->concat($out)->values());
     }
 
     /**

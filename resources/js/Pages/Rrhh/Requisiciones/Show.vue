@@ -10,6 +10,7 @@ import { ref, computed } from 'vue';
 import { Head, Link, router } from '@inertiajs/vue3';
 import { ArrowLeft, Send, Check, X, Briefcase, History, Users } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
+import AppConfirmModal from '@/Components/AppConfirmModal.vue';
 
 const props = defineProps({
     requisicion: { type: Object, required: true },
@@ -35,13 +36,37 @@ const enviarA = (sufijo, datos = {}, extra = {}) => {
     });
 };
 
+/*
+ * Los cuatro botones de esta pantalla usaban `confirm()` nativo.
+ *
+ * Dentro del iframe de la app de escritorio ese diálogo está bloqueado y
+ * devuelve `false` sin avisar: el botón no hacía absolutamente nada. Enviar,
+ * aprobar, abrir la vacante y elegir de la terna —o sea el flujo entero de
+ * requisiciones— eran inoperables desde ahí, y en el navegador no se notaba.
+ *
+ * El proyecto ya había tomado la decisión de reemplazarlos: `AppConfirmModal`
+ * existe justamente por esto y su comentario lo explica. Quedaban 7 sin migrar
+ * y 4 eran éstos.
+ */
+const modalConfirm = ref(null);
+
 const enviar = () => {
-    if (confirm('¿Enviar la solicitud a Gestión Humana? Después ya no se puede editar.')) {
-        enviarA('/enviar');
-    }
+    modalConfirm.value = {
+        titulo: '¿Enviar la solicitud a Gestión Humana?',
+        mensaje: 'Después de enviarla ya no se puede editar.',
+        color: 'sky',
+        textoConfirmar: 'Enviar',
+        onConfirmar: () => { modalConfirm.value = null; enviarA('/enviar'); },
+    };
 };
 const aprobar = () => {
-    if (confirm(`¿Aprobar la solicitud ${props.requisicion.numero}?`)) enviarA('/aprobar');
+    modalConfirm.value = {
+        titulo: `¿Aprobar la solicitud ${props.requisicion.numero}?`,
+        mensaje: 'Queda lista para abrirle la vacante.',
+        color: 'emerald',
+        textoConfirmar: 'Aprobar',
+        onConfirmar: () => { modalConfirm.value = null; enviarA('/aprobar'); },
+    };
 };
 const rechazar = () => {
     errorMotivo.value = '';
@@ -51,7 +76,13 @@ const rechazar = () => {
     });
 };
 const abrirVacante = () => {
-    if (confirm('¿Abrir la vacante con los datos de esta solicitud?')) enviarA('/vacante');
+    modalConfirm.value = {
+        titulo: '¿Abrir la vacante con los datos de esta solicitud?',
+        mensaje: 'Se crea con el cargo, las funciones y el salario que pediste. Después se le cargan candidatos.',
+        color: 'brand',
+        textoConfirmar: 'Abrir vacante',
+        onConfirmar: () => { modalConfirm.value = null; enviarA('/vacante'); },
+    };
 };
 
 /*
@@ -62,13 +93,21 @@ const abrirVacante = () => {
  * respondió.
  */
 const elegir = (c) => {
-    if (! confirm(`¿Elegir a ${c.nombre} para el cargo? Gestión Humana sigue con la contratación.`)) return;
-    if (procesando.value) return;
-    procesando.value = true;
-    router.post(`/app/rrhh/candidatos/${c.id}/elegir`, {}, {
-        preserveScroll: true,
-        onFinish: () => (procesando.value = false),
-    });
+    modalConfirm.value = {
+        titulo: `¿Elegir a ${c.nombre} para el cargo?`,
+        mensaje: 'Queda registrado que vos tomaste la decisión, con fecha. Gestión Humana sigue con la contratación.',
+        color: 'emerald',
+        textoConfirmar: 'Elegir',
+        onConfirmar: () => {
+            modalConfirm.value = null;
+            if (procesando.value) return;
+            procesando.value = true;
+            router.post(`/app/rrhh/candidatos/${c.id}/elegir`, {}, {
+                preserveScroll: true,
+                onFinish: () => (procesando.value = false),
+            });
+        },
+    };
 };
 
 const enTerna = computed(() => props.candidatos.filter((c) => c.en_terna));
@@ -280,5 +319,7 @@ const badge = (color) => ({
                 </div>
             </div>
         </div>
+
+        <AppConfirmModal :cfg="modalConfirm" @cerrar="modalConfirm = null"/>
     </AppLayout>
 </template>
