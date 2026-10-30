@@ -223,6 +223,35 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     Route::get('/contabilidad/asientos-manuales', [\App\Http\Controllers\App\AsientosManualesController::class, 'index'])->name('app.contabilidad.asientos-manuales');
     Route::post('/contabilidad/asientos-manuales', [\App\Http\Controllers\App\AsientosManualesController::class, 'crear'])->middleware('throttle:20,1');
     Route::post('/contabilidad/asientos-manuales/{asientoManual}/aprobar', [\App\Http\Controllers\App\AsientosManualesController::class, 'aprobar'])->middleware('throttle:20,1');
+    // Flujo de caja · proyección por área contra el real que calcula el ERP.
+    Route::get('/tesoreria/flujo-de-caja', [\App\Http\Controllers\App\FlujoDeCajaController::class, 'index'])->name('app.tesoreria.flujo');
+    Route::post('/tesoreria/flujo-de-caja/proyeccion', [\App\Http\Controllers\App\FlujoDeCajaController::class, 'guardarProyeccion'])->middleware('throttle:60,1');
+    Route::post('/tesoreria/flujo-de-caja/concepto', [\App\Http\Controllers\App\FlujoDeCajaController::class, 'guardarConcepto'])->middleware('throttle:20,1');
+
+    // Cuentas por pagar con datos del ERP · la otra lee de la API de SIIGO.
+    Route::get('/compras/cuentas-por-pagar', [\App\Http\Controllers\App\CuentasPorPagarController::class, 'index'])->name('app.compras.cuentas-por-pagar');
+
+    // Programación de pagos · qué se paga, cuándo y con la firma de quién.
+    Route::get('/compras/programacion-pagos', [\App\Http\Controllers\App\ProgramacionPagosController::class, 'index'])->name('app.compras.programacion-pagos');
+    Route::post('/compras/programacion-pagos', [\App\Http\Controllers\App\ProgramacionPagosController::class, 'guardar'])->middleware('throttle:20,1');
+    Route::post('/compras/programacion-pagos/{programacion}/autorizar', [\App\Http\Controllers\App\ProgramacionPagosController::class, 'autorizar'])->middleware('throttle:20,1');
+    Route::post('/compras/programacion-pagos/{programacion}/anular', [\App\Http\Controllers\App\ProgramacionPagosController::class, 'anular'])->middleware('throttle:20,1');
+
+    // Cajas y bancos · dónde está la plata y quién responde por ella.
+    Route::get('/contabilidad/cajas', [\App\Http\Controllers\App\CajasController::class, 'index'])->name('app.contabilidad.cajas');
+    Route::post('/contabilidad/cajas', [\App\Http\Controllers\App\CajasController::class, 'guardar'])->middleware('throttle:20,1');
+    Route::post('/contabilidad/cajas/{caja}/activa', [\App\Http\Controllers\App\CajasController::class, 'alternar'])->middleware('throttle:30,1');
+
+    // El día de una caja: ingresos, gastos y el arqueo con conteo físico.
+    Route::get('/contabilidad/cajas/{caja}/dia', [\App\Http\Controllers\App\ArqueoCajaController::class, 'index'])->name('app.contabilidad.caja.dia');
+    Route::post('/contabilidad/cajas/{caja}/movimientos', [\App\Http\Controllers\App\ArqueoCajaController::class, 'agregarMovimiento'])->middleware('throttle:60,1');
+    Route::post('/contabilidad/cajas/{caja}/movimientos/{movimiento}/quitar', [\App\Http\Controllers\App\ArqueoCajaController::class, 'quitarMovimiento'])->middleware('throttle:60,1');
+    Route::post('/contabilidad/cajas/{caja}/cerrar', [\App\Http\Controllers\App\ArqueoCajaController::class, 'cerrar'])->middleware('throttle:20,1');
+    // Pasar plata a otra caja: deja las dos puntas amarradas.
+    Route::post('/contabilidad/cajas/{caja}/trasladar', [\App\Http\Controllers\App\ArqueoCajaController::class, 'trasladar'])->middleware('throttle:30,1');
+
+    // Anular un asiento equivocado. Exige motivo; no aplica si ya está en SIIGO.
+    Route::post('/contabilidad/asientos-manuales/{asientoManual}/anular', [\App\Http\Controllers\App\AsientosManualesController::class, 'anular'])->middleware('throttle:20,1');
     Route::post('/contabilidad/asientos-manuales/{asientoManual}/reenviar-siigo', [\App\Http\Controllers\App\AsientosManualesController::class, 'reenviarSiigo'])->middleware('throttle:20,1');
     // Sprint 4 · B.3+ · Pagos a proveedor (con retenciones aplicadas).
     Route::get('/cartera/pagos-proveedor', [\App\Http\Controllers\App\PagosProveedorController::class, 'index'])->name('app.cartera.pagos-proveedor');

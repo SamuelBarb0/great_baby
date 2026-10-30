@@ -306,6 +306,13 @@ const groups = [
             // F0 · Pagos a proveedor vivía en «Cartera y CRM», que es lo que el
             //   cliente nos debe. Un pago a proveedor es lo contrario.
             { name: 'Pagos a proveedor', href: '/app/cartera/pagos-proveedor', icon: FileText, permiso: 'cartera' },
+            // Calculada con datos del ERP. La otra pantalla de cuentas por
+            // pagar lee de la API de SIIGO, así que sin SIIGO no muestra nada.
+            { name: 'Cuentas por pagar', href: '/app/compras/cuentas-por-pagar', icon: FileText, permiso: 'contabilidad' },
+            { name: 'Programación de pagos', href: '/app/compras/programacion-pagos', icon: FileText, permiso: 'contabilidad' },
+            // El flujo abre también para quien tiene renglones a su cargo: el
+            // controlador lo resuelve, el menú sólo lo muestra a contabilidad.
+            { name: 'Flujo de caja', href: '/app/tesoreria/flujo-de-caja', icon: BarChart3, permiso: 'contabilidad' },
             { name: 'Reporte de compras', href: '/app/compras/reporte', icon: BarChart3, permiso: 'compras_reportes' },
         ],
     },
