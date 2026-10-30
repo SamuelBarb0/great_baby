@@ -19,6 +19,10 @@ class GastoOperativo extends Model
         // migracion de octubre pero el modelo no las veia, asi que ningun
         // flujo podia llenarlas.
         'linea_negocio', 'destino_fiscal', 'motivo_destino', 'cuenta_puc',
+        // De qué caja salió la plata, cuando se paga en efectivo. Sin esto el
+        // gasto no deja rastro de cuál cajón se vació y el arqueo del día no
+        // tiene con qué explicar los billetes que faltan.
+        'caja_id',
     ];
     protected $casts = [
         'fecha' => 'date',

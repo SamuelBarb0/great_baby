@@ -26,6 +26,7 @@ const props = defineProps({
     cuentaPorDefecto: { type: String, default: '5195' },
     destinos: { type: Array, default: () => [] },
     lineas: { type: Array, default: () => [] },
+    cajas: { type: Array, default: () => [] },
 });
 
 /*
@@ -106,17 +107,42 @@ const rechazar = () => {
         preserveScroll: true, onSuccess: () => { modalRech.value = null; motivoRech.value = ''; },
     });
 };
-const marcarPagado = (id) => {
-    modalConfirm.value = {
-        titulo: '¿Marcar el gasto como pagado?',
-        mensaje: 'Se registra como pagado y sale de los pendientes.',
-        color: 'emerald',
-        textoConfirmar: 'Marcar pagado',
-        onConfirmar: () => {
-            modalConfirm.value = null;
-            router.post(`/app/gastos/${id}/pagado`, {}, { preserveScroll: true });
-        },
-    };
+/*
+ * Marcar pagado · y si sale en efectivo, de qué caja.
+ *
+ * Sin elegir caja el gasto golpeaba la cuenta contable por defecto y no
+ * aterrizaba en ningún arqueo: al final del día faltaban los billetes y la
+ * pantalla de la caja no tenía con qué explicarlo. Para los que se pagan por
+ * transferencia no se pregunta nada, que es el caso más común.
+ */
+const modalPagar = ref(null);
+const cajaElegida = ref(null);
+
+const marcarPagado = (g) => {
+    if (g.metodo_pago !== 'efectivo') {
+        modalConfirm.value = {
+            titulo: '¿Marcar el gasto como pagado?',
+            mensaje: 'Se registra como pagado y sale de los pendientes.',
+            color: 'emerald',
+            textoConfirmar: 'Marcar pagado',
+            onConfirmar: () => {
+                modalConfirm.value = null;
+                router.post(`/app/gastos/${g.id}/pagado`, {}, { preserveScroll: true });
+            },
+        };
+        return;
+    }
+
+    cajaElegida.value = props.cajas.length === 1 ? props.cajas[0].id : null;
+    modalPagar.value = g;
+};
+
+const confirmarPagoEnEfectivo = () => {
+    if (! cajaElegida.value) return;
+    router.post(`/app/gastos/${modalPagar.value.id}/pagado`, { caja_id: cajaElegida.value }, {
+        preserveScroll: true,
+        onSuccess: () => { modalPagar.value = null; cajaElegida.value = null; },
+    });
 };
 const filtrar = (campo, val) => router.get('/app/gastos', { ...props.filtros, [campo]: val || null });
 
@@ -199,7 +225,7 @@ const badge = (e) => ({ pendiente: 'bg-amber-100 text-amber-800', aprobado: 'bg-
                                 <button v-if="esAdmin" @click="abrirContable(g)" class="btn-ghost p-1 text-surface-500" title="Cuenta y destino contable"><BookOpen class="h-4 w-4"/></button>
                                 <button v-if="puedeAprobar && g.estado === 'pendiente'" @click="aprobar(g.id)" class="btn-ghost p-1 text-emerald-600" title="Aprobar"><CheckCircle class="h-4 w-4"/></button>
                                 <button v-if="puedeAprobar && g.estado === 'pendiente'" @click="modalRech = g" class="btn-ghost p-1 text-red-600" title="Rechazar"><XCircle class="h-4 w-4"/></button>
-                                <button v-if="esAdmin && g.estado === 'aprobado'" @click="marcarPagado(g.id)" class="btn-ghost p-1 text-brand-600" title="Marcar pagado"><CreditCard class="h-4 w-4"/></button>
+                                <button v-if="esAdmin && g.estado === 'aprobado'" @click="marcarPagado(g)" class="btn-ghost p-1 text-brand-600" title="Marcar pagado"><CreditCard class="h-4 w-4"/></button>
                             </td>
                         </tr>
                     </tbody>
@@ -314,6 +340,39 @@ const badge = (e) => ({ pendiente: 'bg-amber-100 text-amber-800', aprobado: 'bg-
                             :disabled="guardandoContable || (formContable.destino !== 'siigo' && ! formContable.motivo.trim())"
                             class="btn-primary text-sm disabled:opacity-40">
                         {{ guardandoContable ? 'Guardando…' : 'Guardar y rehacer asiento' }}
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Pagar en efectivo: de qué caja sale la plata -->
+        <div v-if="modalPagar" @click.self="modalPagar = null"
+             class="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+            <div class="bg-white dark:bg-surface-800 rounded-xl shadow-xl max-w-md w-full p-5 space-y-3">
+                <h3 class="text-lg font-bold">Pagar {{ modalPagar.numero }} en efectivo</h3>
+                <p class="text-sm text-surface-600">
+                    {{ modalPagar.descripcion }} · <strong>{{ money(modalPagar.monto) }}</strong>
+                </p>
+
+                <div v-if="cajas.length">
+                    <label class="block text-xs font-bold text-surface-600 mb-1">¿De qué caja sale?</label>
+                    <select v-model="cajaElegida" class="input w-full">
+                        <option :value="null">Elegí la caja…</option>
+                        <option v-for="c in cajas" :key="c.id" :value="c.id">{{ c.nombre }}</option>
+                    </select>
+                    <p class="text-xs text-surface-500 mt-1">
+                        Queda como gasto del día en esa caja, así el arqueo cuadra sin tener que acordarse.
+                    </p>
+                </div>
+                <p v-else class="text-sm text-amber-600">
+                    Todavía no hay cajas creadas. Creá una en Contabilidad → Cajas y bancos.
+                </p>
+
+                <div class="flex justify-end gap-2 pt-1">
+                    <button @click="modalPagar = null" class="btn-ghost text-sm">Cancelar</button>
+                    <button @click="confirmarPagoEnEfectivo" :disabled="!cajaElegida"
+                            class="btn-primary text-sm disabled:opacity-40">
+                        Marcar pagado
                     </button>
                 </div>
             </div>

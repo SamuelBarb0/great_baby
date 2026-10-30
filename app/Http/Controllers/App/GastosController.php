@@ -6,8 +6,10 @@ use App\Http\Controllers\Controller;
 use App\Modules\Contabilidad\Actions\RegistrarAsientoGasto;
 use App\Modules\Contabilidad\Enums\DestinoFiscal;
 use App\Modules\Contabilidad\Enums\LineaNegocio;
+use App\Modules\Contabilidad\Models\MovimientoCaja;
 use App\Modules\Gerencia\Models\GastoOperativo;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Routing\Controllers\HasMiddleware;
 use Illuminate\Routing\Controllers\Middleware;
@@ -66,6 +68,8 @@ class GastosController extends Controller implements HasMiddleware
                 'proveedor' => $g->proveedor, 'factura_ref' => $g->factura_ref,
                 'solicita' => $g->solicita?->name, 'aprueba' => $g->aprueba?->name,
                 'notas' => $g->notas,
+                // De qué caja salió, cuando se pagó en efectivo.
+                'caja_id' => $g->caja_id,
                 // Lo contable, que antes no viajaba a la pantalla porque no
                 // existia: contra que cuenta va y si se declara.
                 'cuenta_puc' => $g->cuenta_puc,
@@ -83,6 +87,12 @@ class GastosController extends Controller implements HasMiddleware
             // Quien puede aprobar o rechazar · distinto de quien puede pagar.
             'puedeAprobar' => $puedeAprobar,
             'cuentaPorDefecto' => (string) setting('contable.cta_gasto_default'),
+            // De qué caja puede salir la plata, para los que se pagan en
+            // efectivo. Sin esto el gasto no aterriza en ningún arqueo.
+            'cajas' => \App\Modules\Contabilidad\Models\Caja::activas()
+                ->whereIn('tipo', ['menor', 'general'])
+                ->orderBy('codigo')->get(['id', 'codigo', 'nombre'])
+                ->map(fn ($c) => ['id' => $c->id, 'nombre' => "{$c->codigo} · {$c->nombre}"]),
             'destinos' => DestinoFiscal::opcionesDeCompra(),  // gasto: fiscal o interno, sin reparto
             'lineas' => LineaNegocio::opciones(),
             'filtros' => ['tipo' => $tipo ?: null, 'estado' => $estado ?: null],
@@ -168,10 +178,47 @@ class GastosController extends Controller implements HasMiddleware
         abort_unless($u?->esContable(), 403);
         $g = GastoOperativo::findOrFail($gasto);
         abort_unless($g->estado === 'aprobado', 422, 'Sólo aprobados pueden marcarse pagados.');
-        $g->update(['estado' => 'pagado']);
 
-        // Cancela el pasivo contra caja o banco segun el medio de pago.
-        app(RegistrarAsientoGasto::class)->pagar($g->fresh());
+        /*
+         * Si sale en efectivo, de qué caja.
+         *
+         * Hasta acá el pago golpeaba la cuenta contable de caja por defecto y
+         * nadie sabía de cuál cajón salió la plata. Resultado: al final del
+         * día la persona cuenta los billetes, le faltan los $395.000 que
+         * entregó, y en la pantalla del arqueo no hay nada que lo explique
+         * porque el gasto vivía en otro módulo. El movimiento se crea acá
+         * para que aterrice en el día de esa caja.
+         */
+        $data = $r->validate([
+            'caja_id' => [
+                $g->metodo_pago === 'efectivo' ? 'required' : 'nullable',
+                'integer', 'exists:cajas,id',
+            ],
+        ], ['caja_id.required' => 'Un gasto en efectivo sale de una caja: decí de cuál.']);
+
+        DB::transaction(function () use ($g, $data, $u) {
+            $g->update([
+                'estado' => 'pagado',
+                'caja_id' => $data['caja_id'] ?? null,
+            ]);
+
+            if (! empty($data['caja_id'])) {
+                MovimientoCaja::create([
+                    'caja_id' => $data['caja_id'],
+                    'fecha' => now('America/Bogota')->toDateString(),
+                    'tipo' => 'gasto',
+                    'descripcion' => "Gasto {$g->numero} · {$g->descripcion}",
+                    // El proveedor es a quien se le entregó la plata; si no
+                    // hay, queda quien lo solicitó, que es quien la recibió.
+                    'entregado_a' => $g->proveedor ?: ($g->solicita?->name ?? 'Sin registrar'),
+                    'valor' => $g->monto,
+                    'user_id' => $u->id,
+                ]);
+            }
+
+            // Cancela el pasivo contra caja o banco segun el medio de pago.
+            app(RegistrarAsientoGasto::class)->pagar($g->fresh());
+        });
 
         return back()->with('success', "Gasto {$g->numero} pagado y registrado en el libro.");
     }

@@ -16,6 +16,7 @@ export const pestanasSiigo = [
 
 export const pestanasConfigContable = [
     { label: 'Plan de cuentas (PUC)', href: '/app/contabilidad/plan-cuentas' },
+    { label: 'Cajas y bancos', href: '/app/contabilidad/cajas' },
     { label: 'Retenciones e impuestos', href: '/app/cartera/retenciones' },
     { label: 'Métodos de pago', href: '/app/cartera/metodos-pago' },
     { label: 'Comisiones de vendedores', href: '/app/cartera/comisiones' },
