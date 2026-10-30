@@ -21,6 +21,17 @@ class PagoVenta extends Model implements AuditableContract
     // (registrado en AppServiceProvider). Se movió fuera de booted() porque
     // el trait OwenIt\Auditing\Auditable intercepta algunos eventos.
 
+    /**
+     * Un borrado en masa también tiene que pasar por el observer.
+     *
+     * `where(...)->delete()` no instancia modelos y por tanto no dispara
+     * `deleted`: el pago queda borrado y su asiento vivo. Ver PagoVentaBuilder.
+     */
+    public function newEloquentBuilder($query): PagoVentaBuilder
+    {
+        return new PagoVentaBuilder($query);
+    }
+
     // Re-audit DATOS #10 · $fillable coherente con FacturaVenta/MovimientoContable
     // ($guarded=['id']) + saving guard sobre factura_id post-creación (evita
     // re-apuntar un pago a otra factura después de contabilizar).
