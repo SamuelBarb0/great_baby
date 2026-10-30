@@ -81,6 +81,8 @@ final class MenuApp
             'marketing_parrilla' => $puede('marketing_parrilla'),
             // MarketingController (ficha, tablero) · MarketingCreativo::puedeGestionar
             'marketing_tablero' => $puede('marketing') || $puede('marketing_parrilla'),
+            // MarketingLanzamientosController · puede('marketing_lanzamientos')
+            'marketing_lanzamientos' => $puede('marketing_lanzamientos'),
             // MarketingCreativosController@index · gestiona o ve el material compartido
             'marketing_material' => $puede('marketing') || $puede('marketing_parrilla') || $puede('marketing_material'),
 

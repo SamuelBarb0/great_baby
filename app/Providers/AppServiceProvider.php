@@ -41,6 +41,8 @@ class AppServiceProvider extends ServiceProvider
         \App\Modules\Catalogo\Models\PrecioVariante::observe(\App\Modules\Siigo\Observers\PrecioVarianteObserver::class);
         // QA-FIX #7 · pago proveedor → SIIGO voucher egreso.
         \App\Modules\Cartera\Models\PagoProveedor::observe(\App\Modules\Siigo\Observers\PagoProveedorObserver::class);
+        // Tablero de lanzamiento · cada contenedor nuevo nace con sus 10 tarjetas.
+        \App\Modules\Compras\Models\Importacion::observe(\App\Modules\Marketing\Observers\ImportacionObserver::class);
 
         // Re-audit SEG A2 · rate-limiters compuestos para el Portal B2B.
         //   `portal-login`     → 5 intentos/min por email+IP (bloquea brute-force targeteado)

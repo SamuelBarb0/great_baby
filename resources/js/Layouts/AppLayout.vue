@@ -7,7 +7,7 @@ import {
     FileText, Users, Truck, Settings, Bell, Search, LogOut,
     Menu as MenuIcon, X, ChevronDown, Home, BarChart3, MessageSquare,
     Boxes, Camera, Scissors, Wallet, MapPin, AlertTriangle, Radio, Upload,
-    Undo2, ScanLine, Tag, Layers, CreditCard, LayoutGrid, Images,
+    Undo2, ScanLine, Tag, Layers, CreditCard, LayoutGrid, Images, Rocket,
 } from 'lucide-vue-next';
 import CommandPalette from '@/Components/CommandPalette.vue';
 import CopilotoChat from '@/Components/CopilotoChat.vue';
@@ -246,6 +246,8 @@ const groups = [
             // menú y recibía 403 al entrar. Ahora sólo la ve quien puede abrirla.
             { name: 'Parrilla de contenido', href: '/app/marketing/parrilla', icon: BarChart3, permiso: 'marketing_parrilla' },
             // MKT-4 · dónde va cada producto, de la compra a la publicación.
+            // Tablero de lanzamiento: las 10 tarjetas de cada contenedor.
+            { name: 'Lanzamientos', href: '/app/marketing/lanzamientos', icon: Rocket, permiso: 'marketing_lanzamientos' },
             { name: 'Tablero de productos', href: '/app/marketing/tablero', icon: LayoutGrid, permiso: 'marketing_tablero' },
             // MKT-2 · lo ven también los vendedores: es el material para vender.
             { name: 'Creativos', href: '/app/marketing/creativos', icon: Images, permiso: 'marketing_material' },

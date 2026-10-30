@@ -152,6 +152,9 @@ final class Permisos
         // Ver y bajar los creativos que Marketing comparte: los vendedores
         //   (mayorista) los usan con sus clientes. Dropship es Aracely, root.
         'marketing_material' => ['Vendedor', 'Marketing'],
+        // Tablero de lanzamiento por contenedor: lo trabajan Marketing (Anny),
+        //   Compras (gerente) y Bodega; Dropshipping es Aracely, root.
+        'marketing_lanzamientos' => ['Marketing', 'Gerente', 'AdminBodega'],
 
         // CONFIGURACIÓN — solo root
         'empresa'          => [],
@@ -191,7 +194,7 @@ final class Permisos
         'Inventario' => ['traslados', 'tomas_fisicas', 'alertas_stock', 'kardex', 'stock_bodegas'],
         'Catálogo' => ['productos', 'ubicaciones', 'importar_productos', 'productos.push_siigo'],
         'Servicio al cliente' => ['garantias', 'servicio_cliente', 'bandeja_importaciones'],
-        'Perfiles operativos' => ['bodega', 'logistica', 'facturacion', 'marketing', 'marketing_parrilla', 'marketing_material', 'vendedor', 'rrhh', 'rrhh_requisiciones', 'rrhh_seleccion', 'rrhh_orden_contratacion', 'portal_colaborador', 'mapa_colombia'],
+        'Perfiles operativos' => ['bodega', 'logistica', 'facturacion', 'marketing', 'marketing_parrilla', 'marketing_material', 'marketing_lanzamientos', 'vendedor', 'rrhh', 'rrhh_requisiciones', 'rrhh_seleccion', 'rrhh_orden_contratacion', 'portal_colaborador', 'mapa_colombia'],
         'Configuración' => ['empresa', 'siigo', 'usuarios', 'plantillas'],
     ];
 
@@ -251,6 +254,7 @@ final class Permisos
         'mapa_colombia' => 'Mapa de Colombia',
         'marketing_parrilla' => 'Parrilla de contenido',
         'marketing_material' => 'Material de marketing (ver y descargar creativos)',
+        'marketing_lanzamientos' => 'Tablero de lanzamiento (por contenedor)',
         'empresa' => 'Datos de la empresa',
         'siigo' => 'Integración SIIGO',
         'usuarios' => 'Usuarios',

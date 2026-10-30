@@ -537,6 +537,16 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     Route::put('/marketing/producto/{producto}/piezas', [\App\Http\Controllers\App\MarketingController::class, 'piezas'])->name('app.marketing.piezas');
     Route::get('/marketing/tablero', [\App\Http\Controllers\App\MarketingController::class, 'tablero'])->name('app.marketing.tablero');
     Route::post('/marketing/parrilla/{post}/etapa', [\App\Http\Controllers\App\MarketingController::class, 'postEtapa'])->name('app.marketing.post.etapa');
+    // Tablero de lanzamiento por contenedor (TABLERO GREAT BABY.pdf, 30-oct).
+    Route::get('/marketing/lanzamientos', [\App\Http\Controllers\App\MarketingLanzamientosController::class, 'index'])->name('app.marketing.lanzamientos');
+    Route::post('/marketing/lanzamientos', [\App\Http\Controllers\App\MarketingLanzamientosController::class, 'crear'])->name('app.marketing.lanzamiento.crear');
+    Route::get('/marketing/lanzamientos/{lanzamiento}', [\App\Http\Controllers\App\MarketingLanzamientosController::class, 'show'])->name('app.marketing.lanzamiento');
+    Route::post('/marketing/lanzamientos/tarjeta/{tarjeta}/mover', [\App\Http\Controllers\App\MarketingLanzamientosController::class, 'mover'])->middleware('throttle:120,1')->name('app.marketing.lanzamiento.mover');
+    Route::post('/marketing/lanzamientos/tarjeta/{tarjeta}/aprobar', [\App\Http\Controllers\App\MarketingLanzamientosController::class, 'aprobar'])->name('app.marketing.lanzamiento.aprobar');
+    Route::post('/marketing/lanzamientos/tarjeta/{tarjeta}/devolver', [\App\Http\Controllers\App\MarketingLanzamientosController::class, 'devolver'])->name('app.marketing.lanzamiento.devolver');
+    Route::put('/marketing/lanzamientos/tarjeta/{tarjeta}', [\App\Http\Controllers\App\MarketingLanzamientosController::class, 'actualizar'])->name('app.marketing.lanzamiento.actualizar');
+    Route::post('/marketing/lanzamientos/tarjeta/{tarjeta}/comentario', [\App\Http\Controllers\App\MarketingLanzamientosController::class, 'comentar'])->middleware('throttle:60,1')->name('app.marketing.lanzamiento.comentar');
+    Route::post('/marketing/lanzamientos/item/{item}', [\App\Http\Controllers\App\MarketingLanzamientosController::class, 'marcar'])->middleware('throttle:240,1')->name('app.marketing.lanzamiento.marcar');
     Route::get('/marketing/creativos', [\App\Http\Controllers\App\MarketingCreativosController::class, 'index'])->name('app.marketing.creativos');
     Route::post('/marketing/creativos', [\App\Http\Controllers\App\MarketingCreativosController::class, 'subir'])->middleware('throttle:60,1')->name('app.marketing.creativo.subir');
     Route::put('/marketing/creativos/{creativo}', [\App\Http\Controllers\App\MarketingCreativosController::class, 'actualizar'])->name('app.marketing.creativo.actualizar');
