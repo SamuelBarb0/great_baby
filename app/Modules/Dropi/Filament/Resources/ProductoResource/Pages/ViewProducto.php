@@ -36,6 +36,7 @@ class ViewProducto extends ViewRecord
                 ->join('producto_variantes as v', 'm.variante_id', '=', 'v.id')
                 ->join('inventario_ubicaciones as u', 'm.ubicacion_id', '=', 'u.id')
                 ->where('v.producto_id', $this->record->id)
+                ->whereNull('m.deleted_at')   // INV-A6 · lo anulado no es stock
                 ->groupBy('v.codigo_barras', 'u.codigo', 'u.nombre')
                 ->selectRaw('v.codigo_barras as sku, u.codigo as ubi, u.nombre as ubi_nombre, SUM(m.cantidad) as saldo')
                 ->having('saldo', '!=', 0)
@@ -50,6 +51,7 @@ class ViewProducto extends ViewRecord
             ->join('inventario_ubicaciones as u', 'm.ubicacion_id', '=', 'u.id')
             ->where('m.producto_id', $this->record->id)
             ->whereNull('m.variante_id')
+            ->whereNull('m.deleted_at')   // INV-A6 · lo anulado no es stock
             ->groupBy('u.codigo', 'u.nombre')
             ->selectRaw("'AGREGADO' as sku, u.codigo as ubi, u.nombre as ubi_nombre, SUM(m.cantidad) as saldo")
             ->having('saldo', '!=', 0)

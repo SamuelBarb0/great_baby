@@ -48,6 +48,11 @@ class ExportSaldosInicialesService
             ->whereNotNull('u.siigo_id')          // bodegas sincronizadas con SIIGO
             ->where('u.activa', true)
             ->whereIn('u.categoria', $soloCategorias)
+            // INV-A6 · un movimiento anulado no es saldo. El kardex se borra
+            // suave a propósito, y `DB::table()` no sabe de `deleted_at`: sin
+            // esto, el stock fantasma que `inventario:reparar-kardex` anuló
+            // viaja en el Excel y entra a SIIGO como saldo de apertura real.
+            ->whereNull('m.deleted_at')
             ->selectRaw(
                 "COALESCE(m.variante_id, 0) as variante_id, "
                 ."COALESCE(m.producto_id, 0) as producto_id, "

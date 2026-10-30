@@ -289,6 +289,7 @@ class ColaJorgeController extends Controller implements HasMiddleware
         $saldos = fn (string $campo, $ids) => $ids->isEmpty() ? collect() : \DB::table('inventario_movimientos as m')
             ->join('inventario_ubicaciones as u', 'u.id', '=', 'm.ubicacion_id')
             ->whereIn("m.{$campo}", $ids)
+            ->whereNull('m.deleted_at')   // INV-A6 · lo anulado no es stock
             // Un producto cuenta como agregado sólo si el movimiento no trae
             // variante; si no, se sumaría el stock de sus variantes.
             ->when($campo === 'producto_id', fn ($q) => $q->whereNull('m.variante_id'))
