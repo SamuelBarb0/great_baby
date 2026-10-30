@@ -40,7 +40,7 @@ beforeEach(function () {
     $rolContador = Role::firstOrCreate(['name' => 'Contador', 'guard_name' => 'web']);
     $rolContador->syncPermissions(collect(App\Auth\Permisos::MATRIZ)
         ->filter(fn ($roles) => in_array('Contador', $roles, true))
-        ->keys()->map(fn ($s) => App\Auth\Permisos::permiso($s))->all());
+        ->keys()->flatMap(fn ($s) => App\Auth\Permisos::permisosDe($s))->all());
 
     $this->silvia = User::factory()->create(['name' => 'Silvia']);
     $this->silvia->assignRole($rolContador);

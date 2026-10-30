@@ -46,7 +46,7 @@ beforeEach(function () {
     $rolGerente = Role::firstOrCreate(['name' => 'Gerente', 'guard_name' => 'web']);
     $rolGerente->syncPermissions(collect(App\Auth\Permisos::MATRIZ)
         ->filter(fn ($roles) => in_array('Gerente', $roles, true))
-        ->keys()->map(fn ($s) => App\Auth\Permisos::permiso($s))->all());
+        ->keys()->flatMap(fn ($s) => App\Auth\Permisos::permisosDe($s))->all());
 
     $this->junta = User::factory()->create(['name' => 'Junta']);
     $this->junta->assignRole($rolGerente);

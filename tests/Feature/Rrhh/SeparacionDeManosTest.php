@@ -46,7 +46,7 @@ function rolDeManos(string $nombre): Role
 
     $rol->syncPermissions(collect(Permisos::MATRIZ)
         ->filter(fn ($roles) => in_array($nombre, $roles, true))
-        ->keys()->map(fn ($s) => Permisos::permiso($s))->all());
+        ->keys()->flatMap(fn ($s) => Permisos::permisosDe($s))->all());
 
     return $rol;
 }

@@ -41,7 +41,7 @@ beforeEach(function () {
     $contador = Role::firstOrCreate(['name' => 'Contador', 'guard_name' => 'web']);
     $contador->syncPermissions(collect(Permisos::MATRIZ)
         ->filter(fn ($roles) => in_array('Contador', $roles, true))
-        ->keys()->map(fn ($s) => Permisos::permiso($s))->all());
+        ->keys()->flatMap(fn ($s) => Permisos::permisosDe($s))->all());
 
     $this->silvia = User::factory()->create(['name' => 'Silvia Contadora']);
     $this->silvia->assignRole($contador);
@@ -52,7 +52,7 @@ beforeEach(function () {
     $rolGerente = Role::firstOrCreate(['name' => 'Gerente', 'guard_name' => 'web']);
     $rolGerente->syncPermissions(collect(Permisos::MATRIZ)
         ->filter(fn ($roles) => in_array('Gerente', $roles, true))
-        ->keys()->map(fn ($s) => Permisos::permiso($s))->all());
+        ->keys()->flatMap(fn ($s) => Permisos::permisosDe($s))->all());
 
     $this->gerente = User::factory()->create(['name' => 'Gerente Demo']);
     $this->gerente->assignRole($rolGerente);
