@@ -40,14 +40,27 @@ class RolesController extends Controller implements HasMiddleware
 
     public function index(): Response
     {
-        $roles = Role::withCount(['users', 'permissions'])
+        /*
+         * El contador cuenta SECCIONES, no permisos.
+         *
+         * Desde que cada sección tiene cuatro acciones, contar permisos daría
+         * «112 accesos» donde antes decía 28 y nadie sabría qué significa.
+         * Lo que importa es a cuántas pantallas entra el rol; el detalle de
+         * qué puede hacer en cada una está adentro.
+         */
+        $roles = Role::withCount([
+            'users',
+            'permissions as secciones_count' => fn ($q) => $q->where('name', 'like', 'ver.%'),
+            'permissions as acciones_count' => fn ($q) => $q->where('name', 'not like', 'ver.%'),
+        ])
             ->orderBy('name')
             ->get()
             ->map(fn (Role $r) => [
                 'id' => $r->id,
                 'nombre' => $r->name,
                 'usuarios' => $r->users_count,
-                'permisos' => $r->permissions_count,
+                'permisos' => $r->secciones_count,
+                'acciones' => $r->acciones_count,
                 'protegido' => in_array($r->name, Permisos::ROLES_PROTEGIDOS, true),
                 'root' => in_array($r->name, ['Aracely', 'Gerencia'], true),
             ]);
@@ -73,6 +86,9 @@ class RolesController extends Controller implements HasMiddleware
                 'usuarios' => $role->users()->pluck('users.id')->all(),
             ] : null,
             'catalogo' => Permisos::catalogo(),
+            'acciones' => collect(Permisos::ACCIONES)
+                ->map(fn ($texto, $accion) => ['accion' => $accion, 'texto' => $texto])
+                ->values(),
             'usuarios' => User::orderBy('name')->get(['id', 'name', 'email'])
                 ->map(fn ($u) => [
                     'id' => $u->id,

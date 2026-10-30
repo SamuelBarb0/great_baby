@@ -72,6 +72,15 @@ final class Permisos
         // CONTABILIDAD
         'contabilidad'     => ['Gerente', 'Contador'],
         'libro_diario'     => ['Gerente', 'Contador'],
+        // TESORERÍA · lo que se construyó para reemplazar los Excel de caja.
+        //   Secciones propias y no colgadas de `contabilidad` para que Aracely
+        //   pueda, por ejemplo, dejar que una auxiliar cargue el arqueo diario
+        //   sin abrirle el libro contable entero.
+        'cajas'            => ['Gerente', 'Contador'],
+        'arqueo_caja'      => ['Gerente', 'Contador'],
+        'flujo_caja'       => ['Gerente', 'Contador'],
+        'cuentas_por_pagar' => ['Gerente', 'Contador'],
+        'programacion_pagos' => ['Gerente', 'Contador'],
         'reportes_contables' => ['Gerente', 'Contador'],
         /*
          * Las reglas CONTABLES, y solo esas.
@@ -235,6 +244,7 @@ final class Permisos
         'Dropi' => ['dropi_dashboard', 'dropi_pedidos', 'dropi_cortes', 'dropi_wallet', 'dropi_devoluciones', 'dropi_discrepancias', 'dropi_reportes'],
         'Cartera y CRM' => ['facturas', 'pagos', 'contactos', 'cartera_dashboard', 'condiciones_credito', 'cobranzas', 'excepciones_credito', 'crm', 'comisiones', 'comisiones_config', 'metodos_pago'],
         'Contabilidad' => ['contabilidad', 'libro_diario', 'reportes_contables', 'reglas_contables'],
+        'Tesorería y caja' => ['cajas', 'arqueo_caja', 'flujo_caja', 'cuentas_por_pagar', 'programacion_pagos'],
         'Compras' => ['compras_oc', 'compras_recepcion', 'compras_importacion', 'compras_reportes'],
         'Inventario' => ['traslados', 'tomas_fisicas', 'alertas_stock', 'kardex', 'stock_bodegas'],
         'Catálogo' => ['productos', 'ubicaciones', 'importar_productos', 'productos.push_siigo'],
@@ -269,6 +279,11 @@ final class Permisos
         'metodos_pago' => 'Métodos de pago',
         'contabilidad' => 'Panel contable',
         'libro_diario' => 'Libro diario',
+        'cajas' => 'Cajas y bancos',
+        'arqueo_caja' => 'Arqueo diario de caja',
+        'flujo_caja' => 'Flujo de caja',
+        'cuentas_por_pagar' => 'Cuentas por pagar',
+        'programacion_pagos' => 'Programación de pagos',
         'reportes_contables' => 'Reportes contables',
         'compras_oc' => 'Órdenes de compra',
         'compras_recepcion' => 'Recepción de mercancía',
@@ -312,9 +327,43 @@ final class Permisos
      * Nombre con que cada sección vive en la tabla `permissions` de Spatie.
      * Prefijamos para no chocar con permisos de otros paquetes.
      */
-    public static function permiso(string $seccion): string
+    /**
+     * Las cuatro acciones que se pueden dar por separado sobre una sección.
+     *
+     * Hasta acá una sección era UN permiso: quien podía verla podía hacerle
+     * todo. Eso obligaba a elegir entre dar acceso completo o no dar nada, y
+     * en la práctica se daba completo — el auxiliar que sólo necesitaba
+     * consultar la cartera terminaba pudiendo borrar una factura.
+     *
+     * `ver` es la puerta: sin ella las demás no sirven de nada, y así se
+     * valida. Marcar «editar» sin «ver» sería una casilla que no hace nada.
+     */
+    public const ACCIONES = [
+        'ver' => 'Ver',
+        'crear' => 'Crear',
+        'editar' => 'Editar',
+        'eliminar' => 'Eliminar',
+    ];
+
+    /**
+     * El nombre del permiso de una sección.
+     *
+     * Sin segundo argumento devuelve el de VER, que es como lo llaman las
+     * decenas de sitios escritos antes de que existieran las acciones. Así
+     * nada de lo viejo cambia de significado.
+     */
+    public static function permiso(string $seccion, string $accion = 'ver'): string
     {
-        return 'ver.'.$seccion;
+        return $accion.'.'.$seccion;
+    }
+
+    /** Los cuatro permisos de una sección, para sembrarlos juntos. */
+    public static function permisosDe(string $seccion): array
+    {
+        return array_map(
+            fn (string $a) => self::permiso($seccion, $a),
+            array_keys(self::ACCIONES),
+        );
     }
 
     /** Etiqueta legible de una sección, con respaldo para secciones nuevas. */
@@ -335,26 +384,40 @@ final class Permisos
         $agrupadas = [];
         foreach (self::GRUPOS as $grupo => $secciones) {
             foreach ($secciones as $s) {
-                $agrupadas[$grupo][] = [
-                    'seccion' => $s,
-                    'permiso' => self::permiso($s),
-                    'etiqueta' => self::etiqueta($s),
-                ];
+                $agrupadas[$grupo][] = self::filaDelCatalogo($s);
             }
         }
 
         $yaListadas = array_merge(...array_values(self::GRUPOS));
         foreach (array_keys(self::MATRIZ) as $s) {
             if (! in_array($s, $yaListadas, true)) {
-                $agrupadas['Otros'][] = [
-                    'seccion' => $s,
-                    'permiso' => self::permiso($s),
-                    'etiqueta' => self::etiqueta($s),
-                ];
+                $agrupadas['Otros'][] = self::filaDelCatalogo($s);
             }
         }
 
         return $agrupadas;
+    }
+
+    /**
+     * Una sección con sus cuatro casillas.
+     *
+     * `permiso` se conserva —es el de ver— porque la pantalla vieja y varios
+     * sitios lo leen por ese nombre. `acciones` es lo nuevo: el nombre del
+     * permiso de cada acción, para pintar la grilla.
+     */
+    private static function filaDelCatalogo(string $seccion): array
+    {
+        return [
+            'seccion' => $seccion,
+            'permiso' => self::permiso($seccion),
+            'etiqueta' => self::etiqueta($seccion),
+            'acciones' => collect(self::ACCIONES)
+                ->map(fn ($texto, $accion) => [
+                    'accion' => $accion,
+                    'texto' => $texto,
+                    'permiso' => self::permiso($seccion, $accion),
+                ])->values()->all(),
+        ];
     }
 
     /**
@@ -379,6 +442,40 @@ final class Permisos
         }
 
         return $u->hasAnyRole(self::MATRIZ[$seccion] ?? []);
+    }
+
+    /**
+     * ¿Puede HACER algo en esta sección, no sólo verla?
+     *
+     * `ver` es la puerta: quien no puede ver tampoco puede crear, editar ni
+     * borrar, aunque alguien le haya marcado esas casillas. Se valida acá y
+     * no en la pantalla porque una casilla mal puesta no debería abrir nada.
+     *
+     * Mientras los permisos no estén sembrados cae al respaldo por rol, igual
+     * que `puede()`: en una instalación a medio migrar es preferible el
+     * comportamiento viejo a cerrarle la puerta a todo el mundo.
+     */
+    public static function puedeAccion(?User $u, string $seccion, string $accion): bool
+    {
+        if (! $u) return false;
+        if (self::esRoot($u)) return true;
+        if (! array_key_exists($accion, self::ACCIONES)) return false;
+
+        if (! self::permisosSembrados()) {
+            return $u->hasAnyRole(self::MATRIZ[$seccion] ?? []);
+        }
+
+        if (! $u->can(self::permiso($seccion))) {
+            return false;
+        }
+
+        return $accion === 'ver' || $u->can(self::permiso($seccion, $accion));
+    }
+
+    /** Atajo para lo que más se pregunta: ¿puede cambiar algo acá? */
+    public static function puedeEditar(?User $u, string $seccion): bool
+    {
+        return self::puedeAccion($u, $seccion, 'editar');
     }
 
     /**

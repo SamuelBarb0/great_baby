@@ -22,15 +22,51 @@ class PermisosSeeder extends Seeder
     {
         $guard = config('auth.defaults.guard', 'web');
 
-        // 1 · Un permiso por sección. Anotamos los que nacen en esta corrida:
-        //     una sección agregada después del primer sembrado tiene que llegar
-        //     igual a sus roles, aunque esos roles ya estén configurados.
+        // 1 · Cuatro permisos por sección: ver, crear, editar, eliminar.
+        //     Anotamos los que nacen en esta corrida: una sección agregada
+        //     después del primer sembrado tiene que llegar igual a sus roles,
+        //     aunque esos roles ya estén configurados.
         $nuevos = [];
+        $accionesNuevas = [];
         foreach (array_keys(Permisos::MATRIZ) as $seccion) {
-            $nombre = Permisos::permiso($seccion);
-            if (! Permission::where('name', $nombre)->where('guard_name', $guard)->exists()) {
+            foreach (array_keys(Permisos::ACCIONES) as $accion) {
+                $nombre = Permisos::permiso($seccion, $accion);
+                if (Permission::where('name', $nombre)->where('guard_name', $guard)->exists()) {
+                    continue;
+                }
+
                 Permission::create(['name' => $nombre, 'guard_name' => $guard]);
-                $nuevos[$nombre] = $seccion;
+
+                if ($accion === 'ver') {
+                    $nuevos[$nombre] = $seccion;
+                } else {
+                    // Las acciones de una sección que YA existía se reparten
+                    // distinto: ver abajo.
+                    $accionesNuevas[$nombre] = $seccion;
+                }
+            }
+        }
+
+        /*
+         * 1a · Las acciones nuevas sobre secciones viejas son ADITIVAS.
+         *
+         * Antes una sección era un solo permiso y quien la veía podía hacerle
+         * todo. Al partirla en cuatro, el despliegue no puede quitarle nada a
+         * nadie: si el Contador podía editar la cartera ayer, hoy tiene que
+         * poder. Así que cada rol que ya tenía el `ver` de una sección recibe
+         * sus tres acciones.
+         *
+         * Restringir es una decisión de Aracely en la pantalla de Roles, no un
+         * efecto colateral de actualizar el sistema.
+         */
+        foreach ($accionesNuevas as $nombre => $seccion) {
+            $verDeLaSeccion = Permisos::permiso($seccion);
+
+            foreach (Role::all() as $rol) {
+                if ($rol->hasPermissionTo($verDeLaSeccion)
+                    || in_array($rol->name, ['Aracely', 'Gerencia'], true)) {
+                    $rol->givePermissionTo($nombre);
+                }
             }
         }
 
@@ -54,10 +90,14 @@ class PermisosSeeder extends Seeder
                 continue;
             }
 
+            // Un rol que estrena permisos los recibe COMPLETOS sobre sus
+            // secciones: es el comportamiento que tenía antes de que las
+            // acciones existieran. Recortar es decisión del admin, no del
+            // sembrado.
             $suyos = [];
             foreach (Permisos::MATRIZ as $seccion => $roles) {
                 if (in_array($rol->name, $roles, true)) {
-                    $suyos[] = Permisos::permiso($seccion);
+                    $suyos = array_merge($suyos, Permisos::permisosDe($seccion));
                 }
             }
 
@@ -69,7 +109,7 @@ class PermisosSeeder extends Seeder
             // (ve todo). AdminBodega es protegido porque sin él la bodega se
             // detiene, pero sigue viendo sólo lo suyo.
             if (in_array($rol->name, ['Aracely', 'Gerencia'], true)) {
-                $suyos = Permission::where('name', 'like', 'ver.%')->pluck('name')->all();
+                $suyos = Permission::query()->pluck('name')->all();
             }
 
             $rol->syncPermissions($suyos);
@@ -77,9 +117,11 @@ class PermisosSeeder extends Seeder
 
         app(\Spatie\Permission\PermissionRegistrar::class)->forgetCachedPermissions();
 
-        $this->command?->info(
-            'Permisos sembrados: '.Permission::where('name', 'like', 'ver.%')->count().
-            ' · roles configurados: '.Role::count()
-        );
+        $this->command?->info(sprintf(
+            'Secciones: %d · permisos: %d (ver/crear/editar/eliminar) · roles: %d',
+            Permission::where('name', 'like', 'ver.%')->count(),
+            Permission::count(),
+            Role::count(),
+        ));
     }
 }
