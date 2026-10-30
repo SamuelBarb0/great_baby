@@ -336,6 +336,25 @@ const guardarRetiro = () => enviar('/retiro', { ...retiro },
 
 const money = (n) => (n ? '$' + Number(n).toLocaleString('es-CO', { maximumFractionDigits: 0 }) : '—');
 
+/*
+ * Cuánto duró una novedad.
+ *
+ * Era `n.dias ? n.dias + ' días' : n.horas + ' horas'`, y una novedad sin
+ * días NI horas —que el formulario permite guardar— imprimía literalmente
+ * «null horas» en la hoja de vida de la persona. De paso, el singular: «1
+ * días» se leía en la ficha de todo el que faltó un solo día.
+ */
+const duracionNovedad = (n) => {
+    const dias = Number(n.dias) || 0;
+    if (dias) return `${dias} día${dias === 1 ? '' : 's'}`;
+
+    const horas = Number(n.horas) || 0;
+    if (horas) return `${horas} hora${horas === 1 ? '' : 's'}`;
+
+    // Decirlo es mejor que imprimir basura: así se nota que hay que corregirla.
+    return 'sin duración registrada';
+};
+
 /* Cómo se ve la alerta de la prueba, según cuánto falte. */
 const prueba = computed(() => {
     const e = props.empleado;
@@ -1006,7 +1025,7 @@ const tono = (t) => ({
                                     <span class="font-semibold">{{ n.clase }}</span>
                                     <span class="text-xs text-surface-500">
                                         · {{ n.desde }}<span v-if="n.hasta"> al {{ n.hasta }}</span>
-                                        · {{ n.dias ? n.dias + ' días' : n.horas + ' horas' }}
+                                        · {{ duracionNovedad(n) }}
                                     </span>
                                 </div>
                                 <span class="text-xs text-surface-500">

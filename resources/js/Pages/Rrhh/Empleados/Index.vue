@@ -18,17 +18,38 @@ const { hoy: hoyBogota } = useBogotaDate();
 const props = defineProps({ empleados: { type: Object, required: true }, filtro: { type: String, default: 'activo' } });
 
 const modal = ref(false);
-const form = reactive({
+
+/*
+ * Una sola fuente de verdad para el formulario en blanco.
+ *
+ * El reset enumeraba seis campos a mano y se dejaba cuatro: `tipo_contrato`,
+ * `tipo_documento`, `salario` y `fecha_ingreso` se quedaban con lo del
+ * empleado anterior. Registrar a alguien con contrato «obra o labor» y al
+ * siguiente abrir el formulario lo dejaba también en obra o labor, con su
+ * salario ya escrito — y eso no se ve, porque el campo parece puesto a
+ * propósito. Ahora el blanco se define una vez y se usa en los dos sitios.
+ */
+const vacio = () => ({
     nombre: '', tipo_documento: 'CC', numero_documento: '', email: '', telefono: '',
     cargo: '', area: '', tipo_contrato: 'indefinido', salario: null, fecha_ingreso: hoyBogota(),
 });
+
+const form = reactive(vacio());
+
+// Se limpia al ABRIR, no sólo al guardar: cancelar a medias tampoco puede
+// dejar lo escrito esperando al siguiente.
+const abrirNuevo = () => {
+    Object.assign(form, vacio());
+    modal.value = true;
+};
+
 const procesando = ref(false);
 const crear = () => {
     if (procesando.value) return;
     procesando.value = true;
     router.post('/app/rrhh/empleados', form, {
         preserveScroll: true,
-        onSuccess: () => { modal.value = false; Object.assign(form, { nombre: '', numero_documento: '', email: '', telefono: '', cargo: '', area: '' }); },
+        onSuccess: () => { modal.value = false; Object.assign(form, vacio()); },
         onFinish: () => procesando.value = false,
     });
 };
@@ -55,7 +76,7 @@ const badgeInd = (e) => ({ pendiente: 'bg-amber-100 text-amber-800', en_curso: '
                     <a :href="`/app/rrhh/exportar/empleados?estado=${filtro}`" class="btn-secondary">
                         <Download class="h-4 w-4"/> Excel
                     </a>
-                    <button @click="modal = true" class="btn-primary"><Plus class="h-4 w-4"/> Nuevo empleado</button>
+                    <button @click="abrirNuevo" class="btn-primary"><Plus class="h-4 w-4"/> Nuevo empleado</button>
                 </div>
             </div>
 

@@ -84,6 +84,20 @@ const alCambiarTipo = () => {
     form.clase = primera ? primera[0] : '';
     if (tipoActual.value.en_horas) form.dias = null;
     else form.horas = null;
+
+    /*
+     * Una ausencia no se paga por defecto.
+     *
+     * La casilla «Remunerada (no se descuenta)» nace marcada porque el caso
+     * normal es la incapacidad, que sí se paga. Pero al pasar a «Ausencias»
+     * seguía marcada: una inasistencia sin justificación quedaba remunerada
+     * salvo que alguien se acordara de desmarcarla, y nadie se acuerda de
+     * desmarcar lo que ya está bien puesto para el caso anterior.
+     *
+     * Se puede volver a marcar a mano —hay ausencias que la empresa decide
+     * pagar— pero el valor de arranque deja de regalar el día.
+     */
+    form.remunerada = form.tipo !== 'ausencia';
 };
 
 const abrirNueva = () => {

@@ -115,7 +115,13 @@ const alternar = (r) => {
 const cuenta = (t) => props.reglas.filter(r => r.tipo === t).length;
 const activas = computed(() => filtradas.value.filter(r => r.activa).length);
 
-const tabs = [
+/*
+ * Las pestañas se recalculan: era un array plano, armado una vez en el setup
+ * con el número ya cocido dentro del texto. Crear una regla la agregaba a la
+ * tabla pero la pestaña seguía diciendo «(0)» hasta recargar la página, que
+ * es justo cuando el contador importa —se acaba de crear algo y no aparece—.
+ */
+const tabs = computed(() => [
     { key: 'retefuente', label: `Retefuente (${cuenta('retefuente')})` },
     { key: 'reteica', label: `Reteica (${cuenta('reteica')})` },
     { key: 'reteiva', label: `Reteiva (${cuenta('reteiva')})` },
@@ -123,7 +129,19 @@ const tabs = [
     // pagar una compra.
     { key: 'autorrenta', label: `Autorrenta (${cuenta('autorrenta')})` },
     { key: 'autorreteica', label: `Autorreteica (${cuenta('autorreteica')})` },
-];
+]);
+
+/*
+ * La tarifa en formato colombiano.
+ *
+ * El valor viene de un `decimal:3`, así que 2,5% llegaba como «2.500» y se
+ * pintaba «2.500%» — que acá se lee dos mil quinientos por ciento, porque el
+ * punto es separador de miles. Sin ceros de relleno y con coma decimal.
+ */
+const tarifa = (v) => {
+    const n = Number(v);
+    return isFinite(n) ? `${n.toLocaleString('es-CO', { maximumFractionDigits: 3 })}%` : '—';
+};
 </script>
 
 <template>
@@ -198,7 +216,7 @@ const tabs = [
                             <td class="p-2 font-semibold">{{ r.concepto }}</td>
                             <td v-if="tab === 'reteica'" class="p-2">{{ r.ciudad || '—' }}</td>
                             <td class="p-2 text-right font-mono">${{ Number(r.base_minima).toLocaleString('es-CO') }}</td>
-                            <td class="p-2 text-right font-mono font-bold text-brand-600">{{ r.tarifa_pct }}%</td>
+                            <td class="p-2 text-right font-mono font-bold text-brand-600">{{ tarifa(r.tarifa_pct) }}</td>
                             <td class="p-2 font-mono">
                                 <span v-if="r.cuenta_puc">{{ r.cuenta_puc }}</span>
                                 <!-- Las reglas cargadas desde la tabla del contador pueden venir
