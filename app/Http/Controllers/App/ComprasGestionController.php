@@ -13,6 +13,9 @@ use App\Modules\Compras\Models\GastoImportacion;
 use App\Modules\Compras\Models\Importacion;
 use App\Modules\Compras\Models\OrdenCompra;
 use App\Modules\Compras\Models\RecepcionCompra;
+use App\Modules\Compras\Services\LectorOrdenProveedor;
+use App\Modules\Compras\Services\PreliquidarOrden;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Routing\Controllers\HasMiddleware;
@@ -87,7 +90,11 @@ class ComprasGestionController extends Controller implements HasMiddleware
                     'precio_unit' => (float) $i->precio_unit, 'iva_pct' => (float) $i->iva_pct,
                     'descuento_pct' => (float) $i->descuento_pct,
                     'subtotal' => (float) $i->subtotal, 'total' => (float) $i->total,
+                    'cajas' => $i->cajas, 'unidades_por_caja' => $i->unidades_por_caja,
+                    'cbm_caja' => $i->cbm_caja !== null ? (float) $i->cbm_caja : null,
+                    'empresa_destino_id' => $i->empresa_destino_id,
                 ])->all(),
+                'preliquidacion' => $o->esImportacion() ? app(PreliquidarOrden::class)->handle($o) : null,
                 'siigo' => [
                     'estado' => $siigoEstado,
                     'total' => $totRec,
@@ -120,7 +127,115 @@ class ComprasGestionController extends Controller implements HasMiddleware
             // Re-audit M2 UX-A4 · bodegas destino para elección explícita en OC.
             'bodegas' => \App\Modules\Dropi\Models\InventarioUbicacion::orderBy('nombre')->get(['id', 'nombre'])
                 ->map(fn ($b) => ['id' => $b->id, 'nombre' => $b->nombre]),
+            // Importación: con qué parámetros y tasa nace la pre-liquidación, y
+            // para quién va cada línea (Great Baby o el e-commerce de Aracely).
+            'parametrosIniciales' => PreliquidarOrden::parametrosIniciales(),
+            'tasasIniciales' => PreliquidarOrden::tasasIniciales(),
+            'empresasDestino' => self::empresasDestino(),
         ]);
+    }
+
+    /** Sólo las dos de la reunión del 21-oct: Great Baby y E-commerce. */
+    private static function empresasDestino(): array
+    {
+        return \App\Models\EmpresaConfig::query()
+            ->whereIn('codigo', ['great_baby', 'ecommerce'])
+            ->orderByDesc('es_principal')
+            ->get(['id', 'codigo', 'nombre_comercial', 'razon_social'])
+            ->map(fn ($e) => [
+                'id' => $e->id,
+                'codigo' => $e->codigo,
+                'nombre' => $e->codigo === 'ecommerce' ? 'E-commerce' : ($e->nombre_comercial ?: $e->razon_social),
+            ])->all();
+    }
+
+    /**
+     * Lee el Excel de pedido del proveedor y devuelve las líneas para que el
+     * formulario las muestre. No crea nada: la OC se guarda con «Crear OC».
+     */
+    public function ocLeerExcel(Request $r, LectorOrdenProveedor $lector): JsonResponse
+    {
+        $r->validate([
+            // Sus Excel traen fotos: el del 24-oct pesa 13 MB.
+            'archivo' => ['required', 'file', 'mimes:xlsx', 'max:51200'],
+        ]);
+
+        try {
+            return response()->json($lector->leer($r->file('archivo')->getRealPath()));
+        } catch (\RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+    }
+
+    /** Cambia los parámetros de la pre-liquidación mientras la OC es borrador. */
+    public function ocParametros(Request $r, int $orden): RedirectResponse
+    {
+        $o = OrdenCompra::findOrFail($orden);
+        abort_unless($o->esImportacion(), 422, 'Sólo las OC de importación se pre-liquidan.');
+        abort_unless($o->estado === EstadoOrdenCompra::Borrador, 422, 'La OC ya no es borrador: los parámetros quedaron fijos.');
+
+        $data = $r->validate(self::reglasParametros() + [
+            'tasa_cambio' => ['required', 'numeric', 'gt:0'],
+        ]);
+
+        $o->tasa_cambio = $data['tasa_cambio'];
+        $o->parametros_preliquidacion = PreliquidarOrden::normalizar($data);
+        $o->save();
+
+        return back()->with('success', 'Pre-liquidación recalculada.');
+    }
+
+    public function calculadora(): Response
+    {
+        return Inertia::render('Compras/Calculadora', [
+            'parametros' => PreliquidarOrden::parametrosIniciales(),
+            'tasa' => PreliquidarOrden::tasaInicial('CNY') ?? 520,
+        ]);
+    }
+
+    /** Costo puesto en Colombia de UN producto, con la misma fórmula de la OC. */
+    public function calcular(Request $r): JsonResponse
+    {
+        $data = $r->validate(self::reglasParametros() + [
+            'tasa_cambio' => ['required', 'numeric', 'gt:0'],
+            'precio' => ['required', 'numeric', 'min:0'],
+            'unidades_por_caja' => ['required', 'integer', 'min:1'],
+            'cbm_caja' => ['nullable', 'numeric', 'gt:0', 'required_without_all:caja_largo_cm,caja_ancho_cm,caja_alto_cm'],
+            'caja_largo_cm' => ['nullable', 'numeric', 'gt:0', 'required_without:cbm_caja'],
+            'caja_ancho_cm' => ['nullable', 'numeric', 'gt:0', 'required_without:cbm_caja'],
+            'caja_alto_cm' => ['nullable', 'numeric', 'gt:0', 'required_without:cbm_caja'],
+        ]);
+
+        // Igual que en la OC: el CBM escrito manda; si no hay, sale de las medidas.
+        $cbm = ! empty($data['cbm_caja'])
+            ? (float) $data['cbm_caja']
+            : $data['caja_largo_cm'] * $data['caja_ancho_cm'] * $data['caja_alto_cm'] / 1_000_000;
+
+        $unidad = app(PreliquidarOrden::class)->porUnidad(
+            PreliquidarOrden::normalizar($data), (float) $data['tasa_cambio'],
+            (float) $data['precio'], (int) $data['unidades_por_caja'], $cbm,
+        );
+
+        return response()->json([
+            'cbm_caja' => round($cbm, 6),
+            'unidad' => array_map(fn ($v) => round($v, 2), $unidad),
+        ]);
+    }
+
+    /** @return array<string,array<int,string>> */
+    private static function reglasParametros(): array
+    {
+        return [
+            'comision_pct' => ['required', 'numeric', 'min:0', 'max:100'],
+            'flete_m3' => ['required', 'numeric', 'min:0'],
+            'gasto_colombia_m3' => ['required', 'numeric', 'min:0'],
+            'arancel_pct' => ['required', 'numeric', 'min:0', 'max:100'],
+            'iva_pct' => ['required', 'numeric', 'min:0', 'max:100'],
+            'divisor_precio_1' => ['required', 'numeric', 'gt:0', 'max:1'],
+            'divisor_precio_2' => ['required', 'numeric', 'gt:0', 'max:1'],
+            'capacidad_m3' => ['required', 'numeric', 'min:0'],
+            'valor_minimo' => ['required', 'numeric', 'min:0'],
+        ];
     }
 
     public function ocCrear(Request $r): RedirectResponse
@@ -144,7 +259,20 @@ class ComprasGestionController extends Controller implements HasMiddleware
             // dejaba la línea apuntando a un producto que no existe.
             'items.*.producto_id' => ['nullable', 'integer', 'exists:productos,id'],
             'items.*.variante_id' => ['nullable', 'integer', 'exists:producto_variantes,id'],
+            // Importación por cajas (Excel de Alejandro).
+            'items.*.cajas' => ['nullable', 'integer', 'min:1'],
+            'items.*.unidades_por_caja' => ['nullable', 'integer', 'min:1', 'required_with:items.*.cajas'],
+            'items.*.caja_largo_cm' => ['nullable', 'numeric', 'gt:0'],
+            'items.*.caja_ancho_cm' => ['nullable', 'numeric', 'gt:0'],
+            'items.*.caja_alto_cm' => ['nullable', 'numeric', 'gt:0'],
+            'items.*.cbm_caja' => ['nullable', 'numeric', 'gt:0'],
+            'items.*.peso_caja_kg' => ['nullable', 'numeric', 'gt:0'],
+            'items.*.empresa_destino_id' => ['nullable', 'integer', 'exists:empresa_config,id'],
+            'parametros_preliquidacion' => ['nullable', 'array'],
         ]);
+        if ($data['tipo'] === 'importacion' && isset($data['parametros_preliquidacion'])) {
+            validator($data['parametros_preliquidacion'], self::reglasParametros())->validate();
+        }
         $oc = CrearOrdenCompra::run($data);
         return redirect()->route('app.compras.oc.show', $oc->id)->with('success', "OC {$oc->numero} creada.");
     }

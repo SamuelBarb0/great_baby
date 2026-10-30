@@ -1,7 +1,8 @@
 <script setup>
-import { reactive, ref, computed } from 'vue';
+import { reactive, ref, computed, watch } from 'vue';
 import { Head, Link, router } from '@inertiajs/vue3';
-import { ShoppingCart, Plus, Trash2, Save } from 'lucide-vue-next';
+import axios from 'axios';
+import { ShoppingCart, Plus, Trash2, Save, FileSpreadsheet, Calculator } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import { useMoney } from '@/composables/useMoney';
 
@@ -10,6 +11,12 @@ const props = defineProps({
     // Re-audit M2 UX-A4 · antes bodega default silenciosa; ahora prop `bodegas`
     // permite elección explícita al crear OC (fallback: primera si solo hay 1).
     bodegas: { type: Array, default: () => [] },
+    // Importación: parámetros y tasa de la última OC pre-liquidada, y los dos
+    // destinos posibles de cada línea (Great Baby / E-commerce).
+    parametrosIniciales: { type: Object, default: () => ({}) },
+    // Moneda → tasa de su última OC de importación (nunca la de otra moneda).
+    tasasIniciales: { type: Object, default: () => ({}) },
+    empresasDestino: { type: Array, default: () => [] },
 });
 
 const { money } = useMoney();
@@ -30,7 +37,10 @@ const { money } = useMoney();
  */
 const lineaNueva = () => ({
     producto_id: null, variante_id: null,
-    descripcion: '', cantidad: 1, precio_unit: 0, iva_pct: 19, descuento_pct: 0,
+    descripcion: '', cantidad: 1, precio_unit: 0,
+    // En importación el IVA se paga en aduana: va en la pre-liquidación, no en la OC.
+    iva_pct: form?.tipo === 'importacion' ? 0 : 19, descuento_pct: 0,
+    cajas: null, unidades_por_caja: null, cbm_caja: null, empresa_destino_id: null,
 });
 
 const form = reactive({
@@ -41,9 +51,84 @@ const form = reactive({
     tasa_cambio: 1,
     fecha_esperada: '',
     observaciones: '',
-    items: [lineaNueva()],
+    parametros_preliquidacion: { ...props.parametrosIniciales },
+    items: [],
 });
+form.items.push(lineaNueva());
 const procesando = ref(false);
+
+/*
+ * Orden de importación (Excel de Alejandro): se pide por cajas, cada caja
+ * ocupa su CBM en el contenedor y cada línea va para Great Baby o para el
+ * e-commerce. Las unidades salen de cajas × unidades por caja.
+ */
+const esImportacion = computed(() => form.tipo === 'importacion');
+watch(() => form.tipo, (tipo) => {
+    if (tipo !== 'importacion') return;
+    if (form.moneda === 'COP') form.moneda = 'CNY';
+    form.items.forEach(i => { if (!i.cajas) i.iva_pct = 0; });
+});
+watch(() => form.moneda, (moneda) => {
+    if (form.tipo === 'importacion' && props.tasasIniciales[moneda]) form.tasa_cambio = props.tasasIniciales[moneda];
+}, { immediate: false });
+
+const sincronizarCantidad = (it) => {
+    if (Number(it.cajas) > 0 && Number(it.unidades_por_caja) > 0) {
+        it.cantidad = Number(it.cajas) * Number(it.unidades_por_caja);
+    }
+};
+
+const cbmTotal = computed(() => form.items.reduce((s, i) => s + (Number(i.cbm_caja) || 0) * (Number(i.cajas) || 0), 0));
+const capacidad = computed(() => Number(form.parametros_preliquidacion.capacidad_m3) || 0);
+const ocupacion = computed(() => capacidad.value > 0 ? cbmTotal.value / capacidad.value * 100 : 0);
+const cbmPorDestino = computed(() => props.empresasDestino.map(e => ({
+    ...e,
+    cbm: form.items
+        .filter(i => (i.empresa_destino_id || props.empresasDestino[0]?.id) === e.id)
+        .reduce((s, i) => s + (Number(i.cbm_caja) || 0) * (Number(i.cajas) || 0), 0),
+})));
+
+const parametrosVisibles = [
+    { clave: 'comision_pct', etiqueta: 'Comisión %', paso: '0.01' },
+    { clave: 'flete_m3', etiqueta: 'Flete por m³ (COP)', paso: '1' },
+    { clave: 'gasto_colombia_m3', etiqueta: 'Gasto Colombia por m³ (COP)', paso: '1' },
+    { clave: 'arancel_pct', etiqueta: 'Arancel %', paso: '0.01' },
+    { clave: 'iva_pct', etiqueta: 'IVA %', paso: '0.01' },
+    { clave: 'divisor_precio_1', etiqueta: 'Divisor precio 1', paso: '0.01' },
+    { clave: 'divisor_precio_2', etiqueta: 'Divisor precio 2', paso: '0.01' },
+    { clave: 'capacidad_m3', etiqueta: 'Capacidad contenedor (m³)', paso: '0.01' },
+    { clave: 'valor_minimo', etiqueta: 'Valor mínimo', paso: '0.01' },
+];
+const verParametros = ref(false);
+
+// Cargar el Excel del proveedor: llena el formulario, no guarda nada.
+const archivoExcel = ref(null);
+const leyendoExcel = ref(false);
+const avisosExcel = ref([]);
+const errorExcel = ref('');
+const cargarExcel = async (e) => {
+    const archivo = e.target.files?.[0];
+    if (!archivo) return;
+    leyendoExcel.value = true;
+    errorExcel.value = '';
+    avisosExcel.value = [];
+    try {
+        const fd = new FormData();
+        fd.append('archivo', archivo);
+        const { data } = await axios.post('/app/compras/oc/leer-excel', fd);
+        form.tipo = 'importacion';
+        const conDatos = form.items.filter(i => (i.descripcion || '').trim());
+        form.items = [...conDatos, ...data.lineas.map(l => ({ ...lineaNueva(), ...l }))];
+        avisosExcel.value = [`${data.lineas.length} línea(s) leídas de «${archivo.name}». Revisa y guarda.`, ...data.avisos];
+    } catch (err) {
+        errorExcel.value = err.response?.data?.message
+            || err.response?.data?.errors?.archivo?.[0]
+            || 'No se pudo leer el archivo.';
+    } finally {
+        leyendoExcel.value = false;
+        if (archivoExcel.value) archivoExcel.value.value = '';
+    }
+};
 
 // COMP-B10 · autocomplete proveedor
 const busquedaProveedor = ref('');
@@ -69,6 +154,7 @@ if (typeof window !== 'undefined') {
 }
 
 const addItem = () => form.items.push(lineaNueva());
+const fmt = (n, d = 2) => Number(n || 0).toLocaleString('es-CO', { minimumFractionDigits: d, maximumFractionDigits: d });
 const rmItem = (i) => form.items.splice(i, 1);
 
 /*
@@ -122,7 +208,9 @@ const puedeGuardar = computed(() => form.proveedor_id && form.bodega_id && items
 const guardar = () => {
     if (procesando.value || !puedeGuardar.value) return;
     procesando.value = true;
-    router.post('/app/compras/oc', form, {
+    const payload = { ...form };
+    if (!esImportacion.value) delete payload.parametros_preliquidacion;
+    router.post('/app/compras/oc', payload, {
         onError: () => { procesando.value = false; },
         onSuccess: () => { procesando.value = false; },
     });
@@ -133,10 +221,26 @@ const guardar = () => {
     <Head title="Nueva orden de compra"/>
     <AppLayout>
         <div class="max-w-5xl mx-auto space-y-4">
-            <h1 class="text-2xl font-bold flex items-center gap-2">
-                <ShoppingCart class="h-6 w-6 text-brand-600"/>
-                Nueva orden de compra
-            </h1>
+            <div class="flex items-center justify-between flex-wrap gap-2">
+                <h1 class="text-2xl font-bold flex items-center gap-2">
+                    <ShoppingCart class="h-6 w-6 text-brand-600"/>
+                    Nueva orden de compra
+                </h1>
+                <div class="flex items-center gap-2">
+                    <Link href="/app/compras/calculadora" class="btn-ghost text-sm"><Calculator class="h-4 w-4"/> Calculadora</Link>
+                    <label class="btn-ghost text-sm border border-surface-300 dark:border-surface-700 cursor-pointer"
+                           :class="leyendoExcel && 'opacity-50 pointer-events-none'">
+                        <FileSpreadsheet class="h-4 w-4"/> {{ leyendoExcel ? 'Leyendo…' : 'Cargar Excel del proveedor' }}
+                        <input ref="archivoExcel" type="file" accept=".xlsx" class="hidden" @change="cargarExcel"/>
+                    </label>
+                </div>
+            </div>
+            <div v-if="errorExcel" class="p-3 rounded-lg bg-red-50 dark:bg-red-950/40 border-l-4 border-red-500 text-sm text-red-700 dark:text-red-300">
+                {{ errorExcel }}
+            </div>
+            <div v-if="avisosExcel.length" class="p-3 rounded-lg bg-brand-50 dark:bg-brand-950/30 border-l-4 border-brand-500 text-sm space-y-1">
+                <div v-for="(a, i) in avisosExcel" :key="i">{{ a }}</div>
+            </div>
 
             <div class="card p-5 space-y-3">
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -213,6 +317,41 @@ const guardar = () => {
                 </div>
             </div>
 
+            <div v-if="esImportacion" class="card p-4">
+                <div class="flex items-center justify-between flex-wrap gap-2">
+                    <div>
+                        <div class="text-xs uppercase tracking-widest font-bold text-brand-600">Contenedor</div>
+                        <div class="text-sm mt-1">
+                            <b :class="ocupacion > 100 ? 'text-red-600' : ''">{{ fmt(cbmTotal) }} m³</b>
+                            de {{ fmt(capacidad) }} m³ · {{ fmt(ocupacion, 1) }} %
+                            <span v-for="d in cbmPorDestino" :key="d.id" class="text-surface-500"> · {{ d.nombre }} {{ fmt(d.cbm) }} m³</span>
+                        </div>
+                    </div>
+                    <button type="button" @click="verParametros = !verParametros" class="btn-ghost text-xs">
+                        {{ verParametros ? 'Ocultar' : 'Ver' }} parámetros de la pre-liquidación
+                    </button>
+                </div>
+                <div class="h-2 rounded bg-surface-200 dark:bg-surface-800 mt-2 overflow-hidden">
+                    <div class="h-full" :class="ocupacion > 100 ? 'bg-red-500' : 'bg-emerald-500'"
+                         :style="{ width: Math.min(ocupacion, 100) + '%' }"></div>
+                </div>
+                <p v-if="Number(form.tasa_cambio) <= 1" class="text-xs text-red-600 mt-1">
+                    Falta la tasa de {{ form.moneda }} a COP: sin ella la pre-liquidación no sirve.
+                </p>
+                <p v-if="ocupacion > 100" class="text-xs text-red-600 mt-1">
+                    Se pasa {{ fmt(cbmTotal - capacidad) }} m³ del contenedor. Se puede guardar igual.
+                </p>
+                <div v-if="verParametros" class="grid grid-cols-2 md:grid-cols-3 gap-3 mt-3">
+                    <div v-for="p in parametrosVisibles" :key="p.clave">
+                        <label class="text-xs font-semibold">{{ p.clave === 'valor_minimo' ? `Valor mínimo (${form.moneda}, 0 = no revisar)` : p.etiqueta }}</label>
+                        <input type="number" :step="p.paso" v-model.number="form.parametros_preliquidacion[p.clave]" class="input w-full"/>
+                    </div>
+                    <p class="col-span-full text-[11px] text-surface-500">
+                        Vienen de la última orden de importación. La tasa es la de arriba ({{ form.moneda }} → COP).
+                    </p>
+                </div>
+            </div>
+
             <div class="card p-4">
                 <div class="flex items-center justify-between mb-3">
                     <div class="text-xs uppercase tracking-widest font-bold text-brand-600">Ítems</div>
@@ -241,6 +380,12 @@ const guardar = () => {
                         <thead class="text-[10px] text-surface-500 uppercase">
                             <tr>
                                 <th class="text-left p-1">Descripción</th>
+                                <template v-if="esImportacion">
+                                    <th class="text-right p-1">Cajas</th>
+                                    <th class="text-right p-1">Uds/caja</th>
+                                    <th class="text-right p-1">CBM caja</th>
+                                    <th class="text-left p-1">Destino</th>
+                                </template>
                                 <th class="text-right p-1">Cant</th>
                                 <th class="text-right p-1">Precio</th>
                                 <th class="text-right p-1">Desc%</th>
@@ -262,7 +407,17 @@ const guardar = () => {
                                         sin catálogo · no mueve inventario
                                     </div>
                                 </td>
-                                <td class="p-1"><input type="number" step="0.001" v-model.number="it.cantidad" class="input w-20 text-right text-sm"/></td>
+                                <template v-if="esImportacion">
+                                    <td class="p-1"><input type="number" step="1" min="0" v-model.number="it.cajas" @input="sincronizarCantidad(it)" class="input w-16 text-right text-sm"/></td>
+                                    <td class="p-1"><input type="number" step="1" min="0" v-model.number="it.unidades_por_caja" @input="sincronizarCantidad(it)" class="input w-16 text-right text-sm"/></td>
+                                    <td class="p-1"><input type="number" step="0.000001" min="0" v-model.number="it.cbm_caja" class="input w-24 text-right text-sm"/></td>
+                                    <td class="p-1">
+                                        <select v-model="it.empresa_destino_id" class="input w-28 text-sm">
+                                            <option v-for="e in empresasDestino" :key="e.id" :value="e.codigo === 'great_baby' ? null : e.id">{{ e.nombre }}</option>
+                                        </select>
+                                    </td>
+                                </template>
+                                <td class="p-1"><input type="number" step="0.001" v-model.number="it.cantidad" :readonly="esImportacion && it.cajas > 0 && it.unidades_por_caja > 0" class="input w-20 text-right text-sm"/></td>
                                 <td class="p-1"><input type="number" step="0.01" v-model.number="it.precio_unit" class="input w-28 text-right text-sm"/></td>
                                 <td class="p-1"><input type="number" step="0.01" v-model.number="it.descuento_pct" class="input w-16 text-right text-sm"/></td>
                                 <td class="p-1"><input type="number" step="0.01" v-model.number="it.iva_pct" class="input w-16 text-right text-sm"/></td>

@@ -1,7 +1,7 @@
 <script setup>
-import { ref } from 'vue';
+import { ref, reactive, computed } from 'vue';
 import { Head, Link, router } from '@inertiajs/vue3';
-import { ArrowLeft, CheckCircle, XCircle, Truck, ShoppingCart, AlertTriangle, Cloud, CloudOff, CloudCog, RefreshCw } from 'lucide-vue-next';
+import { ArrowLeft, CheckCircle, XCircle, Truck, ShoppingCart, AlertTriangle, Cloud, CloudOff, CloudCog, RefreshCw, Container } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import { useMoney } from '@/composables/useMoney';
 import { fechaCorta } from '@/composables/useFecha';
@@ -52,6 +52,36 @@ const badge = (e) => ({
     cerrada: 'bg-surface-200 text-surface-600 dark:bg-surface-800 dark:text-surface-400',
     anulada: 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200',
 }[e] || 'bg-surface-100 dark:bg-surface-800');
+
+/*
+ * Pre-liquidación (sólo OC de importación): costo por unidad puesto en
+ * Colombia con la fórmula del Excel de Alejandro. Los parámetros se pueden
+ * corregir mientras la OC es borrador; después quedan fijos.
+ */
+const pre = computed(() => props.orden.preliquidacion);
+const parametros = reactive(pre.value ? { ...pre.value.parametros, tasa_cambio: pre.value.tasa_cambio } : {});
+const camposParametros = [
+    ['tasa_cambio', 'Tasa (COP por unidad de moneda)', '0.01'],
+    ['comision_pct', 'Comisión %', '0.01'],
+    ['flete_m3', 'Flete por m³', '1'],
+    ['gasto_colombia_m3', 'Gasto Colombia por m³', '1'],
+    ['arancel_pct', 'Arancel %', '0.01'],
+    ['iva_pct', 'IVA %', '0.01'],
+    ['divisor_precio_1', 'Divisor precio 1', '0.01'],
+    ['divisor_precio_2', 'Divisor precio 2', '0.01'],
+    ['capacidad_m3', 'Capacidad (m³)', '0.01'],
+    ['valor_minimo', 'Valor mínimo (0 = no revisar)', '0.01'],
+];
+const recalculando = ref(false);
+const recalcular = () => {
+    if (recalculando.value) return;
+    recalculando.value = true;
+    router.post(`/app/compras/oc/${props.orden.id}/parametros`, parametros, {
+        preserveScroll: true,
+        onFinish: () => recalculando.value = false,
+    });
+};
+const fmt = (n, d = 2) => Number(n || 0).toLocaleString('es-CO', { minimumFractionDigits: d, maximumFractionDigits: d });
 
 // COMP-B6 · semáforo SIIGO agregado de la OC.
 const siigoBadge = (e) => ({
@@ -133,6 +163,7 @@ const reenviarRecepcion = (rec) => {
                         <XCircle class="h-4 w-4"/> Anular
                     </button>
                     <a :href="`/compras/orden/${orden.id}/pdf`" target="_blank" rel="noopener" class="btn-ghost">PDF</a>
+                    <a v-if="orden.preliquidacion" :href="`/compras/orden/${orden.id}/preliquidacion/pdf`" target="_blank" rel="noopener" class="btn-ghost">PDF pre-liquidación</a>
                 </div>
             </div>
 
@@ -158,6 +189,100 @@ const reenviarRecepcion = (rec) => {
                                 <td class="p-2 text-right">{{ money(it.precio_unit) }}</td>
                                 <td class="p-2 text-right">{{ money(it.subtotal) }}</td>
                                 <td class="p-2 text-right font-bold">{{ money(it.total) }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div v-if="pre" class="card p-4 space-y-3">
+                <div class="flex items-start justify-between flex-wrap gap-3">
+                    <div class="flex items-center gap-2">
+                        <Container class="h-5 w-5 text-brand-600"/>
+                        <div>
+                            <div class="text-xs uppercase tracking-widest font-bold text-brand-600">Pre-liquidación</div>
+                            <div class="text-xs text-surface-500">Costo estimado puesto en Colombia, antes de pedir</div>
+                        </div>
+                    </div>
+                    <div class="text-right">
+                        <div class="text-xs text-surface-500 uppercase">Costo total</div>
+                        <div class="text-xl font-bold text-brand-600">{{ money(pre.totales.costo_total) }}</div>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                    <div><div class="text-[10px] uppercase text-surface-500">Cajas</div><b>{{ fmt(pre.totales.cajas, 0) }}</b></div>
+                    <div><div class="text-[10px] uppercase text-surface-500">Unidades</div><b>{{ fmt(pre.totales.unidades, 0) }}</b></div>
+                    <div>
+                        <div class="text-[10px] uppercase text-surface-500">Volumen</div>
+                        <b :class="pre.totales.ocupacion_pct > 100 ? 'text-red-600' : ''">{{ fmt(pre.totales.cbm) }} m³</b>
+                        <span class="text-surface-500"> de {{ fmt(pre.totales.capacidad_m3) }} ({{ fmt(pre.totales.ocupacion_pct, 1) }} %)</span>
+                    </div>
+                    <div><div class="text-[10px] uppercase text-surface-500">Valor</div><b>{{ orden.moneda }} {{ fmt(pre.totales.valor_moneda) }}</b></div>
+                </div>
+                <div class="h-2 rounded bg-surface-200 dark:bg-surface-800 overflow-hidden">
+                    <div class="h-full" :class="pre.totales.ocupacion_pct > 100 ? 'bg-red-500' : 'bg-emerald-500'"
+                         :style="{ width: Math.min(pre.totales.ocupacion_pct || 0, 100) + '%' }"></div>
+                </div>
+                <div class="text-xs text-surface-500">
+                    <span v-for="(d, i) in pre.por_destino" :key="d.empresa_id"><template v-if="i"> · </template><b>{{ d.nombre }}</b> {{ fmt(d.cajas, 0) }} cajas, {{ fmt(d.cbm) }} m³</span>
+                </div>
+                <div v-for="(a, i) in pre.avisos" :key="i" class="p-2 rounded bg-amber-50 dark:bg-amber-950/40 border-l-4 border-amber-500 text-xs text-amber-800 dark:text-amber-200">
+                    {{ a }}
+                </div>
+
+                <details class="text-sm" :open="orden.estado === 'borrador'">
+                    <summary class="cursor-pointer text-xs font-semibold text-surface-600 dark:text-surface-300">
+                        Parámetros {{ orden.estado === 'borrador' ? '(se pueden corregir mientras es borrador)' : '(fijos: la OC ya no es borrador)' }}
+                    </summary>
+                    <div class="grid grid-cols-2 md:grid-cols-5 gap-2 mt-2">
+                        <div v-for="[clave, etiqueta, paso] in camposParametros" :key="clave">
+                            <label class="text-[10px] font-semibold">{{ etiqueta }}</label>
+                            <input type="number" :step="paso" v-model.number="parametros[clave]" :disabled="orden.estado !== 'borrador'" class="input w-full text-sm"/>
+                        </div>
+                    </div>
+                    <div v-if="orden.estado === 'borrador'" class="flex justify-end mt-2">
+                        <button @click="recalcular" :disabled="recalculando" class="btn-primary text-sm">
+                            {{ recalculando ? 'Recalculando…' : 'Recalcular' }}
+                        </button>
+                    </div>
+                </details>
+
+                <div class="overflow-x-auto">
+                    <table v-tabla-movil class="w-full text-xs">
+                        <thead class="text-[10px] text-surface-500 uppercase border-b">
+                            <tr>
+                                <th class="text-left p-1">Referencia</th>
+                                <th class="text-right p-1">Cajas</th>
+                                <th class="text-right p-1">Uds/caja</th>
+                                <th class="text-right p-1">CBM caja</th>
+                                <th class="text-right p-1">China c/com.</th>
+                                <th class="text-right p-1">Flete</th>
+                                <th class="text-right p-1">Arancel</th>
+                                <th class="text-right p-1">IVA</th>
+                                <th class="text-right p-1">Gasto Col.</th>
+                                <th class="text-right p-1">Costo</th>
+                                <th class="text-right p-1">Precio {{ pre.parametros.divisor_precio_1 }}</th>
+                                <th class="text-right p-1">Precio {{ pre.parametros.divisor_precio_2 }}</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y">
+                            <tr v-for="l in pre.lineas" :key="l.id">
+                                <td class="p-1">{{ l.descripcion }}</td>
+                                <td class="p-1 text-right">{{ fmt(l.cajas, 0) }}</td>
+                                <td class="p-1 text-right">{{ fmt(l.unidades_por_caja, 0) }}</td>
+                                <td class="p-1 text-right">{{ fmt(l.cbm_caja, 4) }}</td>
+                                <template v-if="l.unidad">
+                                    <td class="p-1 text-right">{{ money(l.unidad.costo_china_comision) }}</td>
+                                    <td class="p-1 text-right">{{ money(l.unidad.flete) }}</td>
+                                    <td class="p-1 text-right">{{ money(l.unidad.arancel) }}</td>
+                                    <td class="p-1 text-right">{{ money(l.unidad.iva) }}</td>
+                                    <td class="p-1 text-right">{{ money(l.unidad.gasto_colombia) }}</td>
+                                    <td class="p-1 text-right font-bold">{{ money(l.unidad.costo) }}</td>
+                                    <td class="p-1 text-right">{{ money(l.unidad.precio_1) }}</td>
+                                    <td class="p-1 text-right">{{ money(l.unidad.precio_2) }}</td>
+                                </template>
+                                <td v-else colspan="8" class="p-1 text-amber-600">Sin unidades por caja o sin CBM</td>
                             </tr>
                         </tbody>
                     </table>

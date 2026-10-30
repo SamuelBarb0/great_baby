@@ -5,6 +5,7 @@ namespace App\Modules\Compras\Actions;
 use App\Modules\Compras\Enums\EstadoOrdenCompra;
 use App\Modules\Compras\Models\OrdenCompra;
 use App\Modules\Compras\Models\OrdenCompraItem;
+use App\Modules\Compras\Services\PreliquidarOrden;
 use Illuminate\Support\Facades\DB;
 use Lorisleiva\Actions\Concerns\AsAction;
 
@@ -35,6 +36,10 @@ class CrearOrdenCompra
                 'estado' => EstadoOrdenCompra::Borrador,
                 'creado_por' => auth()->id(),
                 'observaciones' => $data['observaciones'] ?? null,
+                // Sólo las importaciones se pre-liquidan; nacen con los de la última.
+                'parametros_preliquidacion' => ($data['tipo'] ?? 'nacional') === 'importacion'
+                    ? PreliquidarOrden::normalizar($data['parametros_preliquidacion'] ?? PreliquidarOrden::parametrosIniciales())
+                    : null,
             ]);
 
             foreach ($data['items'] as $it) {
@@ -47,6 +52,14 @@ class CrearOrdenCompra
                     'precio_unit' => $it['precio_unit'],
                     'descuento_pct' => $it['descuento_pct'] ?? 0,
                     'iva_pct' => $it['iva_pct'] ?? 19,
+                    'cajas' => $it['cajas'] ?? null,
+                    'unidades_por_caja' => $it['unidades_por_caja'] ?? null,
+                    'caja_largo_cm' => $it['caja_largo_cm'] ?? null,
+                    'caja_ancho_cm' => $it['caja_ancho_cm'] ?? null,
+                    'caja_alto_cm' => $it['caja_alto_cm'] ?? null,
+                    'cbm_caja' => $it['cbm_caja'] ?? null,
+                    'peso_caja_kg' => $it['peso_caja_kg'] ?? null,
+                    'empresa_destino_id' => $it['empresa_destino_id'] ?? null,
                 ]);
             }
 

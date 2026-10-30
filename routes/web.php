@@ -128,6 +128,11 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     Route::get('/compras/reporte', [\App\Http\Controllers\App\ComprasGestionController::class, 'reporte'])->middleware('throttle:30,1')->name('app.compras.reporte');
     Route::get('/compras/oc/nueva', [\App\Http\Controllers\App\ComprasGestionController::class, 'ocForm'])->name('app.compras.oc.nueva');
     Route::post('/compras/oc', [\App\Http\Controllers\App\ComprasGestionController::class, 'ocCrear'])->middleware('throttle:60,1')->name('app.compras.oc.crear');
+    // Compras slice 1 · orden de importación desde el Excel de Alejandro + pre-liquidación.
+    Route::post('/compras/oc/leer-excel', [\App\Http\Controllers\App\ComprasGestionController::class, 'ocLeerExcel'])->middleware('throttle:20,1')->name('app.compras.oc.leer-excel');
+    Route::post('/compras/oc/{orden}/parametros', [\App\Http\Controllers\App\ComprasGestionController::class, 'ocParametros'])->middleware('throttle:60,1')->name('app.compras.oc.parametros');
+    Route::get('/compras/calculadora', [\App\Http\Controllers\App\ComprasGestionController::class, 'calculadora'])->name('app.compras.calculadora');
+    Route::post('/compras/calculadora', [\App\Http\Controllers\App\ComprasGestionController::class, 'calcular'])->middleware('throttle:120,1')->name('app.compras.calcular');
     Route::get('/compras/oc/{orden}', [\App\Http\Controllers\App\ComprasGestionController::class, 'ocShow'])->name('app.compras.oc.show');
     Route::post('/compras/oc/{orden}/aprobar', [\App\Http\Controllers\App\ComprasGestionController::class, 'ocAprobar'])->middleware('throttle:60,1')->name('app.compras.oc.aprobar');
     Route::post('/compras/oc/{orden}/anular', [\App\Http\Controllers\App\ComprasGestionController::class, 'ocAnular'])->middleware('throttle:20,1')->name('app.compras.oc.anular');
@@ -743,6 +748,7 @@ Route::middleware(['web', 'auth'])->group(function () {
     Route::middleware(['auth', \App\Http\Middleware\SoloAracely::class])->group(function () {
         // Re-audit M2 R3 PATRÓN R (SEG-A6) · throttle en PDFs (DomPDF es CPU-heavy).
         Route::get('/compras/orden/{orden}/pdf', [OrdenCompraPdfController::class, 'pdf'])->middleware('throttle:20,1')->name('compras.orden.pdf');
+        Route::get('/compras/orden/{orden}/preliquidacion/pdf', [OrdenCompraPdfController::class, 'preliquidacion'])->middleware('throttle:20,1')->name('compras.orden.preliquidacion.pdf');
         Route::get('/compras/recepcion/{recepcion}/pdf', [RecepcionPdfController::class, 'pdf'])->middleware('throttle:20,1')->name('compras.recepcion.pdf');
         Route::get('/compras/importacion/{importacion}/pdf', [ImportacionPdfController::class, 'pdf'])->middleware('throttle:20,1')->name('compras.importacion.pdf');
         Route::get('/compras/plantilla/oc', [PlantillaImportOCController::class, 'descargar'])->name('compras.plantilla.oc');

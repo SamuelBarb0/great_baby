@@ -35,6 +35,7 @@ class OrdenCompra extends Model implements AuditableContract
         'anulado_at' => 'datetime',
         'estado' => EstadoOrdenCompra::class,
         'meta' => 'array',
+        'parametros_preliquidacion' => 'array',
         'tasa_cambio' => 'decimal:6',
         'subtotal' => 'decimal:2',
         'descuento' => 'decimal:2',
