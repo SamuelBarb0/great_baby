@@ -480,14 +480,29 @@ final class Permisos
 
     /**
      * ¿Ya se sembraron los permisos? Se consulta una vez por request.
+     *
      * Si la tabla no existe todavía (instalación a medio migrar) devolvemos
      * false y la autorización cae a la matriz en código.
+     *
+     * La respuesta se guarda en el CONTENEDOR, no en un `static`. Un `static`
+     * dura todo el proceso, y eso no es «una vez por request» donde el proceso
+     * atiende más de una: en Octane, y sobre todo en la suite, donde los mil y
+     * pico tests comparten proceso. Ahí el primer test que sembraba permisos
+     * dejaba la bandera en `true` para todos los siguientes, y los archivos
+     * que montan su usuario con sólo un rol —sin permisos— se caían en bloque
+     * según el ORDEN alfabético de las carpetas. El contenedor se rearma por
+     * request y por test, que es la vida que le corresponde a esta respuesta.
+     *
+     * En un worker de colas el contenedor también vive todo el proceso, y ahí
+     * está bien: la respuesta sólo cambia cuando corre el seeder, y eso pasa
+     * en un despliegue, que reinicia los workers de todos modos.
      */
     private static function permisosSembrados(): bool
     {
-        static $sembrados = null;
-        if ($sembrados !== null) {
-            return $sembrados;
+        $llave = 'permisos.sembrados';
+
+        if (app()->bound($llave)) {
+            return app($llave);
         }
 
         try {
@@ -496,6 +511,8 @@ final class Permisos
         } catch (\Throwable) {
             $sembrados = false;
         }
+
+        app()->instance($llave, $sembrados);
 
         return $sembrados;
     }
