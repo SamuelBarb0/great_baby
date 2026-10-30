@@ -11,6 +11,7 @@ use Illuminate\Http\Request;
 use Illuminate\Routing\Controllers\HasMiddleware;
 use Illuminate\Routing\Controllers\Middleware;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -65,6 +66,14 @@ class AsientosManualesController extends Controller implements HasMiddleware
                 'siigo_sync_at' => $a->siigo_sync_at?->format('Y-m-d H:i'),
                 'autor' => $a->autor?->name,
                 'creado' => $a->created_at?->diffForHumans(),
+                // Anular es por fila igual que aprobar: lo que ya está en
+                // SIIGO no se anula de este lado, y el botón no debe salir
+                // donde va a dar error.
+                'puedo_anular' => ! $a->anulado_at
+                    && $a->estado !== 'sincronizado'
+                    && ! $a->siigo_journal_id,
+                'anulado_at' => $a->anulado_at?->format('Y-m-d H:i'),
+                'motivo_anulacion' => $a->motivo_anulacion,
             ]),
             'kpis' => [
                 'total' => AsientoManual::count(),
@@ -72,8 +81,19 @@ class AsientosManualesController extends Controller implements HasMiddleware
                 'sin_siigo' => AsientoManual::where('estado', 'aprobado')->whereNull('siigo_journal_id')->count(),
                 'monto_mes' => (float) AsientoManual::whereMonth('fecha', now()->month)->whereYear('fecha', now()->year)->sum('valor_total'),
             ],
+            /*
+             * Sólo cuentas que admiten movimiento.
+             *
+             * Antes se ofrecía todo lo de nivel 4 o más, y el nivel 4 del PUC
+             * de Great Baby es en buena parte agrupador: 1110 BANCOS, 130505
+             * Clientes nacionales. Un asiento contra una agrupadora cuadra, se
+             * guarda, se aprueba y vuelve rechazado desde SIIGO, que sólo
+             * acepta auxiliares. Medido en producción el 2026-10-29: la 1110
+             * quedó con saldo en el balance general por esa vía.
+             */
             'cuentas' => PlanCuenta::query()
-                ->where('nivel', '>=', 4)
+                ->where('permite_movimiento', true)
+                ->where('activa', true)
                 ->orderBy('codigo')
                 ->limit(1000)
                 ->get(['codigo', 'nombre'])
@@ -91,11 +111,23 @@ class AsientosManualesController extends Controller implements HasMiddleware
             // contra una cuenta inventada: en los reportes salia como «Cuenta
             // fuera del plan» y el push a SIIGO reventaba despues, cuando ya
             // nadie recordaba el asiento. `GastosController` ya lo validaba asi.
-            'lineas.*.cuenta_puc' => ['required', 'string', 'max:20', 'exists:plan_cuentas,codigo'],
+            //
+            // Y tiene que ADMITIR MOVIMIENTO. Existir no alcanza: media tabla
+            // son agrupadoras (1110 BANCOS, 130505 Clientes nacionales) que
+            // cuadran igual y vuelven rechazadas desde SIIGO, que sólo acepta
+            // auxiliares. El 2026-10-29 la 1110 terminó con saldo en el
+            // balance general de producción por esta puerta.
+            'lineas.*.cuenta_puc' => ['required', 'string', 'max:20',
+                Rule::exists('plan_cuentas', 'codigo')
+                    ->where('permite_movimiento', true)
+                    ->where('activa', true)],
             'lineas.*.tercero_documento' => ['nullable', 'string', 'max:30'],
             'lineas.*.debe' => ['nullable', 'numeric', 'min:0'],
             'lineas.*.haber' => ['nullable', 'numeric', 'min:0'],
             'lineas.*.descripcion' => ['required', 'string', 'max:300'],
+        ], [
+            'lineas.*.cuenta_puc.exists' => 'Esa cuenta no existe en el plan, o es una agrupadora '
+                .'que no admite movimiento. Hay que usar la auxiliar que cuelga de ella.',
         ]);
 
         $totalDebe = 0;
@@ -208,6 +240,58 @@ class AsientosManualesController extends Controller implements HasMiddleware
         //   transacción externa rollbackea después del update.
         \DB::afterCommit(fn () => PushAsientoManualASiigo::dispatch($asientoManual->id));
         return back()->with('flash', ['type' => 'success', 'message' => "Asiento #{$asientoManual->id} aprobado · encolado a SIIGO."]);
+    }
+
+    /**
+     * Anular un asiento equivocado, con firma.
+     *
+     * El asiento no se borra: queda en la lista marcado `anulado` con su
+     * motivo, porque lo que hay que poder auditar seis meses después no es que
+     * desapareciera, es quién lo sacó y por qué. Lo que sale del balance son
+     * sus líneas, borradas suave — que es exactamente lo que el panel contable
+     * ya llama «anulado» en su casilla «Incluir asientos anulados».
+     *
+     * Un asiento que ya viajó a SIIGO no se toca acá: SIIGO es la contabilidad
+     * oficial y borrarlo sólo de este lado deja los dos libros diciendo cosas
+     * distintas. Ese caso se arregla con una nota contraria, no con un delete.
+     *
+     * No se pide cuatro ojos como en aprobar: el error típico es una cuenta
+     * mal tecleada que ve quien la tecleó, y exigir a un segundo para
+     * corregirlo deja el asiento malo vivo mientras tanto. Queda el rastro.
+     */
+    public function anular(Request $r, AsientoManual $asientoManual): RedirectResponse
+    {
+        $data = $r->validate([
+            'motivo' => ['required', 'string', 'min:10', 'max:500'],
+        ], [], ['motivo' => 'motivo']);
+
+        if ($asientoManual->anulado_at) {
+            return back()->with('flash', ['type' => 'error',
+                'message' => "El asiento #{$asientoManual->id} ya estaba anulado."]);
+        }
+
+        if ($asientoManual->estado === 'sincronizado' || $asientoManual->siigo_journal_id) {
+            return back()->with('flash', ['type' => 'error',
+                'message' => "El asiento #{$asientoManual->id} ya está en SIIGO. "
+                    .'Anularlo sólo acá dejaría los dos libros distintos: hay que registrar un asiento contrario.']);
+        }
+
+        DB::transaction(function () use ($asientoManual, $data, $r) {
+            \App\Modules\Cartera\Models\MovimientoContable::query()
+                ->where('origen_type', AsientoManual::class)
+                ->where('origen_id', $asientoManual->id)
+                ->delete();
+
+            $asientoManual->update([
+                'estado' => 'anulado',
+                'anulado_at' => now(),
+                'anulado_por' => $r->user()?->id,
+                'motivo_anulacion' => $data['motivo'],
+            ]);
+        });
+
+        return back()->with('flash', ['type' => 'success',
+            'message' => "Asiento #{$asientoManual->id} anulado · sus líneas salieron del balance."]);
     }
 
     public function reenviarSiigo(AsientoManual $asientoManual): RedirectResponse

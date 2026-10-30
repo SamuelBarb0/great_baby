@@ -3,7 +3,7 @@ import { ref, reactive, computed, watch } from 'vue';
 import { useBogotaDate } from '@/composables/useBogotaDate';
 import { Head, router } from '@inertiajs/vue3';
 import { useDebounceFn } from '@vueuse/core';
-import { BookOpen, Plus, Search, Cloud, CloudOff, RefreshCw, X, Check, Trash2, Link2 } from 'lucide-vue-next';
+import { BookOpen, Plus, Search, Cloud, CloudOff, RefreshCw, X, Check, Trash2, Link2, Ban } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import Paginacion from '@/Components/Paginacion.vue';
 import { useDestacar } from '@/composables/useDestacar';
@@ -137,6 +137,31 @@ const totalDebe = computed(() => nuevo.lineas.reduce((s, l) => s + (parseFloat(l
 const totalHaber = computed(() => nuevo.lineas.reduce((s, l) => s + (parseFloat(l.haber) || 0), 0));
 const cuadra = computed(() => totalDebe.value > 0 && Math.abs(totalDebe.value - totalHaber.value) < 0.01);
 
+/*
+ * Qué le falta al asiento para poder guardarse, dicho en voz alta.
+ *
+ * La descripción de cada línea es `required` en el HTML, así que el navegador
+ * bloqueaba el submit y mostraba su globo nativo... anclado a un campo que
+ * queda fuera del recuadro visible del modal. Desde afuera: clic en Guardar y
+ * no pasa NADA — ni petición de red, ni mensaje, ni pista. Se midió en
+ * producción el 2026-10-29.
+ *
+ * El cuadre ya se avisaba así; esto le da el mismo trato a lo demás.
+ */
+const faltaParaGuardar = computed(() => {
+    const sinCuenta = nuevo.lineas.filter(l => ! String(l.cuenta_puc ?? '').trim()).length;
+    if (sinCuenta) return `Falta la cuenta PUC en ${sinCuenta} línea(s).`;
+
+    const sinDescripcion = nuevo.lineas.filter(l => ! String(l.descripcion ?? '').trim()).length;
+    if (sinDescripcion) return `Falta la descripción en ${sinDescripcion} línea(s).`;
+
+    if (! String(nuevo.glosa ?? '').trim()) return 'Falta la glosa del asiento.';
+    if (String(nuevo.glosa).trim().length < 10) return 'La glosa necesita al menos 10 caracteres.';
+
+    if (! cuadra.value) return null;   // ya lo dice el «NO CUADRA» de los totales
+    return null;
+});
+
 const guardar = () => {
     if (procesando.value || !cuadra.value) return;
     procesando.value = true;
@@ -156,6 +181,27 @@ const aprobar = (a) => {
         onConfirmar: () => {
             modalConfirm.value = null;
             router.post(`/app/contabilidad/asientos-manuales/${a.id}/aprobar`, {}, { preserveScroll: true });
+        },
+    };
+};
+
+/*
+ * Anular un asiento equivocado.
+ *
+ * El mínimo de 10 caracteres es el mismo que valida el servidor: si el botón
+ * deja mandar «error», el 422 es la primera noticia de que faltaba explicar.
+ */
+const anular = (a) => {
+    modalConfirm.value = {
+        titulo: `¿Anular el asiento #${a.id}?`,
+        mensaje: `Sus ${a.lineas_count} línea(s) por ${money(a.valor_total)} salen del balance.\n`
+            + 'El asiento no se borra: queda en esta lista marcado «anulado», con tu nombre y el motivo.',
+        color: 'rose',
+        textoConfirmar: 'Anular',
+        pedirMotivo: { etiqueta: '¿Por qué se anula?', minimo: 10 },
+        onConfirmar: (motivo) => {
+            modalConfirm.value = null;
+            router.post(`/app/contabilidad/asientos-manuales/${a.id}/anular`, { motivo }, { preserveScroll: true });
         },
     };
 };
@@ -183,6 +229,7 @@ const badgeEstado = (e) => ({
     cuadrado: 'bg-blue-500/20 text-blue-700',
     aprobado: 'bg-amber-500/20 text-amber-700',
     sincronizado: 'bg-emerald-500/20 text-emerald-700',
+    anulado: 'bg-rose-500/20 text-rose-700 line-through',
 }[e] || 'bg-surface-500/20');
 </script>
 
@@ -231,6 +278,7 @@ const badgeEstado = (e) => ({
                         <option value="cuadrado">Cuadrado</option>
                         <option value="aprobado">Aprobado</option>
                         <option value="sincronizado">Sincronizado</option>
+                        <option value="anulado">Anulado</option>
                     </select>
                     <label class="flex items-center gap-1 text-xs whitespace-nowrap">
                         <input type="checkbox" v-model="sinSiigo" @change="filtrar" class="rounded"/> Solo sin SIIGO
@@ -276,6 +324,13 @@ const badgeEstado = (e) => ({
                                         title="Reenviar a SIIGO">
                                     <RefreshCw :class="['h-4 w-4', reintentando === a.id ? 'animate-spin' : '']"/>
                                 </button>
+                                <button v-if="a.puedo_anular" @click="anular(a)" class="text-rose-600 hover:text-rose-700 p-1"
+                                        title="Anular: sus líneas salen del balance y queda el motivo">
+                                    <Ban class="h-4 w-4"/>
+                                </button>
+                                <span v-else-if="a.anulado_at" class="text-[10px] text-surface-500" :title="a.motivo_anulacion">
+                                    anulado {{ a.anulado_at }}
+                                </span>
                             </td>
                         </tr>
                         <tr v-if="!asientos.data.length"><td colspan="9" class="p-6 text-center text-surface-500 text-sm">Sin asientos manuales.</td></tr>
@@ -419,9 +474,10 @@ const badgeEstado = (e) => ({
                             💡 Guardar deja el asiento en estado <b>cuadrado</b>. Requiere aprobación separada (botón <Check class="h-3 w-3 inline"/>) para envío a SIIGO.
                         </div>
 
-                        <div class="flex justify-end gap-2 pt-2 border-t">
+                        <div class="flex justify-end items-center gap-2 pt-2 border-t">
+                            <p v-if="faltaParaGuardar" class="text-xs text-amber-600 mr-auto">{{ faltaParaGuardar }}</p>
                             <button type="button" @click="modal = false" class="btn-ghost text-sm">Cancelar</button>
-                            <button type="submit" :disabled="procesando || !cuadra" class="btn-primary text-sm">
+                            <button type="submit" :disabled="procesando || !cuadra || !!faltaParaGuardar" class="btn-primary text-sm">
                                 {{ procesando ? 'Guardando…' : `Guardar ${cuadra ? '('+money(totalDebe)+')' : ''}` }}
                             </button>
                         </div>
