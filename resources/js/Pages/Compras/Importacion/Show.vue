@@ -1,13 +1,17 @@
 <script setup>
 import { ref, reactive, computed } from 'vue';
 import { Head, Link, router } from '@inertiajs/vue3';
-import { ArrowLeft, Package, Plus, Zap, AlertTriangle } from 'lucide-vue-next';
+import { ArrowLeft, Package, Plus, Zap, AlertTriangle, FileText, Paperclip, Upload, Trash2 } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import { useMoney } from '@/composables/useMoney';
 import { fechaCorta } from '@/composables/useFecha';
 import { useEscClose } from '@/composables/useEscClose';
 
-const props = defineProps({ importacion: { type: Object, required: true } });
+const props = defineProps({
+    importacion: { type: Object, required: true },
+    tipos_documento: { type: Object, default: () => ({}) },
+    puede_quitar_documentos: Boolean,
+});
 // Re-audit M2 UX-C2 · useMoney en vez de fmtCOP inline (paridad con Cartera/Contabilidad).
 const { money } = useMoney();
 
@@ -19,17 +23,21 @@ useEscClose(modalLiquidar);
 // Re-audit M2 PATRÓN L · alineado con backend `valor|cantidad|peso|volumen`.
 const gastoForm = reactive({
     concepto: 'flete', descripcion: '', moneda: 'COP', monto: 0,
-    capitalizable: true, metodo_prorrateo: 'valor',
+    // Alejandro reparte los gastos por los m³ de cada ítem (reunión 30-oct).
+    capitalizable: true, metodo_prorrateo: 'volumen',
     factura_proveedor: '', fecha: new Date().toISOString().slice(0, 10),
 });
 const procesando = ref(false);
+// Soporte del gasto (factura del flete, de la agencia…), opcional.
+const comprobante = ref(null);
 
 const agregarGasto = () => {
     if (procesando.value) return;
     procesando.value = true;
-    router.post(`/app/compras/importacion/${props.importacion.id}/gasto`, gastoForm, {
+    router.post(`/app/compras/importacion/${props.importacion.id}/gasto`, { ...gastoForm, comprobante: comprobante.value }, {
         preserveScroll: true,
-        onSuccess: () => { modalGasto.value = false; Object.assign(gastoForm, { monto: 0, descripcion: '', factura_proveedor: '' }); },
+        forceFormData: !!comprobante.value,
+        onSuccess: () => { modalGasto.value = false; comprobante.value = null; Object.assign(gastoForm, { monto: 0, descripcion: '', factura_proveedor: '' }); },
         onFinish: () => procesando.value = false,
     });
 };
@@ -51,6 +59,26 @@ const confirmarLiquidar = () => {
 const puedeAgregarGasto = computed(() => props.importacion.estado !== 'liquidada' && props.importacion.estado !== 'cerrada');
 const puedeLiquidar = computed(() => puedeAgregarGasto.value);
 const costoTotalEstimado = computed(() => (props.importacion.total_fob || 0) + (props.importacion.total_gastos || 0));
+
+// Documentos del contenedor: por tipo, la versión más nueva arriba.
+const docForm = reactive({ tipo: 'lista_empaque', archivo: null, notas: '' });
+const subiendoDoc = ref(false);
+const subirDocumento = () => {
+    if (!docForm.archivo || subiendoDoc.value) return;
+    subiendoDoc.value = true;
+    router.post(`/app/compras/importacion/${props.importacion.id}/documento`, { ...docForm }, {
+        preserveScroll: true, forceFormData: true,
+        onSuccess: () => { docForm.archivo = null; docForm.notas = ''; },
+        onFinish: () => subiendoDoc.value = false,
+    });
+};
+const quitarDocumento = (d) => router.delete(`/app/compras/importacion/documento/${d.id}`, { preserveScroll: true });
+const documentosPorTipo = computed(() => {
+    const grupos = {};
+    for (const d of props.importacion.documentos || []) (grupos[d.tipo] ||= []).push(d);
+    return Object.keys(props.tipos_documento).filter(t => grupos[t]).map(t => ({ tipo: t, label: props.tipos_documento[t], docs: grupos[t] }));
+});
+const kb = (b) => b >= 1048576 ? `${(b / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1024))} KB`;
 
 // Re-audit M2 UX-B10 · moneda ≠ COP se muestra "1,200 USD" en vez de "USD $1,200".
 const fmtMoneda = (monto, mon) => mon === 'COP'
@@ -127,6 +155,7 @@ const fmtMoneda = (monto, mon) => mon === 'COP'
                                 <th class="text-right p-2">Base COP</th>
                                 <th class="text-center p-2" :title="'Capitalizable: suma al costo del inventario'">Cap.</th>
                                 <th class="text-left p-2">Prorrateo</th>
+                                <th class="text-left p-2">Soporte</th>
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-surface-100 dark:divide-surface-800">
@@ -137,11 +166,50 @@ const fmtMoneda = (monto, mon) => mon === 'COP'
                                 <td class="p-2 text-right font-bold">{{ money(g.monto_base) }}</td>
                                 <td class="p-2 text-center">{{ g.capitalizable ? '✓' : '—' }}</td>
                                 <td class="p-2 text-xs">{{ g.metodo_prorrateo }}</td>
+                                <td class="p-2 text-xs">
+                                    <a v-for="c in g.comprobantes" :key="c.id" :href="`/app/compras/importacion/documento/${c.id}`" target="_blank" rel="noopener"
+                                       class="flex items-center gap-1 text-brand-600 hover:underline"><Paperclip class="h-3 w-3"/>{{ c.nombre }}</a>
+                                    <span v-if="!g.comprobantes?.length" class="text-surface-400">—</span>
+                                </td>
                             </tr>
                         </tbody>
                     </table>
                     <p v-else class="text-center py-4 text-surface-500 text-sm">Sin gastos aún.</p>
                 </div>
+            </div>
+
+            <!-- Documentos del contenedor -->
+            <div class="card p-4 space-y-3">
+                <div class="text-xs uppercase font-bold text-brand-600 flex items-center gap-1"><FileText class="h-3.5 w-3.5"/>Documentos ({{ importacion.documentos?.length || 0 }})</div>
+                <div class="grid grid-cols-1 md:grid-cols-[1fr_1fr_1fr_auto] gap-2 items-end">
+                    <div><label class="text-xs font-semibold">Tipo</label>
+                        <select v-model="docForm.tipo" class="input w-full">
+                            <option v-for="(label, clave) in tipos_documento" :key="clave" :value="clave">{{ label }}</option>
+                        </select>
+                    </div>
+                    <div><label class="text-xs font-semibold">Archivo</label>
+                        <input type="file" @change="docForm.archivo = $event.target.files[0] || null" class="input w-full text-xs"
+                               accept=".pdf,.xlsx,.xls,.csv,.doc,.docx,.jpg,.jpeg,.png,.webp,.zip"/>
+                    </div>
+                    <div><label class="text-xs font-semibold">Nota (opcional)</label><input v-model="docForm.notas" class="input w-full" maxlength="500"/></div>
+                    <button @click="subirDocumento" :disabled="!docForm.archivo || subiendoDoc" class="btn-primary text-sm disabled:opacity-50">
+                        <Upload class="h-4 w-4"/>{{ subiendoDoc ? 'Subiendo…' : 'Subir' }}
+                    </button>
+                </div>
+                <div v-if="documentosPorTipo.length" class="divide-y divide-surface-100 dark:divide-surface-800">
+                    <div v-for="g in documentosPorTipo" :key="g.tipo" class="py-2">
+                        <div class="text-sm font-semibold">{{ g.label }}</div>
+                        <div v-for="(d, i) in g.docs" :key="d.id" class="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm pl-2" :class="i > 0 ? 'text-surface-500' : ''">
+                            <a :href="`/app/compras/importacion/documento/${d.id}`" target="_blank" rel="noopener" class="text-brand-600 hover:underline flex items-center gap-1">
+                                <Paperclip class="h-3 w-3"/>{{ d.nombre }}
+                            </a>
+                            <span class="text-xs">v{{ d.version }}<span v-if="i === 0 && g.docs.length > 1"> · la más reciente</span> · {{ kb(d.tamano) }} · {{ d.subido_por }} · {{ d.subido_en }}</span>
+                            <span v-if="d.notas" class="text-xs italic">{{ d.notas }}</span>
+                            <button v-if="puede_quitar_documentos" @click="quitarDocumento(d)" class="text-red-600 hover:text-red-700" :aria-label="`Quitar ${d.nombre}`"><Trash2 class="h-3.5 w-3.5"/></button>
+                        </div>
+                    </div>
+                </div>
+                <p v-else class="text-sm text-surface-500">Sin documentos aún. Suba la prelista, el BL, la lista de empaque, la DUTA… a medida que lleguen.</p>
             </div>
 
             <div v-if="importacion.lineas.length" class="card p-4">
@@ -230,14 +298,18 @@ const fmtMoneda = (monto, mon) => mon === 'COP'
                     </div>
                     <div><label class="text-xs font-semibold">Método prorrateo</label>
                         <select v-model="gastoForm.metodo_prorrateo" class="input w-full">
+                            <option value="volumen">Por volumen (m³ de cada ítem)</option>
                             <option value="valor">Por valor FOB</option>
                             <option value="cantidad">Por cantidad</option>
                             <option value="peso">Por peso</option>
-                            <option value="volumen">Por volumen</option>
                         </select>
                     </div>
                     <div><label class="text-xs font-semibold">Factura</label><input v-model="gastoForm.factura_proveedor" class="input w-full"/></div>
                     <div><label class="text-xs font-semibold">Descripción</label><input v-model="gastoForm.descripcion" class="input w-full"/></div>
+                    <div><label class="text-xs font-semibold">Comprobante (opcional)</label>
+                        <input type="file" @change="comprobante = $event.target.files[0] || null" class="input w-full text-xs"
+                               accept=".pdf,.xlsx,.xls,.csv,.doc,.docx,.jpg,.jpeg,.png,.webp,.zip"/>
+                    </div>
                     <label class="flex items-center gap-2 text-sm cursor-pointer" :title="'Capitalizable: suma al costo del inventario. Los no capitalizables van a gastos operacionales.'">
                         <input type="checkbox" v-model="gastoForm.capitalizable"/> Capitalizable (suma al costo)
                     </label>

@@ -48,14 +48,20 @@ class LiquidarImportacion
 
             $importacion->loadMissing(['ordenes.items', 'gastos']);
 
+            // Volumen y peso de CADA ítem. Antes cada ítem tomaba el m³ y el peso
+            // de su orden entera, así que en una orden de 15 líneas el producto
+            // pequeño cargaba el mismo flete que el grande. Alejandro reparte los
+            // gastos «en los metros cúbicos» de cada ítem (reunión 30-oct).
             $items = collect();
             $itemsBodega = [];
             foreach ($importacion->ordenes as $orden) {
+                $volumenes = $this->repartirPorItem($orden->items, (float) ($orden->pivot->volumen_m3 ?? 0), 'cbm_caja');
+                $pesos = $this->repartirPorItem($orden->items, (float) ($orden->pivot->peso_kg ?? 0), 'peso_caja_kg');
                 foreach ($orden->items as $item) {
                     $items->push([
                         'orden_item' => $item,
-                        'peso_pivot' => (float) ($orden->pivot->peso_kg ?? 0),
-                        'volumen_pivot' => (float) ($orden->pivot->volumen_m3 ?? 0),
+                        'peso_pivot' => $pesos[$item->id],
+                        'volumen_pivot' => $volumenes[$item->id],
                     ]);
                     $itemsBodega[$item->id] = $orden->bodega_id;
                 }
@@ -218,6 +224,40 @@ class LiquidarImportacion
 
             return $importacion->fresh(['ordenes', 'gastos', 'lineas']);
         });
+    }
+
+    /**
+     * Volumen (o peso) de cada ítem de una orden: cajas × medida por caja
+     * cuando la línea la trae. Lo que falte para llegar al total de la orden en
+     * el contenedor se reparte entre los ítems sin medida según su valor, así
+     * una orden vieja (sin cajas) sigue sumando lo mismo que antes.
+     *
+     * @param  \Illuminate\Support\Collection<int, OrdenCompraItem>  $items
+     * @return array<int, float>  orden_item_id => m³ (o kg)
+     */
+    protected function repartirPorItem($items, float $totalOrden, string $porCaja): array
+    {
+        $medidos = [];
+        foreach ($items as $item) {
+            if ((float) $item->cajas > 0 && (float) $item->{$porCaja} > 0) {
+                $medidos[$item->id] = (float) $item->cajas * (float) $item->{$porCaja};
+            }
+        }
+
+        $sinMedida = $items->reject(fn ($i) => isset($medidos[$i->id]));
+        $resto = max(0.0, $totalOrden - array_sum($medidos));
+        $valorSinMedida = (float) $sinMedida->sum(fn ($i) => (float) $i->subtotal);
+
+        $resultado = $medidos;
+        foreach ($sinMedida as $item) {
+            $resultado[$item->id] = match (true) {
+                $resto <= 0 => 0.0,
+                $valorSinMedida > 0 => $resto * (float) $item->subtotal / $valorSinMedida,
+                default => $resto / $sinMedida->count(),
+            };
+        }
+
+        return $resultado;
     }
 
     /**

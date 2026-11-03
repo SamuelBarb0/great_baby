@@ -629,8 +629,11 @@ class ComprasGestionController extends Controller implements HasMiddleware
 
     public function importacionShow(int $importacion): Response
     {
-        $imp = Importacion::with(['lineas', 'gastos'])->findOrFail($importacion);
+        $imp = Importacion::with(['lineas', 'gastos', 'documentos.autor:id,name'])->findOrFail($importacion);
+        $comprobantes = $imp->documentos->whereNotNull('gasto_id')->groupBy('gasto_id');
         return Inertia::render('Compras/Importacion/Show', [
+            'tipos_documento' => array_diff_key(\App\Modules\Compras\Models\ImportacionDocumento::TIPOS, ['comprobante_gasto' => true]),
+            'puede_quitar_documentos' => (bool) auth()->user()?->esAracely(),
             'importacion' => [
                 'id' => $imp->id, 'numero' => $imp->numero,
                 'contenedor' => $imp->contenedor, 'bl_awb' => $imp->bl_awb,
@@ -658,7 +661,13 @@ class ComprasGestionController extends Controller implements HasMiddleware
                     'capitalizable' => (bool) $g->capitalizable,
                     'metodo_prorrateo' => $g->metodo_prorrateo,
                     'fecha' => $g->fecha?->toDateString(),
+                    'comprobantes' => ($comprobantes[$g->id] ?? collect())->map(fn ($d) => ['id' => $d->id, 'nombre' => $d->nombre])->values()->all(),
                 ])->all(),
+                'documentos' => $imp->documentos->whereNull('gasto_id')->sortByDesc('version')->map(fn ($d) => [
+                    'id' => $d->id, 'tipo' => $d->tipo, 'nombre' => $d->nombre, 'version' => $d->version,
+                    'notas' => $d->notas, 'tamano' => (int) $d->tamano,
+                    'subido_por' => $d->autor?->name, 'subido_en' => $d->created_at?->format('Y-m-d H:i'),
+                ])->values()->all(),
                 'total_gastos' => (float) $imp->gastos->sum('monto_base'),
                 'total_fob' => (float) $imp->lineas->sum('costo_fob_total'),
             ],
@@ -711,7 +720,11 @@ class ComprasGestionController extends Controller implements HasMiddleware
             'factura_proveedor' => ['nullable', 'string', 'max:100'],
             'fecha' => ['required', 'date'],
             'proveedor_id' => ['nullable', 'integer'],
+            // El soporte del gasto (factura del flete, de la agencia…): lo pidió
+            // Compras para contabilidad (reunión del 21-oct).
+            'comprobante' => ['nullable', 'file', 'max:20480', 'mimes:'.ImportacionDocumentosController::MIMES],
         ]);
+        unset($data['comprobante']);
         $imp = Importacion::findOrFail($importacion);
         abort_if(
             $imp->estado === EstadoImportacion::Liquidada,
@@ -725,7 +738,10 @@ class ComprasGestionController extends Controller implements HasMiddleware
             abort(422, "Falta definir la tasa de cambio de la importación (moneda={$data['moneda']}). Edítala y agrega TRM antes de agregar gastos en moneda extranjera.");
         }
         $data['monto_base'] = $data['monto'] * (float) ($imp->tasa_cambio_liquidacion ?: 1);
-        $imp->gastos()->create($data);
+        $gasto = $imp->gastos()->create($data);
+        if ($r->hasFile('comprobante')) {
+            \App\Modules\Compras\Actions\GuardarDocumentoImportacion::run($imp, $r->file('comprobante'), 'comprobante_gasto', $gasto);
+        }
         return back()->with('success', 'Gasto agregado.');
     }
 

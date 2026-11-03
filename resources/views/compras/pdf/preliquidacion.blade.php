@@ -106,7 +106,7 @@ td.right, th.right { text-align: right; }
                     @if($l['unidad'])
                         <td class="right">{{ $cop($l['unidad']['costo_china_comision']) }}</td>
                         <td class="right">{{ $cop($l['unidad']['flete']) }}</td>
-                        <td class="right">{{ $cop($l['unidad']['arancel']) }}</td>
+                        <td class="right">{{ $cop($l['unidad']['arancel']) }}@if ($l['arancel_del_producto'])<br><small>{{ $num($l['arancel_pct']) }} % prod.</small>@endif</td>
                         <td class="right">{{ $cop($l['unidad']['iva']) }}</td>
                         <td class="right">{{ $cop($l['unidad']['gasto_colombia']) }}</td>
                         <td class="right"><b>{{ $cop($l['unidad']['costo']) }}</b></td>

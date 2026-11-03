@@ -52,6 +52,7 @@ const form = useForm({
     factor_conversion: props.producto?.factor_conversion || null,
     posicion_arancelaria: props.producto?.posicion_arancelaria || '',
     reposicion_max_dias: props.producto?.reposicion_max_dias || null,
+    arancel_pct: props.producto?.arancel_pct ?? null,
     proteger_precio: props.producto?.proteger_precio ?? false,
     maneja_lotes: props.producto?.maneja_lotes ?? false,
     maneja_seriales: props.producto?.maneja_seriales ?? false,
@@ -806,6 +807,10 @@ const matrizDisenos = ref([]);
                     <div>
                         <label class="text-xs font-semibold text-surface-600">Posición arancelaria</label>
                         <input v-model="form.posicion_arancelaria" class="input w-full font-mono" maxlength="20" placeholder="Ej: 6111.20.00.00"/>
+                    </div>
+                    <div>
+                        <label class="text-xs font-semibold text-surface-600">Arancel (%)</label>
+                        <input v-model="form.arancel_pct" type="number" min="0" max="100" step="0.01" class="input w-full" placeholder="Vacío = el de la orden"/>
                     </div>
                     <div>
                         <label class="text-xs font-semibold text-surface-600">Tiempo reposición máx (días)</label>

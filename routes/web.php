@@ -223,6 +223,10 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     Route::get('/compras/importacion/{importacion}', [\App\Http\Controllers\App\ComprasGestionController::class, 'importacionShow'])->name('app.compras.importacion.show');
     Route::post('/compras/importacion', [\App\Http\Controllers\App\ComprasGestionController::class, 'importacionCrear'])->middleware('throttle:60,1')->name('app.compras.importacion.crear');
     Route::post('/compras/importacion/{importacion}/gasto', [\App\Http\Controllers\App\ComprasGestionController::class, 'importacionGastoAgregar'])->middleware('throttle:60,1')->name('app.compras.importacion.gasto');
+    // Documentos del contenedor (BL, listas de empaque, DUTA…) y comprobantes de gasto.
+    Route::post('/compras/importacion/{importacion}/documento', [\App\Http\Controllers\App\ImportacionDocumentosController::class, 'subir'])->middleware('throttle:60,1')->name('app.compras.importacion.documento');
+    Route::get('/compras/importacion/documento/{documento}', [\App\Http\Controllers\App\ImportacionDocumentosController::class, 'descargar'])->name('app.compras.importacion.documento.ver');
+    Route::delete('/compras/importacion/documento/{documento}', [\App\Http\Controllers\App\ImportacionDocumentosController::class, 'eliminar'])->name('app.compras.importacion.documento.quitar');
     Route::post('/compras/importacion/{importacion}/liquidar', [\App\Http\Controllers\App\ComprasGestionController::class, 'importacionLiquidar'])->middleware('throttle:20,1')->name('app.compras.importacion.liquidar');
     Route::get('/inventario', [\App\Http\Controllers\App\InventarioController::class, 'index'])->name('app.inventario.index');
     // Importador Excel del cliente Aracely (formato REPORTE · productos agregados)

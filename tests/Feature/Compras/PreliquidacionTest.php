@@ -264,3 +264,20 @@ it('rechaza un Excel sin la fila de encabezados', function () {
         ->toThrow(RuntimeException::class, 'No encontré la fila de encabezados');
     @unlink($ruta);
 });
+
+it('usa el arancel del producto cuando el maestro lo tiene, y el de la orden si no', function () {
+    // Pedido de Liz (30-oct): el arancel vive en el maestro del producto.
+    $conArancel = Producto::create(['referencia' => 'CA-0311', 'nombre' => 'Coche CA-0311', 'activo' => true, 'arancel_pct' => 15]);
+    $orden = ocImportacion($this, lineasTopwin(['producto_id' => $conArancel->id]));
+
+    $pre = app(PreliquidarOrden::class)->handle($orden->fresh());
+    [$conMaestro, $sinMaestro] = $pre['lineas'];
+
+    expect($conMaestro['arancel_pct'])->toBe(15.0)
+        ->and($conMaestro['arancel_del_producto'])->toBeTrue()
+        ->and($sinMaestro['arancel_pct'])->toBe(7.5)
+        ->and($sinMaestro['arancel_del_producto'])->toBeFalse()
+        // arancel = (flete + costo China) × 15 %
+        ->and($conMaestro['unidad']['arancel'])
+        ->toBe(round(($conMaestro['unidad']['flete'] + $conMaestro['unidad']['costo_china']) * 0.15, 2));
+});

@@ -145,7 +145,7 @@ class PreliquidarOrden
      */
     public function handle(OrdenCompra $orden): array
     {
-        $orden->loadMissing('items');
+        $orden->loadMissing('items.producto:id,arancel_pct');
         $p = self::normalizar($orden->parametros_preliquidacion);
         $tasa = (float) $orden->tasa_cambio;
 
@@ -160,7 +160,12 @@ class PreliquidarOrden
             /** @var OrdenCompraItem $item */
             $cajas = (int) $item->cajas;
             $cbm = $item->cbmTotal();
-            $unidad = $this->porUnidad($p, $tasa, (float) $item->precio_unit, (int) $item->unidades_por_caja, (float) $item->cbm_caja);
+            // El arancel del producto (maestro, pedido de Liz) manda sobre el
+            // promedio de la orden; sin él, se usa el de la orden.
+            $pLinea = $item->producto?->arancel_pct !== null
+                ? ['arancel_pct' => (float) $item->producto->arancel_pct] + $p
+                : $p;
+            $unidad = $this->porUnidad($pLinea, $tasa, (float) $item->precio_unit, (int) $item->unidades_por_caja, (float) $item->cbm_caja);
             $cantidad = (float) $item->cantidad;
             $valor = $cantidad * (float) $item->precio_unit;
 
@@ -175,6 +180,8 @@ class PreliquidarOrden
                 'precio_unit' => (float) $item->precio_unit,
                 'cbm_caja' => (float) $item->cbm_caja,
                 'cbm_total' => round($cbm, 6),
+                'arancel_pct' => $pLinea['arancel_pct'],
+                'arancel_del_producto' => $pLinea !== $p,
                 'valor_moneda' => round($valor, 2),
                 'unidad' => $unidad ? array_map(fn ($v) => round($v, 2), $unidad) : null,
                 'costo_total' => $unidad ? round($unidad['costo'] * $cantidad, 2) : null,

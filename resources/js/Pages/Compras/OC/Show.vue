@@ -275,7 +275,9 @@ const reenviarRecepcion = (rec) => {
                                 <template v-if="l.unidad">
                                     <td class="p-1 text-right">{{ money(l.unidad.costo_china_comision) }}</td>
                                     <td class="p-1 text-right">{{ money(l.unidad.flete) }}</td>
-                                    <td class="p-1 text-right">{{ money(l.unidad.arancel) }}</td>
+                                    <td class="p-1 text-right" :title="l.arancel_del_producto ? `Arancel del producto: ${l.arancel_pct} %` : `Arancel de la orden: ${l.arancel_pct} %`">
+                                        {{ money(l.unidad.arancel) }}<span v-if="l.arancel_del_producto" class="block text-[10px] text-brand-600">{{ l.arancel_pct }} % del producto</span>
+                                    </td>
                                     <td class="p-1 text-right">{{ money(l.unidad.iva) }}</td>
                                     <td class="p-1 text-right">{{ money(l.unidad.gasto_colombia) }}</td>
                                     <td class="p-1 text-right font-bold">{{ money(l.unidad.costo) }}</td>

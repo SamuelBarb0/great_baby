@@ -36,7 +36,7 @@ class Producto extends Model implements AuditableContract, HasMedia
         'desglose_stock', 'stock_directo',
         // Sprint 4 · G.1 · Campos SIIGO Kardex Referencias
         'linea_id', 'grupo_id', 'subgrupo_id', 'clase_id',
-        'posicion_arancelaria', 'unidad_compra_id', 'factor_conversion',
+        'posicion_arancelaria', 'arancel_pct', 'unidad_compra_id', 'factor_conversion',
         'rentabilidad_pct', 'reposicion_max_dias', 'descuento_default_pct',
         'descripcion_ampliada', 'ficha_tecnica',
         'proteger_precio', 'maneja_lotes', 'maneja_seriales', 'es_estadistico',
