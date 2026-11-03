@@ -37,6 +37,14 @@ const enviar = (url, datos) => {
     router.post(url, datos, { preserveScroll: true, onFinish: () => { enviando.value = false; } });
 };
 const guardarMotivo = (f) => enviar(`${base.value}/empaque/motivo`, { referencia: f.referencia, motivo: motivos[f.referencia] });
+// Lo escrito y todavía sin guardar: lo que cambió y ya es un motivo válido.
+const porGuardar = computed(() => props.filas.filter((f) => {
+    const m = (motivos[f.referencia] || '').trim();
+    return f.estado !== 'igual' && m.length >= 3 && m !== (f.motivo || '');
+}));
+const guardarTodos = () => enviar(`${base.value}/empaque/motivos`, {
+    motivos: porGuardar.value.map((f) => ({ referencia: f.referencia, motivo: motivos[f.referencia].trim() })),
+});
 const vincular = (f) => enviar(`${base.value}/empaque/vincular`, { referencia: f.referencia, orden_item_id: vinculos[f.referencia] });
 </script>
 
@@ -58,6 +66,12 @@ const vincular = (f) => enviar(`${base.value}/empaque/vincular`, { referencia: f
                 <div class="card p-4"><div class="text-xs uppercase text-surface-500">Cajas en la lista</div><div class="text-xl font-bold mt-1">{{ num(resumen.cajas_lista) }}</div></div>
                 <div class="card p-4"><div class="text-xs uppercase text-surface-500">Volumen y peso</div><div class="text-sm font-bold mt-1">{{ num(resumen.cbm_lista) }} m³ · {{ num(resumen.peso_lista) }} kg</div></div>
                 <div class="card p-4" :class="resumen.sin_motivo > 0 ? 'ring-2 ring-amber-500' : ''"><div class="text-xs uppercase text-surface-500">Diferencias sin motivo</div><div class="text-xl font-bold mt-1">{{ resumen.sin_motivo }} de {{ resumen.diferencias }}</div></div>
+            </div>
+
+            <div class="flex justify-end">
+                <button @click="guardarTodos" :disabled="!porGuardar.length || enviando" class="btn-primary text-sm disabled:opacity-50">
+                    {{ enviando ? 'Guardando…' : `Guardar todos (${porGuardar.length})` }}
+                </button>
             </div>
 
             <div class="card overflow-hidden overflow-x-auto">

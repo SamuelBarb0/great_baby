@@ -15,6 +15,7 @@ use App\Modules\Dropi\Models\ProductoReferencia;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 use Inertia\Response;
 use InvalidArgumentException;
@@ -137,6 +138,25 @@ class HerramientasComprasController extends Controller
         $comparador->guardarMotivo($importacion, $data['referencia'], $data['motivo'], $r->user()?->id);
 
         return back()->with('success', 'Motivo guardado.');
+    }
+
+    /** Todos los motivos escritos de una vez: una lista real trae decenas de diferencias. */
+    public function guardarMotivos(Request $r, Importacion $importacion, ComparadorEmpaque $comparador): RedirectResponse
+    {
+        abort_unless(Permisos::puede($r->user(), 'compras_importacion'), 403);
+        $data = $r->validate([
+            'motivos' => ['required', 'array', 'min:1', 'max:3000'],
+            'motivos.*.referencia' => ['required', 'string', 'max:100'],
+            'motivos.*.motivo' => ['required', 'string', 'min:3', 'max:500'],
+        ]);
+
+        DB::transaction(function () use ($data, $importacion, $comparador, $r) {
+            foreach ($data['motivos'] as $m) {
+                $comparador->guardarMotivo($importacion, $m['referencia'], $m['motivo'], $r->user()?->id);
+            }
+        });
+
+        return back()->with('success', count($data['motivos']).' motivo(s) guardados.');
     }
 
     public function vincularReferencia(Request $r, Importacion $importacion, ComparadorEmpaque $comparador): RedirectResponse

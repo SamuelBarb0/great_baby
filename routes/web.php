@@ -289,6 +289,7 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     Route::delete('/catalogo/referencia/{referencia}', [\App\Http\Controllers\App\HerramientasComprasController::class, 'quitarReferencia'])->middleware('throttle:30,1')->name('app.catalogo.referencia.quitar');
     Route::get('/compras/importacion/{importacion}/documento/{documento}/comparar', [\App\Http\Controllers\App\HerramientasComprasController::class, 'comparacion'])->middleware('throttle:30,1')->name('app.compras.importacion.comparar');
     Route::post('/compras/importacion/{importacion}/empaque/motivo', [\App\Http\Controllers\App\HerramientasComprasController::class, 'guardarMotivo'])->middleware('throttle:60,1')->name('app.compras.importacion.empaque.motivo');
+    Route::post('/compras/importacion/{importacion}/empaque/motivos', [\App\Http\Controllers\App\HerramientasComprasController::class, 'guardarMotivos'])->middleware('throttle:60,1')->name('app.compras.importacion.empaque.motivos');
     Route::post('/compras/importacion/{importacion}/empaque/vincular', [\App\Http\Controllers\App\HerramientasComprasController::class, 'vincularReferencia'])->middleware('throttle:30,1')->name('app.compras.importacion.empaque.vincular');
     // Pagos a China: vencimientos, seguimiento y lo que hay que tener listo cada semana.
     Route::get('/compras/pagos-exterior', [\App\Http\Controllers\App\PagosExteriorController::class, 'index'])->name('app.compras.pagos-exterior');

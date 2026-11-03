@@ -205,6 +205,28 @@ it('el motivo queda guardado, y unir una referencia la lee como la misma', funct
             ->where('filas.0.como_llego', 'TW-77'));
 });
 
+it('guarda todos los motivos de una vez, y si uno no vale no guarda ninguno', function () {
+    $orden = ($this->orden)([['descripcion' => 'AB-1 · x'], ['descripcion' => 'AB-2 · y']]);
+    [$imp, $doc] = ($this->comparar)($orden, [['ZZ-9', 'otra', 2, 10, 20, 0.5, 1]]);
+    $url = "/app/compras/importacion/{$imp->id}/empaque/motivos";
+
+    $this->actingAs($this->jorge)->post($url, ['motivos' => [
+        ['referencia' => 'AB-1', 'motivo' => 'No la cargaron'],
+        ['referencia' => 'AB-2', 'motivo' => 'x'],
+    ]])->assertSessionHasErrors('motivos.1.motivo');
+    expect(Illuminate\Support\Facades\DB::table('compras_diferencias_empaque')->count())->toBe(0);
+
+    $this->actingAs($this->jorge)->post($url, ['motivos' => [
+        ['referencia' => 'AB-1', 'motivo' => 'No la cargaron'],
+        ['referencia' => 'AB-2', 'motivo' => 'Se agotó en la fábrica'],
+    ]])->assertSessionHas('success');
+
+    $this->actingAs($this->jorge)->get("/app/compras/importacion/{$imp->id}/documento/{$doc->id}/comparar")
+        ->assertInertia(fn (Assert $p) => $p->where('resumen.diferencias', 3)->where('resumen.sin_motivo', 1));
+
+    $this->actingAs($this->vendedor)->post($url, ['motivos' => [['referencia' => 'AB-1', 'motivo' => 'Otro motivo']]])->assertForbidden();
+});
+
 it('no une con una línea de otro contenedor', function () {
     $orden = ($this->orden)([['descripcion' => 'AB-3 · x']]);
     $ajena = ($this->orden)([['descripcion' => 'AB-4 · y']]);
