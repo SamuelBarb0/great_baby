@@ -1,8 +1,10 @@
 <script setup>
-import { ref, reactive, computed } from 'vue';
+import { ref, reactive, computed, watch } from 'vue';
 import { Head, router } from '@inertiajs/vue3';
 import { Receipt, Plus, Pencil, Trash2, X } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
+import PestanasSeccion from '@/Components/PestanasSeccion.vue';
+import { pestanasConfigContable } from '@/composables/usePestanasContables';
 import AppConfirmModal from '@/Components/AppConfirmModal.vue';
 
 const props = defineProps({ reglas: { type: Array, required: true } });
@@ -13,16 +15,34 @@ const modalConfirm = ref(null);
 
 const tab = ref('retefuente');
 const modal = ref(false);
-const form = reactive({ id: null, tipo: 'retefuente', concepto: '', ciudad: '', base_minima: 0, tarifa_pct: 0, cuenta_puc: '', siigo_tax_id: null, activa: true, notas: '' });
+
+/*
+ * Una autorretención se practica al EMITIR una factura de venta, no al pagar
+ * una compra, y mueve dos cuentas: la 23 de pasivo (lo que se le debe a la
+ * DIAN) contra la 13 de activo (el anticipo a favor). Por eso el formulario
+ * cambia según el tipo.
+ */
+const esAutorretencion = (t) => t === 'autorrenta' || t === 'autorreteica';
+
+const formVacio = (tipo) => ({
+    id: null, tipo, ambito: esAutorretencion(tipo) ? 'ventas' : 'compras',
+    concepto: '', ciudad: '', base_minima: 0, tarifa_pct: 0,
+    cuenta_puc: '', cuenta_puc_contrapartida: '',
+    siigo_tax_id: null, activa: true, notas: '',
+});
+
+const form = reactive(formVacio('retefuente'));
 const procesando = ref(false);
 
 const filtradas = computed(() => props.reglas.filter(r => r.tipo === tab.value));
 
 const abrir = (regla = null) => {
-    if (regla) Object.assign(form, regla);
-    else Object.assign(form, { id: null, tipo: tab.value, concepto: '', ciudad: '', base_minima: 0, tarifa_pct: 0, cuenta_puc: '', siigo_tax_id: null, activa: true, notas: '' });
+    Object.assign(form, regla ? { ...formVacio(regla.tipo), ...regla } : formVacio(tab.value));
     modal.value = true;
 };
+
+// Al cambiar el tipo dentro del formulario, el ámbito se acomoda solo.
+watch(() => form.tipo, (t) => { form.ambito = esAutorretencion(t) ? 'ventas' : 'compras'; });
 
 const guardar = () => {
     if (procesando.value) return;
@@ -47,25 +67,103 @@ const eliminar = (id) => {
     };
 };
 
-const tabs = [
-    { key: 'retefuente', label: `Retefuente (${props.reglas.filter(r => r.tipo === 'retefuente').length})` },
-    { key: 'reteica', label: `Reteica (${props.reglas.filter(r => r.tipo === 'reteica').length})` },
-    { key: 'reteiva', label: `Reteiva (${props.reglas.filter(r => r.tipo === 'reteiva').length})` },
-];
+const alternando = ref(null);
+
+/*
+ * Lo que le falta a la regla para poder prenderse — el mismo seguro que el
+ * servidor, repetido acá a propósito.
+ *
+ * De las 33 reglas del catálogo de la DIAN, 11 entraron sin cuenta del PUC. Si
+ * el interruptor se ofreciera igual para todas, un tercio de los clics se
+ * comería un error en vez de hacer algo: ofrecer y después negar es el defecto
+ * que este ERP arrastra. Acá el interruptor se ve apagado y dice por qué, y el
+ * «⚠ falta cuenta» de al lado abre el formulario para completarla.
+ */
+const faltaParaActivar = (r) => {
+    if (! r.cuenta_puc) return 'Falta la cuenta del PUC: sin ella el asiento de la retención sale mal.';
+    if (esAutorretencion(r.tipo) && ! r.cuenta_puc_contrapartida) {
+        return 'Falta la cuenta de activo (13…): una autorretención mueve dos cuentas.';
+    }
+    return null;
+};
+
+/*
+ * Apagar nunca se bloquea: una regla incompleta que quedó prendida tiene que
+ * poder apagarse, que es justo cuando más urge.
+ */
+const bloqueado = (r) => ! r.activa && !! faltaParaActivar(r);
+
+const tituloInterruptor = (r) => {
+    if (r.activa) return 'Está activa · clic para apagarla';
+    return faltaParaActivar(r) || 'Está apagada · clic para activarla';
+};
+
+/*
+ * El estado nuevo no se manda: lo calcula el servidor sobre lo que hay guardado.
+ * Si esta pantalla quedó abierta un rato, un `activa` enviado desde acá pisaría
+ * con lo viejo lo que alguien más haya cambiado.
+ */
+const alternar = (r) => {
+    if (alternando.value || bloqueado(r)) return;
+    alternando.value = r.id;
+    router.post(`/app/cartera/retenciones/${r.id}/activa`, {}, {
+        preserveScroll: true,
+        onFinish: () => { alternando.value = null; },
+    });
+};
+
+const cuenta = (t) => props.reglas.filter(r => r.tipo === t).length;
+const activas = computed(() => filtradas.value.filter(r => r.activa).length);
+
+/*
+ * Las pestañas se recalculan: era un array plano, armado una vez en el setup
+ * con el número ya cocido dentro del texto. Crear una regla la agregaba a la
+ * tabla pero la pestaña seguía diciendo «(0)» hasta recargar la página, que
+ * es justo cuando el contador importa —se acaba de crear algo y no aparece—.
+ */
+const tabs = computed(() => [
+    { key: 'retefuente', label: `Retefuente (${cuenta('retefuente')})` },
+    { key: 'reteica', label: `Reteica (${cuenta('reteica')})` },
+    { key: 'reteiva', label: `Reteiva (${cuenta('reteiva')})` },
+    // Las dos que pidió la contadora: se practican al emitir la factura, no al
+    // pagar una compra.
+    { key: 'autorrenta', label: `Autorrenta (${cuenta('autorrenta')})` },
+    { key: 'autorreteica', label: `Autorreteica (${cuenta('autorreteica')})` },
+]);
+
+/*
+ * La tarifa en formato colombiano.
+ *
+ * El valor viene de un `decimal:3`, así que 2,5% llegaba como «2.500» y se
+ * pintaba «2.500%» — que acá se lee dos mil quinientos por ciento, porque el
+ * punto es separador de miles. Sin ceros de relleno y con coma decimal.
+ */
+const tarifa = (v) => {
+    const n = Number(v);
+    return isFinite(n) ? `${n.toLocaleString('es-CO', { maximumFractionDigits: 3 })}%` : '—';
+};
 </script>
 
 <template>
     <Head title="Retenciones · configuración"/>
     <AppLayout>
         <div class="space-y-4 max-w-6xl">
+            <PestanasSeccion :pestanas="pestanasConfigContable"/>
+
             <div>
                 <h1 class="text-2xl font-bold flex items-center gap-2">
                     <Receipt class="h-6 w-6 text-brand-600"/>
                     Retenciones tributarias · Configuración
                 </h1>
                 <p class="text-sm text-surface-500 mt-1">
-                    Reglas para calcular automático Retefuente/Reteica/Reteiva al pagar facturas de compra.
-                    Se aplican al confirmar recepción · quedan en <code>retenciones_aplicadas</code> y viajan a SIIGO como parte del voucher de egreso.
+                    <strong>Retefuente, Reteica y Reteiva</strong> se calculan al <strong>pagar una factura de compra</strong>:
+                    se aplican al confirmar recepción, quedan en <code>retenciones_aplicadas</code> y viajan a SIIGO como
+                    parte del voucher de egreso.
+                </p>
+                <p class="text-sm text-surface-500 mt-1">
+                    <strong>Autorrenta y Autorreteica</strong> van al revés: se practican al <strong>emitir una factura de
+                    venta</strong> y mueven dos cuentas — la 23 de pasivo (lo que se le paga a la DIAN mes a mes) contra
+                    la 13 de activo (el anticipo que queda a favor).
                 </p>
                 <p class="text-sm text-surface-500 mt-1">
                     En <strong>ventas</strong> se usan las mismas tarifas para lo que el cliente nos retiene (concepto
@@ -88,7 +186,14 @@ const tabs = [
 
             <div class="card overflow-hidden">
                 <div class="p-3 border-b flex justify-between items-center">
-                    <div class="text-xs uppercase font-bold text-brand-600">Reglas · {{ tab }}</div>
+                    <div class="text-xs uppercase font-bold text-brand-600">
+                        Reglas · {{ tab }}
+                        <!-- Con 33 reglas cargadas y una sola prendida, saber cuántas se
+                             están aplicando de verdad no debería exigir recorrer la lista. -->
+                        <span class="normal-case font-normal text-surface-500">
+                            · {{ activas }} de {{ filtradas.length }} activa{{ activas === 1 ? '' : 's' }}
+                        </span>
+                    </div>
                     <button @click="abrir()" class="btn-primary text-xs inline-flex items-center gap-1">
                         <Plus class="h-3 w-3"/> Nueva regla
                     </button>
@@ -111,9 +216,39 @@ const tabs = [
                             <td class="p-2 font-semibold">{{ r.concepto }}</td>
                             <td v-if="tab === 'reteica'" class="p-2">{{ r.ciudad || '—' }}</td>
                             <td class="p-2 text-right font-mono">${{ Number(r.base_minima).toLocaleString('es-CO') }}</td>
-                            <td class="p-2 text-right font-mono font-bold text-brand-600">{{ r.tarifa_pct }}%</td>
-                            <td class="p-2 font-mono">{{ r.cuenta_puc }}</td>
-                            <td class="p-2 text-center"><span :class="r.activa ? 'text-emerald-600' : 'text-red-500'" class="text-lg">●</span></td>
+                            <td class="p-2 text-right font-mono font-bold text-brand-600">{{ tarifa(r.tarifa_pct) }}</td>
+                            <td class="p-2 font-mono">
+                                <span v-if="r.cuenta_puc">{{ r.cuenta_puc }}</span>
+                                <!-- Las reglas cargadas desde la tabla del contador pueden venir
+                                     sin cuenta: se ven así, no se esconden. -->
+                                <!-- Avisaba y dejaba a la persona buscando dónde arreglarlo: ahora
+                                     el aviso es el camino. -->
+                                <button v-else type="button" @click="abrir(r)"
+                                        class="text-amber-600 hover:text-amber-700 text-xs font-sans font-semibold underline decoration-dotted"
+                                        title="Sin cuenta del PUC la regla no se puede activar · clic para ponerla">
+                                    ⚠ falta cuenta
+                                </button>
+                                <div v-if="r.cuenta_puc_contrapartida" class="text-[10px] text-surface-500">
+                                    ↳ {{ r.cuenta_puc_contrapartida }}
+                                </div>
+                            </td>
+                            <td class="p-2 text-center">
+                                <button type="button" @click="alternar(r)"
+                                        :disabled="bloqueado(r) || alternando === r.id"
+                                        :title="tituloInterruptor(r)"
+                                        :aria-pressed="r.activa ? 'true' : 'false'"
+                                        class="relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition
+                                               focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-1
+                                               disabled:opacity-40 disabled:cursor-not-allowed"
+                                        :class="r.activa ? 'bg-emerald-600' : 'bg-surface-300 dark:bg-surface-600'">
+                                    <span class="sr-only">{{ r.activa ? 'Apagar' : 'Activar' }} {{ r.concepto }}</span>
+                                    <span class="h-4 w-4 rounded-full bg-white shadow transition-transform"
+                                          :class="r.activa ? 'translate-x-[1.1rem]' : 'translate-x-0.5'"></span>
+                                </button>
+                                <div class="text-[10px] mt-0.5" :class="r.activa ? 'text-emerald-600 font-semibold' : 'text-surface-400'">
+                                    {{ r.activa ? 'se aplica' : (bloqueado(r) ? 'incompleta' : 'apagada') }}
+                                </div>
+                            </td>
                             <td class="p-2 text-xs text-surface-500 max-w-xs truncate" :title="r.notas">{{ r.notas || '—' }}</td>
                             <td class="p-2 text-right whitespace-nowrap">
                                 <button @click="abrir(r)" class="text-brand-600 hover:text-brand-700 p-1"><Pencil class="h-4 w-4"/></button>
@@ -150,11 +285,19 @@ const tabs = [
                                 <option value="retefuente">Retefuente</option>
                                 <option value="reteica">Reteica</option>
                                 <option value="reteiva">Reteiva</option>
+                                <option value="autorrenta">Autorrenta</option>
+                                <option value="autorreteica">Autorreteica</option>
                             </select>
+                            <p class="text-[11px] mt-1"
+                               :class="esAutorretencion(form.tipo) ? 'text-amber-600 font-semibold' : 'text-surface-500'">
+                                {{ esAutorretencion(form.tipo)
+                                    ? 'Se practica al EMITIR una factura de venta.'
+                                    : 'Se practica al PAGAR una factura de compra.' }}
+                            </p>
                         </div>
                         <div>
                             <label class="text-xs font-semibold">Concepto *</label>
-                            <input v-model="form.concepto" required maxlength="100" class="input w-full" placeholder="Ej: compras_generales, servicios, honorarios"/>
+                            <input v-model="form.concepto" required maxlength="255" class="input w-full" placeholder="Ej: compras_generales, servicios, honorarios"/>
                         </div>
                         <div v-if="form.tipo === 'reteica'">
                             <label class="text-xs font-semibold">Ciudad *</label>
@@ -171,8 +314,28 @@ const tabs = [
                             </div>
                         </div>
                         <div>
-                            <label class="text-xs font-semibold">Cuenta PUC *</label>
-                            <input v-model="form.cuenta_puc" required maxlength="30" class="input w-full font-mono" placeholder="236540"/>
+                            <label class="text-xs font-semibold">
+                                {{ esAutorretencion(form.tipo) ? 'Cuenta de pasivo (23…) *' : 'Cuenta PUC *' }}
+                            </label>
+                            <input v-model="form.cuenta_puc" maxlength="30" class="input w-full font-mono"
+                                   :placeholder="esAutorretencion(form.tipo) ? '23657501' : '236540'"/>
+                            <p v-if="esAutorretencion(form.tipo)" class="text-[11px] text-surface-500 mt-1">
+                                Lo que se le paga a la DIAN mes a mes.
+                            </p>
+                        </div>
+
+                        <!--
+                            La segunda pata, sólo para autorretención: la 13 de activo.
+                            Con una sola cuenta el asiento sale cojo en cada factura y el
+                            balance no lo delata, porque le faltan las dos patas a la vez.
+                        -->
+                        <div v-if="esAutorretencion(form.tipo)">
+                            <label class="text-xs font-semibold">Cuenta de activo (13…) *</label>
+                            <input v-model="form.cuenta_puc_contrapartida" maxlength="30"
+                                   class="input w-full font-mono" placeholder="13551816"/>
+                            <p class="text-[11px] text-surface-500 mt-1">
+                                El anticipo que queda a favor de la empresa.
+                            </p>
                         </div>
                         <div>
                             <label class="text-xs font-semibold">ID impuesto SIIGO</label>

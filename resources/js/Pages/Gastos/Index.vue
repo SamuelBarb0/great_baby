@@ -1,15 +1,74 @@
 <script setup>
 import { ref, reactive } from 'vue';
+import { useBogotaDate } from '@/composables/useBogotaDate';
 import { Head, router } from '@inertiajs/vue3';
-import { Receipt, Plus, CheckCircle, XCircle, CreditCard } from 'lucide-vue-next';
+import { Receipt, Plus, CheckCircle, XCircle, CreditCard, BookOpen } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
+import Paginacion from '@/Components/Paginacion.vue';
 import AppConfirmModal from '@/Components/AppConfirmModal.vue';
 
-const props = defineProps({ gastos: Object, conteos: Object, esAdmin: Boolean, filtros: Object });
+/*
+ * La fecha de HOY en Colombia, no en UTC.
+ *
+ * `new Date().toISOString().slice(0,10)` convierte a UTC antes de
+ * recortar: entre las 19:00 y la medianoche hora Bogotá devuelve el día
+ * siguiente. Acá eso no era un filtro incómodo sino la fecha que queda
+ * escrita en el documento.
+ */
+const { hoy: hoyBogota } = useBogotaDate();
+
+const props = defineProps({
+    gastos: Object, conteos: Object, esAdmin: Boolean, filtros: Object,
+    // Quien puede APROBAR no es el mismo que puede pagar: el Contador paga
+    // pero no aprueba. Antes los dos botones salian con `esAdmin` y el
+    // Contador recibia un 403 al apretar el verde.
+    puedeAprobar: { type: Boolean, default: false },
+    cuentaPorDefecto: { type: String, default: '5195' },
+    destinos: { type: Array, default: () => [] },
+    lineas: { type: Array, default: () => [] },
+    cajas: { type: Array, default: () => [] },
+});
+
+/*
+ * Lo contable del gasto: contra que cuenta va y si se declara.
+ *
+ * Antes la pantalla no mostraba nada de esto porque el gasto no llegaba al
+ * libro: se aprobaba, se pagaba, y el balance no se enteraba. Ahora el gasto
+ * genera asiento y el contador tiene que poder ver —y corregir— contra que.
+ */
+const modalContable = ref(null);
+const formContable = ref({ cuenta_puc: '', destino: 'siigo', linea: 'great_baby', motivo: '' });
+const guardandoContable = ref(false);
+
+const abrirContable = (g) => {
+    formContable.value = {
+        cuenta_puc: g.cuenta_puc || '',
+        destino: g.destino || 'siigo',
+        linea: g.linea || 'great_baby',
+        motivo: g.motivo_destino || '',
+    };
+    modalContable.value = g;
+};
+
+const guardarContable = () => {
+    if (guardandoContable.value) return;
+    guardandoContable.value = true;
+    router.post(`/app/gastos/${modalContable.value.id}/contabilizar`, formContable.value, {
+        preserveScroll: true,
+        onFinish: () => { guardandoContable.value = false; },
+        onSuccess: () => { modalContable.value = null; },
+    });
+};
+
+const badgeDestino = (color) => ({
+    success: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200',
+    info: 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200',
+    warning: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200',
+}[color] || 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200');
 
 const modal = ref(false);
 const form = reactive({
-    fecha: new Date().toISOString().slice(0, 10),
+    fecha: hoyBogota(),
     categoria: 'papeleria', descripcion: '', monto: 0, proveedor: '', factura_ref: '',
     metodo_pago: 'transferencia', tipo: 'gasto', notas: '',
 });
@@ -48,17 +107,42 @@ const rechazar = () => {
         preserveScroll: true, onSuccess: () => { modalRech.value = null; motivoRech.value = ''; },
     });
 };
-const marcarPagado = (id) => {
-    modalConfirm.value = {
-        titulo: '¿Marcar el gasto como pagado?',
-        mensaje: 'Se registra como pagado y sale de los pendientes.',
-        color: 'emerald',
-        textoConfirmar: 'Marcar pagado',
-        onConfirmar: () => {
-            modalConfirm.value = null;
-            router.post(`/app/gastos/${id}/pagado`, {}, { preserveScroll: true });
-        },
-    };
+/*
+ * Marcar pagado · y si sale en efectivo, de qué caja.
+ *
+ * Sin elegir caja el gasto golpeaba la cuenta contable por defecto y no
+ * aterrizaba en ningún arqueo: al final del día faltaban los billetes y la
+ * pantalla de la caja no tenía con qué explicarlo. Para los que se pagan por
+ * transferencia no se pregunta nada, que es el caso más común.
+ */
+const modalPagar = ref(null);
+const cajaElegida = ref(null);
+
+const marcarPagado = (g) => {
+    if (g.metodo_pago !== 'efectivo') {
+        modalConfirm.value = {
+            titulo: '¿Marcar el gasto como pagado?',
+            mensaje: 'Se registra como pagado y sale de los pendientes.',
+            color: 'emerald',
+            textoConfirmar: 'Marcar pagado',
+            onConfirmar: () => {
+                modalConfirm.value = null;
+                router.post(`/app/gastos/${g.id}/pagado`, {}, { preserveScroll: true });
+            },
+        };
+        return;
+    }
+
+    cajaElegida.value = props.cajas.length === 1 ? props.cajas[0].id : null;
+    modalPagar.value = g;
+};
+
+const confirmarPagoEnEfectivo = () => {
+    if (! cajaElegida.value) return;
+    router.post(`/app/gastos/${modalPagar.value.id}/pagado`, { caja_id: cajaElegida.value }, {
+        preserveScroll: true,
+        onSuccess: () => { modalPagar.value = null; cajaElegida.value = null; },
+    });
 };
 const filtrar = (campo, val) => router.get('/app/gastos', { ...props.filtros, [campo]: val || null });
 
@@ -109,6 +193,7 @@ const badge = (e) => ({ pendiente: 'bg-amber-100 text-amber-800', aprobado: 'bg-
                             <th class="text-right p-2">Monto</th>
                             <th class="text-left p-2">Solicita</th>
                             <th class="text-center p-2">Estado</th>
+                            <th class="text-center p-2">Contable</th>
                             <th class="text-right p-2">Acciones</th>
                         </tr>
                     </thead>
@@ -122,15 +207,31 @@ const badge = (e) => ({ pendiente: 'bg-amber-100 text-amber-800', aprobado: 'bg-
                             <td class="p-2 text-right font-bold">{{ money(g.monto) }}</td>
                             <td class="p-2 text-xs">{{ g.solicita }}</td>
                             <td class="p-2 text-center"><span :class="['inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase', badge(g.estado)]">{{ g.estado }}</span></td>
+                            <!-- Contra que cuenta va y si se declara. Si todavia
+                                 no esta en el libro se dice, en vez de dejarlo
+                                 en blanco como si no existiera. -->
+                            <td class="p-2 text-center whitespace-nowrap">
+                                <span :class="['inline-block px-2 py-0.5 rounded text-[10px] font-bold', badgeDestino(g.destino_color)]">
+                                    {{ g.destino_label }}
+                                </span>
+                                <div class="text-[10px] text-surface-400 font-mono">
+                                    {{ g.cuenta_puc || cuentaPorDefecto + ' (por defecto)' }}
+                                </div>
+                                <div v-if="!g.en_el_libro" class="text-[10px] text-amber-600 font-semibold">
+                                    sin asiento
+                                </div>
+                            </td>
                             <td class="p-2 text-right space-x-1">
-                                <button v-if="esAdmin && g.estado === 'pendiente'" @click="aprobar(g.id)" class="btn-ghost p-1 text-emerald-600" title="Aprobar"><CheckCircle class="h-4 w-4"/></button>
-                                <button v-if="esAdmin && g.estado === 'pendiente'" @click="modalRech = g" class="btn-ghost p-1 text-red-600" title="Rechazar"><XCircle class="h-4 w-4"/></button>
-                                <button v-if="esAdmin && g.estado === 'aprobado'" @click="marcarPagado(g.id)" class="btn-ghost p-1 text-brand-600" title="Marcar pagado"><CreditCard class="h-4 w-4"/></button>
+                                <button v-if="esAdmin" @click="abrirContable(g)" class="btn-ghost p-1 text-surface-500" title="Cuenta y destino contable"><BookOpen class="h-4 w-4"/></button>
+                                <button v-if="puedeAprobar && g.estado === 'pendiente'" @click="aprobar(g.id)" class="btn-ghost p-1 text-emerald-600" title="Aprobar"><CheckCircle class="h-4 w-4"/></button>
+                                <button v-if="puedeAprobar && g.estado === 'pendiente'" @click="modalRech = g" class="btn-ghost p-1 text-red-600" title="Rechazar"><XCircle class="h-4 w-4"/></button>
+                                <button v-if="esAdmin && g.estado === 'aprobado'" @click="marcarPagado(g)" class="btn-ghost p-1 text-brand-600" title="Marcar pagado"><CreditCard class="h-4 w-4"/></button>
                             </td>
                         </tr>
                     </tbody>
                 </table>
             </div>
+            <Paginacion :pagina="gastos" etiqueta="gastos"/>
         </div>
 
         <div v-if="modal" @click.self="modal = false" class="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
@@ -186,6 +287,97 @@ const badge = (e) => ({ pendiente: 'bg-amber-100 text-amber-800', aprobado: 'bg-
                 </div>
             </div>
         </div>
+        <!-- Cuenta y destino contable del gasto -->
+        <div v-if="modalContable" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+             @click.self="modalContable = null">
+            <div class="card p-5 w-full max-w-md space-y-3">
+                <h3 class="font-bold text-lg">Contabilidad del gasto {{ modalContable.numero }}</h3>
+                <p class="text-xs text-surface-500">
+                    {{ modalContable.descripcion }} · {{ money(modalContable.monto) }}
+                </p>
+
+                <div>
+                    <label class="text-xs font-semibold text-surface-500">Cuenta PUC del gasto</label>
+                    <input v-model="formContable.cuenta_puc" class="input w-full mt-1 font-mono"
+                           :placeholder="cuentaPorDefecto + ' (por defecto)'" maxlength="10"/>
+                    <p class="text-[11px] text-surface-500 mt-1">
+                        Vacía usa {{ cuentaPorDefecto }}. Tiene que existir en el plan de cuentas.
+                    </p>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="text-xs font-semibold text-surface-500">Línea de negocio</label>
+                        <select v-model="formContable.linea" class="input w-full mt-1">
+                            <option v-for="l in lineas" :key="l.valor" :value="l.valor">{{ l.label }}</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="text-xs font-semibold text-surface-500">Destino</label>
+                        <select v-model="formContable.destino" class="input w-full mt-1">
+                            <option v-for="d in destinos" :key="d.valor" :value="d.valor">{{ d.label }}</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div v-if="formContable.destino !== 'siigo'"
+                     class="text-sm bg-amber-50 dark:bg-amber-900/20 border-l-4 border-amber-500 p-3">
+                    Este gasto no se declara: su IVA no se descuenta y no viaja a SIIGO.
+                    Escribí por qué.
+                </div>
+
+                <div>
+                    <label class="text-xs font-semibold text-surface-500">
+                        Motivo {{ formContable.destino === 'siigo' ? '(opcional)' : '*' }}
+                    </label>
+                    <textarea v-model="formContable.motivo" rows="2" maxlength="300" class="input w-full mt-1"
+                              placeholder="Ej.: el proveedor no factura"></textarea>
+                </div>
+
+                <div class="flex justify-end gap-2 pt-1">
+                    <button @click="modalContable = null" class="btn-secondary text-sm">Cancelar</button>
+                    <button @click="guardarContable"
+                            :disabled="guardandoContable || (formContable.destino !== 'siigo' && ! formContable.motivo.trim())"
+                            class="btn-primary text-sm disabled:opacity-40">
+                        {{ guardandoContable ? 'Guardando…' : 'Guardar y rehacer asiento' }}
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Pagar en efectivo: de qué caja sale la plata -->
+        <div v-if="modalPagar" @click.self="modalPagar = null"
+             class="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+            <div class="bg-white dark:bg-surface-800 rounded-xl shadow-xl max-w-md w-full p-5 space-y-3">
+                <h3 class="text-lg font-bold">Pagar {{ modalPagar.numero }} en efectivo</h3>
+                <p class="text-sm text-surface-600">
+                    {{ modalPagar.descripcion }} · <strong>{{ money(modalPagar.monto) }}</strong>
+                </p>
+
+                <div v-if="cajas.length">
+                    <label class="block text-xs font-bold text-surface-600 mb-1">¿De qué caja sale?</label>
+                    <select v-model="cajaElegida" class="input w-full">
+                        <option :value="null">Elegí la caja…</option>
+                        <option v-for="c in cajas" :key="c.id" :value="c.id">{{ c.nombre }}</option>
+                    </select>
+                    <p class="text-xs text-surface-500 mt-1">
+                        Queda como gasto del día en esa caja, así el arqueo cuadra sin tener que acordarse.
+                    </p>
+                </div>
+                <p v-else class="text-sm text-amber-600">
+                    Todavía no hay cajas creadas. Creá una en Contabilidad → Cajas y bancos.
+                </p>
+
+                <div class="flex justify-end gap-2 pt-1">
+                    <button @click="modalPagar = null" class="btn-ghost text-sm">Cancelar</button>
+                    <button @click="confirmarPagoEnEfectivo" :disabled="!cajaElegida"
+                            class="btn-primary text-sm disabled:opacity-40">
+                        Marcar pagado
+                    </button>
+                </div>
+            </div>
+        </div>
+
         <AppConfirmModal :cfg="modalConfirm" @cerrar="modalConfirm = null"/>
     </AppLayout>
 </template>

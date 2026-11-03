@@ -29,6 +29,7 @@ class PagoProveedor extends Model implements AuditableContract
         'siigo_response' => 'array',
         'siigo_sync_at' => 'datetime',
         'confirmado_at' => 'datetime',
+        'anulado_at' => 'datetime',
     ];
 
     public function proveedor(): BelongsTo

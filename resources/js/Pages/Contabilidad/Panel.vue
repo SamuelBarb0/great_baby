@@ -3,6 +3,8 @@ import { ref, watch, computed } from 'vue';
 import { Head, router, Link } from '@inertiajs/vue3';
 import { Calculator, TrendingUp, TrendingDown, AlertTriangle, EyeOff, Eye, ArrowLeft } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
+import PestanasSeccion from '@/Components/PestanasSeccion.vue';
+import { pestanasPanel } from '@/composables/usePestanasContables';
 import { useMoney } from '@/composables/useMoney';
 import { pucLabel } from '@/composables/pucLabels';
 import { useBogotaDate } from '@/composables/useBogotaDate';
@@ -55,6 +57,8 @@ const signoBalance = computed(() => {
     <Head title="Panel contable"/>
     <AppLayout>
         <div class="space-y-4">
+            <PestanasSeccion :pestanas="pestanasPanel"/>
+
             <!-- Re-audit UX-A6 · breadcrumb / volver. -->
             <Link href="/app/contabilidad/reportes" class="text-sm text-brand-600 hover:underline inline-flex items-center gap-1">
                 <ArrowLeft class="h-4 w-4"/> Volver a Reportes

@@ -34,7 +34,35 @@ class ProductosController extends Controller implements HasMiddleware
             new Middleware(function (Request $r, \Closure $next) {
                 abort_unless(\App\Auth\Permisos::puede($r->user(), 'productos'), 403);
                 return $next($r);
-            }),
+            }, except: ['buscar']),
+
+            /*
+             * LOG-H2 · La lupa del catálogo.
+             *
+             * `buscar()` no es una pantalla del catálogo: es el buscador que
+             * usan TRES formularios —factura manual, ficha de producto y
+             * Nueva OC—. Guardarla tras el permiso `productos` dejaba al
+             * bodeguero entrando a Nueva OC (puede: `esEquipoBodega`) y
+             * recibiendo 403 al buscar el producto que iba a pedir, sin
+             * mensaje: la lupa simplemente no devolvía nada.
+             *
+             * La puerta es la de las pantallas que la usan. Lo que cambia
+             * según quién pregunta es la RESPUESTA, no el acceso: el precio
+             * de venta sólo sale para quien ya puede verlo.
+             */
+            new Middleware(function (Request $r, \Closure $next) {
+                $u = $r->user();
+
+                abort_unless(
+                    \App\Auth\Permisos::puede($u, 'productos')
+                        || $u?->esEquipoBodega()
+                        || $u?->esContable(),
+                    403,
+                    'Este buscador es de catálogo, compras y facturación.',
+                );
+
+                return $next($r);
+            }, only: ['buscar']),
         ];
     }
 
@@ -65,6 +93,28 @@ class ProductosController extends Controller implements HasMiddleware
         if ($r->boolean('sin_siigo')) $q->whereNull('siigo_id');
 
         return Inertia::render('Catalogo/Productos', [
+            /*
+             * Qué puede hacer quien mira, además de mirar.
+             *
+             * La pantalla se abre con `puede('productos')`, que incluye al
+             * Contador por decisión explícita (darle lectura del catálogo).
+             * Pero ocho acciones de escritura exigen `esRoot()`, y esta vista
+             * no mandaba ninguna bandera: el ícono de papelera de cada fila,
+             * «Excel SIIGO», la papelera, la edición en lote y el push masivo
+             * salían pintados para él y los ocho le daban 403. Es el mismo
+             * defecto que ya se corrigió en Gastos, repetido entero acá.
+             */
+            'puede_administrar' => \App\Auth\Permisos::esRoot($r->user()),
+            // El boton «Excel SIIGO» abre el import: su casilla propia.
+            'puede_importar' => \App\Auth\Permisos::puede($r->user(), 'importar_productos'),
+            /*
+             * «Traer de SIIGO» y «Por código» no postean acá: van a
+             * `/app/siigo/*`, que tiene su propia puerta (Aracely o Gerente).
+             * Bandera aparte para que el Gerente no los pierda junto con el
+             * resto, y para que el Contador deje de verlos.
+             */
+            'puede_siigo' => ($r->user()?->esAracely()
+                || $r->user()?->hasAnyRole(['Gerente', 'Gerencia'])) ?? false,
             'filtros' => [
                 'q' => $r->query('q', ''),
                 'activo' => $r->query('activo', ''),
@@ -99,7 +149,7 @@ class ProductosController extends Controller implements HasMiddleware
         ]);
     }
 
-    public function show(Producto $producto): Response
+    public function show(Request $r, Producto $producto): Response
     {
         $producto->load([
             'marca:id,nombre', 'categoriaMaestra:id,nombre', 'coleccion:id,nombre',
@@ -118,6 +168,14 @@ class ProductosController extends Controller implements HasMiddleware
             'catalogos' => $this->catalogosParaForm(),
             'precios_lista' => $this->preciosPorLista($producto),
             'listo_para_vender' => $this->listoParaVender($producto),
+            /*
+             * Quién puede tocar las listas de precios. Es la misma condición
+             * que exige `guardarPrecios()`: la ficha mostraba el formulario y
+             * el botón «Guardar precios» a todo el que pudiera abrir el
+             * catálogo.
+             */
+            'puede_precios' => \App\Auth\Permisos::esRoot($r->user())
+                || \App\Auth\Permisos::puede($r->user(), 'vendedor'),
         ]);
     }
 
@@ -702,7 +760,10 @@ class ProductosController extends Controller implements HasMiddleware
     {
         // Import masivo = N pushes SIIGO + mutación bulk de precios/costos.
         // Mismo nivel que bulkEdit (ya restringido).
-        abort_unless(\App\Auth\Permisos::esRoot($r->user()), 403, 'Solo gerencia puede importar productos.');
+        // Casilla: Importar productos. Era `esRoot()`, y la casilla que ya
+        //   existia para esto no la consultaba nadie.
+        abort_unless(\App\Auth\Permisos::puede($r->user(), 'importar_productos'), 403,
+            'Importar el catalogo necesita su propio acceso.');
 
         $r->validate([
             'archivo' => ['required', 'file', 'mimes:xlsx,xls', 'max:5120'],
@@ -858,14 +919,58 @@ class ProductosController extends Controller implements HasMiddleware
     {
         $q = trim((string) $r->query('q', ''));
         if (mb_strlen($q) < 2) return response()->json([]);
+
+        /*
+         * F2b · se agregan `precio` y `siigo_id` para el formulario de factura
+         * manual: sin el precio hay que teclearlo de memoria en cada linea, y
+         * sin saber si el producto esta sincronizado el aviso de SIIGO solo
+         * aparece al emitir, horas despues.
+         *
+         * El precio sale de la lista PREDETERMINADA y vigente hoy. Es un dato
+         * de ayuda: el formulario lo deja editar, porque una venta a precio
+         * distinto del de lista es algo que pasa todos los dias.
+         */
+        $hoy = now('America/Bogota')->toDateString();
+
+        $productos = Producto::where('activo', true)
+            ->where(function ($qq) use ($q) {
+                $qq->where('referencia', 'like', '%'.$q.'%')->orWhere('nombre', 'like', '%'.$q.'%');
+            })
+            ->limit(15)
+            ->get(['id', 'referencia', 'nombre', 'siigo_id', 'impuesto_id']);
+
+        $precios = $productos->isEmpty() ? collect() : \Illuminate\Support\Facades\DB::table('precios_producto as pp')
+            ->join('listas_precios as lp', 'lp.id', '=', 'pp.lista_id')
+            ->whereIn('pp.producto_id', $productos->pluck('id'))
+            ->where('lp.predeterminada', true)
+            ->where('lp.activa', true)
+            ->where(fn ($w) => $w->whereNull('pp.vigente_desde')->orWhere('pp.vigente_desde', '<=', $hoy))
+            ->where(fn ($w) => $w->whereNull('pp.vigente_hasta')->orWhere('pp.vigente_hasta', '>=', $hoy))
+            ->orderBy('pp.vigente_desde')
+            ->pluck('pp.precio', 'pp.producto_id');
+
+        $ivas = \App\Modules\Catalogo\Models\Impuesto::query()
+            ->whereIn('id', $productos->pluck('impuesto_id')->filter()->unique())
+            ->pluck('porcentaje', 'id');
+
+        /*
+         * LOG-H2 · El precio de venta sale sólo para quien ya puede verlo.
+         *
+         * El bodeguero entra acá porque está armando una orden de COMPRA, y
+         * ahí el precio de venta no se usa. Abrirle la puerta al buscador no
+         * tiene por qué abrirle también la lista de precios.
+         */
+        $veElPrecio = \App\Auth\Permisos::puede($r->user(), 'productos') || $r->user()?->esContable();
+
         return response()->json(
-            Producto::where('activo', true)
-                ->where(function ($qq) use ($q) {
-                    $qq->where('referencia', 'like', '%'.$q.'%')->orWhere('nombre', 'like', '%'.$q.'%');
-                })
-                ->limit(15)
-                ->get(['id', 'referencia', 'nombre'])
-                ->all()
+            $productos->map(fn ($p) => [
+                'id' => $p->id,
+                'referencia' => $p->referencia,
+                'nombre' => $p->nombre,
+                'precio' => $veElPrecio && isset($precios[$p->id]) ? (float) $precios[$p->id] : null,
+                'iva_pct' => isset($ivas[$p->impuesto_id]) ? (float) $ivas[$p->impuesto_id] : null,
+                'en_siigo' => (bool) $p->siigo_id,
+            ])->all()
         );
     }
 
@@ -1095,6 +1200,21 @@ class ProductosController extends Controller implements HasMiddleware
      */
     public function guardarPrecios(Request $r, Producto $producto): RedirectResponse
     {
+        /*
+         * Poner precios es decisión comercial, no de lectura del catálogo.
+         *
+         * Era la única escritura del controlador sin puerta propia, y eso lo
+         * volvía el reverso exacto del problema de los botones: ocho acciones
+         * inofensivas exigían gerencia, y ésta —que define a qué precio se le
+         * vende a cada cliente, y que con la casilla vacía BORRA el precio de
+         * una lista— quedaba abierta a cualquiera con lectura del catálogo.
+         */
+        abort_unless(
+            \App\Auth\Permisos::esRoot($r->user()) || \App\Auth\Permisos::puede($r->user(), 'vendedor'),
+            403,
+            'Cambiar las listas de precios es de Gerencia o del equipo comercial.'
+        );
+
         abort_if($producto->desglose_stock, 422,
             'Este producto se vende por variante: su precio se carga en cada variante, no acá.');
 

@@ -2,8 +2,10 @@
 
 namespace App\Modules\Portal\Actions;
 
+use App\Auth\Permisos;
 use App\Models\Contacto;
 use App\Models\NotificacionErp;
+use App\Models\User;
 use App\Modules\Cartera\Actions\ConsultarCredito;
 use App\Modules\Catalogo\Models\PrecioProducto;
 use App\Modules\Catalogo\Models\PrecioVariante;
@@ -114,6 +116,35 @@ class CrearPedidoCliente
         });
 
         Cache::forget("portal.kpis.{$cliente->id}");
+
+        // COM-1 · El comentario del vendedor le llega a Contabilidad.
+        //
+        // El vendedor en la calle pacta cosas que el precio de lista no
+        // registra —un descuento que prometió, un plazo, una condición— y las
+        // escribe en el comentario del pedido. Hasta ahora ese texto se
+        // guardaba y ahí moría: Contabilidad lo descubría al facturar, o no lo
+        // descubría. Se avisa sólo cuando el pedido lo levantó un vendedor,
+        // porque por este mismo camino entran los del Portal y ahí las notas
+        // las escribe el propio cliente, que es otra cosa.
+        if ($vendedorId && trim((string) $notas) !== '') {
+            $quienVende = User::find($vendedorId)?->name ?? 'un vendedor';
+
+            User::permission(Permisos::permiso('contabilidad'))
+                // Quien lo escribió ya sabe lo que escribió. Recibir el propio
+                // aviso es ruido, y el ruido es lo que hace que a la semana
+                // nadie mire la campana.
+                ->whereKeyNot($vendedorId)
+                ->get(['id'])
+                ->each(fn ($u) => NotificacionErp::crear([
+                    'user_id' => $u->id,
+                    'tipo' => 'pedido_con_comentario',
+                    'titulo' => "Pedido {$pedido->numero} con comentario de {$quienVende}",
+                    'mensaje' => $cliente->nombreDisplay().' · '.trim((string) $notas),
+                    'color' => 'info',
+                    'icono' => 'heroicon-o-chat-bubble-left-ellipsis',
+                    'url' => "/app/pedidos-b2b/{$pedido->id}",
+                ]));
+        }
 
         // LOG-J3 · Si el semáforo retuvo el pedido, Gerencia necesita saberlo
         // para liberarlo o rechazarlo.

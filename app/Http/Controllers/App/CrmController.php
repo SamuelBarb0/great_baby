@@ -21,7 +21,8 @@ class CrmController extends Controller implements HasMiddleware
     {
         return [
             new Middleware(function (Request $r, \Closure $next) {
-                abort_unless($r->user()?->esAracely(), 403);
+                // Casilla: CRM · Segmentacion.
+                   abort_unless(\App\Auth\Permisos::puede($r->user(), 'crm'), 403);
                 return $next($r);
             }),
         ];
@@ -36,6 +37,8 @@ class CrmController extends Controller implements HasMiddleware
             'comisionesUltimoMes' => $this->comisionesUltimoMes(),
             'tiposInteraccion' => Interaccion::tipos(),
             'fuentes' => $this->leadsPorFuente(),
+            // Quién puede reescribir la segmentación de todos los clientes.
+            'puede_segmentar' => \App\Auth\Permisos::esRoot($request->user()),
         ]);
     }
 
@@ -64,6 +67,18 @@ class CrmController extends Controller implements HasMiddleware
     /** Correr segmentación manualmente */
     public function segmentarAhora(Request $request): RedirectResponse
     {
+        /*
+         * Ver los segmentos es una cosa; reescribirlos para TODOS los clientes
+         * es otra. La pantalla lo avisa —«recalcula los segmentos de TODOS los
+         * clientes, los previos se sobrescribirán»— y la acción no tenía puerta
+         * propia: colgaba de la de clase. Mientras el CRM fue de Aracely sola
+         * no se notó; al pasar la puerta a la casilla `crm`, que la matriz le
+         * da también al Vendedor y a Servicio al Cliente, el botón habría
+         * quedado al alcance de cualquiera de ellos.
+         */
+        abort_unless(\App\Auth\Permisos::esRoot($request->user()), 403,
+            'Re-segmentar a todos los clientes es de Gerencia.');
+
         $n = SegmentarClientes::run();
         return back()->with('success', "✅ {$n} contactos re-segmentados");
     }

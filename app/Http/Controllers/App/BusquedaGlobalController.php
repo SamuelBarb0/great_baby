@@ -39,8 +39,23 @@ class BusquedaGlobalController extends Controller implements HasMiddleware
         // autenticado para enumerar la cartera y el libro de clientes letra por
         // letra, sin importar los permisos del rol. Cada bloque pide el mismo
         // permiso que la pantalla a la que lleva.
-        $puedeFacturas = \App\Auth\Permisos::puede($u, 'facturas');
-        $puedeContactos = \App\Auth\Permisos::puede($u, 'contactos');
+        /*
+         * El permiso que pide el DESTINO, no uno que se le parezca.
+         *
+         * Antes este bloque miraba `facturas` y `contactos`, que son dos
+         * casillas de la pantalla de roles que ningún controlador consulta:
+         * `/app/facturas/{id}` y `/app/contactos/{id}` piden `contabilidad`.
+         * El Vendedor tiene `facturas` por matriz, así que el buscador le
+         * devolvía la factura y la pantalla se la negaba — el mismo defecto
+         * que ya habíamos corregido cuatro veces en logística, acá otra vez.
+         *
+         * Se piden los dos: el del buscador (que es lo que el admin marcó) y
+         * el de la pantalla (que es lo que de verdad se va a exigir).
+         */
+        $puedeFacturas = \App\Auth\Permisos::puede($u, 'facturas')
+            && \App\Auth\Permisos::puede($u, 'contabilidad');
+        $puedeContactos = \App\Auth\Permisos::puede($u, 'contactos')
+            && \App\Auth\Permisos::puede($u, 'contabilidad');
 
         // Facturas por número
         if ($puedeFacturas) {
@@ -90,7 +105,12 @@ class BusquedaGlobalController extends Controller implements HasMiddleware
         }
 
         // Pedidos B2B · los ve quien trabaja el pedido: comercial o logística.
-        if ($puedeContactos || \App\Auth\Permisos::puede($u, 'logistica')) {
+        /*
+         * `/app/pedidos-b2b/{id}` pide `esEquipoBodega()` o el rol
+         * Despachador. `logistica` no alcanza: el Alistador la tiene y la
+         * pantalla igual lo rechaza.
+         */
+        if ($u?->esEquipoBodega() || $u?->hasRole('Despachador') || \App\Auth\Permisos::esRoot($u)) {
             foreach (PedidoCliente::where('numero', 'like', $like)->limit(5)->get(['id', 'numero', 'total', 'estado']) as $p) {
                 $out[] = [
                     'tipo' => 'Pedido B2B',
@@ -102,11 +122,22 @@ class BusquedaGlobalController extends Controller implements HasMiddleware
             }
         }
 
-        // Variantes por código de barras · buscar un producto por su código no
-        // revela nada sensible y es lo que más usa la bodega, así que queda
-        // abierto a cualquier usuario del ERP.
-        foreach (ProductoVariante::with('producto:id,nombre,referencia')
-            ->where('codigo_barras', 'like', $like)->limit(5)->get(['id', 'producto_id', 'codigo_barras']) as $v) {
+        /*
+         * Variantes por código de barras.
+         *
+         * Buscar un producto por su código no revela nada sensible, pero el
+         * resultado LLEVA AL KARDEX, y el kardex sólo lo abren Aracely,
+         * alistadores y admins de bodega. Ofrecérselo al Contador o al
+         * Gerente era mandarlos a un 403: escriben el código para ver de
+         * dónde salió un movimiento y el sistema les cierra la puerta que
+         * él mismo les mostró.
+         */
+        $puedeKardex = \App\Auth\Permisos::esRoot($u)
+            || $u?->esAlistador() || $u?->esAdminBodega();
+
+        foreach ($puedeKardex ? ProductoVariante::with('producto:id,nombre,referencia')
+            ->where('codigo_barras', 'like', $like)->limit(5)->get(['id', 'producto_id', 'codigo_barras'])
+            : collect() as $v) {
             $out[] = [
                 'tipo' => 'Producto',
                 'label' => $v->codigo_barras,
@@ -116,17 +147,33 @@ class BusquedaGlobalController extends Controller implements HasMiddleware
             ];
         }
 
-        // Accesos rápidos siempre visibles cuando coincide texto
+        /*
+         * Accesos rápidos.
+         *
+         * Cada uno lleva la condición de SU destino. Antes salían todos para
+         * todo el mundo: al Colaborador le ofrecía la estación de empaque y
+         * al Vendedor la nueva orden de compra.
+         */
         $shortcuts = [
-            ['nombre' => 'Nueva OC', 'url' => '/app/compras/oc/nueva', 'kw' => ['oc', 'compra', 'orden']],
-            ['nombre' => 'Registrar devolución Dropi', 'url' => '/app/dropi/devolucion/registrar', 'kw' => ['devol', 'dropi']],
-            ['nombre' => 'Escáner cámara', 'url' => '/app/dropi/escaner-camara', 'kw' => ['escan', 'camara']],
-            ['nombre' => 'Nueva garantía', 'url' => '/app/garantias/nueva', 'kw' => ['garan', 'ticket']],
-            ['nombre' => 'Estación de empaque', 'url' => '/app/estacion-empaque', 'kw' => ['empaque', 'estacion']],
-            ['nombre' => 'Torre de Control', 'url' => '/app', 'kw' => ['torre', 'control']],
+            ['nombre' => 'Nueva OC', 'url' => '/app/compras/oc/nueva', 'kw' => ['oc', 'compra', 'orden'],
+                'puede' => fn () => $u?->esEquipoBodega() || $u?->esContable()],
+            ['nombre' => 'Registrar devolución Dropi', 'url' => '/app/dropi/devolucion/registrar', 'kw' => ['devol', 'dropi'],
+                'puede' => fn () => \App\Auth\Permisos::puede($u, 'dropi_devoluciones')],
+            ['nombre' => 'Escáner cámara', 'url' => '/app/dropi/escaner-camara', 'kw' => ['escan', 'camara'],
+                'puede' => fn () => \App\Auth\Permisos::puede($u, 'escanner_camara')],
+            ['nombre' => 'Nueva garantía', 'url' => '/app/garantias/nueva', 'kw' => ['garan', 'ticket'],
+                'puede' => fn () => \App\Auth\Permisos::puede($u, 'garantias')],
+            ['nombre' => 'Estación de empaque', 'url' => '/app/estacion-empaque', 'kw' => ['empaque', 'estacion'],
+                'puede' => fn () => \App\Auth\Permisos::puede($u, 'estacion_empaque')],
+            ['nombre' => 'Torre de Control', 'url' => '/app', 'kw' => ['torre', 'control'],
+                'puede' => fn () => true],   // `/app` redirige a lo de cada quien
         ];
         $qLower = mb_strtolower($q);
         foreach ($shortcuts as $s) {
+            if (! ($s['puede'])()) {
+                continue;
+            }
+
             foreach ($s['kw'] as $kw) {
                 if (str_contains($qLower, $kw)) {
                     $out[] = ['tipo' => 'Acción', 'label' => $s['nombre'], 'sub' => '', 'url' => $s['url'], 'icon' => 'Zap'];

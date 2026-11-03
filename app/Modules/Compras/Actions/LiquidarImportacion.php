@@ -264,11 +264,15 @@ class LiquidarImportacion
      * PATRÓN O · helper para detectar concepto IVA importación robustamente.
      * Acepta enum o string legacy, defensivo contra typos.
      */
+    /**
+     * Delega en el enum, que es donde vive la regla.
+     *
+     * Estaba escrita a mano aca y `RegistrarAsientoCompra` no la tenia: el
+     * prorrateo excluia el IVA y el asiento no.
+     */
     protected function esConceptoIvaImportacion($gasto): bool
     {
-        $c = $gasto->concepto ?? null;
-        $val = is_object($c) && property_exists($c, 'value') ? $c->value : (string) $c;
-        return in_array(strtolower($val), ['iva_importacion', 'iva importación', 'iva'], true);
+        return \App\Modules\Compras\Enums\ConceptoGastoImportacion::gastoEsIvaImportacion($gasto);
     }
 
     protected function esConceptoArancel($gasto): bool

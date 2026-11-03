@@ -58,6 +58,17 @@ class RegistrarDevolucionProveedor
                     'tipo' => 'salida_devolucion_proveedor',
                     'cantidad' => -1 * abs((float) $it->cantidad),
                     'costo_unit' => (float) $it->costo_unit,
+                    /*
+                     * `referencia_tipo`, no `referencia_type`.
+                     *
+                     * Decía `_type`, y como `InventarioMovimiento` usa
+                     * `$guarded = ['id']`, el atributo entraba tal cual al
+                     * INSERT: «Unknown column 'referencia_type'». El kardex se
+                     * escribe antes del asiento, así que la transacción entera
+                     * hacía rollback y NINGUNA devolución a proveedor se podía
+                     * confirmar — el botón existía, la pantalla existía, el
+                     * asiento estaba bien diseñado, y la tabla tenía 0 filas.
+                     */
                     'referencia_tipo' => DevolucionProveedor::class,
                     'referencia_id' => $d->id,
                     'user_id' => $userId,
@@ -71,14 +82,14 @@ class RegistrarDevolucionProveedor
             //    IVA: si lo había, también se reversa 2408 crédito contra 2205.
             $terceroType = \App\Models\Contacto::class;
             MovimientoContable::create([
-                'fecha' => $ts, 'cuenta_puc' => '2205',
+                'fecha' => $ts, 'cuenta_puc' => setting('contable.cta_proveedores_default'),
                 'tercero_type' => $terceroType, 'tercero_id' => $d->proveedor_id,
                 'debe' => $d->total, 'haber' => 0,
                 'origen_type' => DevolucionProveedor::class, 'origen_id' => $d->id,
                 'descripcion' => "Devolución {$d->numero} · reversa CxP",
                 'user_id' => $userId,
             ]);
-            $ctaInv = $d->ubicacion?->ctaInventarioEfectiva() ?? (string) setting('contable.cta_inventario_default', '1435');
+            $ctaInv = $d->ubicacion?->ctaInventarioEfectiva() ?? (string) setting('contable.cta_inventario_default');
             MovimientoContable::create([
                 'fecha' => $ts, 'cuenta_puc' => $ctaInv,
                 'debe' => 0, 'haber' => $d->subtotal,
@@ -88,7 +99,7 @@ class RegistrarDevolucionProveedor
             ]);
             if ($d->iva > 0) {
                 MovimientoContable::create([
-                    'fecha' => $ts, 'cuenta_puc' => '2408',
+                    'fecha' => $ts, 'cuenta_puc' => setting('contable.cta_iva_compra_default'),
                     'debe' => 0, 'haber' => $d->iva,
                     'origen_type' => DevolucionProveedor::class, 'origen_id' => $d->id,
                     'descripcion' => "Devolución {$d->numero} · reversa IVA",

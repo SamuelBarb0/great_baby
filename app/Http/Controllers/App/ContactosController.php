@@ -115,12 +115,39 @@ class ContactosController extends Controller implements HasMiddleware
             return response()->json($rows);
         }
 
-        return response()->json(
-            Contacto::where(function ($qq) use ($q) {
+        /*
+         * El `rol` filtra de verdad, y la ficha trae lo que el motor de
+         * retenciones necesita.
+         *
+         * La pantalla de pagos a proveedor llamaba con `rol=proveedor` y esto
+         * lo IGNORABA: devolvia cualquier contacto —clientes, empleados— y
+         * `crear()` solo valida `exists:contactos,id`, asi que se podia
+         * registrar un pago a proveedor contra un CLIENTE.
+         *
+         * Y devolvia solo id/nombre/documento, asi que la ciudad nunca se
+         * autollenaba y el formulario se quedaba con «Bogota» fijo: **se
+         * calculaba ReteICA de Bogota para un proveedor de cualquier ciudad.**
+         * Eso es plata que se retiene mal.
+         */
+        $rol = (string) $request->input('rol', '');
+
+        $contactos = Contacto::query()
+            ->where(function ($qq) use ($q) {
                 $qq->where('nombre_completo', 'like', "%{$q}%")
                     ->orWhere('numero_documento', 'like', "%{$q}%");
-            })->limit(10)->get(['id', 'nombre_completo as nombre', 'numero_documento as documento'])
-        );
+            })
+            ->when($rol === 'proveedor', fn ($qq) => $qq->where('es_proveedor', true))
+            ->when($rol === 'cliente', fn ($qq) => $qq->where('es_cliente', true))
+            ->limit(10)
+            ->get(['id', 'nombre_completo', 'razon_social', 'numero_documento', 'ciudad', 'es_autorretenedor']);
+
+        return response()->json($contactos->map(fn ($c) => [
+            'id' => $c->id,
+            'nombre' => $c->razon_social ?: $c->nombre_completo,
+            'documento' => $c->numero_documento,
+            'ciudad' => $c->ciudad,
+            'es_autorretenedor' => (bool) $c->es_autorretenedor,
+        ]));
     }
 
     public function show(Contacto $contacto): Response
@@ -215,6 +242,7 @@ class ContactosController extends Controller implements HasMiddleware
                 'es_cliente' => (bool) $contacto->es_cliente,
                 'es_cliente_b2b' => (bool) $contacto->es_cliente_b2b,
                 'es_proveedor' => (bool) $contacto->es_proveedor,
+                'es_autorretenedor' => (bool) $contacto->es_autorretenedor,
                 'es_empleado' => (bool) $contacto->es_empleado,
                 'regimen_iva' => $contacto->regimen_iva,
                 'retenciones_default' => (array) ($contacto->retenciones_default ?? []),
@@ -286,6 +314,20 @@ class ContactosController extends Controller implements HasMiddleware
             'es_proveedor' => ['boolean'],
             'es_empleado' => ['boolean'],
             'regimen_iva' => ['nullable', 'in:responsable,no_responsable'],
+            /*
+             * Si el proveedor se autorretiene, nosotros NO le retenemos.
+             *
+             * El motor ya lo respeta —probado el 29-oct: $5.000.000 a un
+             * autorretenedor dan retención $0 y a uno normal $125.000— pero
+             * esta columna sólo se LEÍA. No había casilla, ni regla de
+             * validación, ni una sola línea en todo el código que la
+             * escribiera: la única forma de marcarla era por base de datos.
+             *
+             * Y practicarle retefuente a un autorretenedor es doble retención,
+             * que es sanción. La regla estaba bien programada y era
+             * inalcanzable.
+             */
+            'es_autorretenedor' => ['boolean'],
             // Qué nos retiene este cliente al pagar (AplicarRetencionesVenta).
             'retenciones_default' => ['nullable', 'array:fuente,ica,iva'],
             'retenciones_default.*' => ['boolean'],

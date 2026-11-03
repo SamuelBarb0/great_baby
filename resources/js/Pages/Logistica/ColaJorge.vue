@@ -2,7 +2,7 @@
 import { onMounted, onBeforeUnmount, ref, computed } from 'vue';
 import { Head, router, Link } from '@inertiajs/vue3';
 import AppLayout from '@/Layouts/AppLayout.vue';
-import { Boxes, Clock, CheckCheck, PackageCheck } from 'lucide-vue-next';
+import { Boxes, Clock, CheckCheck, PackageCheck, AlertTriangle } from 'lucide-vue-next';
 
 const props = defineProps({
     en_cola: { type: Array, required: true },
@@ -12,6 +12,8 @@ const props = defineProps({
     alistadores: { type: Array, required: true },
     rol: { type: Object, required: true },
     kpis: { type: Object, required: true },
+    sin_bodegas: { type: Boolean, default: false },
+    puede_asignarse_bodegas: { type: Boolean, default: false },
 });
 
 const money = (n) => new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n || 0);
@@ -131,6 +133,27 @@ const minutosDesde = (hhmm) => {
     <Head title="Cola de alistamiento"/>
     <AppLayout>
         <div class="space-y-4">
+            <!--
+                LOG-H1 · Una cola vacía por falta de configuración se veía
+                igual que un día sin trabajo. Acá se dice cuál de las dos es.
+            -->
+            <div v-if="sin_bodegas"
+                class="p-4 rounded-lg bg-amber-500/10 border-l-4 border-amber-500 flex gap-3">
+                <AlertTriangle class="h-5 w-5 text-amber-600 shrink-0 mt-0.5"/>
+                <div class="text-sm text-amber-900 dark:text-amber-200">
+                    <strong>Esta cola está vacía porque no tenés bodegas a cargo</strong>, no porque no haya trabajo.
+                    <template v-if="puede_asignarse_bodegas">
+                        Asignate como responsable de una bodega en
+                        <Link href="/app/inventario/ubicaciones" class="underline font-semibold">Ubicaciones</Link>
+                        y los pedidos de esa sede aparecen acá.
+                    </template>
+                    <template v-else>
+                        Pedile a gerencia que te ponga como responsable de tu bodega en Ubicaciones:
+                        hasta que eso pase no te va a llegar ningún pedido.
+                    </template>
+                </div>
+            </div>
+
             <div class="flex items-start justify-between gap-4 flex-wrap">
                 <div>
                     <h1 class="text-2xl font-bold flex items-center gap-2">

@@ -1,10 +1,26 @@
 <script setup>
-import { ref, reactive, computed } from 'vue';
+import { ref, reactive, computed, watch } from 'vue';
+import { useBogotaDate } from '@/composables/useBogotaDate';
 import { Head, router } from '@inertiajs/vue3';
-import { BookOpen, Plus, Search, Cloud, CloudOff, RefreshCw, X, Check, Trash2 } from 'lucide-vue-next';
+import { useDebounceFn } from '@vueuse/core';
+import { BookOpen, Plus, Search, Cloud, CloudOff, RefreshCw, X, Check, Trash2, Link2, Ban } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
+import Paginacion from '@/Components/Paginacion.vue';
+import { useDestacar } from '@/composables/useDestacar';
+import PestanasSeccion from '@/Components/PestanasSeccion.vue';
+import { pestanasLibro } from '@/composables/usePestanasContables';
 import { useMoney } from '@/composables/useMoney';
 import AppConfirmModal from '@/Components/AppConfirmModal.vue';
+
+/*
+ * La fecha de HOY en Colombia, no en UTC.
+ *
+ * `new Date().toISOString().slice(0,10)` convierte a UTC antes de
+ * recortar: entre las 19:00 y la medianoche hora Bogotá devuelve el día
+ * siguiente. Acá eso no era un filtro incómodo sino la fecha que queda
+ * escrita en el documento.
+ */
+const { hoy: hoyBogota } = useBogotaDate();
 
 const props = defineProps({
     filtros: { type: Object, required: true },
@@ -12,6 +28,10 @@ const props = defineProps({
     kpis: { type: Object, required: true },
     cuentas: { type: Array, required: true },
 });
+
+// La Torre SIIGO enlaza aca con `?destacar=<id>` cuando el documento no tiene
+// pantalla de detalle propia. Senala la fila en vez de dar un 404.
+const { clasesDe } = useDestacar();
 
 // Confirmaciones con el modal propio: el confirm() nativo queda bloqueado
 // dentro del iframe de la app de escritorio y en celular ignora el diseno.
@@ -36,17 +56,76 @@ const filtrar = () => {
 const modal = ref(false);
 const procesando = ref(false);
 const nuevo = reactive({
-    fecha: new Date().toISOString().slice(0, 10),
+    fecha: hoyBogota(),
     glosa: '',
     lineas: [],
 });
 
 const nuevaLinea = () => ({ cuenta_puc: '', tercero_documento: '', debe: 0, haber: 0, descripcion: '' });
 
+/*
+ * Buscador de facturas pendientes para amarrar la línea a un documento.
+ *
+ * La contadora lo pidió así en la reunión del 21-oct: «la idea es que yo cuando
+ * elija 3.05, elija el NIT del cliente y me despliegue las varias facturas que
+ * él me debe y yo pueda escogerla». Hasta hoy el tercero era un campo de texto
+ * que decía «opcional», o sea: había que acordarse del NIT, teclearlo bien, y
+ * aun así el asiento no quedaba atado a ninguna factura.
+ *
+ * Se reusa el endpoint que ya alimenta la pantalla de Pagos — mismo permiso,
+ * misma consulta, cero código nuevo del lado del servidor.
+ */
+const buscandoEn = ref(null);     // índice de la línea que tiene el buscador abierto
+const textoFactura = ref('');
+const facturas = ref([]);
+const cargandoFacturas = ref(false);
+
+const abrirBuscador = (i) => {
+    buscandoEn.value = buscandoEn.value === i ? null : i;
+    textoFactura.value = '';
+    facturas.value = [];
+    if (buscandoEn.value !== null) buscarFacturas();
+};
+
+const buscarFacturas = useDebounceFn(async () => {
+    if (buscandoEn.value === null) return;
+    cargandoFacturas.value = true;
+    try {
+        const r = await fetch(`/app/pagos/facturas-pendientes?q=${encodeURIComponent(textoFactura.value)}`, {
+            headers: { 'X-Requested-With': 'XMLHttpRequest' },
+        });
+        facturas.value = r.ok ? await r.json() : [];
+    } catch {
+        facturas.value = [];
+    } finally {
+        cargandoFacturas.value = false;
+    }
+}, 350);
+
+watch(textoFactura, buscarFacturas);
+
+/*
+ * Al elegir la factura se llenan el tercero y la descripción, y el saldo se
+ * propone en la columna que corresponde: una cuenta por COBRAR (13…) se abona
+ * cuando el cliente paga, una por PAGAR (2…) se debita. El contador puede
+ * cambiar el monto si el abono es parcial.
+ */
+const elegirFactura = (i, f) => {
+    const l = nuevo.lineas[i];
+    l.tercero_documento = f.nit || '';
+    l.descripcion = `Factura ${f.numero} · ${f.cliente}`;
+
+    const esPorCobrar = String(l.cuenta_puc || '').startsWith('13');
+    if (esPorCobrar) { l.haber = f.saldo; l.debe = 0; }
+    else { l.debe = f.saldo; l.haber = 0; }
+
+    buscandoEn.value = null;
+};
+
 const abrir = () => {
     modal.value = true;
     Object.assign(nuevo, {
-        fecha: new Date().toISOString().slice(0, 10),
+        fecha: hoyBogota(),
         glosa: '',
         lineas: [nuevaLinea(), nuevaLinea()],
     });
@@ -57,6 +136,31 @@ const quitarLinea = (i) => { if (nuevo.lineas.length > 2) nuevo.lineas.splice(i,
 const totalDebe = computed(() => nuevo.lineas.reduce((s, l) => s + (parseFloat(l.debe) || 0), 0));
 const totalHaber = computed(() => nuevo.lineas.reduce((s, l) => s + (parseFloat(l.haber) || 0), 0));
 const cuadra = computed(() => totalDebe.value > 0 && Math.abs(totalDebe.value - totalHaber.value) < 0.01);
+
+/*
+ * Qué le falta al asiento para poder guardarse, dicho en voz alta.
+ *
+ * La descripción de cada línea es `required` en el HTML, así que el navegador
+ * bloqueaba el submit y mostraba su globo nativo... anclado a un campo que
+ * queda fuera del recuadro visible del modal. Desde afuera: clic en Guardar y
+ * no pasa NADA — ni petición de red, ni mensaje, ni pista. Se midió en
+ * producción el 2026-10-29.
+ *
+ * El cuadre ya se avisaba así; esto le da el mismo trato a lo demás.
+ */
+const faltaParaGuardar = computed(() => {
+    const sinCuenta = nuevo.lineas.filter(l => ! String(l.cuenta_puc ?? '').trim()).length;
+    if (sinCuenta) return `Falta la cuenta PUC en ${sinCuenta} línea(s).`;
+
+    const sinDescripcion = nuevo.lineas.filter(l => ! String(l.descripcion ?? '').trim()).length;
+    if (sinDescripcion) return `Falta la descripción en ${sinDescripcion} línea(s).`;
+
+    if (! String(nuevo.glosa ?? '').trim()) return 'Falta la glosa del asiento.';
+    if (String(nuevo.glosa).trim().length < 10) return 'La glosa necesita al menos 10 caracteres.';
+
+    if (! cuadra.value) return null;   // ya lo dice el «NO CUADRA» de los totales
+    return null;
+});
 
 const guardar = () => {
     if (procesando.value || !cuadra.value) return;
@@ -77,6 +181,27 @@ const aprobar = (a) => {
         onConfirmar: () => {
             modalConfirm.value = null;
             router.post(`/app/contabilidad/asientos-manuales/${a.id}/aprobar`, {}, { preserveScroll: true });
+        },
+    };
+};
+
+/*
+ * Anular un asiento equivocado.
+ *
+ * El mínimo de 10 caracteres es el mismo que valida el servidor: si el botón
+ * deja mandar «error», el 422 es la primera noticia de que faltaba explicar.
+ */
+const anular = (a) => {
+    modalConfirm.value = {
+        titulo: `¿Anular el asiento #${a.id}?`,
+        mensaje: `Sus ${a.lineas_count} línea(s) por ${money(a.valor_total)} salen del balance.\n`
+            + 'El asiento no se borra: queda en esta lista marcado «anulado», con tu nombre y el motivo.',
+        color: 'rose',
+        textoConfirmar: 'Anular',
+        pedirMotivo: { etiqueta: '¿Por qué se anula?', minimo: 10 },
+        onConfirmar: (motivo) => {
+            modalConfirm.value = null;
+            router.post(`/app/contabilidad/asientos-manuales/${a.id}/anular`, { motivo }, { preserveScroll: true });
         },
     };
 };
@@ -104,6 +229,7 @@ const badgeEstado = (e) => ({
     cuadrado: 'bg-blue-500/20 text-blue-700',
     aprobado: 'bg-amber-500/20 text-amber-700',
     sincronizado: 'bg-emerald-500/20 text-emerald-700',
+    anulado: 'bg-rose-500/20 text-rose-700 line-through',
 }[e] || 'bg-surface-500/20');
 </script>
 
@@ -111,6 +237,8 @@ const badgeEstado = (e) => ({
     <Head title="Asientos manuales · Contabilidad + SIIGO"/>
     <AppLayout>
         <div class="space-y-4 max-w-7xl">
+            <PestanasSeccion :pestanas="pestanasLibro"/>
+
             <div class="flex items-start justify-between gap-3 flex-wrap">
                 <div>
                     <h1 class="text-2xl font-bold flex items-center gap-2">
@@ -150,6 +278,7 @@ const badgeEstado = (e) => ({
                         <option value="cuadrado">Cuadrado</option>
                         <option value="aprobado">Aprobado</option>
                         <option value="sincronizado">Sincronizado</option>
+                        <option value="anulado">Anulado</option>
                     </select>
                     <label class="flex items-center gap-1 text-xs whitespace-nowrap">
                         <input type="checkbox" v-model="sinSiigo" @change="filtrar" class="rounded"/> Solo sin SIIGO
@@ -173,7 +302,7 @@ const badgeEstado = (e) => ({
                         </tr>
                     </thead>
                     <tbody class="divide-y">
-                        <tr v-for="a in asientos.data" :key="a.id" class="hover:bg-surface-50">
+                        <tr v-for="a in asientos.data" :key="a.id" :class="['hover:bg-surface-50', clasesDe(a.id)]">
                             <td class="p-2 font-mono">#{{ a.id }}</td>
                             <td class="p-2 text-xs">{{ a.fecha }}</td>
                             <td class="p-2 text-xs max-w-xs truncate" :title="a.glosa">{{ a.glosa }}</td>
@@ -186,7 +315,7 @@ const badgeEstado = (e) => ({
                             </td>
                             <td class="p-2 text-xs">{{ a.autor }}</td>
                             <td class="p-2 text-right whitespace-nowrap">
-                                <button v-if="a.estado === 'cuadrado'" @click="aprobar(a)" class="text-emerald-600 hover:text-emerald-700 p-1" title="Aprobar y enviar a SIIGO">
+                                <button v-if="a.estado === 'cuadrado' && a.puedo_aprobar" @click="aprobar(a)" class="text-emerald-600 hover:text-emerald-700 p-1" title="Aprobar y enviar a SIIGO">
                                     <Check class="h-4 w-4"/>
                                 </button>
                                 <button v-if="a.estado === 'aprobado' && !a.siigo_journal_id" @click="reenviar(a)" :disabled="reintentando === a.id"
@@ -195,12 +324,20 @@ const badgeEstado = (e) => ({
                                         title="Reenviar a SIIGO">
                                     <RefreshCw :class="['h-4 w-4', reintentando === a.id ? 'animate-spin' : '']"/>
                                 </button>
+                                <button v-if="a.puedo_anular" @click="anular(a)" class="text-rose-600 hover:text-rose-700 p-1"
+                                        title="Anular: sus líneas salen del balance y queda el motivo">
+                                    <Ban class="h-4 w-4"/>
+                                </button>
+                                <span v-else-if="a.anulado_at" class="text-[10px] text-surface-500" :title="a.motivo_anulacion">
+                                    anulado {{ a.anulado_at }}
+                                </span>
                             </td>
                         </tr>
                         <tr v-if="!asientos.data.length"><td colspan="9" class="p-6 text-center text-surface-500 text-sm">Sin asientos manuales.</td></tr>
                     </tbody>
                 </table>
             </div>
+            <Paginacion :pagina="asientos" etiqueta="asientos"/>
 
             <div v-if="modal" @click.self="modal = false" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
                 <div class="card p-5 w-full max-w-4xl space-y-3 max-h-[90vh] overflow-y-auto">
@@ -233,12 +370,31 @@ const badgeEstado = (e) => ({
                                     </tr>
                                 </thead>
                                 <tbody class="divide-y">
-                                    <tr v-for="(l, i) in nuevo.lineas" :key="i">
+                                    <!--
+                                        template v-for porque cada línea son DOS filas: la de datos
+                                        y, debajo, la del buscador de facturas cuando está abierto.
+                                    -->
+                                    <template v-for="(l, i) in nuevo.lineas" :key="i">
+                                    <tr>
                                         <td class="p-1">
                                             <input v-model="l.cuenta_puc" list="cuentas-puc" required placeholder="1105" class="input w-full text-xs font-mono"/>
                                         </td>
                                         <td class="p-1">
-                                            <input v-model="l.tercero_documento" placeholder="opcional" class="input w-full text-xs font-mono"/>
+                                            <div class="flex items-center gap-1">
+                                                <input v-model="l.tercero_documento" placeholder="NIT"
+                                                       class="input w-full text-xs font-mono"/>
+                                                <!--
+                                                    Amarrar la línea a una factura: en vez de acordarse
+                                                    del NIT y teclearlo, se elige el documento y el
+                                                    tercero, la descripción y el saldo se llenan solos.
+                                                -->
+                                                <button type="button" @click="abrirBuscador(i)"
+                                                        :class="['p-1 rounded shrink-0',
+                                                                 buscandoEn === i ? 'bg-brand-600 text-white' : 'text-brand-600 hover:bg-brand-50']"
+                                                        title="Buscar factura pendiente">
+                                                    <Link2 class="h-3.5 w-3.5"/>
+                                                </button>
+                                            </div>
                                         </td>
                                         <td class="p-1">
                                             <input v-model="l.debe" type="number" step="0.01" min="0" class="input w-full text-xs text-right font-mono"/>
@@ -256,6 +412,41 @@ const badgeEstado = (e) => ({
                                             </button>
                                         </td>
                                     </tr>
+
+                                    <!-- Facturas pendientes del cliente, para amarrar esta línea -->
+                                    <tr v-if="buscandoEn === i">
+                                        <td colspan="6" class="p-2 bg-brand-50 dark:bg-brand-900/20">
+                                            <div class="relative mb-2">
+                                                <Search class="h-3.5 w-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-surface-400"/>
+                                                <input v-model="textoFactura" autofocus
+                                                       placeholder="Buscar por número de factura, cliente o NIT…"
+                                                       class="input w-full text-xs pl-7"/>
+                                            </div>
+
+                                            <div v-if="cargandoFacturas" class="text-xs text-surface-500 py-2">Buscando…</div>
+
+                                            <div v-else-if="! facturas.length" class="text-xs text-surface-500 py-2">
+                                                No hay facturas pendientes con ese criterio.
+                                            </div>
+
+                                            <div v-else class="max-h-52 overflow-y-auto divide-y divide-surface-200 dark:divide-surface-800">
+                                                <button v-for="f in facturas" :key="f.id" type="button"
+                                                        @click="elegirFactura(i, f)"
+                                                        class="w-full text-left px-2 py-1.5 hover:bg-white dark:hover:bg-surface-800 flex items-center gap-3">
+                                                    <span class="font-mono text-xs text-brand-600 font-semibold w-28 shrink-0">{{ f.numero }}</span>
+                                                    <span class="text-xs flex-1 truncate">
+                                                        {{ f.cliente }}
+                                                        <span v-if="f.nit" class="text-surface-500 font-mono">· {{ f.nit }}</span>
+                                                    </span>
+                                                    <span class="text-[10px] text-surface-500 shrink-0">vence {{ f.vence || '—' }}</span>
+                                                    <span class="font-mono text-xs font-bold text-red-600 w-28 text-right shrink-0">
+                                                        {{ money(f.saldo) }}
+                                                    </span>
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    </template>
                                 </tbody>
                                 <tfoot class="border-t bg-surface-50 dark:bg-surface-900 font-mono font-bold">
                                     <tr>
@@ -283,9 +474,10 @@ const badgeEstado = (e) => ({
                             💡 Guardar deja el asiento en estado <b>cuadrado</b>. Requiere aprobación separada (botón <Check class="h-3 w-3 inline"/>) para envío a SIIGO.
                         </div>
 
-                        <div class="flex justify-end gap-2 pt-2 border-t">
+                        <div class="flex justify-end items-center gap-2 pt-2 border-t">
+                            <p v-if="faltaParaGuardar" class="text-xs text-amber-600 mr-auto">{{ faltaParaGuardar }}</p>
                             <button type="button" @click="modal = false" class="btn-ghost text-sm">Cancelar</button>
-                            <button type="submit" :disabled="procesando || !cuadra" class="btn-primary text-sm">
+                            <button type="submit" :disabled="procesando || !cuadra || !!faltaParaGuardar" class="btn-primary text-sm">
                                 {{ procesando ? 'Guardando…' : `Guardar ${cuadra ? '('+money(totalDebe)+')' : ''}` }}
                             </button>
                         </div>

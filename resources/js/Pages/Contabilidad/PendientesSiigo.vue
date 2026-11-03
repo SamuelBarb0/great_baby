@@ -3,6 +3,8 @@ import { ref, computed } from 'vue';
 import { Head, Link, router } from '@inertiajs/vue3';
 import { Cloud, CloudOff, AlertTriangle, AlertOctagon, RefreshCw, ExternalLink, Filter } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
+import PestanasSeccion from '@/Components/PestanasSeccion.vue';
+import { pestanasSiigo } from '@/composables/usePestanasContables';
 import { useMoney } from '@/composables/useMoney';
 import { fechaCorta } from '@/composables/useFecha';
 import AppConfirmModal from '@/Components/AppConfirmModal.vue';
@@ -11,7 +13,7 @@ import { mensajeDeError } from '@/composables/useMensajeError';
 /*
  * CONT-C1 · Dashboard de documentos pendientes de SIIGO.
  * Aracely entra aquí y ve TODO lo que no llegó a SIIGO en un solo lugar
- * (recepciones, devoluciones, pagos, NC, ND, asientos). Puede reenviar
+ * (facturas de venta, recepciones, devoluciones, pagos, NC, ND, asientos). Puede reenviar
  * manual sin ir módulo por módulo.
  */
 const props = defineProps({
@@ -31,6 +33,7 @@ const filtroPermanente = ref(false); // CONT-C7 · solo fallas permanentes
 const busqueda = ref('');
 
 const tiposLabel = {
+    factura: 'Factura de venta',
     recepcion: 'Recepción compra',
     devolucion: 'Devolución proveedor',
     pago_proveedor: 'Pago proveedor',
@@ -39,6 +42,8 @@ const tiposLabel = {
     asiento_manual: 'Asiento manual',
 };
 const tiposClass = {
+    // Rojo fuerte: es la única con plazo legal ante la DIAN.
+    factura: 'bg-rose-100 text-rose-900 font-bold dark:bg-rose-900/50 dark:text-rose-100',
     recepcion: 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200',
     devolucion: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200',
     pago_proveedor: 'bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-200',
@@ -144,6 +149,8 @@ const enviarTodosVisibles = async () => {
         </Transition>
 
         <div class="max-w-7xl mx-auto space-y-4">
+            <PestanasSeccion :pestanas="pestanasSiigo"/>
+
             <!-- Header + KPIs -->
             <div class="card p-5">
                 <div class="flex items-center gap-3 mb-4">
@@ -164,6 +171,14 @@ const enviarTodosVisibles = async () => {
                             {{ resumen.fallas_permanentes }}
                         </div>
                         <div class="text-[10px] uppercase text-surface-500">Falla perm.</div>
+                    </button>
+                    <button @click="filtroTipo = 'factura'"
+                            :class="['card p-3 border-2', filtroTipo==='factura' ? 'border-rose-500' : 'border-transparent',
+                                     resumen.facturas > 0 ? 'ring-2 ring-rose-200' : '']">
+                        <div class="text-xl font-bold" :class="resumen.facturas > 0 ? 'text-rose-700' : ''">
+                            {{ resumen.facturas }}
+                        </div>
+                        <div class="text-[10px] uppercase text-surface-500">Facturas</div>
                     </button>
                     <button @click="filtroTipo = 'recepcion'" :class="['card p-3 border-2', filtroTipo==='recepcion' ? 'border-brand-500' : 'border-transparent']">
                         <div class="text-xl font-bold">{{ resumen.recepciones }}</div>

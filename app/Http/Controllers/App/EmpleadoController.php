@@ -35,11 +35,12 @@ class EmpleadoController extends Controller implements HasMiddleware
         })];
     }
 
-    public function show(int $empleado): Response
+    public function show(Request $r, int $empleado): Response
     {
         $e = Empleado::with([
             'vacante:id,titulo,requisicion_id',
             'contratacion:id,empleado_id,eps,arl,pension,caja,examen_resultado,contrato_firmado_at',
+            'novedades.registradaPor:id,name',
             'induccionPor:id,name',
             'documentos.subidoPor:id,name',
         ])->findOrFail($empleado);
@@ -75,12 +76,53 @@ class EmpleadoController extends Controller implements HasMiddleware
                 'fecha_retiro' => $e->fecha_retiro?->toDateString(),
                 'vacante' => $e->vacante ? ['id' => $e->vacante->id, 'titulo' => $e->vacante->titulo] : null,
                 'requisicion_id' => $e->vacante?->requisicion_id,
-                'afiliaciones' => $e->contratacion ? [
-                    'EPS' => $e->contratacion->eps,
-                    'ARL' => $e->contratacion->arl,
-                    'Pensión' => $e->contratacion->pension,
-                    'Caja' => $e->contratacion->caja,
-                ] : null,
+                /*
+                 * Las afiliaciones VIGENTES, no las del trámite.
+                 *
+                 * Se muestra la de la ficha; si todavía no la tiene —gente
+                 * registrada antes de la Fase A— se cae a la del trámite de
+                 * contratación. Es el valor EFECTIVO: lo que la casilla
+                 * muestra es lo que de verdad rige, no lo que está guardado en
+                 * esa columna. Si mostrara vacío estando heredada, el primer
+                 * guardado las borraría todas.
+                 */
+                'afiliaciones' => [
+                    'EPS' => $e->eps ?: $e->contratacion?->eps,
+                    'ARL' => $e->arl ?: $e->contratacion?->arl,
+                    'Pensión' => $e->pension ?: $e->contratacion?->pension,
+                    'Caja' => $e->caja ?: $e->contratacion?->caja,
+                ],
+                // Fase A · los datos que pide el cuadro de novedades.
+                'ficha' => [
+                    'fecha_nacimiento' => $e->fecha_nacimiento?->toDateString(),
+                    'grupo_sanguineo' => $e->grupo_sanguineo,
+                    'direccion' => $e->direccion,
+                    'ciudad' => $e->ciudad,
+                    'telefono' => $e->telefono,
+                    'email' => $e->email,
+                    'empresa_afiliadora' => $e->empresa_afiliadora,
+                    'horario' => $e->horario,
+                    'periodicidad_pago' => $e->periodicidad_pago,
+                    'valor_adicional' => $e->valor_adicional !== null ? (float) $e->valor_adicional : null,
+                    'concepto_adicional' => $e->concepto_adicional,
+                    'banco' => $e->banco,
+                    'tipo_cuenta' => $e->tipo_cuenta,
+                    'cuenta_bancaria' => $e->cuenta_bancaria,
+                    'eps' => $e->eps ?: $e->contratacion?->eps,
+                    'pension' => $e->pension ?: $e->contratacion?->pension,
+                    'cesantias' => $e->cesantias,
+                    'caja' => $e->caja ?: $e->contratacion?->caja,
+                    'arl' => $e->arl ?: $e->contratacion?->arl,
+                    'arl_nivel_riesgo' => $e->arl_nivel_riesgo,
+                ],
+                // Lo que le falta para salir entera en el cuadro del mes.
+                'faltantes' => $e->faltantesDeFicha(),
+                'devenga_auxilio' => $e->devengaAuxilioTransporte(),
+                // Y por qué no, cuando no: el panel muestra el valor
+                // EFECTIVO y la razón, no una casilla muda.
+                'auxilio_excluido' => (bool) $e->auxilio_excluido,
+                'auxilio_excluido_motivo' => $e->auxilio_excluido_motivo,
+                'por_que_no_auxilio' => $e->porQueNoDevengaAuxilio(),
             ],
             'documentos' => $e->documentos->map(fn ($d) => [
                 'id' => $d->id,
@@ -92,16 +134,343 @@ class EmpleadoController extends Controller implements HasMiddleware
             ])->values(),
             'tipos_documento' => collect(DocumentoEmpleado::TIPOS)
                 ->map(fn ($l, $k) => ['valor' => $k, 'label' => $l])->values(),
+            // Los exámenes que se le piden a alguien que ya trabaja acá: el de
+            // ingreso ya pasó, así que no se ofrece.
+            'tipos_examen' => \App\Modules\Rrhh\Enums\TipoExamenMedico::catalogo(
+                \App\Modules\Rrhh\Enums\TipoExamenMedico::deEmpleado(),
+            ),
+            // Fase F1 · la entrevista de retiro.
+            'motivos_salida' => \App\Modules\Rrhh\Enums\MotivoSalida::catalogo(),
+            'criterios_retiro' => \App\Modules\Rrhh\Models\EntrevistaRetiro::catalogoCriterios(),
+            'entrevista_retiro' => $this->entrevistaDeRetiro($e),
+            // Fase F2 · entrega de cargo.
+            'bloques_entrega' => \App\Modules\Rrhh\Models\EntregaCargo::catalogoBloques(),
+            'entrega_cargo' => $this->entregaDeCargo($e),
+            // F8 · la inducción con su temario.
+            'induccion' => $this->induccionDe($e),
+            'temario_en_blanco' => \App\Modules\Rrhh\Models\Induccion::temarioEnBlanco(),
+            // F10 · la liquidación definitiva, si ya se fue.
+            'liquidacion' => $this->liquidacionDe($e),
+            'puedo_liquidar' => [
+                'calcular' => Permisos::puede($r->user(), 'rrhh'),
+                'aprobar' => Permisos::puede($r->user(), 'rrhh_nomina_aprobar'),
+                'pagar' => Permisos::puede($r->user(), 'contabilidad'),
+                'ver' => Permisos::puede($r->user(), 'rrhh_nomina'),
+            ],
+            // Qué bloques puede firmar QUIEN está mirando: cada área firma el
+            // suyo y nada más.
+            'puedo_firmar' => collect(\App\Modules\Rrhh\Models\EntregaCargo::AREAS)
+                ->map(fn ($a) => Permisos::puede($r->user(), $a['permiso'])),
             // Para registrar el retiro desde acá: sin el motivo, el indicador
             // de rotación no puede responder la pregunta de la Junta.
             'tipos_retiro' => collect(\App\Modules\Rrhh\Support\IndicadoresRrhh::TIPOS_RETIRO)
                 ->map(fn ($l, $k) => ['valor' => $k, 'label' => $l])->values(),
+            // Sus novedades, para no tener que ir al cuadro del mes a buscar
+            // si esta persona ya se había incapacitado antes.
+            /*
+             * Las evaluaciones del período de prueba, con su detalle.
+             *
+             * En plural porque el período se prorroga: la segunda evaluación
+             * no reemplaza a la primera, y el historial es justo lo que
+             * sustenta la decisión si después alguien la reclama.
+             */
+            'evaluaciones_prueba' => \App\Modules\Rrhh\Models\EvaluacionPrueba::with('jefe:id,name')
+                ->where('empleado_id', $e->id)
+                ->orderByDesc('fecha_evaluacion')
+                ->get()
+                ->map(fn ($ev) => [
+                    'id' => $ev->id,
+                    'fecha' => $ev->fecha_evaluacion?->toDateString(),
+                    'jefe' => $ev->jefe?->name,
+                    'jefe_cargo' => $ev->jefe_cargo,
+                    'resultado' => $ev->resultado,
+                    'promedio' => $ev->promedio(),
+                    'calificaciones' => $ev->calificaciones(),
+                    'resaltar' => $ev->aspectos_resaltar,
+                    'mejorar' => $ev->aspectos_mejorar,
+                    'motivo' => $ev->motivo,
+                    // Lo que el jefe dejó sin calificar, sin contar «si aplica».
+                    'sin_calificar' => $ev->sinCalificar(),
+                ])->values(),
+            'novedades' => $e->novedades->map(fn ($n) => [
+                'id' => $n->id,
+                'tipo' => $n->tipo->label(),
+                'clase' => $n->etiquetaDeClase(),
+                'desde' => $n->fecha_inicio?->toDateString(),
+                'hasta' => $n->fecha_fin?->toDateString(),
+                'dias' => $n->dias !== null ? (float) $n->dias : null,
+                'horas' => $n->horas !== null ? (float) $n->horas : null,
+                'descuento' => (float) $n->descuento,
+                'periodo' => $n->periodo,
+            ])->values(),
             'bitacora' => $e->bitacora()->with('usuario:id,name')->get()->map(fn ($b) => [
                 'resumen' => $b->resumen,
                 'usuario' => $b->usuario?->name ?? 'Sistema',
                 'cuando' => $b->created_at?->format('Y-m-d H:i'),
             ])->values(),
         ]);
+    }
+
+    /**
+     * La inducción con su temario, si ya se registró.
+     *
+     * Devuelve el temario GUARDADO, no el vigente: si el área agrega un tema
+     * en marzo, la inducción de enero no se vuelve incompleta por algo que no
+     * existía cuando se dio.
+     */
+    private function induccionDe(Empleado $e): ?array
+    {
+        $i = \App\Modules\Rrhh\Models\Induccion::with('registradaPor:id,name')
+            ->where('empleado_id', $e->id)->first();
+
+        if (! $i) {
+            return null;
+        }
+
+        return [
+            'fecha' => $i->fecha?->toDateString(),
+            'responsable_nombre' => $i->responsable_nombre,
+            'responsable_cargo' => $i->responsable_cargo,
+            'temas' => $i->temario(),
+            'cubiertos' => $i->cubiertos(),
+            'total' => count($i->temario()),
+            'pendientes' => $i->pendientes(),
+            'completa' => $i->completa(),
+            'firmada_at' => $i->firmada_at?->toDateString(),
+            'firmada' => $i->firmada(),
+            'observaciones' => $i->observaciones,
+            'registrada_por' => $i->registradaPor?->name,
+        ];
+    }
+
+    /**
+     * La liquidación definitiva de quien se fue.
+     *
+     * Sale de la fila guardada: una vez calculada, lo que vale es lo que
+     * quedó escrito, no lo que daría recalcular hoy.
+     */
+    private function liquidacionDe(Empleado $e): ?array
+    {
+        $liq = \App\Modules\Rrhh\Models\Liquidacion::with([
+            'liquidadaPor:id,name', 'aprobadaPor:id,name', 'pagadaPor:id,name',
+        ])->where('empleado_id', $e->id)->first();
+
+        if (! $liq) {
+            return null;
+        }
+
+        return [
+            'estado' => $liq->estado,
+            'estado_label' => $liq->estadoLabel(),
+            'color' => $liq->colorEstado(),
+            'se_puede_rehacer' => $liq->sePuedeRehacer(),
+            'tiempo_servido' => $liq->tiempoServido(),
+            'manos_repetidas' => $liq->hizoVariasManos(),
+            'conceptos' => $liq->conceptos(),
+            'total_a_favor' => (float) $liq->total_a_favor,
+            'total_descuentos' => (float) $liq->total_descuentos,
+            'neto' => (float) $liq->neto,
+            'vacaciones_tomadas' => (int) $liq->vacaciones_tomadas,
+            'cesantias_ya_pagadas' => (float) $liq->cesantias_ya_pagadas,
+            'indemnizacion' => (float) $liq->indemnizacion,
+            'indemnizacion_concepto' => $liq->indemnizacion_concepto,
+            'otros_descuentos' => (float) $liq->otros_descuentos,
+            'otros_descuentos_concepto' => $liq->otros_descuentos_concepto,
+            'observaciones' => $liq->observaciones,
+            'fecha_pago' => $liq->fecha_pago?->toDateString(),
+            'liquidada' => $liq->liquidada_at?->format('Y-m-d H:i'),
+            'liquidada_por' => $liq->liquidadaPor?->name,
+            'aprobada' => $liq->aprobada_at?->format('Y-m-d H:i'),
+            'aprobada_por' => $liq->aprobadaPor?->name,
+            'pagada' => $liq->pagada_at?->format('Y-m-d H:i'),
+            'pagada_por' => $liq->pagadaPor?->name,
+        ];
+    }
+
+    /**
+     * La entrega de cargo, con sus seis listas y sus tres firmas.
+     *
+     * Las listas vienen agrupadas por bloque para que la pantalla no tenga que
+     * repartirlas, y las firmas con quién y cuándo: el valor del formato no es
+     * que esté lleno sino que las tres áreas lo hayan dado por bueno.
+     */
+    private function entregaDeCargo(Empleado $e): ?array
+    {
+        $entrega = \App\Modules\Rrhh\Models\EntregaCargo::with([
+            'items', 'recibe:id,name',
+            'jefeConfirmoPor:id,name', 'ghConfirmoPor:id,name', 'tesoreriaConfirmoPor:id,name',
+        ])->where('empleado_id', $e->id)->first();
+
+        if (! $entrega) {
+            return null;
+        }
+
+        return [
+            'fecha' => $entrega->fecha?->toDateString(),
+            'recibe_id' => $entrega->recibe_id,
+            'recibe_nombre' => $entrega->recibe_nombre,
+            'quien_recibe' => $entrega->quienRecibe(),
+            'observaciones' => $entrega->observaciones,
+            'items' => $entrega->items->map(fn ($i) => [
+                'bloque' => $i->bloque, 'nombre' => $i->nombre, 'detalle' => $i->detalle,
+            ])->values(),
+            'completa' => $entrega->completa(),
+            'faltan_firmas' => $entrega->faltanFirmas(),
+            // Se avisa en pantalla lo mismo que se imprime: si una sola
+            // persona dio dos de las tres conformidades, no hubo tres
+            // revisiones por más que el formato esté lleno.
+            'firmas_repetidas' => $entrega->firmoVariosBloques(),
+            'firmas' => collect(\App\Modules\Rrhh\Models\EntregaCargo::AREAS)
+                ->map(fn ($a, $clave) => [
+                    'titulo' => $a['titulo'],
+                    'cuando' => $entrega->{"{$clave}_confirmo_at"}?->format('Y-m-d H:i'),
+                    'quien' => $entrega->{$clave === 'gh' ? 'ghConfirmoPor' : ($clave === 'jefe' ? 'jefeConfirmoPor' : 'tesoreriaConfirmoPor')}?->name,
+                ]),
+        ];
+    }
+
+    /**
+     * La entrevista de retiro de esta persona, si ya se hizo.
+     *
+     * Se devuelve plana para que el formulario la precargue y se pueda
+     * corregir: una entrevista se conversa, y es normal volver a abrirla para
+     * completar lo que quedó suelto.
+     */
+    private function entrevistaDeRetiro(Empleado $e): ?array
+    {
+        $ev = \App\Modules\Rrhh\Models\EntrevistaRetiro::with('entrevistador:id,name')
+            ->where('empleado_id', $e->id)->first();
+
+        if (! $ev) {
+            return null;
+        }
+
+        $base = [
+            'fecha_entrevista' => $ev->fecha_entrevista?->toDateString(),
+            'entrevistador' => $ev->entrevistador?->name,
+            'salida' => $ev->salida,
+            'motivo_principal' => $ev->motivo_principal?->value,
+            'motivo_otro' => $ev->motivo_otro,
+            'motivo_en_palabras' => $ev->motivoEnPalabras(),
+            'detalle_motivo' => $ev->detalle_motivo,
+            'que_valoro' => $ev->que_valoro,
+            'que_mejorar' => $ev->que_mejorar,
+            'funciones_correspondian' => $ev->funciones_correspondian,
+            'funciones_explicacion' => $ev->funciones_explicacion,
+            'recomendaria' => $ev->recomendaria,
+            'recomendaria_por_que' => $ev->recomendaria_por_que,
+            'accesos_cerrados' => $ev->accesos_cerrados,
+            'observaciones' => $ev->observaciones,
+            'promedio' => $ev->promedio(),
+            // Lo que de verdad se mira: dónde calificó 1 o 2 y por qué.
+            'puntos_bajos' => $ev->puntosBajos(),
+        ];
+
+        foreach (array_keys(\App\Modules\Rrhh\Models\EntrevistaRetiro::CRITERIOS) as $c) {
+            $base["n_{$c}"] = $ev->{"n_{$c}"};
+            $base["c_{$c}"] = $ev->{"c_{$c}"};
+        }
+
+        return $base;
+    }
+
+    /**
+     * Fase E · El formato GH-F-015 de una evaluación de período de prueba.
+     *
+     * Se imprime una evaluación concreta y no «la del empleado», porque puede
+     * haber más de una: si el período se prorroga, la segunda no reemplaza a
+     * la primera y el papel de cada una tiene que decir lo que se evaluó ESE
+     * día.
+     */
+    public function evaluacionPruebaPdf(Request $r, int $empleado, int $evaluacion)
+    {
+        $e = Empleado::findOrFail($empleado);
+
+        $ev = \App\Modules\Rrhh\Models\EvaluacionPrueba::with('jefe:id,name')
+            ->where('empleado_id', $e->id)
+            ->findOrFail($evaluacion);
+
+        return \Barryvdh\DomPDF\Facade\Pdf::loadView('rrhh.pdf.evaluacion-prueba', [
+            'e' => $e,
+            'ev' => $ev,
+            'empresa' => \App\Models\EmpresaConfig::current(),
+            'generadoPor' => $r->user()->name,
+        ])->setPaper('letter')
+            ->stream('evaluacion-prueba-'.str($e->nombre)->slug().'.pdf');
+    }
+
+    /**
+     * Fase A · Guarda los datos laborales de la ficha.
+     *
+     * Son los dieciséis que pide el bloque de ingresos del cuadro de
+     * novedades. Nueve de ellos no existían en el sistema y se transcribían a
+     * mano desde la carpeta física cada mes.
+     *
+     * Dos cuidados que vienen de haberse quemado antes:
+     *
+     *   · Se escribe SÓLO lo que el formulario mandó. La pantalla manda todos
+     *     los campos siempre —precargados con el valor efectivo—, así que
+     *     guardar sin tocar nada no borra lo que no se editó.
+     *
+     *   · Las afiliaciones que se ven en la pantalla son las EFECTIVAS: la de
+     *     la ficha, o la del trámite de contratación mientras nadie la haya
+     *     cambiado. Si la casilla mostrara vacío estando heredada, el primer
+     *     guardado las borraría todas sin que nadie lo pidiera.
+     */
+    public function fichaLaboral(Request $r, int $empleado): RedirectResponse
+    {
+        $e = Empleado::findOrFail($empleado);
+
+        $data = $r->validate([
+            'fecha_nacimiento' => ['nullable', 'date', 'before:today'],
+            'grupo_sanguineo' => ['nullable', 'string', 'max:6'],
+            'direccion' => ['nullable', 'string', 'max:200'],
+            'ciudad' => ['nullable', 'string', 'max:80'],
+            'telefono' => ['nullable', 'string', 'max:40'],
+            'email' => ['nullable', 'email', 'max:160'],
+            'empresa_afiliadora' => ['nullable', 'string', 'max:120'],
+            'horario' => ['nullable', 'string', 'max:160'],
+            'periodicidad_pago' => ['nullable', 'in:mensual,quincenal'],
+            'valor_adicional' => ['nullable', 'numeric', 'min:0'],
+            'concepto_adicional' => ['nullable', 'string', 'max:60'],
+            /*
+             * El auxilio de transporte no depende sólo del sueldo: tampoco lo
+             * devenga quien vive en el lugar de trabajo ni aquel a quien la
+             * empresa le pone la ruta. El motivo es obligatorio cuando se
+             * excluye —quitarle el auxilio a alguien es quitarle plata todos
+             * los meses, y tiene que quedar dicho por qué—.
+             */
+            'auxilio_excluido' => ['nullable', 'boolean'],
+            'auxilio_excluido_motivo' => [
+                'nullable', 'string', 'max:200',
+                \Illuminate\Validation\Rule::requiredIf(fn () => $r->boolean('auxilio_excluido')),
+            ],
+            'banco' => ['nullable', 'string', 'max:80'],
+            'tipo_cuenta' => ['nullable', 'in:ahorros,corriente'],
+            'cuenta_bancaria' => ['nullable', 'string', 'max:40'],
+            'eps' => ['nullable', 'string', 'max:120'],
+            'pension' => ['nullable', 'string', 'max:120'],
+            'cesantias' => ['nullable', 'string', 'max:120'],
+            'caja' => ['nullable', 'string', 'max:120'],
+            'arl' => ['nullable', 'string', 'max:120'],
+            'arl_nivel_riesgo' => ['nullable', 'in:I,II,III,IV,V'],
+        ], [
+            // Ver la nota de `EntrevistaCandidatoController`: el `:date` de
+            // `before:today` no se traduce desde `attributes`, sale «today».
+            'fecha_nacimiento.before' => 'La fecha de nacimiento tiene que ser anterior a hoy.',
+        ], ['arl_nivel_riesgo' => 'nivel de riesgo ARL']);
+
+        // `only()` sobre lo que llegó: un campo ausente del formulario no se
+        // toca, y uno vacío a propósito sí se limpia.
+        $e->update(array_intersect_key($data, $r->all()));
+
+        $faltan = $e->fresh()->faltantesDeFicha();
+
+        $e->anotar('ficha_laboral', 'Datos laborales actualizados por '.$r->user()->name);
+
+        return back()->with('success', $faltan === []
+            ? 'Ficha completa. Esta persona ya sale entera en el cuadro de novedades.'
+            : 'Ficha guardada. Todavía falta: '.implode(', ', $faltan).'.');
     }
 
     /**

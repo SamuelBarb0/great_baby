@@ -7,6 +7,8 @@ use App\Modules\Cartera\Enums\ClasificacionDiferencia;
 use App\Modules\Cartera\Enums\EstadoFactura;
 use App\Modules\Cartera\Models\FacturaVenta;
 use App\Modules\Cartera\Models\PagoVenta;
+use App\Modules\Contabilidad\Support\FiltroEjes;
+use App\Support\ExportadorCsv;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -22,7 +24,10 @@ class PagosController extends Controller implements HasMiddleware
     {
         return [
             new Middleware(function (Request $r, \Closure $next) {
-                abort_unless($r->user()?->esContable(), 403);  // A1/A3 FIX · unificado con sidebar (Contador/Gerente)
+                // La casilla manda. Antes la puerta preguntaba por el rol y la
+                //   casilla de /app/roles no la consultaba nadie: el admin creia
+                //   repartir accesos y solo movia lo que se ve en el menu.
+                abort_unless(\App\Auth\Permisos::puede($r->user(), 'pagos'), 403);
                 return $next($r);
             }),
         ];
@@ -35,21 +40,10 @@ class PagosController extends Controller implements HasMiddleware
         $desde = $request->input('desde');
         $hasta = $request->input('hasta');
 
-        $query = PagoVenta::query()->with(['factura:id,numero,contacto_id', 'factura.contacto:id,nombre_completo', 'registrador:id,name']);
+        $ejes = FiltroEjes::deRequest($request);
 
-        if ($q !== '') {
-            $query->where(function ($qq) use ($q) {
-                $qq->where('referencia', 'like', "%{$q}%")
-                    ->orWhere('banco', 'like', "%{$q}%")
-                    ->orWhereHas('factura', fn ($f) => $f->where('numero', 'like', "%{$q}%"))
-                    ->orWhereHas('factura.contacto', fn ($c) => $c->where('nombre_completo', 'like', "%{$q}%"));
-            });
-        }
-        if ($medio !== 'todos') {
-            $query->where('medio_pago', $medio);
-        }
-        if ($desde) $query->whereDate('fecha', '>=', $desde);
-        if ($hasta) $query->whereDate('fecha', '<=', $hasta);
+        $query = $this->consultaDePagos($q, $medio, $desde, $hasta, $ejes)
+            ->with(['factura:id,numero,contacto_id,linea_negocio,destino_fiscal', 'factura.contacto:id,nombre_completo', 'registrador:id,name']);
 
         $paginado = $query->orderByDesc('fecha')->orderByDesc('id')->paginate(30);
 
@@ -76,8 +70,18 @@ class PagosController extends Controller implements HasMiddleware
                 // el cobro llegó a la contabilidad ni con qué número.
                 'siigo_numero' => $p->siigo_number,
                 'en_siigo' => (bool) $p->siigo_id,
+                // Los ejes salen de la FACTURA: un pago no tiene destino
+                // propio, y dárselo abriría la puerta a un pago «fiscal» de
+                // una factura interna, que no significa nada.
+                'destino' => $p->factura?->destino_fiscal?->label() ?? '—',
+                'destino_color' => $p->factura?->destino_fiscal?->color() ?? 'gray',
+                'linea' => $p->factura?->linea_negocio?->label() ?? '—',
             ])->withQueryString(),
-            'filtros' => ['q' => $q, 'medio' => $medio, 'desde' => $desde, 'hasta' => $hasta],
+            'filtros' => array_merge(
+                ['q' => $q, 'medio' => $medio, 'desde' => $desde, 'hasta' => $hasta],
+                $ejes->aParametros(),
+            ),
+            'opcionesEjes' => FiltroEjes::opciones(),
             'totales' => [
                 'aplicado' => $totalAplicado,
                 'recibido' => $totalRecibido,
@@ -110,7 +114,9 @@ class PagosController extends Controller implements HasMiddleware
         $q = trim((string) $r->input('q', ''));
 
         $facturas = FacturaVenta::query()
-            ->with('contacto:id,nombre_completo,razon_social')
+            // `numero_documento` lo usa la pantalla de asientos manuales para
+            // llenar el tercero de la línea sin que nadie lo teclee.
+            ->with('contacto:id,nombre_completo,razon_social,numero_documento')
             ->whereNotIn('estado', [EstadoFactura::Pagada, EstadoFactura::Anulada])
             ->where('saldo', '>', 0)
             ->when($q !== '', fn ($qq) => $qq->where(function ($w) use ($q) {
@@ -122,15 +128,33 @@ class PagosController extends Controller implements HasMiddleware
             }))
             ->orderBy('fecha_vencimiento')
             ->limit(25)
-            ->get(['id', 'numero', 'contacto_id', 'fecha_emision', 'fecha_vencimiento', 'total', 'saldo']);
+            ->get(['id', 'numero', 'contacto_id', 'fecha_emision', 'fecha_vencimiento', 'total', 'saldo',
+                   'destino_fiscal', 'monto_fiscal', 'linea_negocio']);
 
         return response()->json($facturas->map(fn ($f) => [
             'id' => $f->id,
             'numero' => $f->numero,
             'cliente' => $f->contacto?->razon_social ?: $f->contacto?->nombre_completo,
+            'nit' => $f->contacto?->numero_documento,
+            'emision' => $f->fecha_emision?->toDateString(),
             'vence' => $f->fecha_vencimiento?->toDateString(),
             'total' => (float) $f->total,
             'saldo' => (float) $f->saldo,
+            /*
+             * A donde va el pago. No se elige al pagar —se decidio al emitir la
+             * factura— pero tiene que VERSE: sin esto se registra un abono sin
+             * saber si entra al libro fiscal o no, que es justo lo que hay que
+             * saber antes de darle al boton.
+             */
+            'destino' => ($f->destino_fiscal ?? \App\Modules\Contabilidad\Enums\DestinoFiscal::Siigo)->value,
+            'destino_label' => ($f->destino_fiscal ?? \App\Modules\Contabilidad\Enums\DestinoFiscal::Siigo)->label(),
+            'destino_color' => ($f->destino_fiscal ?? \App\Modules\Contabilidad\Enums\DestinoFiscal::Siigo)->color(),
+            'linea_label' => ($f->linea_negocio ?? \App\Modules\Contabilidad\Enums\LineaNegocio::GreatBaby)->label(),
+            // Cuanto de la factura se declara y cuanto de eso YA cubrieron los
+            // abonos anteriores: con eso la pantalla puede mostrar como se va a
+            // partir este pago antes de registrarlo.
+            'monto_fiscal' => $f->monto_fiscal !== null ? (float) $f->monto_fiscal : null,
+            'declarado_cubierto' => (float) \App\Modules\Cartera\Models\PagoVenta::where('factura_id', $f->id)->sum('monto_aplicado'),
         ]));
     }
 
@@ -201,5 +225,82 @@ class PagosController extends Controller implements HasMiddleware
         return back()->with('success',
             'Pago registrado en '.$factura->numero.'. Saldo ahora: $'
             .number_format((float) $factura->saldo, 0, ',', '.').'.');
+    }
+
+    /**
+     * La consulta de pagos filtrada. La usan la pantalla y el export, para que
+     * no exista la posibilidad de que el archivo traiga algo distinto de lo que
+     * se está viendo.
+     */
+    private function consultaDePagos(
+        string $q, string $medio, ?string $desde, ?string $hasta, FiltroEjes $ejes
+    ): \Illuminate\Database\Eloquent\Builder {
+        return PagoVenta::query()
+            ->when($q !== '', fn ($query) => $query->where(function ($qq) use ($q) {
+                $qq->where('referencia', 'like', "%{$q}%")
+                    ->orWhere('banco', 'like', "%{$q}%")
+                    ->orWhereHas('factura', fn ($f) => $f->where('numero', 'like', "%{$q}%"))
+                    ->orWhereHas('factura.contacto', fn ($c) => $c->where('nombre_completo', 'like', "%{$q}%"));
+            }))
+            ->when($medio !== 'todos', fn ($query) => $query->where('medio_pago', $medio))
+            ->when($desde, fn ($query) => $query->whereDate('fecha', '>=', $desde))
+            ->when($hasta, fn ($query) => $query->whereDate('fecha', '<=', $hasta))
+            // Los ejes viven en la factura, no en el pago.
+            ->tap(fn ($query) => $ejes->aplicarPor($query, 'factura'));
+    }
+
+    /**
+     * F2c · Bajar los pagos tal como se están viendo.
+     *
+     * Incluye la diferencia y su clasificación, que es lo que se concilia
+     * contra el extracto del banco: sin eso el export no sirve para la única
+     * tarea para la que alguien lo baja.
+     */
+    public function exportar(Request $request): \Symfony\Component\HttpFoundation\StreamedResponse
+    {
+        $q = trim((string) $request->input('q', ''));
+        $medio = (string) $request->input('medio', 'todos');
+        $desde = $request->input('desde');
+        $hasta = $request->input('hasta');
+        $ejes = FiltroEjes::deRequest($request);
+
+        $consulta = $this->consultaDePagos($q, $medio, $desde, $hasta, $ejes)
+            ->with(['factura:id,numero,contacto_id,linea_negocio,destino_fiscal', 'factura.contacto:id,nombre_completo', 'registrador:id,name'])
+            ->orderBy('fecha')->orderBy('id');
+
+        $totales = (clone $consulta)->reorder()
+            ->selectRaw('COALESCE(SUM(monto_recibido),0) r, COALESCE(SUM(monto_aplicado),0) a, COUNT(*) n')->first();
+
+        return ExportadorCsv::descargar(
+            'pagos-recibidos',
+            ['Fecha', 'Factura', 'Cliente', 'Línea', 'Destino', 'Medio', 'Recibido', 'Aplicado',
+             'Diferencia', 'Clasificación', 'Referencia', 'Banco', 'Recibo SIIGO', 'Registrado por'],
+            $consulta,
+            fn ($p) => [
+                $p->fecha?->toDateString(),
+                $p->factura?->numero,
+                $p->factura?->contacto?->nombre_completo,
+                $p->factura?->linea_negocio?->label(),
+                $p->factura?->destino_fiscal?->label(),
+                $p->medio_pago,
+                (float) $p->monto_recibido,
+                (float) $p->monto_aplicado,
+                (float) $p->diferencia,
+                $p->clasificacion_diferencia,
+                $p->referencia,
+                $p->banco,
+                $p->siigo_number,
+                $p->registrador?->name,
+            ],
+            [
+                '',
+                'Rango: '.($desde ?: 'sin límite').' a '.($hasta ?: 'sin límite'),
+                'Filtro: '.$ejes->descripcion().($medio !== 'todos' ? " · medio {$medio}" : '')
+                    .($q !== '' ? " · búsqueda «{$q}»" : ''),
+                'Recibido: '.number_format((float) ($totales->r ?? 0), 2, ',', '.'),
+                'Aplicado: '.number_format((float) ($totales->a ?? 0), 2, ',', '.'),
+                'Pagos: '.number_format((int) ($totales->n ?? 0), 0, ',', '.'),
+            ],
+        );
     }
 }

@@ -3,6 +3,7 @@ import { ref } from 'vue';
 import { Head, router, Link } from '@inertiajs/vue3';
 import { Ship, Plus, Search, Package, DollarSign, Anchor } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
+import Paginacion from '@/Components/Paginacion.vue';
 import { useMoney } from '@/composables/useMoney';
 
 const props = defineProps({
@@ -128,6 +129,7 @@ const badgeEstado = (e) => ({
                     </tbody>
                 </table>
             </div>
+            <Paginacion :pagina="importaciones" etiqueta="importaciones"/>
         </div>
     </AppLayout>
 </template>

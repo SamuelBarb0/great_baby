@@ -27,7 +27,7 @@ class ImportacionDocumentosController extends Controller implements HasMiddlewar
     {
         return [
             new Middleware(function (Request $r, \Closure $next) {
-                abort_unless($r->user()?->esEquipoBodega(), 403);
+                abort_unless(\App\Auth\Permisos::puede($r->user(), 'compras_importacion'), 403);
                 return $next($r);
             }),
         ];

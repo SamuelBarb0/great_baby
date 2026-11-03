@@ -46,7 +46,8 @@ class SeleccionController extends Controller implements HasMiddleware
     {
         $v = Vacante::with('requisicion:id,numero,solicitante_id')->findOrFail($vacante);
 
-        $candidatos = Candidato::where('vacante_id', $v->id)
+        $candidatos = Candidato::with(['pruebasPsicotecnicas', 'entrevistas'])
+            ->where('vacante_id', $v->id)
             ->orderByDesc('id')->get();
 
         /*
@@ -96,12 +97,30 @@ class SeleccionController extends Controller implements HasMiddleware
                 'exige_observacion' => $v->exigeObservacion(),
             ])->values(),
             'terna_llena' => $candidatos->where('etapa', EtapaCandidato::Terna)->count() >= Candidato::TAMANO_TERNA,
+            // Fase C · los catálogos de las psicotécnicas, armados desde los
+            // enums para que agregar un instrumento no exija tocar la pantalla.
+            'instrumentos' => \App\Modules\Rrhh\Enums\InstrumentoPsicotecnico::catalogo(),
+            // Los dos cuestionarios, armados desde el modelo: cambiar una
+            // pregunta es editar una constante, no la pantalla.
+            'cuestionarios' => [
+                'saber_hacer' => \App\Modules\Rrhh\Models\EntrevistaCandidato::SABER_HACER_BLOQUES,
+                'items' => \App\Modules\Rrhh\Models\EntrevistaCandidato::SABER_HACER_ITEMS,
+                'psicologica' => \App\Modules\Rrhh\Models\EntrevistaCandidato::PSICOLOGICA_BLOQUES,
+                'niveles' => \App\Modules\Rrhh\Models\EntrevistaCandidato::NIVELES_EDUCATIVOS,
+            ],
+            'conceptos' => \App\Modules\Rrhh\Enums\ConceptoPsicotecnico::catalogo(),
         ]);
     }
 
     public function crear(Request $r, int $vacante): RedirectResponse
     {
         $v = Vacante::findOrFail($vacante);
+
+        // Cerrar una vacante no significa nada si se le siguen cargando hojas
+        // de vida: la persona quedaría en un proceso que ya terminó, esperando
+        // una llamada que no va a llegar.
+        abort_if($v->estado === 'cerrada', 422,
+            "La vacante «{$v->titulo}» está cerrada. Reabrila si vas a seguir recibiendo candidatos.");
 
         $data = $r->validate([
             'nombre' => ['required', 'string', 'max:150'],
@@ -185,7 +204,29 @@ class SeleccionController extends Controller implements HasMiddleware
         ], [], ['motivo' => 'motivo del descarte']);
 
         $c = Candidato::findOrFail($candidato);
-        abort_if($c->etapa->esFinal(), 422, 'Este candidato ya salió del proceso.');
+
+        /*
+         * Antes frenaba con `esFinal()`, que mete en la misma bolsa a
+         * `descartado` y a `seleccionado`. Lo segundo era un error: estar
+         * seleccionado no es haber salido del proceso, es estar en el último
+         * tramo. Y dejaba sin salida a quien el jefe eligió pero la Junta no
+         * autorizó: no se podía contratar —la orden no autoriza— ni descartar
+         * —«ya salió del proceso»—, así que la persona quedaba ahí para
+         * siempre, ocupando el puesto de elegido de una vacante que seguía
+         * abierta. Lo mismo pasa con quien se arrepiente o no contesta más.
+         *
+         * Lo que de verdad cierra la puerta es haber empezado la contratación:
+         * si ya hay un contrato en curso, esto no se deshace descartando a la
+         * persona.
+         */
+        abort_if($c->etapa === EtapaCandidato::Descartado, 422,
+            "{$c->nombre} ya estaba descartado.");
+
+        abort_if(
+            \App\Modules\Rrhh\Models\Contratacion::where('candidato_id', $c->id)->exists(),
+            422,
+            "{$c->nombre} ya tiene una contratación abierta: no se descarta desde acá.",
+        );
 
         $c->motivo_descarte = $data['motivo'];
         $c->moverA(EtapaCandidato::Descartado, "Descartado: {$data['motivo']}");
@@ -334,6 +375,36 @@ class SeleccionController extends Controller implements HasMiddleware
             'motivo_descarte' => $c->motivo_descarte,
             'elegido' => (bool) $c->elegido_at,
             'desde' => $c->created_at?->format('Y-m-d'),
+            /*
+             * Fase C · Las psicotécnicas.
+             *
+             * Va el CONCEPTO, no el contenido: el informe se abre aparte, por
+             * una ruta que revisa permiso y anota quién lo leyó. Mandar el
+             * texto del informe en el payload del tablero sería repartirlo a
+             * todo el que abra la pantalla.
+             */
+            /*
+             * Fase C · Las entrevistas.
+             *
+             * Va el resumen —tipo, fecha, quién entrevistó y el total—, no
+             * las respuestas: el tablero es una lista de tarjetas y mandar
+             * veinte respuestas de texto por candidato lo volvería lento sin
+             * que nadie las lea desde ahí. El detalle se abre aparte.
+             */
+            'entrevistas' => $c->entrevistas->map(fn ($x) => $x->paraElTablero() + ['id' => $x->id])->values(),
+            'psicotecnicas' => $c->pruebasPsicotecnicas->map(fn ($p) => [
+                'id' => $p->id,
+                'instrumento' => $p->instrumento->value,
+                'prueba' => $p->comoSeLlama(),
+                'concepto' => $p->concepto->value,
+                'concepto_label' => $p->concepto->label(),
+                'color' => $p->concepto->color(),
+                'fecha' => $p->fecha_aplicacion?->toDateString(),
+                'firma' => $p->quienFirma(),
+                'observaciones' => $p->observaciones,
+                'tiene_informe' => $p->tieneSoporte(),
+                'falta' => $p->loQueFalta(),
+            ])->values(),
         ];
     }
 }

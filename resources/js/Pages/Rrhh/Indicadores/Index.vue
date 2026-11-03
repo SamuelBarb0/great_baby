@@ -6,9 +6,13 @@
  * cobertura de capacitaciones, por qué se retira la gente y cómo estamos
  * creciendo.
  *
- * El ausentismo aparece marcado como no disponible, con la razón. No se
- * estima: un número sin respaldo en una junta directiva es peor que un hueco,
- * porque el inventado se cree.
+ * El ausentismo sale del cuadro de novedades. Hasta la Fase B aparecía marcado
+ * como no disponible porque las incapacidades vivían en un Excel por fuera del
+ * sistema, y esta pantalla sólo sabía pintar ese caso.
+ *
+ * Lo que no cambió: un período sin novedades registradas sigue diciendo «no
+ * disponible» en vez de 0 %. Un número sin respaldo en una junta directiva es
+ * peor que un hueco, porque el inventado se cree.
  */
 import { ref } from 'vue';
 import { Head, router } from '@inertiajs/vue3';
@@ -111,13 +115,42 @@ const ancho = (valor, max) => `${Math.round((valor / max) * 100)}%`;
             </div>
 
             <div class="grid lg:grid-cols-2 gap-4">
-                <!-- 2 · Ausentismo · no disponible, y se dice por qué -->
+                <!-- 2 · Ausentismo · sale del cuadro de novedades (Fase B) -->
                 <div class="card p-5">
                     <h2 class="font-bold text-sm uppercase text-surface-500 mb-2">Ausentismo</h2>
+
+                    <!-- Sin novedades registradas no se pinta 0 %: se dice por qué -->
                     <div v-if="!indicadores.ausentismo.disponible"
                         class="flex items-start gap-2 text-sm text-surface-600">
                         <Info class="h-5 w-5 shrink-0 text-amber-500 mt-0.5" />
                         <p>{{ indicadores.ausentismo.motivo }}</p>
+                    </div>
+
+                    <div v-else>
+                        <div class="flex items-end gap-4">
+                            <div class="text-4xl font-black"
+                                :class="indicadores.ausentismo.porcentaje >= 5 ? 'text-rose-600' : 'text-emerald-600'">
+                                {{ indicadores.ausentismo.porcentaje }}<span class="text-xl">%</span>
+                            </div>
+                            <div class="text-sm text-surface-500 pb-1">
+                                {{ indicadores.ausentismo.dias_perdidos }} día(s) perdidos
+                                sobre {{ indicadores.ausentismo.dias_disponibles }} disponibles
+                            </div>
+                        </div>
+
+                        <!-- La pregunta que sigue al número: ¿por qué falta la gente? -->
+                        <ul class="mt-3 space-y-1 text-sm">
+                            <li v-for="(dias, clase) in indicadores.ausentismo.por_clase" :key="clase"
+                                class="flex justify-between gap-2">
+                                <span class="text-surface-600">{{ clase }}</span>
+                                <span class="font-semibold">{{ dias }} día(s)</span>
+                            </li>
+                        </ul>
+
+                        <p class="text-xs text-surface-400 mt-2">
+                            {{ indicadores.ausentismo.novedades }} novedad(es) registradas en el período.
+                            Los días se cuentan sobre el mes comercial de 30 días, el mismo con el que se liquida la nómina.
+                        </p>
                     </div>
                 </div>
 
@@ -161,6 +194,72 @@ const ancho = (valor, max) => `${Math.round((valor / max) * 100)}%`;
                             <div class="h-2 rounded bg-surface-200 dark:bg-surface-800 mt-1 overflow-hidden">
                                 <div class="h-full bg-brand-500"
                                     :style="{ width: ancho(t.cantidad, maximo(indicadores.retiros.por_tipo, 'cantidad')) }"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!--
+                        Lo que dijo la gente al irse · Fase F1.
+
+                        Lo de arriba es cómo clasifica la EMPRESA la salida:
+                        veinte renuncias se cuentan igual. Esto es qué contestó
+                        LA PERSONA, y ahí se separa lo que es mercado de lo que
+                        la empresa puede arreglar.
+                    -->
+                    <div class="pt-3 border-t">
+                        <h3 class="text-xs font-bold uppercase text-surface-500 mb-2">
+                            Lo que dijeron en la entrevista de retiro
+                        </h3>
+
+                        <div v-if="!indicadores.retiros.entrevistas.disponible"
+                            class="flex items-start gap-2 text-sm text-surface-600">
+                            <Info class="h-4 w-4 shrink-0 text-amber-500 mt-0.5" />
+                            <p>{{ indicadores.retiros.entrevistas.motivo }}</p>
+                        </div>
+
+                        <div v-else>
+                            <div class="flex flex-wrap gap-4 mb-3">
+                                <div>
+                                    <div class="text-[10px] uppercase text-surface-400">Se podían evitar</div>
+                                    <div class="text-2xl font-black"
+                                        :class="indicadores.retiros.entrevistas.accionables ? 'text-rose-600' : 'text-emerald-600'">
+                                        {{ indicadores.retiros.entrevistas.accionables }}
+                                        <span class="text-sm font-normal text-surface-400">
+                                            de {{ indicadores.retiros.entrevistas.hechas }}
+                                        </span>
+                                    </div>
+                                </div>
+                                <div>
+                                    <div class="text-[10px] uppercase text-surface-400">No nos recomendarían</div>
+                                    <div class="text-2xl font-black"
+                                        :class="indicadores.retiros.entrevistas.no_recomiendan ? 'text-rose-600' : 'text-emerald-600'">
+                                        {{ indicadores.retiros.entrevistas.no_recomiendan }}
+                                    </div>
+                                </div>
+                                <div>
+                                    <div class="text-[10px] uppercase text-surface-400">Cobertura</div>
+                                    <div class="text-2xl font-black">{{ indicadores.retiros.entrevistas.cobertura }}%</div>
+                                    <div class="text-[10px] text-surface-400">de las salidas</div>
+                                </div>
+                            </div>
+
+                            <div class="space-y-2">
+                                <div v-for="m in indicadores.retiros.entrevistas.por_motivo" :key="m.motivo" class="text-sm">
+                                    <div class="flex justify-between gap-2">
+                                        <span>
+                                            {{ m.label }}
+                                            <span v-if="m.accionable"
+                                                class="ml-1 text-[10px] uppercase text-rose-600 font-bold">
+                                                se puede atacar
+                                            </span>
+                                        </span>
+                                        <span class="font-bold">{{ m.cantidad }}</span>
+                                    </div>
+                                    <div class="h-2 rounded bg-surface-200 dark:bg-surface-800 mt-1 overflow-hidden">
+                                        <div class="h-full" :class="m.accionable ? 'bg-rose-500' : 'bg-surface-400'"
+                                            :style="{ width: ancho(m.cantidad, maximo(indicadores.retiros.entrevistas.por_motivo, 'cantidad')) }"></div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>

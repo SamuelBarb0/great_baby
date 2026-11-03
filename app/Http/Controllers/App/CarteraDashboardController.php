@@ -21,7 +21,8 @@ class CarteraDashboardController extends Controller implements HasMiddleware
     {
         return [
             new Middleware(function (Request $r, \Closure $next) {
-                abort_unless($r->user()?->esContable(), 403);  // A1/A3 FIX · unificado con sidebar (Contador/Gerente)
+                // Casilla: Panel de cartera.
+                abort_unless(\App\Auth\Permisos::puede($r->user(), 'cartera_dashboard'), 403);
                 return $next($r);
             }),
         ];

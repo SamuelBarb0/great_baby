@@ -1,10 +1,21 @@
 <script setup>
 import { ref, reactive, watch } from 'vue';
+import { useBogotaDate } from '@/composables/useBogotaDate';
 import { Head, router } from '@inertiajs/vue3';
 import { Wallet, Plus, TrendingUp, TrendingDown } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import { useMoney } from '@/composables/useMoney';
 import { useEscClose } from '@/composables/useEscClose';
+
+/*
+ * La fecha de HOY en Colombia, no en UTC.
+ *
+ * `toISOString()` convierte a UTC antes de recortar, asi que entre las
+ * 19:00 y la medianoche hora Bogota devuelve el dia siguiente. Las fechas
+ * de esta pantalla quedan escritas en registros, no son un filtro: un dia
+ * de corrimiento cambia lo que dice el documento.
+ */
+const { hoy: hoyBogota } = useBogotaDate();
 
 const props = defineProps({
     movimientos: { type: Object, required: true },
@@ -28,7 +39,7 @@ const TIPOS = [
 const modalNuevo = ref(false);
 useEscClose(modalNuevo);
 const form = reactive({
-    fecha: new Date().toISOString().slice(0, 10),
+    fecha: hoyBogota(),
     tipo: 'otro',
     monto: 0,
     guia: '',           // U20 · autocomplete por guía (backend resuelve pedido_id)

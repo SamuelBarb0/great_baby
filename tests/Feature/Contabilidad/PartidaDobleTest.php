@@ -126,7 +126,7 @@ it('el asiento de una factura cuadra y no se duplica al re-generarlo', function 
 
     expect($lineas)->not->toBeEmpty()
         ->and(round($lineas->sum('debe'), 2))->toBe(round($lineas->sum('haber'), 2))
-        ->and((float) $lineas->firstWhere('cuenta_puc', '1305')->debe)->toBe(1190000.0);
+        ->and((float) $lineas->firstWhere('cuenta_puc', cta('cta_cxc_default'))->debe)->toBe(1190000.0);
 
     // Re-generar tiene que reemplazar, no acumular: si no, el mayor de la
     // cuenta 1305 muestra la misma venta dos veces.

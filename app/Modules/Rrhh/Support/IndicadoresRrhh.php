@@ -2,7 +2,10 @@
 
 namespace App\Modules\Rrhh\Support;
 
+use App\Modules\Rrhh\Enums\MotivoSalida;
+use App\Modules\Rrhh\Enums\TipoNovedad;
 use App\Modules\Rrhh\Models\Empleado;
+use App\Modules\Rrhh\Models\EntrevistaRetiro;
 use Illuminate\Support\Carbon;
 
 /**
@@ -14,11 +17,15 @@ use Illuminate\Support\Carbon;
  * cobertura de capacitaciones, el reporte de por qué la gente se retira, y
  * cómo estamos creciendo —nosotros le decimos arquitectura de personal—».
  *
- * De esos cinco, CUATRO salen de lo que el módulo ya guarda. El ausentismo NO:
- * necesita el registro de incapacidades y permisos, que vive en el módulo de
- * novedades y todavía no existe. Se devuelve marcado como no disponible en vez
- * de un número inventado — un indicador falso en una junta directiva es peor
- * que un indicador que falta.
+ * Los cinco ya salen. Cuatro de ellos siempre estuvieron en lo que el módulo
+ * guardaba; el ausentismo quedó en «no disponible» hasta la Fase B, porque las
+ * incapacidades y los permisos vivían en un Excel por fuera del sistema. Ahora
+ * los toma del cuadro de novedades.
+ *
+ * Lo que sí se mantuvo: ninguno se estima. Si el período no tiene novedades
+ * registradas, el ausentismo vuelve a decir «no disponible» en vez de pintar
+ * un 0 % — un indicador falso en una junta directiva es peor que uno que falta,
+ * porque al falso le creen.
  *
  * Los cálculos van acá y no en el controlador porque son los MISMOS números
  * que salen por pantalla, por PDF y por Excel. Si se repitieran, un día dirían
@@ -193,7 +200,64 @@ class IndicadoresRrhh
                 'motivo' => $e->motivo_retiro,
                 'fecha' => $e->fecha_retiro?->toDateString(),
             ])->values()->all(),
-        ];
+        ] + $this->loQueDijoLaGente();
+    }
+
+    /**
+     * Lo que dijeron en la entrevista de retiro, que es otra cosa.
+     *
+     * `tipo_retiro` dice cómo clasifica la EMPRESA la salida: veinte renuncias
+     * se cuentan igual. El motivo de la entrevista dice qué contestó LA
+     * PERSONA, y ahí se separa lo que es mercado —mejor oferta, mudanza— de lo
+     * que la empresa puede arreglar: el jefe, el clima, la carga.
+     *
+     * Por eso se devuelve también `accionables`: si de diez salidas siete caen
+     * en esa mitad, el problema no es el mercado. Ése es el número que
+     * cambia una conversación de Junta.
+     *
+     * `cobertura` dice sobre cuántas salidas se alcanzó a hacer la entrevista.
+     * Sin ese dato, un «0 % por clima laboral» puede significar que nadie se
+     * quejó o que no se entrevistó a nadie, que es lo contrario.
+     */
+    private function loQueDijoLaGente(): array
+    {
+        $ids = $this->retirosDelPeriodo()->pluck('id');
+
+        $entrevistas = EntrevistaRetiro::whereIn('empleado_id', $ids)
+            ->whereNotNull('motivo_principal')
+            ->get();
+
+        if ($entrevistas->isEmpty()) {
+            return ['entrevistas' => [
+                'disponible' => false,
+                'motivo' => 'Todavía no hay entrevistas de retiro con motivo registrado en este período.',
+            ]];
+        }
+
+        $porMotivo = $entrevistas
+            ->groupBy(fn ($ev) => $ev->motivo_principal->value)
+            ->map->count()
+            ->sortDesc()
+            ->map(fn ($n, $clave) => [
+                'motivo' => $clave,
+                'label' => MotivoSalida::from($clave)->label(),
+                'cantidad' => $n,
+                'accionable' => MotivoSalida::from($clave)->esAccionable(),
+            ])->values()->all();
+
+        $accionables = $entrevistas->filter(fn ($ev) => $ev->motivo_principal->esAccionable())->count();
+        $noRecomiendan = $entrevistas->where('recomendaria', false)->count();
+
+        return ['entrevistas' => [
+            'disponible' => true,
+            'hechas' => $entrevistas->count(),
+            'cobertura' => $ids->count() > 0
+                ? round($entrevistas->count() / $ids->count() * 100, 1)
+                : 0.0,
+            'por_motivo' => $porMotivo,
+            'accionables' => $accionables,
+            'no_recomiendan' => $noRecomiendan,
+        ]];
     }
 
     /**
@@ -220,21 +284,91 @@ class IndicadoresRrhh
     }
 
     /**
-     * Ausentismo · NO disponible todavía.
+     * Ausentismo del período: días perdidos sobre días disponibles.
      *
-     * Necesita el registro de incapacidades, permisos y ausencias, que vive en
-     * el módulo de novedades y aún no existe. Se devuelve marcado como no
-     * disponible, con la razón: un número inventado en una junta directiva es
-     * peor que un indicador que falta, porque el inventado se cree.
+     * Hasta la Fase B esto devolvía `disponible => false`, porque no había
+     * dónde estuvieran las incapacidades. Ahora salen del cuadro de novedades.
+     *
+     * Días perdidos cuenta incapacidades, permisos y ausencias; las horas
+     * extra no, obviamente. Un permiso de dos horas entra como 0,25 días y no
+     * como uno: contar cada cita médica como día completo duplicaba el número.
+     *
+     * Días disponibles es el mes comercial de 30 días por persona activa, que
+     * es con el que se liquida la nómina. Si se usaran días calendario, el
+     * porcentaje no cuadraría con ningún otro número de la empresa.
+     *
+     * Se sigue devolviendo `disponible => false` mientras no haya UNA sola
+     * novedad registrada en el período. Un 0,0 % y un «nadie ha registrado
+     * nada todavía» se ven igual en una diapositiva y significan lo contrario.
      */
     public function ausentismo(): array
     {
+        $perdidos = 0.0;
+        $disponibles = 0.0;
+        $registradas = 0;
+        $porClase = [];
+
+        foreach ($this->mesesDelPeriodo() as $periodo) {
+            $cuadro = CuadroDeNovedades::de($periodo);
+            $resumen = $cuadro->resumen();
+
+            $perdidos += (float) $resumen['dias_perdidos'];
+            $disponibles += $cuadro->diasDisponibles();
+            $registradas += (int) $resumen['novedades'];
+
+            foreach (TipoNovedad::cases() as $tipo) {
+                if (! $tipo->cuentaAusentismo()) {
+                    continue;
+                }
+
+                foreach ($cuadro->novedadesDe($tipo) as $n) {
+                    $etiqueta = $n->etiquetaDeClase();
+                    $porClase[$etiqueta] = round(($porClase[$etiqueta] ?? 0) + $n->diasEquivalentes(), 2);
+                }
+            }
+        }
+
+        if ($registradas === 0) {
+            return [
+                'disponible' => false,
+                'motivo' => 'Todavía no hay novedades registradas en este período. '
+                    .'No se muestra 0 % para no confundir «nadie faltó» con «nadie ha registrado nada».',
+            ];
+        }
+
+        arsort($porClase);
+
         return [
-            'disponible' => false,
-            'motivo' => 'Necesita el registro de incapacidades y permisos (módulo de novedades), '
-                .'que todavía no está construido. Aquí no se muestra un estimado para no '
-                .'llevar un número sin respaldo a la Junta.',
+            'disponible' => true,
+            'dias_perdidos' => round($perdidos, 2),
+            'dias_disponibles' => round($disponibles, 2),
+            'porcentaje' => $disponibles > 0 ? round($perdidos / $disponibles * 100, 2) : 0.0,
+            'novedades' => $registradas,
+            // Por qué falta la gente, que es la pregunta que sigue al número.
+            'por_clase' => $porClase,
         ];
+    }
+
+    /**
+     * Los meses «YYYY-MM» que toca el período.
+     *
+     * El ausentismo se lleva por corte de nómina, así que el rango del tablero
+     * —que puede ser cualquier par de fechas— se traduce a los meses que
+     * atraviesa.
+     *
+     * @return array<string>
+     */
+    private function mesesDelPeriodo(): array
+    {
+        $meses = [];
+        $cursor = $this->desde->copy()->startOfMonth();
+
+        while ($cursor->lessThanOrEqualTo($this->hasta)) {
+            $meses[] = $cursor->format('Y-m');
+            $cursor->addMonth();
+        }
+
+        return $meses;
     }
 
     // ───────────────────────────── internos ─────────────────────────────

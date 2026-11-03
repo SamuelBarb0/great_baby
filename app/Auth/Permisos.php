@@ -32,7 +32,9 @@ final class Permisos
         // OPERACIÓN DIARIA
         'torre_control'    => ['Gerente', 'Alistador', 'Contador', 'ServicioCliente', 'Vendedor'],
         'estacion_empaque' => ['Alistador'],
-        'vista_alistador'  => ['Alistador'],
+        // La estacion de empaque la abre `Alistador` o `AdminBodega`: el admin
+        //   de bodega empaca cuando falta gente, y la puerta ya lo dejaba.
+        'vista_alistador'  => ['Alistador', 'AdminBodega'],
         'escanner_camara'  => ['Alistador'],
         'inventario_vivo'  => ['Gerente', 'Alistador', 'Contador'],
 
@@ -70,13 +72,41 @@ final class Permisos
         // CONTABILIDAD
         'contabilidad'     => ['Gerente', 'Contador'],
         'libro_diario'     => ['Gerente', 'Contador'],
+        // TESORERÍA · lo que se construyó para reemplazar los Excel de caja.
+        //   Secciones propias y no colgadas de `contabilidad` para que Aracely
+        //   pueda, por ejemplo, dejar que una auxiliar cargue el arqueo diario
+        //   sin abrirle el libro contable entero.
+        'cajas'            => ['Gerente', 'Contador'],
+        'arqueo_caja'      => ['Gerente', 'Contador'],
+        'flujo_caja'       => ['Gerente', 'Contador'],
+        'cuentas_por_pagar' => ['Gerente', 'Contador'],
+        'programacion_pagos' => ['Gerente', 'Contador'],
         'reportes_contables' => ['Gerente', 'Contador'],
+        /*
+         * Las reglas CONTABLES, y solo esas.
+         *
+         * Reglas de negocio es de administracion y asi se queda: ahi viven
+         * 140 reglas en 11 grupos —SIIGO, RRHH, Dropi, CRM— y abrirle la
+         * pantalla entera al contador le daria mucho mas que cuentas.
+         *
+         * Pero las 45 de 'contable.*' son suyas: dicen a que cuenta postea
+         * cada transaccion, y hoy tres de ellas apuntan a cuentas que el
+         * plan prohibe mover (6135, 1435, 1305). Silvia sabe cual es la
+         * correcta y no podia escribirla: tenia que dictarsela a Aracely.
+         *
+         * Esta clave abre solo ese grupo. El filtro va en el servidor, no
+         * en la pantalla.
+         */
+        'reglas_contables' => ['Contador'],
 
         // COMPRAS
         'compras_oc'       => ['Gerente'],
-        'compras_recepcion' => ['Gerente', 'Alistador'],
-        'compras_importacion' => ['Gerente'],
-        'compras_reportes' => ['Gerente', 'Contador'],
+        // Recibir mercancia lo hace bodega, y el Contador la consulta. Los dos
+        //   entraban por `esEquipoBodega() || esContable()`; si no quedan acá,
+        //   el dia que la casilla mande pierden la pantalla.
+        'compras_recepcion' => ['Gerente', 'Alistador', 'AdminBodega', 'Contador'],
+        'compras_importacion' => ['Gerente', 'AdminBodega', 'Contador'],
+        'compras_reportes' => ['Gerente', 'Contador', 'AdminBodega'],
 
         // INVENTARIO
         'traslados'        => ['Gerente', 'Alistador'],
@@ -90,8 +120,10 @@ final class Permisos
         //   piden esRoot aparte en ProductosController, así que el Contador
         //   solo puede leer/editar · lo mínimo para su rol fiscal.
         'productos'        => ['Gerente', 'Contador'],
-        'ubicaciones'      => ['Gerente'],
-        'importar_productos' => ['Gerente'],
+        // Jorge administra sus bodegas: la pantalla ya se le abria.
+        'ubicaciones'      => ['Gerente', 'AdminBodega'],
+        // Entraba por `puede('productos')`, que incluye al Contador.
+        'importar_productos' => ['Gerente', 'Contador'],
         // B3-A5 · llave dedicada para el botón «Sincronizar con SIIGO»
         // (push MANUAL desde ProductoResource). Consume rate limit real y
         // afecta contabilidad en SIIGO, así que la lista es más corta que
@@ -130,12 +162,35 @@ final class Permisos
         //   «solamente los jefes o líderes de área pueden hacer la solicitud».
         'rrhh_requisiciones' => ['Gerente', 'GestionHumana', 'LiderArea'],
         'rrhh_seleccion'     => ['Gerente', 'GestionHumana'],
+        // El cuadro de novedades que se le manda al contador cada mes. Va
+        //   aparte porque es lo único de Gestión Humana que alguien de
+        //   contabilidad podría necesitar abrir sin ver hojas de vida —hoy no
+        //   lo tiene, pero el día que haga falta se reparte desde la pantalla
+        //   de roles en vez de tocar código.
+        'rrhh_novedades'     => ['Gerente', 'GestionHumana'],
         // La orden de contratación la autoriza la JUNTA DIRECTIVA, no Gestión
         //   Humana ni el líder que pidió el personal: «solo ingresa la empresa
         //   realmente a un contrato si viene autorizado por la junta directiva»
         //   (Elena, 19-oct). Por eso es un permiso aparte y NO lo tiene
         //   GestionHumana: si lo tuviera, ella se autorizaría a sí misma.
         'rrhh_orden_contratacion' => ['Gerente'],
+        /*
+         * La nómina es permiso aparte porque es la pantalla donde está el
+         * sueldo de TODO el mundo. Quien lleva requisiciones o selección no
+         * tiene por qué ver cuánto gana el de al lado.
+         *
+         * Contabilidad entra porque le toca pagarla; por eso ve la pantalla
+         * aunque no sea de Gestión Humana.
+         */
+        'rrhh_nomina'        => ['Gerente', 'GestionHumana', 'Contador'],
+        /*
+         * Aprobar es de gerencia y de nadie más, por la misma razón que la
+         * orden de contratación: si Gestión Humana liquidara y aprobara, se
+         * estaría aprobando a sí misma. Son tres manos a propósito —liquida
+         * Gestión Humana, aprueba gerencia, paga tesorería— y un solo botón
+         * de «listo» haría que quien lo apriete firme por las tres.
+         */
+        'rrhh_nomina_aprobar' => ['Gerente'],
         // El portal del propio empleado: sus datos, sus documentos, sus
         //   herramientas y sus avisos. Es lo ÚNICO que abre el rol
         //   `Colaborador`, y nadie más lo necesita —cada quien ve lo suyo
@@ -158,7 +213,9 @@ final class Permisos
 
         // CONFIGURACIÓN — solo root
         'empresa'          => [],
-        'siigo'            => [],
+        // El Gerente monitorea SIIGO desde antes; sin nombrarlo aca lo perderia
+        //   el dia que la casilla mande (Aracely/Gerencia pasan por ser root).
+        'siigo'            => ['Gerente'],
         'usuarios'         => [],
         'plantillas'       => [],
     ];
@@ -189,12 +246,13 @@ final class Permisos
         'Operación' => ['torre_control', 'estacion_empaque', 'vista_alistador', 'escanner_camara', 'inventario_vivo'],
         'Dropi' => ['dropi_dashboard', 'dropi_pedidos', 'dropi_cortes', 'dropi_wallet', 'dropi_devoluciones', 'dropi_discrepancias', 'dropi_reportes'],
         'Cartera y CRM' => ['facturas', 'pagos', 'contactos', 'cartera_dashboard', 'condiciones_credito', 'cobranzas', 'excepciones_credito', 'crm', 'comisiones', 'comisiones_config', 'metodos_pago'],
-        'Contabilidad' => ['contabilidad', 'libro_diario', 'reportes_contables'],
+        'Contabilidad' => ['contabilidad', 'libro_diario', 'reportes_contables', 'reglas_contables'],
+        'Tesorería y caja' => ['cajas', 'arqueo_caja', 'flujo_caja', 'cuentas_por_pagar', 'programacion_pagos'],
         'Compras' => ['compras_oc', 'compras_recepcion', 'compras_importacion', 'compras_reportes'],
         'Inventario' => ['traslados', 'tomas_fisicas', 'alertas_stock', 'kardex', 'stock_bodegas'],
         'Catálogo' => ['productos', 'ubicaciones', 'importar_productos', 'productos.push_siigo'],
         'Servicio al cliente' => ['garantias', 'servicio_cliente', 'bandeja_importaciones'],
-        'Perfiles operativos' => ['bodega', 'logistica', 'facturacion', 'marketing', 'marketing_parrilla', 'marketing_material', 'marketing_lanzamientos', 'vendedor', 'rrhh', 'rrhh_requisiciones', 'rrhh_seleccion', 'rrhh_orden_contratacion', 'portal_colaborador', 'mapa_colombia'],
+        'Perfiles operativos' => ['bodega', 'logistica', 'facturacion', 'marketing', 'marketing_parrilla', 'marketing_material', 'marketing_lanzamientos', 'vendedor', 'rrhh', 'rrhh_requisiciones', 'rrhh_seleccion', 'rrhh_novedades', 'rrhh_orden_contratacion', 'rrhh_nomina', 'rrhh_nomina_aprobar', 'portal_colaborador', 'mapa_colombia'],
         'Configuración' => ['empresa', 'siigo', 'usuarios', 'plantillas'],
     ];
 
@@ -224,6 +282,11 @@ final class Permisos
         'metodos_pago' => 'Métodos de pago',
         'contabilidad' => 'Panel contable',
         'libro_diario' => 'Libro diario',
+        'cajas' => 'Cajas y bancos',
+        'arqueo_caja' => 'Arqueo diario de caja',
+        'flujo_caja' => 'Flujo de caja',
+        'cuentas_por_pagar' => 'Cuentas por pagar',
+        'programacion_pagos' => 'Programación de pagos',
         'reportes_contables' => 'Reportes contables',
         'compras_oc' => 'Órdenes de compra',
         'compras_recepcion' => 'Recepción de mercancía',
@@ -249,7 +312,10 @@ final class Permisos
         'rrhh' => 'Gestión humana (vacantes y empleados)',
         'rrhh_requisiciones' => 'Solicitar personal y seguir mis solicitudes',
         'rrhh_seleccion' => 'Proceso de selección (candidatos, entrevistas, terna)',
+        'rrhh_novedades' => 'Cuadro de novedades (incapacidades, permisos, horas extra)',
         'rrhh_orden_contratacion' => 'Autorizar contrataciones (Junta Directiva)',
+        'rrhh_nomina' => 'Nómina (liquidar y consultar lo que gana cada quien)',
+        'rrhh_nomina_aprobar' => 'Aprobar la nómina del mes (gerencia)',
         'portal_colaborador' => 'Mi espacio (portal del empleado)',
         'mapa_colombia' => 'Mapa de Colombia',
         'marketing_parrilla' => 'Parrilla de contenido',
@@ -265,9 +331,43 @@ final class Permisos
      * Nombre con que cada sección vive en la tabla `permissions` de Spatie.
      * Prefijamos para no chocar con permisos de otros paquetes.
      */
-    public static function permiso(string $seccion): string
+    /**
+     * Las cuatro acciones que se pueden dar por separado sobre una sección.
+     *
+     * Hasta acá una sección era UN permiso: quien podía verla podía hacerle
+     * todo. Eso obligaba a elegir entre dar acceso completo o no dar nada, y
+     * en la práctica se daba completo — el auxiliar que sólo necesitaba
+     * consultar la cartera terminaba pudiendo borrar una factura.
+     *
+     * `ver` es la puerta: sin ella las demás no sirven de nada, y así se
+     * valida. Marcar «editar» sin «ver» sería una casilla que no hace nada.
+     */
+    public const ACCIONES = [
+        'ver' => 'Ver',
+        'crear' => 'Crear',
+        'editar' => 'Editar',
+        'eliminar' => 'Eliminar',
+    ];
+
+    /**
+     * El nombre del permiso de una sección.
+     *
+     * Sin segundo argumento devuelve el de VER, que es como lo llaman las
+     * decenas de sitios escritos antes de que existieran las acciones. Así
+     * nada de lo viejo cambia de significado.
+     */
+    public static function permiso(string $seccion, string $accion = 'ver'): string
     {
-        return 'ver.'.$seccion;
+        return $accion.'.'.$seccion;
+    }
+
+    /** Los cuatro permisos de una sección, para sembrarlos juntos. */
+    public static function permisosDe(string $seccion): array
+    {
+        return array_map(
+            fn (string $a) => self::permiso($seccion, $a),
+            array_keys(self::ACCIONES),
+        );
     }
 
     /** Etiqueta legible de una sección, con respaldo para secciones nuevas. */
@@ -288,26 +388,40 @@ final class Permisos
         $agrupadas = [];
         foreach (self::GRUPOS as $grupo => $secciones) {
             foreach ($secciones as $s) {
-                $agrupadas[$grupo][] = [
-                    'seccion' => $s,
-                    'permiso' => self::permiso($s),
-                    'etiqueta' => self::etiqueta($s),
-                ];
+                $agrupadas[$grupo][] = self::filaDelCatalogo($s);
             }
         }
 
         $yaListadas = array_merge(...array_values(self::GRUPOS));
         foreach (array_keys(self::MATRIZ) as $s) {
             if (! in_array($s, $yaListadas, true)) {
-                $agrupadas['Otros'][] = [
-                    'seccion' => $s,
-                    'permiso' => self::permiso($s),
-                    'etiqueta' => self::etiqueta($s),
-                ];
+                $agrupadas['Otros'][] = self::filaDelCatalogo($s);
             }
         }
 
         return $agrupadas;
+    }
+
+    /**
+     * Una sección con sus cuatro casillas.
+     *
+     * `permiso` se conserva —es el de ver— porque la pantalla vieja y varios
+     * sitios lo leen por ese nombre. `acciones` es lo nuevo: el nombre del
+     * permiso de cada acción, para pintar la grilla.
+     */
+    private static function filaDelCatalogo(string $seccion): array
+    {
+        return [
+            'seccion' => $seccion,
+            'permiso' => self::permiso($seccion),
+            'etiqueta' => self::etiqueta($seccion),
+            'acciones' => collect(self::ACCIONES)
+                ->map(fn ($texto, $accion) => [
+                    'accion' => $accion,
+                    'texto' => $texto,
+                    'permiso' => self::permiso($seccion, $accion),
+                ])->values()->all(),
+        ];
     }
 
     /**
@@ -335,15 +449,64 @@ final class Permisos
     }
 
     /**
+     * ¿Puede HACER algo en esta sección, no sólo verla?
+     *
+     * `ver` es la puerta: quien no puede ver tampoco puede crear, editar ni
+     * borrar, aunque alguien le haya marcado esas casillas. Se valida acá y
+     * no en la pantalla porque una casilla mal puesta no debería abrir nada.
+     *
+     * Mientras los permisos no estén sembrados cae al respaldo por rol, igual
+     * que `puede()`: en una instalación a medio migrar es preferible el
+     * comportamiento viejo a cerrarle la puerta a todo el mundo.
+     */
+    public static function puedeAccion(?User $u, string $seccion, string $accion): bool
+    {
+        if (! $u) return false;
+        if (self::esRoot($u)) return true;
+        if (! array_key_exists($accion, self::ACCIONES)) return false;
+
+        if (! self::permisosSembrados()) {
+            return $u->hasAnyRole(self::MATRIZ[$seccion] ?? []);
+        }
+
+        if (! $u->can(self::permiso($seccion))) {
+            return false;
+        }
+
+        return $accion === 'ver' || $u->can(self::permiso($seccion, $accion));
+    }
+
+    /** Atajo para lo que más se pregunta: ¿puede cambiar algo acá? */
+    public static function puedeEditar(?User $u, string $seccion): bool
+    {
+        return self::puedeAccion($u, $seccion, 'editar');
+    }
+
+    /**
      * ¿Ya se sembraron los permisos? Se consulta una vez por request.
+     *
      * Si la tabla no existe todavía (instalación a medio migrar) devolvemos
      * false y la autorización cae a la matriz en código.
+     *
+     * La respuesta se guarda en el CONTENEDOR, no en un `static`. Un `static`
+     * dura todo el proceso, y eso no es «una vez por request» donde el proceso
+     * atiende más de una: en Octane, y sobre todo en la suite, donde los mil y
+     * pico tests comparten proceso. Ahí el primer test que sembraba permisos
+     * dejaba la bandera en `true` para todos los siguientes, y los archivos
+     * que montan su usuario con sólo un rol —sin permisos— se caían en bloque
+     * según el ORDEN alfabético de las carpetas. El contenedor se rearma por
+     * request y por test, que es la vida que le corresponde a esta respuesta.
+     *
+     * En un worker de colas el contenedor también vive todo el proceso, y ahí
+     * está bien: la respuesta sólo cambia cuando corre el seeder, y eso pasa
+     * en un despliegue, que reinicia los workers de todos modos.
      */
     private static function permisosSembrados(): bool
     {
-        static $sembrados = null;
-        if ($sembrados !== null) {
-            return $sembrados;
+        $llave = 'permisos.sembrados';
+
+        if (app()->bound($llave)) {
+            return app($llave);
         }
 
         try {
@@ -353,12 +516,34 @@ final class Permisos
             $sembrados = false;
         }
 
+        app()->instance($llave, $sembrados);
+
         return $sembrados;
     }
 
     /**
      * ¿Es root? (Aracely dueña o Gerencia general)
      */
+    /**
+     * ¿Tiene alguna de estas secciones?
+     *
+     * Para los controladores que atienden varias pantallas con casillas
+     * distintas: la puerta de clase deja entrar si tiene cualquiera, y cada
+     * método exige después la suya. Sin esto habría que elegir una sola clave
+     * por controlador, y las otras volverían a quedar huérfanas — que es
+     * justo lo que estamos arreglando.
+     */
+    public static function tieneAlguno(?User $u, array $secciones): bool
+    {
+        foreach ($secciones as $seccion) {
+            if (self::puede($u, $seccion)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public static function esRoot(?User $u): bool
     {
         return $u && $u->hasAnyRole(['Aracely', 'Gerencia']);

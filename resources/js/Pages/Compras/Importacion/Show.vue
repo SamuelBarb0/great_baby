@@ -1,11 +1,22 @@
 <script setup>
-import { ref, reactive, computed } from 'vue';
+import { ref, reactive, computed, watch } from 'vue';
+import { useBogotaDate } from '@/composables/useBogotaDate';
 import { Head, Link, router } from '@inertiajs/vue3';
 import { ArrowLeft, Package, Plus, Zap, AlertTriangle, FileText, Paperclip, Upload, Trash2 } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import { useMoney } from '@/composables/useMoney';
 import { fechaCorta } from '@/composables/useFecha';
 import { useEscClose } from '@/composables/useEscClose';
+
+/*
+ * La fecha de HOY en Colombia, no en UTC.
+ *
+ * `new Date().toISOString().slice(0,10)` convierte a UTC antes de
+ * recortar: entre las 19:00 y la medianoche hora Bogotá devuelve el día
+ * siguiente. Acá eso no era un filtro incómodo sino la fecha que queda
+ * escrita en el documento.
+ */
+const { hoy: hoyBogota } = useBogotaDate();
 
 const props = defineProps({
     importacion: { type: Object, required: true },
@@ -14,6 +25,22 @@ const props = defineProps({
 });
 // Re-audit M2 UX-C2 · useMoney en vez de fmtCOP inline (paridad con Cartera/Contabilidad).
 const { money } = useMoney();
+
+/*
+ * El IVA de importacion NUNCA suma al costo del inventario: se paga a la DIAN
+ * y se registra como credito fiscal (1355). Capitalizarlo lo mete dos veces en
+ * el libro y lo descuadra por el monto completo del IVA.
+ *
+ * La casilla venia PREMARCADA para todo concepto, asi que ese era el camino
+ * por defecto — y el texto («suma al costo del inventario») suena justamente a
+ * lo que uno quiere. Ahora se apaga sola y queda bloqueada, con el motivo a la
+ * vista en lugar de un tooltip.
+ */
+const esIvaDeImportacion = computed(() => gastoForm.concepto === 'iva_importacion');
+
+watch(esIvaDeImportacion, (es) => {
+    if (es) gastoForm.capitalizable = false;
+});
 
 const modalGasto = ref(false);
 const modalLiquidar = ref(false);
@@ -25,7 +52,7 @@ const gastoForm = reactive({
     concepto: 'flete', descripcion: '', moneda: 'COP', monto: 0,
     // Alejandro reparte los gastos por los m³ de cada ítem (reunión 30-oct).
     capitalizable: true, metodo_prorrateo: 'volumen',
-    factura_proveedor: '', fecha: new Date().toISOString().slice(0, 10),
+    factura_proveedor: '', fecha: hoyBogota(),
 });
 const procesando = ref(false);
 // Soporte del gasto (factura del flete, de la agencia…), opcional.
@@ -311,8 +338,13 @@ const fmtMoneda = (monto, mon) => mon === 'COP'
                                accept=".pdf,.xlsx,.xls,.csv,.doc,.docx,.jpg,.jpeg,.png,.webp,.zip"/>
                     </div>
                     <label class="flex items-center gap-2 text-sm cursor-pointer" :title="'Capitalizable: suma al costo del inventario. Los no capitalizables van a gastos operacionales.'">
-                        <input type="checkbox" v-model="gastoForm.capitalizable"/> Capitalizable (suma al costo)
+                        <input type="checkbox" v-model="gastoForm.capitalizable" :disabled="esIvaDeImportacion"/>
+                        Capitalizable (suma al costo)
                     </label>
+                    <p v-if="esIvaDeImportacion" class="text-[11px] text-amber-600 mt-1">
+                        El IVA de importación no capitaliza: se paga a la DIAN y queda como
+                        crédito fiscal. Sumarlo al costo lo contaría dos veces.
+                    </p>
                 </div>
                 <div class="flex justify-end gap-2 mt-4">
                     <button @click="modalGasto = false" class="btn-ghost" :disabled="procesando">Cancelar</button>

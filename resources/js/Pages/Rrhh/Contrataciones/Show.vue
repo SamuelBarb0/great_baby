@@ -9,9 +9,10 @@
 import { ref, reactive, computed } from 'vue';
 import { Head, Link, router } from '@inertiajs/vue3';
 import {
-    ArrowLeft, ClipboardCheck, Check, AlertTriangle, FileText, Upload, History, X,
+    ArrowLeft, ClipboardCheck, Check, AlertTriangle, FileText, Upload, History, X, Stethoscope,
 } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
+import AppConfirmModal from '@/Components/AppConfirmModal.vue';
 
 const props = defineProps({
     contratacion: { type: Object, required: true },
@@ -19,6 +20,7 @@ const props = defineProps({
     frenada: { type: Boolean, default: false },
     documentos: { type: Array, default: () => [] },
     tipos_documento: { type: Array, default: () => [] },
+    documentos_faltantes: { type: Array, default: () => [] },
     resultados_examen: { type: Array, default: () => [] },
     bitacora: { type: Array, default: () => [] },
 });
@@ -79,8 +81,23 @@ const subirDoc = () => {
 };
 
 /* cierre y cancelación */
+
+/*
+ * `confirm()` nativo está bloqueado dentro del iframe de la app de escritorio:
+ * devuelve false sin avisar y el botón no hace nada. Cerrar la contratación es
+ * lo que CREA al empleado, así que un botón mudo acá deja a alguien contratado
+ * en el papel y sin ficha en el sistema.
+ */
+const modalConfirm = ref(null);
+
 const completar = () => {
-    if (confirm('¿Cerrar la contratación y crear al empleado?')) enviar('/completar');
+    modalConfirm.value = {
+        titulo: '¿Cerrar la contratación y crear al empleado?',
+        mensaje: 'Se le abre la ficha de empleado con lo pactado. Después esto no se deshace.',
+        color: 'emerald',
+        textoConfirmar: 'Cerrar y crear',
+        onConfirmar: () => { modalConfirm.value = null; enviar('/completar'); },
+    };
 };
 const modalCancelar = ref(false);
 const motivo = ref('');
@@ -203,9 +220,21 @@ const money = (n) => (n ? '$' + Number(n).toLocaleString('es-CO', { maximumFract
                                 </div>
                                 <div v-else class="text-xs text-surface-400">Sin registrar</div>
                             </div>
-                            <button v-if="enProceso" @click="modalExamen = true" class="btn-secondary text-xs">
-                                {{ contratacion.examen_at ? 'Corregir' : 'Registrar' }}
-                            </button>
+                            <div class="flex gap-2">
+                                <!--
+                                    La carta que la persona lleva a la IPS. Hasta
+                                    ahora el sistema guardaba la fecha y el
+                                    resultado del examen, pero no tenía con qué
+                                    pedirlo: la carta se escribía por fuera.
+                                -->
+                                <a :href="`/app/rrhh/contrataciones/${contratacion.id}/emo`"
+                                    class="btn-secondary text-xs">
+                                    <Stethoscope class="h-3.5 w-3.5" /> Carta SST-F-001
+                                </a>
+                                <button v-if="enProceso" @click="modalExamen = true" class="btn-secondary text-xs">
+                                    {{ contratacion.examen_at ? 'Corregir' : 'Registrar' }}
+                                </button>
+                            </div>
                         </div>
 
                         <div class="flex items-center justify-between gap-2 flex-wrap text-sm border-t pt-3">
@@ -249,12 +278,32 @@ const money = (n) => (n ? '$' + Number(n).toLocaleString('es-CO', { maximumFract
 
                     <!-- Documentos -->
                     <div class="card p-5">
-                        <div class="flex items-center justify-between mb-3">
+                        <div class="flex items-center justify-between mb-3 gap-2 flex-wrap">
                             <h3 class="font-bold text-sm uppercase text-surface-500">Carpeta de documentos</h3>
-                            <button @click="modalDoc = true" class="btn-secondary text-xs">
-                                <Upload class="h-3.5 w-3.5" /> Cargar
-                            </button>
+                            <div class="flex gap-2">
+                                <!--
+                                    La carta GH-F-007 con la lista de lo que
+                                    tiene que traer. Marca lo ya recibido, para
+                                    que en la segunda entrega no vuelva a traer
+                                    lo que ya trajo.
+                                -->
+                                <a :href="`/app/rrhh/contrataciones/${contratacion.id}/documentos-solicitud`"
+                                    class="btn-secondary text-xs">
+                                    <FileText class="h-3.5 w-3.5" /> Carta GH-F-007
+                                </a>
+                                <button @click="modalDoc = true" class="btn-secondary text-xs">
+                                    <Upload class="h-3.5 w-3.5" /> Cargar
+                                </button>
+                            </div>
                         </div>
+
+                        <!-- Lo obligatorio que todavía no llegó -->
+                        <div v-if="documentos_faltantes.length"
+                            class="mb-3 p-2.5 rounded bg-amber-500/10 border-l-4 border-amber-500 text-xs">
+                            <span class="font-bold">Faltan por recibir:</span>
+                            {{ documentos_faltantes.join(', ') }}.
+                        </div>
+
                         <ul class="divide-y text-sm">
                             <li v-for="d in documentos" :key="d.id" class="py-2 flex items-center justify-between gap-2">
                                 <div class="min-w-0">
@@ -382,5 +431,7 @@ const money = (n) => (n ? '$' + Number(n).toLocaleString('es-CO', { maximumFract
                 </div>
             </div>
         </div>
+
+        <AppConfirmModal :cfg="modalConfirm" @cerrar="modalConfirm = null"/>
     </AppLayout>
 </template>

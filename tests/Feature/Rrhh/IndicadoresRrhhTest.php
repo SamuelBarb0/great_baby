@@ -122,16 +122,20 @@ it('quien se fue antes del período no cuenta como plantilla inicial', function 
         ->and($r['retiros'])->toBe(0);
 });
 
-it('el ausentismo se devuelve como NO disponible, con la razón', function () {
+it('el ausentismo de un período sin novedades se devuelve como NO disponible', function () {
     /*
-     * Necesita el registro de incapacidades y permisos, que todavía no existe.
-     * Un número inventado en una junta directiva es peor que un indicador que
-     * falta, porque el inventado se cree y se decide sobre él.
+     * Hasta la Fase B esto decía «el módulo de novedades no existe». Ya existe,
+     * y el indicador sale del cuadro del mes. Lo que NO cambió —y es lo que
+     * esta prueba cuida— es que un período sin novedades registradas siga
+     * diciendo «no disponible» en vez de pintar un 0 %.
+     *
+     * Un 0,0 % y un «nadie ha registrado nada» se ven igual en una diapositiva
+     * y significan lo contrario. Al número falso le creen y se decide sobre él.
      */
     $a = IndicadoresRrhh::entre('2026-01-01', '2026-12-31')->ausentismo();
 
     expect($a['disponible'])->toBeFalse()
-        ->and($a['motivo'])->toContain('incapacidades');
+        ->and($a['motivo'])->toContain('no hay novedades registradas');
 });
 
 it('los motivos de retiro se cuentan y además se listan', function () {

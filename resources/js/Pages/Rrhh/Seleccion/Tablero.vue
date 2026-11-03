@@ -11,11 +11,23 @@
  * algo que se pueda hacer bien.
  */
 import { ref, reactive, computed } from 'vue';
+import { useBogotaDate } from '@/composables/useBogotaDate';
 import { Head, Link, router } from '@inertiajs/vue3';
 import {
-    ArrowLeft, Plus, FileText, ShieldCheck, ShieldAlert, X, Star, Users, Download, Printer,
+    ArrowLeft, Plus, FileText, ShieldCheck, ShieldAlert, X, Star, Users, Download, Printer, Brain,
+    MessageSquare, Trash2,
 } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
+
+/*
+ * La fecha de HOY en Colombia, no en UTC.
+ *
+ * `toISOString()` convierte a UTC antes de recortar, asi que entre las
+ * 19:00 y la medianoche hora Bogota devuelve el dia siguiente. Las fechas
+ * de esta pantalla quedan escritas en registros, no son un filtro: un dia
+ * de corrimiento cambia lo que dice el documento.
+ */
+const { hoy: hoyBogota } = useBogotaDate();
 
 const props = defineProps({
     vacante: { type: Object, required: true },
@@ -25,6 +37,9 @@ const props = defineProps({
     fuentes: { type: Array, default: () => [] },
     valoraciones: { type: Array, default: () => [] },
     terna_llena: { type: Boolean, default: false },
+    instrumentos: { type: Array, default: () => [] },
+    conceptos: { type: Array, default: () => [] },
+    cuestionarios: { type: Object, default: () => ({}) },
 });
 
 const procesando = ref(false);
@@ -88,6 +103,115 @@ const guardarValoracion = () => accion(
     { ...val },
     { onSuccess: () => { modalValoracion.value = null; Object.assign(val, { valoracion: 'apto', observacion: '' }); } },
 );
+
+/*
+ * ── Entrevistas · Fase C ─────────────────────────────────────────────────
+ *
+ * Dos formatos en el mismo modal. El cuestionario viene del servidor, así
+ * que agregar o cambiar una pregunta es editar una constante en PHP y no
+ * esta pantalla: el formato del área y lo que se pregunta no pueden
+ * separarse.
+ */
+const modalEntrevista = ref(null);
+const tipoEntrevista = ref('saber_hacer');
+const entrevista = reactive({
+    fecha: '', entrevistador_nombre: '', entrevistador_cargo: '',
+    respuestas: {}, calificaciones: {}, observaciones: '',
+});
+
+const esSaberHacer = computed(() => tipoEntrevista.value === 'saber_hacer');
+
+const totalEntrevista = computed(() => {
+    const notas = Object.values(entrevista.calificaciones)
+        .map(Number).filter((n) => n >= 1 && n <= 5);
+    return notas.length ? notas.reduce((a, b) => a + b, 0) : null;
+});
+
+const abrirEntrevista = (c, tipo) => {
+    errores.value = {};
+    tipoEntrevista.value = tipo;
+    modalEntrevista.value = c;
+    Object.assign(entrevista, {
+        fecha: hoyBogota(),
+        entrevistador_nombre: '', entrevistador_cargo: '',
+        respuestas: {}, calificaciones: {}, observaciones: '',
+    });
+    // Las tres tablas de la psicológica arrancan con una fila en blanco.
+    if (tipo === 'psicologica') {
+        ['familia', 'academica', 'laboral'].forEach((b) => {
+            entrevista.respuestas[`${b}_filas`] = [{}];
+        });
+    }
+};
+
+const filasTabla = (bloque) => entrevista.respuestas[`${bloque}_filas`] ?? [];
+const agregarFila = (bloque) => entrevista.respuestas[`${bloque}_filas`].push({});
+const quitarFila = (bloque, i) => entrevista.respuestas[`${bloque}_filas`].splice(i, 1);
+
+const guardarEntrevista = () => {
+    if (procesando.value) return;
+    procesando.value = true;
+    errores.value = {};
+    router.post(`/app/rrhh/candidatos/${modalEntrevista.value.id}/entrevista`, {
+        tipo: tipoEntrevista.value, ...entrevista,
+    }, {
+        preserveScroll: true,
+        onSuccess: () => { modalEntrevista.value = null; },
+        onError: (e) => { errores.value = e; },
+        onFinish: () => { procesando.value = false; },
+    });
+};
+
+/*
+ * ── Psicotécnicas · Fase C ───────────────────────────────────────────────
+ *
+ * Acá se registra el CONCEPTO del profesional, no las respuestas. No es una
+ * simplificación de la pantalla: el sistema no las guarda en ninguna parte.
+ * Las respuestas de un MINIMULT son dato sensible de salud y los dos
+ * instrumentos tienen derechos de autor.
+ *
+ * El informe firmado sí se adjunta, va al disco privado y se abre por una
+ * ruta aparte que revisa permiso y deja anotado quién lo leyó.
+ */
+const modalPrueba = ref(null);
+const prueba = reactive({
+    instrumento: 'minimult', instrumento_otro: '', fecha_aplicacion: '',
+    profesional_nombre: '', profesional_tarjeta: '', concepto: 'apto', observaciones: '',
+});
+const informe = ref(null);
+
+const instrumentoSel = computed(() => props.instrumentos.find((i) => i.valor === prueba.instrumento));
+const conceptoSel = computed(() => props.conceptos.find((c) => c.valor === prueba.concepto));
+
+const abrirPrueba = (c, ya = null) => {
+    errores.value = {};
+    informe.value = null;
+    modalPrueba.value = c;
+    Object.assign(prueba, {
+        instrumento: ya?.instrumento ?? 'minimult',
+        instrumento_otro: '',
+        fecha_aplicacion: ya?.fecha ?? hoyBogota(),
+        profesional_nombre: '',
+        profesional_tarjeta: '',
+        concepto: ya?.concepto ?? 'apto',
+        observaciones: ya?.observaciones ?? '',
+    });
+};
+
+const guardarPrueba = () => {
+    if (procesando.value) return;
+    procesando.value = true;
+    errores.value = {};
+    // FormData porque lleva el informe adjunto.
+    router.post(`/app/rrhh/candidatos/${modalPrueba.value.id}/psicotecnica`,
+        { ...prueba, informe: informe.value }, {
+            forceFormData: true,
+            preserveScroll: true,
+            onSuccess: () => { modalPrueba.value = null; },
+            onError: (e) => { errores.value = e; },
+            onFinish: () => { procesando.value = false; },
+        });
+};
 
 /*
  * De seleccionado a contratado, pasando por la Junta.
@@ -236,12 +360,67 @@ const badge = (color) => ({
                                 <ShieldCheck class="h-3.5 w-3.5" /> Antecedentes revisados
                             </div>
 
+                            <!-- Entrevistas · el total; el detalle se abre aparte -->
+                            <div v-if="c.entrevistas?.length" class="space-y-1">
+                                <div v-for="x in c.entrevistas" :key="x.id"
+                                    class="flex items-center gap-1 flex-wrap text-[11px]">
+                                    <span class="text-surface-500">{{ x.tipo_label }}</span>
+                                    <span v-if="x.total"
+                                        class="px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-800 text-[10px] font-bold">
+                                        {{ x.total }}/30
+                                    </span>
+                                    <a :href="`/app/rrhh/entrevistas/${x.id}/pdf`" target="_blank"
+                                        class="text-surface-500 hover:text-brand-600" title="Imprimir">
+                                        <FileText class="h-3 w-3" />
+                                    </a>
+                                    <span v-if="x.sin_contestar" class="text-amber-700">
+                                        · {{ x.sin_contestar }} sin contestar
+                                    </span>
+                                </div>
+                            </div>
+
+                            <!--
+                                Psicotécnicas · el concepto, nunca el contenido.
+                                El informe se abre aparte, por una ruta que
+                                revisa permiso y anota quién lo leyó.
+                            -->
+                            <div v-if="c.psicotecnicas?.length" class="space-y-1">
+                                <div v-for="p in c.psicotecnicas" :key="p.id"
+                                    class="flex items-center gap-1 flex-wrap text-[11px]">
+                                    <span class="text-surface-500">{{ p.prueba }}</span>
+                                    <span :class="['px-1.5 py-0.5 rounded text-[10px] font-bold', badge(p.color)]"
+                                        :title="p.observaciones || p.firma">
+                                        {{ p.concepto_label }}
+                                    </span>
+                                    <a v-if="p.tiene_informe" :href="`/app/rrhh/psicotecnicas/${p.id}/informe`"
+                                        target="_blank" class="text-surface-500 hover:text-brand-600"
+                                        title="Informe firmado">
+                                        <FileText class="h-3 w-3" />
+                                    </a>
+                                    <span v-if="p.falta.length" class="text-amber-700" :title="`Falta ${p.falta.join(' y ')}`">
+                                        · falta {{ p.falta.join(' y ') }}
+                                    </span>
+                                </div>
+                            </div>
+
                             <div class="flex gap-1">
                                 <select :value="c.etapa" @change="mover(c, $event.target.value)"
                                     :disabled="procesando" class="input flex-1 min-w-0 text-xs py-1">
                                     <option v-for="o in columnas" :key="o.valor" :value="o.valor">{{ o.label }}</option>
                                     <option value="seleccionado">Seleccionado</option>
                                 </select>
+                                <button @click="abrirEntrevista(c, 'saber_hacer')"
+                                    class="btn-secondary px-2 py-1" title="Entrevista de saber hacer">
+                                    <MessageSquare class="h-3.5 w-3.5" />
+                                </button>
+                                <button @click="abrirEntrevista(c, 'psicologica')"
+                                    class="btn-secondary px-2 py-1" title="Entrevista psicológica">
+                                    <Users class="h-3.5 w-3.5" />
+                                </button>
+                                <button @click="abrirPrueba(c)" class="btn-secondary px-2 py-1"
+                                    title="Registrar una prueba psicotécnica">
+                                    <Brain class="h-3.5 w-3.5" />
+                                </button>
                                 <button @click="modalValoracion = c" class="btn-secondary px-2 py-1" title="Valorar">
                                     <Star class="h-3.5 w-3.5" />
                                 </button>
@@ -297,7 +476,30 @@ const badge = (color) => ({
                         <span v-else-if="c.orden.estado === 'pendiente'" class="text-xs text-amber-600">
                             Esperando a la Junta
                         </span>
-                        <span v-else class="text-xs text-rose-600">No autorizada</span>
+                        <!--
+                            Negada: las dos salidas que la Junta deja abiertas.
+
+                            Acá sólo decía «No autorizada», en rojo y sin nada
+                            más. La persona quedaba atascada: ni contratable
+                            —la orden no autoriza— ni descartable —el botón de
+                            descarte vive en las columnas del embudo y los
+                            seleccionados ya no están ahí—, así que seguía
+                            ocupando el puesto de elegido para siempre. El
+                            propio diálogo de la Junta promete que Gestión
+                            Humana puede «insistir, bajar el salario o cerrar
+                            la vacante»; las tres estaban cerradas.
+                        -->
+                        <div v-else class="flex items-center gap-2">
+                            <span class="text-xs text-rose-600">No autorizada</span>
+                            <button @click="pedirOrden(c)" :disabled="procesando"
+                                class="btn-secondary text-xs py-1 px-3">
+                                Volver a pedirla
+                            </button>
+                            <button @click="modalDescarte = c"
+                                class="text-xs py-1 px-3 rounded border border-surface-300 text-surface-600 hover:bg-surface-50">
+                                Descartar
+                            </button>
+                        </div>
                     </li>
                 </ul>
             </div>
@@ -407,6 +609,228 @@ const badge = (color) => ({
                     <button @click="modalValoracion = null" class="btn-secondary">Cancelar</button>
                     <button @click="guardarValoracion" :disabled="procesando || (exigeObs && !val.observacion)"
                         class="btn-primary">Guardar</button>
+                </div>
+            </div>
+        </div>
+
+        <!--
+            Entrevista · un modal para los dos formatos. El cuestionario viene
+            del servidor: el formato del área manda y la pantalla lo copia.
+        -->
+        <div v-if="modalEntrevista" @click.self="modalEntrevista = null"
+            class="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+            <div class="card p-6 max-w-3xl w-full max-h-[90vh] overflow-y-auto space-y-3">
+                <h3 class="text-lg font-bold">
+                    {{ esSaberHacer ? 'Entrevista de saber hacer' : 'Entrevista psicológica' }}
+                    · {{ modalEntrevista.nombre }}
+                </h3>
+
+                <div class="grid grid-cols-3 gap-3">
+                    <div>
+                        <label class="text-xs uppercase text-surface-500">Fecha</label>
+                        <input v-model="entrevista.fecha" type="date" class="input w-full mt-1" />
+                        <p v-if="errores.fecha" class="text-xs text-rose-600 mt-1">{{ errores.fecha }}</p>
+                    </div>
+                    <div>
+                        <label class="text-xs uppercase text-surface-500">Quién entrevistó</label>
+                        <input v-model="entrevista.entrevistador_nombre" class="input w-full mt-1" />
+                        <p v-if="errores.entrevistador_nombre" class="text-xs text-rose-600 mt-1">
+                            {{ errores.entrevistador_nombre }}
+                        </p>
+                    </div>
+                    <div>
+                        <label class="text-xs uppercase text-surface-500">Cargo</label>
+                        <input v-model="entrevista.entrevistador_cargo" class="input w-full mt-1" />
+                    </div>
+                </div>
+
+                <!-- Saber hacer: tres bloques de preguntas y seis calificaciones -->
+                <template v-if="esSaberHacer">
+                    <div v-for="(b, clave) in cuestionarios.saber_hacer" :key="clave" class="pt-2 border-t">
+                        <h4 class="text-xs font-bold uppercase text-surface-500">{{ b.titulo }}</h4>
+                        <p v-if="b.nota" class="text-[11px] text-surface-400 italic mb-1">{{ b.nota }}</p>
+                        <div v-for="(pregunta, k) in b.preguntas" :key="k" class="mt-2">
+                            <label class="text-xs text-surface-600">{{ pregunta }}</label>
+                            <textarea v-model="entrevista.respuestas[k]" rows="2"
+                                class="input w-full mt-1 text-sm"></textarea>
+                        </div>
+                    </div>
+
+                    <div class="pt-2 border-t">
+                        <h4 class="text-xs font-bold uppercase text-surface-500">Evaluación de la entrevista</h4>
+                        <p class="text-[11px] text-surface-400 mb-1">
+                            De 1 a 5, donde 1 es la menor puntuación y 5 la más alta.
+                        </p>
+                        <div v-for="(texto, k) in cuestionarios.items" :key="k"
+                            class="flex items-center justify-between gap-3 py-1 border-b last:border-0">
+                            <span class="text-xs">{{ texto }}</span>
+                            <div class="flex gap-1 shrink-0">
+                                <button v-for="n in 5" :key="n" type="button"
+                                    @click="entrevista.calificaciones[k] = n"
+                                    :class="['h-7 w-7 rounded text-xs font-bold',
+                                        Number(entrevista.calificaciones[k]) === n
+                                            ? 'bg-brand-600 text-white'
+                                            : 'bg-surface-200 dark:bg-surface-700']">{{ n }}</button>
+                            </div>
+                        </div>
+                        <div class="text-right text-sm font-bold mt-2">
+                            Total: {{ totalEntrevista !== null ? totalEntrevista + ' de 30' : '—' }}
+                        </div>
+                    </div>
+                </template>
+
+                <!-- Psicológica: tres tablas que crecen y los bloques abiertos -->
+                <template v-else>
+                    <div v-for="(b, clave) in cuestionarios.psicologica" :key="clave" class="pt-2 border-t">
+                        <h4 class="text-xs font-bold uppercase text-surface-500">{{ b.titulo }}</h4>
+
+                        <template v-if="b.tabla">
+                            <div v-for="(fila, i) in filasTabla(clave)" :key="i"
+                                class="flex gap-1 items-center mt-1">
+                                <template v-for="(titulo, col) in b.tabla" :key="col">
+                                    <select v-if="col === 'nivel'" v-model="fila[col]"
+                                        class="input flex-1 min-w-0 text-xs py-1">
+                                        <option value="">Nivel…</option>
+                                        <option v-for="niv in cuestionarios.niveles" :key="niv" :value="niv">
+                                            {{ niv }}
+                                        </option>
+                                    </select>
+                                    <input v-else v-model="fila[col]" :placeholder="titulo"
+                                        class="input flex-1 min-w-0 text-xs py-1" />
+                                </template>
+                                <button type="button" @click="quitarFila(clave, i)"
+                                    class="text-surface-400 hover:text-rose-600 shrink-0">
+                                    <Trash2 class="h-3.5 w-3.5" />
+                                </button>
+                            </div>
+                            <button type="button" @click="agregarFila(clave)"
+                                class="text-xs text-brand-600 hover:underline mt-1">+ Agregar fila</button>
+                        </template>
+
+                        <div v-for="(pregunta, k) in b.campos" :key="k" class="mt-2">
+                            <label class="text-xs text-surface-600">{{ pregunta }}</label>
+                            <textarea v-model="entrevista.respuestas[k]" rows="2"
+                                class="input w-full mt-1 text-sm"></textarea>
+                        </div>
+                    </div>
+
+                    <p class="text-[11px] text-surface-400 pt-2 border-t">
+                        Este formato lleva datos del núcleo familiar del aspirante. Su manejo está sujeto
+                        a la Ley 1581 de 2012: queda en la carpeta del proceso y no sale de Gestión Humana.
+                    </p>
+                </template>
+
+                <div class="pt-2 border-t">
+                    <label class="text-xs uppercase text-surface-500">Observaciones</label>
+                    <textarea v-model="entrevista.observaciones" rows="2" class="input w-full mt-1"></textarea>
+                </div>
+
+                <div class="flex justify-end gap-2 pt-1">
+                    <button @click="modalEntrevista = null" class="btn-secondary">Cancelar</button>
+                    <button @click="guardarEntrevista" :disabled="procesando" class="btn-primary">
+                        {{ procesando ? 'Guardando…' : 'Guardar entrevista' }}
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!--
+            Prueba psicotécnica · Fase C.
+
+            Se pide el concepto, quién lo firma y el informe. No hay dónde
+            escribir respuestas a propósito: no se guardan en ninguna parte.
+        -->
+        <div v-if="modalPrueba" @click.self="modalPrueba = null"
+            class="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+            <div class="card p-6 max-w-xl w-full max-h-[90vh] overflow-y-auto">
+                <h3 class="text-lg font-bold">Prueba psicotécnica de {{ modalPrueba.nombre }}</h3>
+                <p class="text-xs text-surface-500 mb-3">
+                    Se guarda el concepto del profesional y el informe firmado.
+                    Las respuestas de la prueba no se guardan: son dato sensible de salud.
+                </p>
+
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="text-xs font-semibold">Prueba</label>
+                        <select v-model="prueba.instrumento" class="input w-full mt-1">
+                            <option v-for="i in instrumentos" :key="i.valor" :value="i.valor">{{ i.label }}</option>
+                        </select>
+                        <p class="text-[11px] text-surface-500 mt-1">{{ instrumentoSel?.que_mide }}</p>
+                    </div>
+                    <div>
+                        <label class="text-xs font-semibold">Fecha de aplicación</label>
+                        <input v-model="prueba.fecha_aplicacion" type="date" class="input w-full mt-1" />
+                        <p v-if="errores.fecha_aplicacion" class="text-xs text-rose-600 mt-1">
+                            {{ errores.fecha_aplicacion }}
+                        </p>
+                    </div>
+                </div>
+
+                <div v-if="prueba.instrumento === 'otro'" class="mt-3">
+                    <label class="text-xs font-semibold">¿Cuál prueba?</label>
+                    <input v-model="prueba.instrumento_otro" class="input w-full mt-1"
+                        placeholder="16PF, Wartegg, prueba técnica del cargo…" />
+                    <p v-if="errores.instrumento_otro" class="text-xs text-rose-600 mt-1">
+                        {{ errores.instrumento_otro }}
+                    </p>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3 mt-3">
+                    <div>
+                        <label class="text-xs font-semibold">Quién la aplicó</label>
+                        <input v-model="prueba.profesional_nombre" class="input w-full mt-1"
+                            placeholder="Nombre del profesional" />
+                        <p v-if="errores.profesional_nombre" class="text-xs text-rose-600 mt-1">
+                            {{ errores.profesional_nombre }}
+                        </p>
+                    </div>
+                    <div>
+                        <label class="text-xs font-semibold">
+                            Tarjeta profesional
+                            <span v-if="instrumentoSel?.exige_profesional" class="text-rose-600">· obligatoria</span>
+                        </label>
+                        <input v-model="prueba.profesional_tarjeta" class="input w-full mt-1" />
+                        <p v-if="instrumentoSel?.exige_profesional" class="text-[11px] text-surface-500 mt-1">
+                            Es prueba clínica: sólo la aplica un psicólogo con tarjeta (Ley 1090 de 2006).
+                        </p>
+                        <p v-if="errores.profesional_tarjeta" class="text-xs text-rose-600 mt-1">
+                            {{ errores.profesional_tarjeta }}
+                        </p>
+                    </div>
+                </div>
+
+                <div class="mt-3">
+                    <label class="text-xs font-semibold">Concepto</label>
+                    <select v-model="prueba.concepto" class="input w-full mt-1">
+                        <option v-for="k in conceptos" :key="k.valor" :value="k.valor">{{ k.label }}</option>
+                    </select>
+                </div>
+
+                <div class="mt-3">
+                    <label class="text-xs font-semibold">
+                        Observaciones
+                        <span v-if="conceptoSel?.exige_observaciones" class="text-rose-600">· obligatorias</span>
+                    </label>
+                    <textarea v-model="prueba.observaciones" rows="3" class="input w-full mt-1"
+                        placeholder="Lo que el jefe debería tener en cuenta. Sin detalles clínicos."></textarea>
+                    <p v-if="errores.observaciones" class="text-xs text-rose-600 mt-1">{{ errores.observaciones }}</p>
+                </div>
+
+                <div class="mt-3">
+                    <label class="text-xs font-semibold">Informe firmado (PDF)</label>
+                    <input type="file" accept="application/pdf"
+                        @change="informe = $event.target.files[0]" class="input w-full mt-1 text-xs" />
+                    <p class="text-[11px] text-surface-500 mt-1">
+                        Se guarda en el disco privado. Se abre sólo desde acá y queda anotado quién lo abrió.
+                    </p>
+                    <p v-if="errores.informe" class="text-xs text-rose-600 mt-1">{{ errores.informe }}</p>
+                </div>
+
+                <div class="flex justify-end gap-2 mt-4">
+                    <button @click="modalPrueba = null" class="btn-secondary">Cancelar</button>
+                    <button @click="guardarPrueba" :disabled="procesando" class="btn-primary">
+                        {{ procesando ? 'Guardando…' : 'Guardar concepto' }}
+                    </button>
                 </div>
             </div>
         </div>

@@ -6,7 +6,9 @@ import { ArrowLeft, ShieldCheck, Lock, Users, Search, Save } from 'lucide-vue-ne
 
 const props = defineProps({
     rol: Object,         // null = rol nuevo
-    catalogo: Object,    // { grupo: [{seccion, permiso, etiqueta}] }
+    catalogo: Object,    // { grupo: [{seccion, permiso, etiqueta, acciones}] }
+    // Las cuatro columnas de la grilla: ver, crear, editar, eliminar.
+    acciones: { type: Array, default: () => [] },
     usuarios: Array,
 });
 
@@ -23,20 +25,60 @@ const esProtegido = props.rol?.protegido ?? false;
 
 const tiene = (p) => permisos.value.includes(p);
 
-const alternar = (p) => {
+const poner = (p) => { if (! tiene(p)) permisos.value.push(p); };
+const quitar = (p) => {
     const i = permisos.value.indexOf(p);
-    i === -1 ? permisos.value.push(p) : permisos.value.splice(i, 1);
+    if (i !== -1) permisos.value.splice(i, 1);
 };
+
+/*
+ * «Ver» es la puerta.
+ *
+ * Quitar el ver de una sección se lleva sus otras acciones: dejar marcado
+ * «editar» sobre algo que la persona no puede abrir es una casilla que miente
+ * —el servidor la rechaza igual— y al revisar la pantalla parecería que tiene
+ * un permiso que no sirve.
+ *
+ * Y marcar cualquier acción enciende el ver, porque nadie marca «eliminar»
+ * queriendo decir «pero que no lo vea».
+ */
+const alternar = (p, fila = null) => {
+    const esVer = fila && p === fila.permiso;
+
+    if (tiene(p)) {
+        quitar(p);
+        if (esVer) fila.acciones.forEach(a => quitar(a.permiso));
+        return;
+    }
+
+    poner(p);
+    if (! esVer && fila) poner(fila.permiso);
+};
+
+/** Cuántas acciones tiene marcadas una sección, para el resumen de la fila. */
+const accionesDe = (fila) => fila.acciones.filter(a => tiene(a.permiso)).length;
 
 const grupoCompleto = (items) => items.every(i => tiene(i.permiso));
 
 const alternarGrupo = (items) => {
     if (grupoCompleto(items)) {
-        permisos.value = permisos.value.filter(p => ! items.some(i => i.permiso === p));
+        // Quitar el grupo se lleva todo lo suyo, acciones incluidas.
+        items.forEach(i => {
+            quitar(i.permiso);
+            i.acciones.forEach(a => quitar(a.permiso));
+        });
     } else {
-        items.forEach(i => { if (! tiene(i.permiso)) permisos.value.push(i.permiso); });
+        // Marcar todo da acceso completo, que es lo que se espera del botón.
+        items.forEach(i => {
+            poner(i.permiso);
+            i.acciones.forEach(a => poner(a.permiso));
+        });
     }
 };
+
+/** Sólo las secciones marcadas, para el contador de arriba. */
+const seccionesMarcadas = computed(() =>
+    permisos.value.filter(p => p.startsWith('ver.')).length);
 
 const usuariosFiltrados = computed(() => {
     const q = buscar.value.trim().toLowerCase();
@@ -100,7 +142,9 @@ const guardar = () => {
                 <div class="px-4 py-3 border-b border-surface-200 dark:border-surface-800">
                     <h3 class="font-semibold">¿Qué puede ver y hacer?</h3>
                     <p class="text-xs text-surface-500 mt-0.5">
-                        {{ permisos.length }} accesos marcados.
+                        {{ seccionesMarcadas }} sección(es) marcada(s).
+                        <strong>Ver</strong> abre la pantalla; las otras tres dicen qué puede hacer adentro.
+                        Sin <strong>Ver</strong>, las demás no sirven.
                     </p>
                 </div>
 
@@ -113,14 +157,37 @@ const guardar = () => {
                                 {{ grupoCompleto(items) ? 'Quitar todo' : 'Marcar todo' }}
                             </button>
                         </div>
-                        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                            <label v-for="i in items" :key="i.permiso"
-                                   class="flex items-center gap-2 p-2 rounded border border-surface-200 dark:border-surface-700 cursor-pointer hover:bg-brand-50/50 dark:hover:bg-brand-950/20 text-sm">
-                                <input type="checkbox" :checked="tiene(i.permiso)" @change="alternar(i.permiso)"
-                                       class="h-4 w-4 rounded shrink-0"/>
-                                <span>{{ i.etiqueta }}</span>
-                            </label>
-                        </div>
+                        <table class="w-full text-sm">
+                            <thead>
+                                <tr class="text-[10px] uppercase text-surface-400">
+                                    <th class="text-left font-semibold pb-1">Sección</th>
+                                    <th v-for="a in acciones" :key="a.accion" class="w-16 pb-1 font-semibold">
+                                        {{ a.texto }}
+                                    </th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-surface-100 dark:divide-surface-800">
+                                <tr v-for="i in items" :key="i.permiso"
+                                    :class="tiene(i.permiso) ? '' : 'opacity-60'">
+                                    <td class="py-1.5 pr-2">
+                                        {{ i.etiqueta }}
+                                        <span v-if="tiene(i.permiso) && accionesDe(i) === 0"
+                                              class="ml-1 text-[10px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-700">
+                                            sólo lectura
+                                        </span>
+                                    </td>
+                                    <td v-for="a in i.acciones" :key="a.permiso" class="text-center py-1.5">
+                                        <input type="checkbox"
+                                               :checked="tiene(a.permiso)"
+                                               :disabled="a.accion !== 'ver' && ! tiene(i.permiso)"
+                                               :title="a.accion !== 'ver' && ! tiene(i.permiso)
+                                                   ? 'Primero hay que marcar Ver' : a.texto"
+                                               @change="alternar(a.permiso, i)"
+                                               class="h-4 w-4 rounded disabled:opacity-30"/>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             </div>

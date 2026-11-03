@@ -70,6 +70,35 @@
         @endif
     </div>
 
+    {{--
+        Fase C · Las psicotécnicas.
+
+        Va el CONCEPTO y quién lo firmó, nunca el contenido del informe. Este
+        PDF se imprime y circula —es el sustento de la selección— y un informe
+        psicológico no circula: queda en el sistema, bajo permiso y con rastro
+        de quién lo abrió.
+    --}}
+    <h2>Pruebas psicotécnicas</h2>
+    <div style="font-size: 9pt;">
+        @forelse($c->pruebasPsicotecnicas as $p)
+            <div style="margin-bottom: 4px;">
+                <strong>{{ $p->comoSeLlama() }}</strong> ·
+                {{ $p->concepto->label() }} ·
+                {{ $p->fecha_aplicacion?->format('d/m/Y') }}
+                <br>
+                <span style="color:#6b7280;">Aplicó e interpretó: {{ $p->quienFirma() }}</span>
+                @if($p->observaciones)
+                    <br>{{ $p->observaciones }}
+                @endif
+                @if($p->loQueFalta())
+                    <br><span class="falta">Falta {{ implode(' y ', $p->loQueFalta()) }}.</span>
+                @endif
+            </div>
+        @empty
+            <span class="falta">No se le aplicaron pruebas.</span>
+        @endforelse
+    </div>
+
     <h2>Valoración de Gestión Humana</h2>
     <div style="font-size: 9pt;">
         @if($c->valoracion)

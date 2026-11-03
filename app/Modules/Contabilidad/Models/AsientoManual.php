@@ -21,6 +21,7 @@ class AsientoManual extends Model implements AuditableContract
         'fecha' => 'date',
         'valor_total' => 'decimal:2',
         'siigo_sync_at' => 'datetime',
+        'anulado_at' => 'datetime',
     ];
 
     public function lineas(): HasMany
@@ -56,11 +57,18 @@ class AsientoManual extends Model implements AuditableContract
             if ($a->exists && $a->isDirty('estado')) {
                 $desde = $a->getOriginal('estado');
                 $hasta = $a->estado;
+                /*
+                 * `anulado` es terminal y NO sale de `sincronizado`: un
+                 * asiento que ya viajó a SIIGO no se anula de este lado,
+                 * porque dejaría los dos libros diciendo cosas distintas.
+                 * Ese caso se corrige con un asiento contrario.
+                 */
                 $ok = match ($desde) {
-                    'borrador' => in_array($hasta, ['cuadrado', 'borrador'], true),
-                    'cuadrado' => in_array($hasta, ['aprobado', 'borrador'], true),
-                    'aprobado' => in_array($hasta, ['sincronizado', 'cuadrado'], true),
+                    'borrador' => in_array($hasta, ['cuadrado', 'borrador', 'anulado'], true),
+                    'cuadrado' => in_array($hasta, ['aprobado', 'borrador', 'anulado'], true),
+                    'aprobado' => in_array($hasta, ['sincronizado', 'cuadrado', 'anulado'], true),
                     'sincronizado' => $hasta === 'sincronizado',
+                    'anulado' => $hasta === 'anulado',
                     default => false,
                 };
                 if (! $ok) {

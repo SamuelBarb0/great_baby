@@ -21,6 +21,17 @@ class PagoVenta extends Model implements AuditableContract
     // (registrado en AppServiceProvider). Se movió fuera de booted() porque
     // el trait OwenIt\Auditing\Auditable intercepta algunos eventos.
 
+    /**
+     * Un borrado en masa también tiene que pasar por el observer.
+     *
+     * `where(...)->delete()` no instancia modelos y por tanto no dispara
+     * `deleted`: el pago queda borrado y su asiento vivo. Ver PagoVentaBuilder.
+     */
+    public function newEloquentBuilder($query): PagoVentaBuilder
+    {
+        return new PagoVentaBuilder($query);
+    }
+
     // Re-audit DATOS #10 · $fillable coherente con FacturaVenta/MovimientoContable
     // ($guarded=['id']) + saving guard sobre factura_id post-creación (evita
     // re-apuntar un pago a otra factura después de contabilizar).
@@ -51,6 +62,26 @@ class PagoVenta extends Model implements AuditableContract
     public function factura(): BelongsTo
     {
         return $this->belongsTo(FacturaVenta::class, 'factura_id');
+    }
+
+    /*
+     * Los dos ejes de un pago son los de SU FACTURA. No son columnas acá a
+     * proposito: un pago con destino propio permitiria un pago «fiscal» de una
+     * factura interna, que no significa nada y deja la CxC fiscal en negativo
+     * —se abonaria en el libro fiscal una deuda que ahi nunca se cargo—.
+     *
+     * Con estos accesores el estampado de `MovimientoContable` los encuentra
+     * solo, sin que cada sitio que asienta un pago tenga que acordarse.
+     */
+
+    public function getLineaNegocioAttribute(): ?\App\Modules\Contabilidad\Enums\LineaNegocio
+    {
+        return $this->factura?->linea_negocio;
+    }
+
+    public function getDestinoFiscalAttribute(): ?\App\Modules\Contabilidad\Enums\DestinoFiscal
+    {
+        return $this->factura?->destino_fiscal;
     }
 
     public function contacto(): BelongsTo

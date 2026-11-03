@@ -19,6 +19,8 @@ const props = defineProps({
     // Precio por lista del producto agregado; vacío en los granulares,
     // que llevan el precio en cada variante.
     precios_lista: { type: Array, default: () => [] },
+    // Si quien mira puede CAMBIAR esos precios. Por defecto no.
+    puede_precios: { type: Boolean, default: false },
     // Qué le falta al producto para poder venderse y costearse.
     listo_para_vender: { type: Object, default: () => ({}) },
 });
@@ -1131,7 +1133,7 @@ const matrizDisenos = ref([]);
                                 Sin precio en una lista, los clientes que la tengan asignada no pueden pedir este producto.
                             </div>
                         </div>
-                        <button type="button" @click="guardarPrecios" :disabled="guardandoPrecios"
+                        <button v-if="puede_precios" type="button" @click="guardarPrecios" :disabled="guardandoPrecios"
                                 class="btn-primary min-h-[44px] sm:min-h-0 disabled:opacity-50">
                             {{ guardandoPrecios ? 'Guardando…' : 'Guardar precios' }}
                         </button>
@@ -1159,8 +1161,11 @@ const matrizDisenos = ref([]);
                                 <td class="px-3 py-2 text-xs text-surface-500">{{ l.grupo }}</td>
                                 <td class="px-3 py-2 text-right">
                                     <input v-model="l.precio" type="number" min="0" step="1"
+                                           :readonly="! puede_precios"
+                                           :title="puede_precios ? '' : 'Sólo Gerencia o el equipo comercial cambian las listas de precios'"
                                            placeholder="sin precio"
-                                           class="input w-36 text-right font-mono tabular-nums"/>
+                                           :class="['input w-36 text-right font-mono tabular-nums',
+                                                    puede_precios ? '' : 'bg-surface-100 dark:bg-surface-800 cursor-not-allowed']"/>
                                 </td>
                             </tr>
                         </tbody>

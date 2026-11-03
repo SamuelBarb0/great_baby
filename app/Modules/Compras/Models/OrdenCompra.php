@@ -29,6 +29,10 @@ class OrdenCompra extends Model implements AuditableContract
     protected $guarded = ['id'];
 
     protected $casts = [
+        // Los dos ejes. Sin el cast vuelven como string y cualquier
+        // `->label()` revienta con «Call to a member function label() on string».
+        'linea_negocio' => \App\Modules\Contabilidad\Enums\LineaNegocio::class,
+        'destino_fiscal' => \App\Modules\Contabilidad\Enums\DestinoFiscal::class,
         'fecha_emision' => 'date',
         'fecha_esperada' => 'date',
         'aprobado_at' => 'datetime',

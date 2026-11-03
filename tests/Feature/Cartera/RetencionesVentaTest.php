@@ -168,7 +168,7 @@ it('el asiento lleva lo retenido a 1355 y cuadra', function () {
     (new RegistrarAsientoContable())->factura($f->fresh());
 
     $movs = MovimientoContable::where('origen_type', FacturaVenta::class)->where('origen_id', $f->id)->get();
-    expect((float) $movs->firstWhere('cuenta_puc', '1305')->debe)->toBe(2380000.0 - 107000.0)
+    expect((float) $movs->firstWhere('cuenta_puc', cta('cta_cxc_default'))->debe)->toBe(2380000.0 - 107000.0)
         ->and((float) $movs->firstWhere('cuenta_puc', '135515')->debe)->toBe(50000.0)
         ->and((float) $movs->firstWhere('cuenta_puc', '135517')->debe)->toBe(57000.0)
         ->and(round((float) $movs->sum('debe'), 2))->toBe(round((float) $movs->sum('haber'), 2));

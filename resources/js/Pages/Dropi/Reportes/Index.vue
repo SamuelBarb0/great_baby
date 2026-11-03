@@ -1,9 +1,20 @@
 <script setup>
 import { ref, computed } from 'vue';
+import { useBogotaDate } from '@/composables/useBogotaDate';
 import { Head, router } from '@inertiajs/vue3';
 import { BarChart3, TrendingUp, TrendingDown, AlertTriangle, Banknote, Download } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import { useMoney } from '@/composables/useMoney';
+
+/*
+ * La fecha de HOY en Colombia, no en UTC.
+ *
+ * `toISOString()` convierte a UTC antes de recortar, asi que entre las
+ * 19:00 y la medianoche hora Bogota devuelve el dia siguiente. Las fechas
+ * de esta pantalla quedan escritas en registros, no son un filtro: un dia
+ * de corrimiento cambia lo que dice el documento.
+ */
+const { hoy: hoyBogota } = useBogotaDate();
 
 const props = defineProps({
     periodo: { type: Object, required: true },
@@ -16,8 +27,8 @@ const props = defineProps({
 const { money } = useMoney();
 
 // U19 · selector de periodo.
-const desde = ref(props.periodo.inicio ?? new Date().toISOString().slice(0, 10));
-const hasta = ref(props.periodo.fin ?? new Date().toISOString().slice(0, 10));
+const desde = ref(props.periodo.inicio ?? hoyBogota());
+const hasta = ref(props.periodo.fin ?? hoyBogota());
 const filtrar = () => router.get('/app/dropi/reportes', { desde: desde.value, hasta: hasta.value }, { preserveState: true });
 
 // U19 · export CSV — arma el archivo en el cliente, no requiere endpoint extra.

@@ -80,7 +80,8 @@ class ExportacionRrhhController extends Controller implements HasMiddleware
     {
         abort_unless(Permisos::puede($r->user(), 'rrhh_seleccion'), 403);
 
-        $c = Candidato::with(['vacante.requisicion', 'elegidoPor:id,name'])->findOrFail($candidato);
+        $c = Candidato::with(['vacante.requisicion', 'elegidoPor:id,name', 'pruebasPsicotecnicas'])
+            ->findOrFail($candidato);
 
         return Pdf::loadView('rrhh.pdf.proceso-candidato', [
             'c' => $c,

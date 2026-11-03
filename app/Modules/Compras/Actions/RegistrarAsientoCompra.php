@@ -3,6 +3,7 @@
 namespace App\Modules\Compras\Actions;
 
 use App\Modules\Cartera\Models\MovimientoContable;
+use App\Modules\Compras\Enums\ConceptoGastoImportacion;
 use App\Modules\Compras\Models\Importacion;
 use App\Modules\Compras\Models\RecepcionCompra;
 use Illuminate\Support\Facades\DB;
@@ -31,8 +32,23 @@ class RegistrarAsientoCompra
             $this->limpiar($recepcion);
             $orden = $recepcion->orden;
             $terceroTipo = 'App\\Models\\Contacto';
-            $cuentaProveedor = $orden->esImportacion() ? '2210' : '2205';
-            $cuentaInventario = $orden->esImportacion() ? '1465' : '1435';
+            /*
+             * Las cuentas salen de las reglas, no escritas acá.
+             *
+             * `2205` escrito a mano contra una regla que dice 220505 hacía que
+             * la recepción acreditara una cuenta y el pago al proveedor
+             * debitara otra: el pasivo con proveedores no se cerraba nunca.
+             *
+             * `1465` (inventario en tránsito) se queda escrita: es propia de
+             * este asiento —mercancía importada que todavía no nacionaliza— y
+             * no hay regla de empresa para ella.
+             */
+            $cuentaProveedor = $orden->esImportacion()
+                ? setting('contable.cta_proveedores_exterior')
+                : setting('contable.cta_proveedores_default');
+            $cuentaInventario = $orden->esImportacion()
+                ? '1465'
+                : setting('contable.cta_inventario_default');
 
             $totalRecibido = (float) $recepcion->items->sum('subtotal');
             if ($totalRecibido <= 0) {
@@ -64,7 +80,7 @@ class RegistrarAsientoCompra
             if ($ivaProporcion > 0.01) {
                 MovimientoContable::create([
                     'fecha' => $recepcion->fecha_recepcion,
-                    'cuenta_puc' => '2408',
+                    'cuenta_puc' => setting('contable.cta_iva_compra_default'),
                     'tercero_type' => $terceroTipo, 'tercero_id' => $orden->proveedor_id,
                     'debe' => round($ivaProporcion, 2), 'haber' => 0,
                     'origen_type' => RecepcionCompra::class, 'origen_id' => $recepcion->id,
@@ -101,7 +117,25 @@ class RegistrarAsientoCompra
             $fecha = $importacion->fecha_liquidacion ?? now();
 
             $costoFob = (float) $importacion->lineas->sum('costo_fob_total');
-            $gastosCap = (float) $importacion->gastos->where('capitalizable', true)->sum('monto_base');
+            /*
+             * El IVA de importacion NO capitaliza, aunque venga marcado asi.
+             *
+             * `LiquidarImportacion` ya lo excluia del prorrateo —su comentario
+             * dice «violacion partida doble»— pero este calculo, que es el que
+             * arma el ASIENTO, no. Resultado: el IVA entraba al costo del
+             * inventario (1435) Y otra vez como credito fiscal (1355), y el
+             * libro quedaba descuadrado por el monto completo del IVA. El fix
+             * se habia aplicado de un solo lado.
+             *
+             * Y la casilla «capitalizable» viene PREMARCADA en la pantalla, asi
+             * que es el camino por defecto: nadie la va a desmarcar porque el
+             * texto dice «suma al costo del inventario», que suena a lo que uno
+             * quiere.
+             */
+            $gastosCap = (float) $importacion->gastos
+                ->where('capitalizable', true)
+                ->reject(fn ($g) => ConceptoGastoImportacion::gastoEsIvaImportacion($g))
+                ->sum('monto_base');
             $gastosNoCap = (float) $importacion->gastos->where('capitalizable', false)->sum('monto_base');
 
             $movs = 0;
@@ -109,7 +143,7 @@ class RegistrarAsientoCompra
             if ($costoFob + $gastosCap > 0) {
                 MovimientoContable::create([
                     'fecha' => $fecha,
-                    'cuenta_puc' => '1435',
+                    'cuenta_puc' => setting('contable.cta_inventario_default'),
                     'tercero_type' => null, 'tercero_id' => null,
                     'debe' => round($costoFob + $gastosCap, 2), 'haber' => 0,
                     'origen_type' => Importacion::class, 'origen_id' => $importacion->id,
@@ -151,7 +185,7 @@ class RegistrarAsientoCompra
                     ]);
                     MovimientoContable::create([
                         'fecha' => $fecha,
-                        'cuenta_puc' => '2205',
+                        'cuenta_puc' => setting('contable.cta_proveedores_default'),
                         'tercero_type' => $gasto->proveedor_id ? $terceroTipo : null,
                         'tercero_id' => $gasto->proveedor_id,
                         'debe' => 0, 'haber' => $monto,
@@ -167,7 +201,7 @@ class RegistrarAsientoCompra
                 if (! $gasto->capitalizable) {
                     MovimientoContable::create([
                         'fecha' => $fecha,
-                        'cuenta_puc' => '5195',
+                        'cuenta_puc' => setting('contable.cta_gasto_default'),
                         'tercero_type' => $gasto->proveedor_id ? $terceroTipo : null,
                         'tercero_id' => $gasto->proveedor_id,
                         'debe' => $monto, 'haber' => 0,
@@ -177,7 +211,7 @@ class RegistrarAsientoCompra
                     ]);
                     MovimientoContable::create([
                         'fecha' => $fecha,
-                        'cuenta_puc' => '2205',
+                        'cuenta_puc' => setting('contable.cta_proveedores_default'),
                         'tercero_type' => $gasto->proveedor_id ? $terceroTipo : null,
                         'tercero_id' => $gasto->proveedor_id,
                         'debe' => 0, 'haber' => $monto,
@@ -192,7 +226,7 @@ class RegistrarAsientoCompra
                 // Capitalizables (flete, seguro, arancel, aduana): ya entraron a 1435, ahora CxP al proveedor del gasto
                 MovimientoContable::create([
                     'fecha' => $fecha,
-                    'cuenta_puc' => '2205',
+                    'cuenta_puc' => setting('contable.cta_proveedores_default'),
                     'tercero_type' => $gasto->proveedor_id ? $terceroTipo : null,
                     'tercero_id' => $gasto->proveedor_id,
                     'debe' => 0, 'haber' => $monto,
