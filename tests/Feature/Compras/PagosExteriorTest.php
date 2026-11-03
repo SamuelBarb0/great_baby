@@ -96,6 +96,16 @@ it('toda orden aprobada nace con 90 días desde el zarpe, y sin zarpe no inventa
     expect(($this->plan)()->pendientes()->first()['vence'])->toBe('2026-12-30');
 });
 
+it('aprobar la orden ya deja su plan, y el aviso sale sin abrir la pantalla de pagos', function () {
+    $orden = ($this->orden)();
+    ($this->contenedor)($orden, '2026-07-20');
+
+    expect(CompromisoPago::where('orden_id', $orden->id)->count())->toBe(1);
+
+    $this->actingAs($this->contador)->get('/app/compras/importacion')->assertOk()
+        ->assertInertia(fn (Assert $p) => $p->has('pagos_sin_seguimiento', 1)->where('pagos_sin_seguimiento.0.monto_cop', 520000));
+});
+
 it('una orden en borrador no entra a la lista', function () {
     auth()->forgetGuards();
     CrearOrdenCompra::run([

@@ -40,13 +40,21 @@ class PlanDePagos
             ->where('tipo', 'importacion')
             ->whereIn('estado', self::ESTADOS_VIVOS)
             ->whereDoesntHave('compromisosPago')
-            ->get(['id'])
-            ->each(fn (OrdenCompra $o) => $o->compromisosPago()->create([
+            ->get(['id', 'tipo'])
+            ->each(fn (OrdenCompra $o) => $this->asegurarPlan($o));
+    }
+
+    /** Desde que se aprueba hay deuda: su plan no puede esperar a que alguien abra la pantalla. */
+    public function asegurarPlan(OrdenCompra $orden): void
+    {
+        if ($orden->esImportacion() && ! $orden->compromisosPago()->exists()) {
+            $orden->compromisosPago()->create([
                 'concepto' => 'Pago total',
                 'porcentaje' => 100,
                 'base' => 'zarpe',
                 'dias' => (int) setting('compras.credito_dias_zarpe', 90),
-            ]));
+            ]);
+        }
     }
 
     /**

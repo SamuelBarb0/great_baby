@@ -49,6 +49,8 @@ class AprobarOrdenCompra
         $orden->aprobado_at = now();
         $orden->save();
 
+        app(\App\Modules\Compras\Services\PlanDePagos::class)->asegurarPlan($orden);
+
         // Re-audit M2 R3 PATRÓN R (SEG-M2) · audit log de aprobación.
         \Illuminate\Support\Facades\Log::channel(
             array_key_exists('audit', config('logging.channels') ?? []) ? 'audit' : 'stack'
