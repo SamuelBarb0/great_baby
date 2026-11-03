@@ -52,7 +52,7 @@ const vincular = (f) => enviar(`${base.value}/empaque/vincular`, { referencia: f
     <Head :title="`Comparar lista · ${importacion.numero}`"/>
     <AppLayout>
         <div class="max-w-6xl mx-auto space-y-4">
-            <Link :href="base" class="btn-ghost inline-flex items-center gap-1 text-sm"><ArrowLeft class="h-4 w-4"/> Volver al contenedor</Link>
+            <Link :href="`${base}?tab=documentos`" class="btn-ghost inline-flex items-center gap-1 text-sm"><ArrowLeft class="h-4 w-4"/> Volver al contenedor</Link>
             <div>
                 <h1 class="text-2xl font-bold flex items-center gap-2"><FileSearch class="h-6 w-6 text-brand-600"/> Lo pedido contra la lista</h1>
                 <p class="text-sm text-surface-500 mt-1">{{ documento.tipo }} v{{ documento.version }}: {{ documento.nombre }}<template v-if="hoja"> · hoja «{{ hoja }}»</template>. No cambia la orden ni el inventario.</p>

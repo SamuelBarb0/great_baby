@@ -1,5 +1,5 @@
 <script setup>
-import { ref, reactive, computed, watch } from 'vue';
+import { ref, reactive, computed, watch, nextTick } from 'vue';
 import { useBogotaDate } from '@/composables/useBogotaDate';
 import { Head, Link, router } from '@inertiajs/vue3';
 import { ArrowLeft, Package, Plus, Zap, AlertTriangle, FileText, Paperclip, Upload, Trash2 } from 'lucide-vue-next';
@@ -8,6 +8,7 @@ import { useMoney } from '@/composables/useMoney';
 import { fechaCorta } from '@/composables/useFecha';
 import { useEscClose } from '@/composables/useEscClose';
 import Seguimiento from './Seguimiento.vue';
+import SiguientePaso from '../SiguientePaso.vue';
 
 /*
  * La fecha de HOY en Colombia, no en UTC.
@@ -21,6 +22,7 @@ const { hoy: hoyBogota } = useBogotaDate();
 
 const props = defineProps({
     importacion: { type: Object, required: true },
+    paso: { type: Object, required: true },
     tipos_documento: { type: Object, default: () => ({}) },
     puede_quitar_documentos: Boolean,
     max_subida_mb: { type: Number, default: 40 },
@@ -31,6 +33,32 @@ const props = defineProps({
 });
 // Re-audit M2 UX-C2 · useMoney en vez de fmtCOP inline (paridad con Cartera/Contabilidad).
 const { money } = useMoney();
+
+// Una pestaña por tarea. Va en la URL para que guardar algo la deje donde estaba.
+const pestanas = { seguimiento: 'Seguimiento', documentos: 'Documentos', costos: 'Gastos y costos' };
+const pedida = new URLSearchParams(window.location.search).get('tab');
+const pestana = ref(pestanas[pedida] ? pedida : (props.paso.numero >= 5 ? 'costos' : 'seguimiento'));
+const irA = (nombre) => {
+    pestana.value = nombre;
+    const url = new URL(window.location.href);
+    url.searchParams.set('tab', nombre);
+    window.history.replaceState(window.history.state, '', url);
+};
+const seguimientoRef = ref(null);
+const estados = { en_transito: 'En camino', en_puerto: 'En puerto', nacionalizada: 'Nacionalizado', liquidada: 'Liquidado', cerrada: 'Cerrado' };
+const hacer = (accion) => {
+    const enSeguimiento = { marcar: 'marcarSiguiente', 'agregar-orden': 'irAAgregarOrden', aduana: 'irAAduana' }[accion];
+    if (enSeguimiento) {
+        irA('seguimiento');
+        nextTick(() => seguimientoRef.value?.[enSeguimiento]());
+    } else if (accion === 'agregar-gasto') {
+        irA('costos');
+        modalGasto.value = true;
+    } else if (accion === 'liquidar') {
+        irA('costos');
+        abrirLiquidar();
+    }
+};
 
 /*
  * El IVA de importacion NUNCA suma al costo del inventario: se paga a la DIAN
@@ -130,8 +158,8 @@ const fmtMoneda = (monto, mon) => mon === 'COP'
     <Head :title="`Importación ${importacion.numero}`"/>
     <AppLayout>
         <div class="max-w-5xl mx-auto space-y-4">
-            <Link href="/app/compras" class="btn-ghost inline-flex items-center gap-1 text-sm">
-                <ArrowLeft class="h-4 w-4"/> Volver
+            <Link href="/app/compras/importacion" class="btn-ghost inline-flex items-center gap-1 text-sm">
+                <ArrowLeft class="h-4 w-4"/> Todos los contenedores
             </Link>
 
             <div v-if="$page.props.flash?.success" class="p-3 rounded-lg bg-emerald-500/15 border-l-4 border-emerald-500 text-emerald-700 dark:text-emerald-300 text-sm">
@@ -144,19 +172,21 @@ const fmtMoneda = (monto, mon) => mon === 'COP'
             <div class="card p-5">
                 <div class="flex items-start justify-between flex-wrap gap-3">
                     <div>
-                        <div class="text-xs text-surface-500 uppercase">Importación</div>
-                        <h1 class="text-2xl font-bold font-mono">{{ importacion.numero }}</h1>
-                        <div class="text-xs text-surface-500 mt-1">
-                            Contenedor: {{ importacion.contenedor || '—' }} · BL/AWB: {{ importacion.bl_awb || '—' }} · Incoterm: <span :title="'Incoterm 2020: cláusula de responsabilidad transporte + seguro'">{{ importacion.incoterm || '—' }}</span>
-                        </div>
+                        <div class="text-xs text-surface-500 uppercase">Contenedor</div>
+                        <h1 class="text-2xl font-bold font-mono">{{ importacion.contenedor || importacion.numero }}</h1>
+                        <div class="text-xs text-surface-500 mt-1">{{ importacion.numero }}</div>
                     </div>
                     <div class="text-right">
                         <div class="text-xs text-surface-500 uppercase">Estado</div>
                         <span class="inline-block px-3 py-1 rounded font-bold text-sm uppercase"
-                              :class="importacion.estado === 'liquidada' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200' : 'bg-brand-100 text-brand-800 dark:bg-brand-900/40 dark:text-brand-200'">{{ importacion.estado }}</span>
+                              :class="importacion.estado === 'liquidada' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200' : 'bg-brand-100 text-brand-800 dark:bg-brand-900/40 dark:text-brand-200'">{{ estados[importacion.estado] || importacion.estado }}</span>
                     </div>
                 </div>
-                <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4 text-sm border-t border-surface-200 dark:border-surface-800 pt-3">
+                <details class="mt-3 border-t border-surface-200 dark:border-surface-800 pt-3">
+                <summary class="cursor-pointer text-xs font-semibold text-surface-600 dark:text-surface-300">Ver más datos</summary>
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3 text-sm">
+                    <div><b>BL/AWB:</b> {{ importacion.bl_awb || '—' }}</div>
+                    <div><b>Incoterm:</b> {{ importacion.incoterm || '—' }}</div>
                     <div><b>Puerto origen:</b> {{ importacion.puerto_origen || '—' }}</div>
                     <div><b>Puerto destino:</b> {{ importacion.puerto_destino || '—' }}</div>
                     <div><b>Zarpe:</b> {{ fechaCorta(importacion.fecha_zarpe) }}</div>
@@ -165,19 +195,30 @@ const fmtMoneda = (monto, mon) => mon === 'COP'
                     <div><b>Liquidación:</b> {{ fechaCorta(importacion.fecha_liquidacion) }}</div>
                     <div><b>Moneda:</b> {{ importacion.moneda_origen }} @ {{ importacion.tasa_cambio_liquidacion }}</div>
                 </div>
-                <div class="flex items-center gap-2 border-t border-surface-200 dark:border-surface-800 pt-3 mt-3">
-                    <button v-if="puedeLiquidar" @click="abrirLiquidar" class="btn-primary bg-emerald-600 hover:bg-emerald-700" :disabled="liquidando">
-                        <Zap class="h-4 w-4"/> Liquidar contenedor
-                    </button>
-                    <a :href="`/compras/importacion/${importacion.id}/pdf`" target="_blank" rel="noopener" class="btn-ghost">PDF</a>
-                </div>
+                <a :href="`/compras/importacion/${importacion.id}/pdf`" target="_blank" rel="noopener" class="btn-ghost mt-3">PDF</a>
+                </details>
             </div>
 
-            <Seguimiento :importacion="importacion" :seguimiento="seguimiento" :puede-editar="puede_editar_seguimiento"
-                         :selectividades="selectividades" :tipos-inspeccion="tipos_inspeccion"/>
+            <SiguientePaso :paso="paso" @accion="hacer"/>
 
+            <div role="tablist" aria-label="Partes del contenedor" class="flex gap-1 border-b border-surface-200 dark:border-surface-800 overflow-x-auto">
+                <button v-for="(nombre, clave) in pestanas" :key="clave" role="tab" :aria-selected="pestana === clave" @click="irA(clave)"
+                        class="px-4 py-2 text-sm font-semibold border-b-2 -mb-px whitespace-nowrap"
+                        :class="pestana === clave ? 'border-brand-600 text-brand-600' : 'border-transparent text-surface-500 hover:text-surface-800 dark:hover:text-surface-200'">
+                    {{ nombre }}
+                    <template v-if="clave === 'documentos'"> ({{ importacion.documentos?.length || 0 }})</template>
+                    <template v-if="clave === 'costos'"> ({{ importacion.gastos.length }})</template>
+                </button>
+            </div>
+
+            <div v-show="pestana === 'seguimiento'">
+                <Seguimiento ref="seguimientoRef" :importacion="importacion" :seguimiento="seguimiento" :puede-editar="puede_editar_seguimiento"
+                             :selectividades="selectividades" :tipos-inspeccion="tipos_inspeccion"/>
+            </div>
+
+            <div v-show="pestana === 'costos'" class="space-y-4">
             <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <div class="card p-4"><div class="text-xs text-surface-500">Total FOB<template v-if="importacion.fob_es_previsto"> (previsto)</template></div><div class="text-xl font-bold">{{ money(importacion.total_fob) }}</div></div>
+                <div class="card p-4"><div class="text-xs text-surface-500">Mercancía (FOB)<template v-if="importacion.fob_es_previsto"> (previsto)</template></div><div class="text-xl font-bold">{{ money(importacion.total_fob) }}</div></div>
                 <div class="card p-4"><div class="text-xs text-surface-500" :title="'Suma de gastos capitalizables + no capitalizables'">Total gastos</div><div class="text-xl font-bold">{{ money(importacion.total_gastos) }}</div></div>
                 <div class="card p-4"><div class="text-xs text-surface-500">Costo total</div><div class="text-xl font-bold text-brand-600">{{ money(costoTotalEstimado) }}</div></div>
             </div>
@@ -186,7 +227,7 @@ const fmtMoneda = (monto, mon) => mon === 'COP'
                 <div class="flex items-center justify-between mb-2">
                     <div class="text-xs uppercase font-bold text-brand-600">Gastos ({{ importacion.gastos.length }})</div>
                     <button v-if="puedeAgregarGasto" @click="modalGasto = true" class="btn-ghost text-xs"><Plus class="h-3 w-3"/> Agregar gasto</button>
-                    <span v-else class="text-xs text-surface-500">Ya liquidada — no admite gastos.</span>
+                    <span v-else class="text-xs text-surface-500">Ya está liquidado: no admite más gastos.</span>
                 </div>
                 <div class="overflow-x-auto">
                     <table v-tabla-movil v-if="importacion.gastos.length" class="w-full text-sm">
@@ -195,9 +236,9 @@ const fmtMoneda = (monto, mon) => mon === 'COP'
                                 <th class="text-left p-2">Fecha</th>
                                 <th class="text-left p-2">Concepto</th>
                                 <th class="text-right p-2">Monto</th>
-                                <th class="text-right p-2">Base COP</th>
-                                <th class="text-center p-2" :title="'Capitalizable: suma al costo del inventario'">Cap.</th>
-                                <th class="text-left p-2">Prorrateo</th>
+                                <th class="text-right p-2">En pesos</th>
+                                <th class="text-center p-2" :title="'Capitalizable: suma al costo del inventario'">Suma al costo</th>
+                                <th class="text-left p-2">Se reparte por</th>
                                 <th class="text-left p-2">Soporte</th>
                             </tr>
                         </thead>
@@ -221,8 +262,41 @@ const fmtMoneda = (monto, mon) => mon === 'COP'
                 </div>
             </div>
 
+            <div v-if="puedeLiquidar" class="flex justify-end">
+                <button @click="abrirLiquidar" class="btn-primary bg-emerald-600 hover:bg-emerald-700" :disabled="liquidando">
+                    <Zap class="h-4 w-4"/> Liquidar contenedor
+                </button>
+            </div>
+
+            <div v-if="importacion.lineas.length" class="card p-4">
+                <div class="text-xs uppercase font-bold text-brand-600 mb-2">Costo final por línea ({{ importacion.lineas.length }})</div>
+                <div class="overflow-x-auto">
+                    <table v-tabla-movil class="w-full text-sm min-w-[600px]">
+                        <thead class="text-[10px] text-surface-500 uppercase border-b border-surface-200 dark:border-surface-800">
+                            <tr>
+                                <th class="text-right p-2">Cant</th>
+                                <th class="text-right p-2">FOB unit</th>
+                                <th class="text-right p-2">FOB total</th>
+                                <th class="text-right p-2">Prorrateado</th>
+                                <th class="text-right p-2">Costo final</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-surface-100 dark:divide-surface-800">
+                            <tr v-for="l in importacion.lineas" :key="l.id">
+                                <td class="p-2 text-right">{{ l.cantidad }}</td>
+                                <td class="p-2 text-right">{{ money(l.costo_fob_unit) }}</td>
+                                <td class="p-2 text-right">{{ money(l.costo_fob_total) }}</td>
+                                <td class="p-2 text-right text-amber-600">{{ money(l.gasto_prorrateado) }}</td>
+                                <td class="p-2 text-right font-bold text-brand-600">{{ money(l.costo_final_unit) }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            </div>
+
             <!-- Documentos del contenedor -->
-            <div class="card p-4 space-y-3">
+            <div v-show="pestana === 'documentos'" class="card p-4 space-y-3">
                 <div class="text-xs uppercase font-bold text-brand-600 flex items-center gap-1"><FileText class="h-3.5 w-3.5"/>Documentos ({{ importacion.documentos?.length || 0 }})</div>
                 <div class="grid grid-cols-1 md:grid-cols-[1fr_1fr_1fr_auto] gap-2 items-end">
                     <div><label class="text-xs font-semibold">Tipo</label>
@@ -258,32 +332,7 @@ const fmtMoneda = (monto, mon) => mon === 'COP'
                     </div>
                 </div>
                 <p v-else class="text-sm text-surface-500">Sin documentos aún. Suba la prelista, el BL, la lista de empaque, la DUTA… a medida que lleguen.</p>
-            </div>
-
-            <div v-if="importacion.lineas.length" class="card p-4">
-                <div class="text-xs uppercase font-bold text-brand-600 mb-2">Líneas ({{ importacion.lineas.length }})</div>
-                <div class="overflow-x-auto">
-                    <table v-tabla-movil class="w-full text-sm min-w-[600px]">
-                        <thead class="text-[10px] text-surface-500 uppercase border-b border-surface-200 dark:border-surface-800">
-                            <tr>
-                                <th class="text-right p-2">Cant</th>
-                                <th class="text-right p-2">FOB unit</th>
-                                <th class="text-right p-2">FOB total</th>
-                                <th class="text-right p-2">Prorrateado</th>
-                                <th class="text-right p-2">Costo final</th>
-                            </tr>
-                        </thead>
-                        <tbody class="divide-y divide-surface-100 dark:divide-surface-800">
-                            <tr v-for="l in importacion.lineas" :key="l.id">
-                                <td class="p-2 text-right">{{ l.cantidad }}</td>
-                                <td class="p-2 text-right">{{ money(l.costo_fob_unit) }}</td>
-                                <td class="p-2 text-right">{{ money(l.costo_fob_total) }}</td>
-                                <td class="p-2 text-right text-amber-600">{{ money(l.gasto_prorrateado) }}</td>
-                                <td class="p-2 text-right font-bold text-brand-600">{{ money(l.costo_final_unit) }}</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
+                <p v-if="documentosPorTipo.length" class="text-xs text-surface-500">Con la lista de empaque o la factura en Excel puede usar «Comparar con la orden» para ver qué cambió.</p>
             </div>
         </div>
 
@@ -295,17 +344,17 @@ const fmtMoneda = (monto, mon) => mon === 'COP'
                     <div>
                         <h3 class="text-lg font-bold mb-1">¿Liquidar importación?</h3>
                         <p class="text-sm text-surface-600 dark:text-surface-400 mb-3">
-                            Se prorratean <b>{{ importacion.gastos.length }}</b> gasto(s) capitalizables al costo unitario de <b>{{ importacion.lineas.length || 'las' }}</b> líneas, se corrige el costo de lo que ya recibió bodega y se genera el asiento contable definitivo. La cantidad no cambia: el stock entra cuando bodega acepta la mercancía.
+                            Los gastos se reparten entre los productos, se corrige el costo de lo que recibió bodega y queda el asiento contable. Las cantidades del inventario no cambian.
                         </p>
                         <div class="text-xs bg-surface-50 dark:bg-surface-900/50 rounded p-2 mb-3 space-y-1">
-                            <div class="flex justify-between"><span>FOB total (previsto):</span> <b>{{ money(importacion.total_fob) }}</b></div>
+                            <div class="flex justify-between"><span>Mercancía (FOB, previsto):</span> <b>{{ money(importacion.total_fob) }}</b></div>
                             <div class="flex justify-between"><span>Gastos:</span> <b>{{ money(importacion.total_gastos) }}</b></div>
                             <div class="flex justify-between text-brand-600 pt-1 border-t border-surface-200 dark:border-surface-700"><span>Costo total al inventario:</span> <b>{{ money(costoAlInventario) }}</b></div>
                         </div>
                         <p v-if="importacion.fob_aviso" class="text-[11px] text-red-600 dark:text-red-400 mb-2">{{ importacion.fob_aviso }}</p>
                         <p v-if="importacion.fob_sin_recibir > 0" class="text-[11px] text-surface-500 mb-2">{{ importacion.fob_sin_recibir }} línea(s) aún sin recibir van por lo pedido.</p>
                         <p v-if="importacion.gastos_al_inventario < importacion.total_gastos" class="text-[11px] text-surface-500 mb-2">Los gastos no capitalizables no entran al costo del inventario.</p>
-                        <p class="text-[11px] text-amber-700 dark:text-amber-400"><b>Advertencia:</b> Después de liquidar no se pueden agregar gastos ni editar líneas sin reversar.</p>
+                        <p class="text-[11px] text-amber-700 dark:text-amber-400"><b>Ojo:</b> después de liquidar ya no se pueden agregar gastos.</p>
                     </div>
                 </div>
                 <div class="flex justify-end gap-2 mt-4">
@@ -350,7 +399,14 @@ const fmtMoneda = (monto, mon) => mon === 'COP'
                     <div v-if="gastoForm.moneda !== 'COP'" class="text-[11px] text-surface-500 bg-surface-50 dark:bg-surface-900/50 rounded p-2">
                         Se convertirá a COP con tasa {{ importacion.tasa_cambio_liquidacion }} de esta importación.
                     </div>
-                    <div><label class="text-xs font-semibold">Método prorrateo</label>
+                    <div><label class="text-xs font-semibold">Comprobante (opcional)</label>
+                        <input type="file" @change="comprobante = $event.target.files[0] || null" class="input w-full text-xs"
+                               accept=".pdf,.xlsx,.xls,.csv,.doc,.docx,.jpg,.jpeg,.png,.webp,.zip"/>
+                    </div>
+                    <details class="text-sm">
+                    <summary class="cursor-pointer text-xs font-semibold text-surface-600 dark:text-surface-300">Más opciones (casi nunca hacen falta)</summary>
+                    <div class="space-y-3 mt-2">
+                    <div><label class="text-xs font-semibold">Repartir el gasto</label>
                         <select v-model="gastoForm.metodo_prorrateo" class="input w-full">
                             <option value="volumen">Por volumen (m³ de cada ítem)</option>
                             <option value="valor">Por valor FOB</option>
@@ -360,14 +416,12 @@ const fmtMoneda = (monto, mon) => mon === 'COP'
                     </div>
                     <div><label class="text-xs font-semibold">Factura</label><input v-model="gastoForm.factura_proveedor" class="input w-full"/></div>
                     <div><label class="text-xs font-semibold">Descripción</label><input v-model="gastoForm.descripcion" class="input w-full"/></div>
-                    <div><label class="text-xs font-semibold">Comprobante (opcional)</label>
-                        <input type="file" @change="comprobante = $event.target.files[0] || null" class="input w-full text-xs"
-                               accept=".pdf,.xlsx,.xls,.csv,.doc,.docx,.jpg,.jpeg,.png,.webp,.zip"/>
-                    </div>
                     <label class="flex items-center gap-2 text-sm cursor-pointer" :title="'Capitalizable: suma al costo del inventario. Los no capitalizables van a gastos operacionales.'">
                         <input type="checkbox" v-model="gastoForm.capitalizable" :disabled="esIvaDeImportacion"/>
-                        Capitalizable (suma al costo)
+                        Suma al costo del inventario
                     </label>
+                    </div>
+                    </details>
                     <p v-if="esIvaDeImportacion" class="text-[11px] text-amber-600 mt-1">
                         El IVA de importación no capitaliza: se paga a la DIAN y queda como
                         crédito fiscal. Sumarlo al costo lo contaría dos veces.

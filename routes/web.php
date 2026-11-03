@@ -299,6 +299,7 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     Route::post('/compras/orden/{orden}/productos', [\App\Http\Controllers\App\ImportacionSeguimientoController::class, 'crearProductos'])->middleware('throttle:30,1')->name('app.compras.orden.productos');
     // Armar y seguir el contenedor: sus órdenes, etapas, declaraciones e inspecciones.
     Route::put('/compras/importacion/{importacion}/datos', [\App\Http\Controllers\App\ImportacionSeguimientoController::class, 'actualizar'])->middleware('throttle:60,1')->name('app.compras.importacion.datos');
+    Route::post('/compras/orden/{orden}/contenedor', [\App\Http\Controllers\App\ImportacionSeguimientoController::class, 'ponerEnContenedor'])->middleware('throttle:60,1')->name('app.compras.orden.contenedor');
     Route::post('/compras/importacion/{importacion}/orden', [\App\Http\Controllers\App\ImportacionSeguimientoController::class, 'ligarOrden'])->middleware('throttle:60,1')->name('app.compras.importacion.orden');
     Route::delete('/compras/importacion/{importacion}/orden/{orden}', [\App\Http\Controllers\App\ImportacionSeguimientoController::class, 'soltarOrden'])->middleware('throttle:60,1')->name('app.compras.importacion.orden.soltar');
     Route::post('/compras/importacion/{importacion}/etapa', [\App\Http\Controllers\App\ImportacionSeguimientoController::class, 'marcarEtapa'])->middleware('throttle:60,1')->name('app.compras.importacion.etapa');

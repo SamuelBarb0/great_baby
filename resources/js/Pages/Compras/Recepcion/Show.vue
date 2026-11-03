@@ -6,8 +6,13 @@ import AppLayout from '@/Layouts/AppLayout.vue';
 import { useMoney } from '@/composables/useMoney';
 import { fechaCorta } from '@/composables/useFecha';
 import AppConfirmModal from '@/Components/AppConfirmModal.vue';
+import SiguientePaso from '../SiguientePaso.vue';
 
-const props = defineProps({ recepcion: { type: Object, required: true } });
+const props = defineProps({
+    recepcion: { type: Object, required: true },
+    paso: { type: Object, default: null },
+    contenedor: { type: Object, default: null },
+});
 
 // Confirmaciones con el modal propio: el confirm() nativo queda bloqueado
 // dentro del iframe de la app de escritorio y en celular ignora el diseno.
@@ -45,9 +50,11 @@ const reenviarSiigo = () => {
     <Head :title="`Recepción ${recepcion.numero}`"/>
     <AppLayout>
         <div class="max-w-4xl mx-auto space-y-4">
-            <Link href="/app/compras" class="btn-ghost inline-flex items-center gap-1 text-sm">
-                <ArrowLeft class="h-4 w-4"/> Volver
+            <Link :href="contenedor ? `/app/compras/importacion/${contenedor.id}` : (recepcion.orden_id ? `/app/compras/oc/${recepcion.orden_id}` : '/app/compras')" class="btn-ghost inline-flex items-center gap-1 text-sm">
+                <ArrowLeft class="h-4 w-4"/> {{ contenedor ? `Volver al contenedor ${contenedor.nombre}` : 'Volver a la orden' }}
             </Link>
+
+            <SiguientePaso v-if="paso" :paso="paso"/>
 
             <div class="card p-5">
                 <div class="flex items-start justify-between">

@@ -10,6 +10,7 @@ use App\Modules\Compras\Enums\EtapaContenedor;
 use App\Modules\Compras\Models\Importacion;
 use App\Modules\Compras\Models\ImportacionEtapa;
 use App\Modules\Compras\Models\OrdenCompra;
+use App\Modules\Compras\Models\RecepcionCompra;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use InvalidArgumentException;
@@ -269,6 +270,9 @@ class SeguimientoContenedor
                 'subtotal' => (float) $o->subtotal,
                 'cantidad' => (float) $o->items->sum('cantidad'),
                 'recibido' => (float) $o->items->sum('cantidad_recibida'),
+                'recepciones' => RecepcionCompra::where('orden_id', $o->id)->where('estado', 'confirmada')
+                    ->get(['id', 'numero', 'total_recibido'])
+                    ->map(fn ($r) => ['id' => $r->id, 'numero' => $r->numero, 'total' => (float) $r->total_recibido])->all(),
                 'cajas' => (int) $o->items->sum('cajas'),
                 'volumen_m3' => (float) $o->pivot->volumen_m3,
                 'peso_kg' => (float) $o->pivot->peso_kg,

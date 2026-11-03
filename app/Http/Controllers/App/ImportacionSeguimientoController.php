@@ -18,6 +18,7 @@ use Illuminate\Http\Request;
 use Illuminate\Routing\Controllers\HasMiddleware;
 use Illuminate\Routing\Controllers\Middleware;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use InvalidArgumentException;
 
@@ -80,6 +81,39 @@ class ImportacionSeguimientoController extends Controller implements HasMiddlewa
     }
 
     /** Crea los productos que le faltan a una orden, con la referencia escrita o la que trae. */
+    /** Desde la orden: a un contenedor abierto o a uno nuevo, sin ir a armarlo antes. */
+    public function ponerEnContenedor(Request $r, OrdenCompra $orden): RedirectResponse
+    {
+        $data = $r->validate([
+            'importacion_id' => ['nullable', 'integer', 'exists:compras_importaciones,id'],
+            'contenedor' => ['nullable', 'string', 'max:50'],
+        ]);
+
+        try {
+            $importacion = DB::transaction(function () use ($data, $orden, $r) {
+                $importacion = ! empty($data['importacion_id'])
+                    ? Importacion::findOrFail($data['importacion_id'])
+                    : Importacion::create([
+                        'numero' => Importacion::siguienteNumero(),
+                        'contenedor' => $data['contenedor'] ?? null,
+                        'puerto_destino' => 'Buenaventura',
+                        'incoterm' => 'FOB',
+                        'moneda_origen' => $orden->moneda,
+                        'tasa_cambio_liquidacion' => $orden->tasa_cambio,
+                        'creado_por' => $r->user()?->id,
+                    ]);
+                $this->seguimiento->ligarOrden($importacion, $orden);
+
+                return $importacion;
+            });
+        } catch (InvalidArgumentException $e) {
+            return back()->with('error', $e->getMessage());
+        }
+
+        return redirect("/app/compras/importacion/{$importacion->id}?tab=seguimiento")
+            ->with('success', "Orden {$orden->numero} agregada al contenedor.");
+    }
+
     public function crearProductos(Request $r, OrdenCompra $orden): RedirectResponse
     {
         abort_unless($orden->esImportacion(), 422, 'Sólo aplica a órdenes de importación.');

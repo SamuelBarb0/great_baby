@@ -9,6 +9,8 @@ import { useEscClose } from '@/composables/useEscClose';
 import AppConfirmModal from '@/Components/AppConfirmModal.vue';
 
 import LineasSinProducto from '../Importacion/LineasSinProducto.vue';
+import SiguientePaso from '../SiguientePaso.vue';
+import EtiquetasDeLaOrden from './EtiquetasDeLaOrden.vue';
 
 const props = defineProps({
     orden: { type: Object, required: true },
@@ -18,6 +20,11 @@ const props = defineProps({
     lineas_sin_producto: { type: Array, default: () => [] },
     puede_excel: { type: Boolean, default: false },
     etiquetas: { type: Object, default: null },
+    paso: { type: Object, default: null },
+    contenedor: { type: Object, default: null },
+    contenedores_abiertos: { type: Array, default: () => [] },
+    lineas_etiqueta: { type: Array, default: () => [] },
+    puede_etiqueta: { type: Boolean, default: false },
 });
 
 const modalAnular = ref(false);
@@ -29,6 +36,10 @@ const procesando = ref(false);
 
 // Re-audit M2 UX-C2 · useMoney (paridad con Cartera/Contabilidad).
 const { money } = useMoney();
+// La orden va en la moneda del proveedor: 173.202 CNY no son 173.202 pesos.
+const enMoneda = (n) => (props.orden.moneda === 'COP'
+    ? money(n)
+    : `${Number(n || 0).toLocaleString('es-CO', { maximumFractionDigits: 2 })} ${props.orden.moneda}`);
 
 const badgeDestino = (color) => ({
     success: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200',
@@ -39,6 +50,23 @@ const badgeDestino = (color) => ({
 // Re-audit M2 UX-C4 · modal propio en lugar de confirm() nativo (consistencia
 // con Anular). Muestra el monto que se compromete al aprobar.
 const abrirAprobar = () => { modalAprobar.value = true; };
+// «Lo que sigue» en la orden.
+const modalContenedor = ref(false);
+useEscClose(modalContenedor);
+const contenedorForm = reactive({ importacion_id: '', contenedor: '' });
+const ponerEnContenedor = () => {
+    if (procesando.value) return;
+    procesando.value = true;
+    router.post(`/app/compras/orden/${props.orden.id}/contenedor`, {
+        importacion_id: contenedorForm.importacion_id || null,
+        contenedor: contenedorForm.contenedor || null,
+    }, { onFinish: () => procesando.value = false });
+};
+const hacer = (accion) => {
+    if (accion === 'aprobar') abrirAprobar();
+    else if (accion === 'contenedor') modalContenedor.value = true;
+    else if (accion === 'ir-productos') document.getElementById('crear-productos')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+};
 const confirmarAprobar = () => {
     if (procesando.value) return;
     procesando.value = true;
@@ -153,6 +181,9 @@ const reenviarRecepcion = (rec) => {
             <div v-if="$page.props.flash?.success" class="p-3 rounded-lg bg-emerald-500/15 border-l-4 border-emerald-500 text-emerald-700 text-sm">
                 {{ $page.props.flash.success }}
             </div>
+            <div v-if="$page.props.flash?.error" class="p-3 rounded-lg bg-red-500/15 border-l-4 border-red-500 text-red-700 dark:text-red-300 text-sm">
+                {{ $page.props.flash.error }}
+            </div>
 
             <div class="card p-5">
                 <div class="flex items-start justify-between mb-3 flex-wrap gap-3">
@@ -160,19 +191,21 @@ const reenviarRecepcion = (rec) => {
                         <div class="text-xs text-surface-500 uppercase">Orden de compra</div>
                         <h1 class="text-2xl font-bold font-mono">{{ orden.numero }}</h1>
                         <div class="text-xs text-surface-500 mt-1">{{ orden.proveedor }} · {{ orden.tipo }} · {{ orden.moneda }} @ {{ orden.tasa_cambio }}</div>
+                        <Link v-if="contenedor" :href="`/app/compras/importacion/${contenedor.id}`" class="text-sm text-brand-600 hover:underline inline-flex items-center gap-1 mt-1"><Container class="h-3.5 w-3.5"/> Contenedor {{ contenedor.nombre }}</Link>
                     </div>
                     <div class="text-right">
                         <div class="text-xs text-surface-500 uppercase">Total</div>
-                        <div class="text-2xl font-bold text-brand-600">{{ money(orden.total) }}</div>
+                        <div class="text-2xl font-bold text-brand-600">{{ enMoneda(orden.total) }}</div>
+                        <div v-if="orden.moneda !== 'COP' && orden.tasa_cambio > 1" class="text-xs text-surface-500">Unos {{ money(orden.total * orden.tasa_cambio) }}</div>
                         <span :class="['inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase', badge(orden.estado)]">{{ orden.estado }}</span>
                     </div>
                 </div>
 
                 <div class="flex items-center gap-2 border-t border-surface-200 dark:border-surface-800 pt-3 flex-wrap">
-                    <button v-if="puede_aprobar && (orden.estado === 'borrador' || orden.estado === 'enviada')" @click="abrirAprobar" :disabled="procesando" class="btn-primary">
+                    <button v-if="!paso && puede_aprobar && (orden.estado === 'borrador' || orden.estado === 'enviada')" @click="abrirAprobar" :disabled="procesando" class="btn-primary">
                         <CheckCircle class="h-4 w-4"/> Aprobar
                     </button>
-                    <Link v-if="['aprobada','parcial'].includes(orden.estado)" :href="`/app/compras/recepcion/nueva?oc=${orden.id}`" class="btn-primary bg-emerald-600 hover:bg-emerald-700">
+                    <Link v-if="['aprobada','parcial'].includes(orden.estado) && (!paso || contenedor)" :href="`/app/compras/recepcion/nueva?oc=${orden.id}`" class="btn-primary bg-emerald-600 hover:bg-emerald-700">
                         <Truck class="h-4 w-4"/> Recibir mercancía
                     </Link>
                     <button v-if="!['recibida','cerrada','anulada'].includes(orden.estado)" @click="modalAnular = true" class="btn-ghost text-red-600 border border-red-300">
@@ -180,12 +213,18 @@ const reenviarRecepcion = (rec) => {
                     </button>
                     <a v-if="etiquetas && puede_excel" :href="`/app/compras/orden/${orden.id}/excel`" class="btn-ghost">Excel para China</a>
                     <a v-if="etiquetas" :href="`/app/compras/orden/${orden.id}/etiquetas`" target="_blank" rel="noopener" class="btn-ghost"
-                       :title="`${etiquetas.con} con etiqueta, ${etiquetas.sin} sin etiqueta`">Etiquetas ({{ etiquetas.con }} de {{ etiquetas.con + etiquetas.sin }})</a>
+                       :title="`${etiquetas.con} con etiqueta, ${etiquetas.sin} sin etiqueta`">PDF de etiquetas</a>
                     <a v-if="puede_pdf" :href="`/compras/orden/${orden.id}/pdf`" target="_blank" rel="noopener"
                         class="btn-ghost">PDF</a>
                     <a v-if="puede_pdf && orden.preliquidacion" :href="`/compras/orden/${orden.id}/preliquidacion/pdf`" target="_blank" rel="noopener" class="btn-ghost">PDF pre-liquidación</a>
                 </div>
             </div>
+
+            <SiguientePaso v-if="paso" :paso="paso" @accion="hacer"/>
+
+            <div id="crear-productos"><LineasSinProducto :orden-id="orden.id" :lineas="lineas_sin_producto"/></div>
+
+            <EtiquetasDeLaOrden :lineas="lineas_etiqueta" :puede-subir="puede_etiqueta"/>
 
             <div class="card p-4">
                 <div class="text-xs uppercase tracking-widest font-bold text-brand-600 mb-3">Ítems ({{ orden.items.length }})</div>
@@ -206,16 +245,14 @@ const reenviarRecepcion = (rec) => {
                                 <td class="p-2">{{ it.descripcion }}</td>
                                 <td class="p-2 text-right">{{ it.cantidad }}</td>
                                 <td class="p-2 text-right" :class="it.cantidad_recibida < it.cantidad ? 'text-amber-600' : 'text-emerald-600'">{{ it.cantidad_recibida }}</td>
-                                <td class="p-2 text-right">{{ money(it.precio_unit) }}</td>
-                                <td class="p-2 text-right">{{ money(it.subtotal) }}</td>
-                                <td class="p-2 text-right font-bold">{{ money(it.total) }}</td>
+                                <td class="p-2 text-right">{{ enMoneda(it.precio_unit) }}</td>
+                                <td class="p-2 text-right">{{ enMoneda(it.subtotal) }}</td>
+                                <td class="p-2 text-right font-bold">{{ enMoneda(it.total) }}</td>
                             </tr>
                         </tbody>
                     </table>
                 </div>
             </div>
-
-            <LineasSinProducto :orden-id="orden.id" :lineas="lineas_sin_producto"/>
 
             <div v-if="pre" class="card p-4 space-y-3">
                 <div class="flex items-start justify-between flex-wrap gap-3">
@@ -425,6 +462,27 @@ const reenviarRecepcion = (rec) => {
                 </div>
             </div>
         </div>
+        <div v-if="modalContenedor" @click.self="modalContenedor = false" class="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+            <div class="card p-6 max-w-md w-full space-y-3">
+                <h3 class="text-lg font-bold">Poner la orden en un contenedor</h3>
+                <div>
+                    <label class="text-xs font-semibold" for="contenedor-elegido">¿En cuál?</label>
+                    <select id="contenedor-elegido" v-model="contenedorForm.importacion_id" class="input w-full">
+                        <option value="">Un contenedor nuevo</option>
+                        <option v-for="c in contenedores_abiertos" :key="c.id" :value="c.id">{{ c.nombre }}</option>
+                    </select>
+                </div>
+                <div v-if="!contenedorForm.importacion_id">
+                    <label class="text-xs font-semibold" for="contenedor-numero">Número del contenedor (si ya lo tiene)</label>
+                    <input id="contenedor-numero" v-model="contenedorForm.contenedor" maxlength="50" class="input w-full"/>
+                </div>
+                <div class="flex justify-end gap-2">
+                    <button @click="modalContenedor = false" class="btn-ghost" :disabled="procesando">Cancelar</button>
+                    <button @click="ponerEnContenedor" :disabled="procesando" class="btn-primary">{{ procesando ? 'Guardando…' : 'Listo' }}</button>
+                </div>
+            </div>
+        </div>
+
         <AppConfirmModal :cfg="modalConfirm" @cerrar="modalConfirm = null"/>
     </AppLayout>
 </template>

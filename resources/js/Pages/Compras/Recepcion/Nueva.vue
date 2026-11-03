@@ -76,8 +76,9 @@ const clampCantidad = (it) => {
 
 // Re-audit M2 UX-M12 · deshabilitar submit si ningún ítem tiene cantidad > 0.
 const itemsAConfirmar = computed(() => form.items.filter(i => Number(i.cantidad_recibida) > 0));
-const totalRecepcion = computed(() =>
-    itemsAConfirmar.value.reduce((s, i) => s + (Number(i.cantidad_recibida) * Number(i.precio_unit || 0)), 0));
+// Lo marcado como faltante no llegó: no suma, igual que al guardar.
+const valorLinea = (i) => (i.clasificacion === 'faltante' ? 0 : Number(i.cantidad_recibida || 0) * Number(i.precio_unit || 0));
+const totalRecepcion = computed(() => itemsAConfirmar.value.reduce((s, i) => s + valorLinea(i), 0));
 
 const guardar = () => {
     if (procesando.value || itemsAConfirmar.value.length === 0) return;
@@ -107,7 +108,7 @@ const guardar = () => {
     <Head title="Recibir mercancía"/>
     <AppLayout>
         <div class="max-w-4xl mx-auto space-y-4">
-            <Link href="/app/compras" class="btn-ghost inline-flex items-center gap-1 text-sm">
+            <Link :href="oc?.importacion_id ? `/app/compras/importacion/${oc.importacion_id}` : (oc ? `/app/compras/oc/${oc.id}` : '/app/compras')" class="btn-ghost inline-flex items-center gap-1 text-sm">
                 <ArrowLeft class="h-4 w-4"/> Volver
             </Link>
 
@@ -226,7 +227,7 @@ const guardar = () => {
                                                @blur="clampCantidad(it)"
                                                class="input w-24 text-right text-sm"/>
                                     </td>
-                                    <td class="p-2 text-right font-mono text-xs">{{ money((it.cantidad_recibida || 0) * (it.precio_unit || 0)) }}</td>
+                                    <td class="p-2 text-right font-mono text-xs">{{ money(valorLinea(it)) }}</td>
                                     <td class="p-2"><input v-model="it.lote" class="input w-full text-sm" placeholder="Opcional" maxlength="80"/></td>
                                     <td class="p-2">
                                         <select v-model="it.clasificacion" class="input text-xs w-full">
@@ -261,7 +262,9 @@ const guardar = () => {
                     </div>
                 </div>
 
-                <div class="flex justify-end">
+                <div class="h-16" aria-hidden="true"></div>
+                <div class="card p-3 fixed bottom-4 right-4 left-4 md:left-auto md:right-6 md:max-w-2xl z-30 flex items-center justify-between gap-3 flex-wrap shadow-lg">
+                    <p class="text-sm">Total a recibir: <b>{{ money(totalRecepcion) }}</b></p>
                     <button @click="guardar" :disabled="procesando || itemsAConfirmar.length === 0 || !!oc.falta_tasa" class="btn-primary disabled:opacity-50">
                         <Save class="h-4 w-4"/> {{ procesando ? 'Guardando…' : (oc.es_importacion ? 'Aceptar y subir al inventario' : 'Confirmar recepción') }}
                     </button>

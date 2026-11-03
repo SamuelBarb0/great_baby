@@ -207,6 +207,14 @@ const itemsValidos = computed(() => form.items.filter(i =>
 const faltaTasa = computed(() => form.moneda !== 'COP' && Number(form.tasa_cambio) <= 1);
 const puedeGuardar = computed(() => form.proveedor_id && form.bodega_id && itemsValidos.value.length > 0 && !faltaTasa.value);
 
+// Lo que falta, dicho junto al botón: deshabilitado y sin razón no se entiende.
+const faltan = computed(() => [
+    !form.proveedor_id && 'elegir el proveedor de la lista',
+    !form.bodega_id && 'elegir la bodega',
+    faltaTasa.value && 'escribir la tasa de cambio',
+    !itemsValidos.value.length && 'agregar un producto con cantidad y precio',
+].filter(Boolean));
+
 const guardar = () => {
     if (procesando.value || !puedeGuardar.value) return;
     procesando.value = true;
@@ -443,12 +451,18 @@ const guardar = () => {
                 </div>
             </div>
 
-            <div class="flex justify-end gap-2">
+            <div class="h-16" aria-hidden="true"></div>
+            <div class="card p-3 fixed bottom-4 right-4 left-4 md:left-auto md:right-6 md:max-w-2xl z-30 flex items-center justify-between gap-3 flex-wrap shadow-lg">
+                <p class="text-sm" :class="faltan.length ? 'text-amber-700 dark:text-amber-400' : 'text-emerald-700 dark:text-emerald-400'">
+                    <template v-if="faltan.length">Para crearla falta: {{ faltan.join(', ') }}.</template>
+                    <template v-else>Lista para crear.</template>
+                </p>
+                <div class="flex gap-2">
                 <Link href="/app/compras" class="btn-ghost">Cancelar</Link>
-                <button @click="guardar" :disabled="procesando || !puedeGuardar" class="btn-primary disabled:opacity-50"
-                        :title="!puedeGuardar ? 'Selecciona proveedor, bodega y agrega al menos un ítem con cantidad y precio > 0' : ''">
+                <button @click="guardar" :disabled="procesando || !puedeGuardar" class="btn-primary disabled:opacity-50">
                     <Save class="h-4 w-4"/> {{ procesando ? 'Creando…' : 'Crear OC' }}
                 </button>
+                </div>
             </div>
         </div>
     </AppLayout>

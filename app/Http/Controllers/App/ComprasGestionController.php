@@ -97,7 +97,29 @@ class ComprasGestionController extends Controller implements HasMiddleware
             default => 'parcial',
         };
 
+        $guia = app(\App\Modules\Compras\Services\PasoDeCompra::class);
+        $contenedor = $o->esImportacion() ? $this->contenedorDe($o) : null;
+
         return Inertia::render('Compras/OC/Show', [
+            'paso' => $guia->deOrden($o, $r->user()),
+            'contenedor' => $contenedor ? ['id' => $contenedor->id, 'nombre' => $contenedor->contenedor ?: $contenedor->numero] : null,
+            // Sólo los que pueden recibirla: un contenedor lleva una sola moneda.
+            'contenedores_abiertos' => $o->esImportacion() && ! $contenedor
+                ? Importacion::whereNotIn('estado', [EstadoImportacion::Liquidada, EstadoImportacion::Cerrada])
+                    ->where(fn ($q) => $q->where('moneda_origen', $o->moneda)->orWhereDoesntHave('ordenes'))
+                    ->orderByDesc('id')->limit(50)->get(['id', 'numero', 'contenedor'])
+                    ->map(fn ($i) => ['id' => $i->id, 'nombre' => $i->contenedor ? "{$i->contenedor} ({$i->numero})" : $i->numero])
+                    ->all()
+                : [],
+            'puede_etiqueta' => \App\Auth\Permisos::puede($r->user(), 'productos') || \App\Auth\Permisos::puede($r->user(), 'compras_importacion'),
+            'lineas_etiqueta' => $o->esImportacion()
+                ? $o->items->loadMissing('producto.media')->filter(fn ($i) => $i->producto)->unique('producto_id')
+                    ->map(fn ($i) => [
+                        'producto_id' => $i->producto_id,
+                        'nombre' => $i->descripcion,
+                        'tiene_etiqueta' => (bool) $i->producto->getFirstMedia('etiqueta_importacion'),
+                    ])->values()->all()
+                : [],
             /*
              * El impreso de la OC es sólo de Aracely/Gerencia (lleva costos
              * de proveedor). El enlace salía igual para todos: el
@@ -473,8 +495,11 @@ class ComprasGestionController extends Controller implements HasMiddleware
     // ================== RECEPCIÓN ==================
     public function recepcionShow(int $recepcion): Response
     {
-        $rc = RecepcionCompra::with(['orden:id,numero', 'items'])->findOrFail($recepcion);
+        $rc = RecepcionCompra::with(['orden.items', 'items'])->findOrFail($recepcion);
+        $contenedor = $rc->orden ? $this->contenedorDe($rc->orden) : null;
         return Inertia::render('Compras/Recepcion/Show', [
+            'paso' => $rc->orden ? app(\App\Modules\Compras\Services\PasoDeCompra::class)->deOrden($rc->orden, auth()->user()) : null,
+            'contenedor' => $contenedor ? ['id' => $contenedor->id, 'nombre' => $contenedor->contenedor ?: $contenedor->numero] : null,
             'recepcion' => [
                 'id' => $rc->id, 'numero' => $rc->numero,
                 'orden_id' => $rc->orden?->id,
@@ -580,6 +605,7 @@ class ComprasGestionController extends Controller implements HasMiddleware
                 'proveedor' => $oc->proveedor?->razon_social ?: $oc->proveedor?->nombre_completo,
                 'es_importacion' => $esImportacion,
                 'contenedor' => $this->contenedorDe($oc)?->contenedor,
+                'importacion_id' => $this->contenedorDe($oc)?->id,
                 'falta_tasa' => $faltaTasa,
                 'items' => $oc->items->map(fn ($i) => [
                     'id' => $i->id, 'descripcion' => $i->descripcion,
@@ -822,6 +848,7 @@ class ComprasGestionController extends Controller implements HasMiddleware
         // Hasta liquidar no hay líneas: lo que se ve es lo que saldría si se liquida ahora.
         $esPrevisto = $imp->lineas->isEmpty();
         return Inertia::render('Compras/Importacion/Show', [
+            'paso' => app(\App\Modules\Compras\Services\PasoDeCompra::class)->deContenedor($imp, auth()->user()),
             'tipos_documento' => array_diff_key(\App\Modules\Compras\Models\ImportacionDocumento::TIPOS, ['comprobante_gasto' => true]),
             'puede_quitar_documentos' => (bool) auth()->user()?->esAracely(),
             'max_subida_mb' => ImportacionDocumentosController::limiteMb(),

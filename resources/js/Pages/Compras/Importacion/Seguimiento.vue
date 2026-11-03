@@ -1,9 +1,10 @@
 <script setup>
-import { computed, reactive, ref, watch } from 'vue';
+import { computed, nextTick, reactive, ref, watch } from 'vue';
 import { router } from '@inertiajs/vue3';
 import { AlertTriangle, Check, CircleDot, Circle, Container, Pencil, Plus, ShieldAlert, Trash2, FileCheck } from 'lucide-vue-next';
 import AppConfirmModal from '@/Components/AppConfirmModal.vue';
 import { useBogotaDate } from '@/composables/useBogotaDate';
+import { useMoney } from '@/composables/useMoney';
 import { useEscClose } from '@/composables/useEscClose';
 import { fechaCorta } from '@/composables/useFecha';
 
@@ -20,6 +21,7 @@ const props = defineProps({
 });
 
 const { hoy } = useBogotaDate();
+const { money } = useMoney();
 const base = computed(() => `/app/compras/importacion/${props.importacion.id}`);
 const cerrado = computed(() => ['liquidada', 'cerrada'].includes(props.importacion.estado));
 const confirmar = ref(null);
@@ -74,6 +76,25 @@ const quitarEtapa = (e) => pedirConfirmacion(
     () => enviar('delete', `${base.value}/etapa/${e.etapa}`, {}, { onSuccess: () => { etapaAbierta.value = null; } }),
 );
 const dias = (n) => `${n} ${n === 1 ? 'día' : 'días'}`;
+const proxima = computed(() => {
+    const { etapas, resumen } = props.seguimiento;
+    return resumen.siguiente ?? (resumen.etapa ? null : etapas[0]?.etapa);
+});
+const llevarA = (id) => nextTick(() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'center' }));
+// El botón de «Lo que sigue» abre la etapa que toca, lista para poner la fecha.
+const marcarSiguiente = () => {
+    const etapa = props.seguimiento.etapas.find((e) => e.etapa === proxima.value);
+    if (!etapa) return;
+    abrirEtapa(etapa);
+    llevarA(`etapa-${etapa.etapa}`);
+};
+const irAAgregarOrden = () => llevarA('orden-elegida');
+const aduanaPedida = ref(false);
+const irAAduana = () => {
+    aduanaPedida.value = true;
+    llevarA('aduana');
+};
+defineExpose({ marcarSiguiente, irAAgregarOrden, irAAduana });
 const estadoEtapa = (e) => {
     if (e.etapa === props.seguimiento.resumen.etapa) return 'actual';
     if (e.fecha) return 'hecha';
@@ -109,6 +130,12 @@ const listasParaLevante = computed(() => {
     return declaraciones.length > 0 && declaraciones.every((d) => d.fecha_levante) && !levante?.fecha;
 });
 const conInspeccion = computed(() => declaracionForm.selectividad === 'fisica' || declaracionForm.selectividad === 'documental');
+// La aduana no le toca a nadie hasta que el contenedor llega a la zona franca.
+const posicion = (etapa) => props.seguimiento.etapas.findIndex((e) => e.etapa === etapa);
+const aduanaAbierta = computed(() => aduanaPedida.value
+    || props.seguimiento.declaraciones.length > 0
+    || props.seguimiento.inspecciones.length > 0
+    || posicion(props.seguimiento.resumen.etapa) >= posicion('ingreso_zona_franca'));
 const colorSelectividad = (s) => ({
     pendiente: 'bg-surface-200 text-surface-700 dark:bg-surface-800 dark:text-surface-300',
     automatica: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200',
@@ -195,7 +222,8 @@ watch(() => props.importacion.id, () => { etapaAbierta.value = null; });
                             <td class="p-2 text-right">{{ fmt(o.subtotal) }} {{ o.moneda }}</td>
                             <td class="p-2 text-xs">
                                 {{ fmt(o.recibido, 0) }} de {{ fmt(o.cantidad, 0) }}
-                                <a v-if="o.recibido < o.cantidad" :href="`/app/compras/recepcion/nueva?oc=${o.id}`" class="block text-brand-600 hover:underline">Recibir</a>
+                                <a v-for="r in o.recepciones" :key="r.id" :href="`/app/compras/recepcion/${r.id}`" class="block text-brand-600 hover:underline">Ver recepción: {{ money(r.total) }}</a>
+                                <a v-if="o.recibido < o.cantidad" :href="`/app/compras/recepcion/nueva?oc=${o.id}`" class="block text-brand-600 hover:underline">{{ o.recepciones.length ? 'Recibir lo que falta' : 'Recibir' }}</a>
                             </td>
                             <td class="p-2 text-xs"><div v-for="d in o.destinos" :key="d.nombre">{{ d.nombre }}: {{ fmt(d.cajas, 0) }} cajas</div></td>
                             <td v-if="puedeEditar && !cerrado" class="p-2 text-right">
@@ -228,7 +256,7 @@ watch(() => props.importacion.id, () => { etapaAbierta.value = null; });
                 </div>
             </div>
             <ol>
-                <li v-for="e in seguimiento.etapas" :key="e.etapa" class="relative pl-7 pb-3 last:pb-0">
+                <li v-for="e in seguimiento.etapas" :key="e.etapa" :id="`etapa-${e.etapa}`" class="relative pl-7 pb-3 last:pb-0">
                     <span class="absolute left-[7px] top-5 bottom-0 w-px bg-surface-200 dark:bg-surface-800" aria-hidden="true"></span>
                     <component :is="estadoEtapa(e) === 'hecha' ? Check : estadoEtapa(e) === 'actual' ? CircleDot : Circle"
                                class="absolute left-0 top-0.5 h-4 w-4"
@@ -240,7 +268,7 @@ watch(() => props.importacion.id, () => { etapaAbierta.value = null; });
                             <span v-if="e.dias !== null" :class="e.esperados !== null && e.dias > e.esperados ? 'text-red-600 font-semibold' : ''">{{ dias(e.dias) }}</span>
                             <span v-if="e.muestras >= 3">prom. {{ e.promedio }}</span>
                             <span v-else-if="e.esperados !== null && !e.fecha">normal {{ dias(e.esperados) }}</span>
-                            <button v-if="puedeEditar" @click="etapaAbierta === e.etapa ? etapaAbierta = null : abrirEtapa(e)" class="text-brand-600 hover:underline">{{ e.fecha ? 'Corregir' : 'Marcar' }}</button>
+                            <button v-if="puedeEditar" @click="etapaAbierta === e.etapa ? etapaAbierta = null : abrirEtapa(e)" :class="e.etapa === proxima && !e.fecha ? 'btn-primary text-xs' : 'text-brand-600 hover:underline'">{{ e.fecha ? 'Corregir' : 'Marcar' }}</button>
                         </div>
                     </div>
                     <p v-if="e.notas" class="text-xs italic text-surface-500 mt-0.5">{{ e.notas }}</p>
@@ -256,7 +284,10 @@ watch(() => props.importacion.id, () => { etapaAbierta.value = null; });
             </ol>
         </div>
 
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <details id="aduana" class="card p-4" :open="aduanaAbierta">
+            <summary class="cursor-pointer text-sm font-bold">Aduana: declaraciones e inspecciones ({{ seguimiento.declaraciones.length + seguimiento.inspecciones.length }})</summary>
+            <p class="text-xs text-surface-500 mt-1">Se usa cuando el contenedor llega a la zona franca, o si van a abrirlo antes.</p>
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-3">
             <!-- Declaraciones -->
             <div class="card p-4 space-y-3">
                 <div class="flex items-center justify-between gap-2">
@@ -337,6 +368,7 @@ watch(() => props.importacion.id, () => { etapaAbierta.value = null; });
                 </div>
             </div>
         </div>
+        </details>
 
         <div v-if="modalDatos" @click.self="modalDatos = false" class="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
             <div class="card p-6 max-w-lg w-full">
