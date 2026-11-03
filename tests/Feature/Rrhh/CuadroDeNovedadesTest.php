@@ -17,15 +17,18 @@
 use App\Models\User;
 use App\Modules\Rrhh\Enums\TipoNovedad;
 use App\Modules\Rrhh\Models\Empleado;
+use App\Modules\Rrhh\Models\Nomina;
 use App\Modules\Rrhh\Models\Novedad;
 use App\Modules\Rrhh\Support\CuadroDeNovedades;
 use App\Modules\Rrhh\Support\IndicadoresRrhh;
 use App\Support\Reglas;
+use Database\Seeders\PermisosSeeder;
+use Database\Seeders\RolesGestionHumanaSeeder;
 use Spatie\Permission\Models\Role;
 
 beforeEach(function () {
-    $this->seed(Database\Seeders\PermisosSeeder::class);
-    $this->seed(Database\Seeders\RolesGestionHumanaSeeder::class);
+    $this->seed(PermisosSeeder::class);
+    $this->seed(RolesGestionHumanaSeeder::class);
     Reglas::limpiarRequestCache();
 
     $this->elena = User::factory()->create(['name' => 'Elena']);
@@ -181,6 +184,179 @@ it('un permiso de dos horas vale 0,25 días, no uno', function () {
     ]);
 
     expect($n->diasEquivalentes())->toBe(0.25);
+});
+
+it('sin días ni horas se cuentan las fechas, contando los dos extremos', function () {
+    /*
+     * En producción había dos incapacidades con la casilla de días en blanco.
+     * El indicador de la Junta decía «Enfermedad general: 0 días» con ocho días
+     * de incapacidad cargados, porque cero y «no la llenaron» eran el mismo
+     * número. Del 5 al 9 son CINCO días: también se falta el día que empieza.
+     */
+    $n = novedad(trabajador(), [
+        'tipo' => TipoNovedad::Incapacidad->value, 'clase' => 'EG',
+        'fecha_inicio' => '2026-10-05', 'fecha_fin' => '2026-10-09',
+        'dias' => null, 'horas' => null, 'remunerada' => true,
+    ]);
+
+    expect($n->diasEquivalentes())->toBe(5.0);
+});
+
+it('una novedad de un solo día no cuenta cero', function () {
+    $n = novedad(trabajador(), [
+        'fecha_inicio' => '2026-10-22', 'fecha_fin' => '2026-10-22',
+        'dias' => null, 'horas' => null,
+    ]);
+
+    expect($n->diasEquivalentes())->toBe(1.0);
+});
+
+it('lo que se teclea manda sobre lo que dicen las fechas', function () {
+    /*
+     * Una incapacidad de quince días calendario puede descontar menos si parte
+     * de ellos caen en el corte anterior. Ese criterio es de Gestión Humana y
+     * se escribe a mano: deducirlo otra vez de las fechas lo pisaría.
+     */
+    $n = novedad(trabajador(), [
+        'fecha_inicio' => '2026-10-01', 'fecha_fin' => '2026-10-30', 'dias' => 3,
+    ]);
+
+    expect($n->diasEquivalentes())->toBe(3.0);
+});
+
+it('la pantalla deduce los días y el descuento sale completo', function () {
+    // Sin esto la novedad entraba con descuento cero y nadie lo notaba.
+    $e = trabajador(['salario' => 2_000_000]);
+
+    $this->actingAs($this->elena)->post('/app/rrhh/novedades', [
+        'empleado_id' => $e->id,
+        'tipo' => 'ausencia', 'clase' => 'SIN_JUSTIFICACION',
+        'fecha_inicio' => '2026-10-05', 'fecha_fin' => '2026-10-06',
+        'remunerada' => false, 'periodo' => '2026-10',
+    ])->assertRedirect();
+
+    $n = Novedad::first();
+
+    expect((float) $n->dias)->toBe(2.0)
+        ->and(round((float) $n->descuento, 2))->toBe(133333.33);
+});
+
+it('una novedad sin forma de medir cuánto duró se rechaza', function () {
+    /*
+     * Un día sin fecha de terminación, sin días y sin horas no se puede medir,
+     * y lo que no se mide pesa cero en el descuento y en el ausentismo. Se pide
+     * en vez de inventarlo.
+     */
+    $e = trabajador();
+
+    $this->actingAs($this->elena)->post('/app/rrhh/novedades', [
+        'empleado_id' => $e->id,
+        'tipo' => 'ausencia', 'clase' => 'SIN_JUSTIFICACION',
+        'fecha_inicio' => '2026-10-05', 'periodo' => '2026-10',
+    ])->assertSessionHasErrors('dias');
+
+    expect(Novedad::count())->toBe(0);
+});
+
+// ── El corte cerrado ─────────────────────────────────────────────────────────
+
+it('no se le agregan novedades a un mes cuya nómina ya se pagó', function () {
+    /*
+     * Pasó en producción: la nómina de octubre estaba liquidada, aprobada y
+     * pagada, y el cuadro aceptó una incapacidad de ese mismo corte sin decir
+     * nada. El contador queda con un soporte que no cuadra con lo que salió del
+     * banco, y nadie se entera hasta que alguien compara los dos papeles.
+     */
+    $e = trabajador();
+    Nomina::create(['periodo' => '2026-10', 'estado' => 'pagada']);
+
+    $this->actingAs($this->elena)->post('/app/rrhh/novedades', [
+        'empleado_id' => $e->id,
+        'tipo' => 'incapacidad', 'clase' => 'EG',
+        'fecha_inicio' => '2026-10-26', 'fecha_fin' => '2026-10-28',
+        'periodo' => '2026-10',
+    ])->assertSessionHasErrors('periodo');
+
+    expect(Novedad::count())->toBe(0);
+});
+
+it('con la nómina en borrador sí se puede: la incapacidad que llega tarde se rehace', function () {
+    // El mes se cierra al aprobar, no al liquidar: `Nomina::sePuedeRehacer()`.
+    $e = trabajador();
+    Nomina::create(['periodo' => '2026-10', 'estado' => 'borrador']);
+
+    $this->actingAs($this->elena)->post('/app/rrhh/novedades', [
+        'empleado_id' => $e->id,
+        'tipo' => 'incapacidad', 'clase' => 'EG',
+        'fecha_inicio' => '2026-10-26', 'fecha_fin' => '2026-10-28',
+        'periodo' => '2026-10',
+    ])->assertRedirect();
+
+    expect(Novedad::count())->toBe(1);
+});
+
+it('tampoco se saca una novedad de un corte ya pagado cambiándole el mes', function () {
+    /*
+     * Mover la novedad a noviembre deja el cuadro de octubre tan desalineado
+     * como meterle una: es la forma fácil de hacerlo sin darse cuenta, porque
+     * basta cambiar el desplegable del corte.
+     */
+    $n = novedad(trabajador());
+    Nomina::create(['periodo' => '2026-10', 'estado' => 'aprobada']);
+
+    $this->actingAs($this->elena)->put("/app/rrhh/novedades/{$n->id}", [
+        'empleado_id' => $n->empleado_id,
+        'tipo' => 'ausencia', 'clase' => 'SIN_JUSTIFICACION',
+        'fecha_inicio' => '2026-10-05', 'fecha_fin' => '2026-10-06',
+        'dias' => 2, 'periodo' => '2026-11',
+    ])->assertSessionHasErrors('periodo');
+
+    expect($n->fresh()->periodo)->toBe('2026-10');
+});
+
+it('cuando el descuento guardado no cuadra con la cuenta, el cuadro lo dice', function () {
+    /*
+     * Las novedades que se guardaron sin días quedaron con descuento cero. Al
+     * deducir los días, la cuenta pasa a dar otra cosa — y la pantalla mostraba
+     * el cero arriba y la cuenta nueva abajo, sin decir cuál creer. No se
+     * corrige solo: si el corte ya se pagó, el cero es lo que se consignó.
+     */
+    $e = trabajador(['salario' => 2_000_000]);
+
+    $n = novedad($e, ['dias' => 2, 'remunerada' => false]);
+    $n->forceFill(['descuento' => 0, 'descuento_manual' => false])->save();
+
+    $props = $this->actingAs($this->elena)->get('/app/rrhh/novedades?periodo=2026-10')
+        ->assertOk()->viewData('page')['props'];
+
+    $fila = collect($props['bloques']['ausencia'])->firstWhere('id', $n->id);
+
+    expect($fila['descuento_formula'])->toContain('No coincide con lo registrado');
+});
+
+it('un descuento corregido a mano no lleva el aviso: ya tiene el suyo', function () {
+    $e = trabajador(['salario' => 2_000_000]);
+
+    $n = novedad($e, ['dias' => 2, 'remunerada' => false]);
+    $n->forceFill(['descuento' => 100_000, 'descuento_manual' => true])->save();
+
+    $props = $this->actingAs($this->elena)->get('/app/rrhh/novedades?periodo=2026-10')
+        ->assertOk()->viewData('page')['props'];
+
+    $fila = collect($props['bloques']['ausencia'])->firstWhere('id', $n->id);
+
+    expect($fila['descuento_formula'])->not->toContain('No coincide');
+});
+
+it('una novedad de un corte pagado tampoco se borra', function () {
+    $n = novedad(trabajador());
+    Nomina::create(['periodo' => '2026-10', 'estado' => 'pagada']);
+
+    $this->actingAs($this->elena)
+        ->delete("/app/rrhh/novedades/{$n->id}")
+        ->assertSessionHasErrors('periodo');
+
+    expect(Novedad::count())->toBe(1);
 });
 
 // ── El cuadro ────────────────────────────────────────────────────────────────

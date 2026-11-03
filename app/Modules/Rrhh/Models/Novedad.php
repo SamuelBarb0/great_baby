@@ -93,6 +93,13 @@ class Novedad extends Model
      * Sin esto, el ausentismo del mes se calcularía contando como día completo
      * cada cita médica, y el número que llega a la Junta sería el doble del
      * real.
+     *
+     * Si no hay ni días ni horas se cuentan las fechas, que es el otro dato
+     * que la novedad siempre trae. Antes devolvía cero, y cero acá no significa
+     * «no faltó»: significa que la casilla quedó en blanco. Una incapacidad del
+     * 5 al 9 con la casilla vacía salía como cero días perdidos EN EL INDICADOR
+     * QUE VE LA JUNTA, y además con descuento cero, porque el auxilio de
+     * transporte se calcula sobre este mismo número.
      */
     public function diasEquivalentes(): float
     {
@@ -104,7 +111,23 @@ class Novedad extends Model
             return round((float) $this->horas / 8, 4);
         }
 
-        return 0.0;
+        return $this->diasDelRango() ?? 0.0;
+    }
+
+    /**
+     * Los días que abarcan las fechas, contando los dos extremos.
+     *
+     * Del 5 al 9 son cinco días, no cuatro: el día que empieza la incapacidad
+     * también se falta. Devuelve `null` cuando no hay fecha de terminación,
+     * que es el caso en que de verdad no se puede saber cuánto duró.
+     */
+    public function diasDelRango(): ?float
+    {
+        if (! $this->fecha_inicio || ! $this->fecha_fin) {
+            return null;
+        }
+
+        return (float) max(1, (int) $this->fecha_inicio->diffInDays($this->fecha_fin) + 1);
     }
 
     /**
