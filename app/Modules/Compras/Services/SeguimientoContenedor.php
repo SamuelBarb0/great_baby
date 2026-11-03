@@ -259,7 +259,7 @@ class SeguimientoContenedor
         }
 
         $ordenes = $imp->ordenes->map(function ($o) {
-            $porDestino = $o->items->groupBy(fn ($i) => $i->empresaDestino?->nombreCorto() ?? 'Sin destino');
+            $porDestino = $o->items->groupBy(fn ($i) => $i->empresaDestino?->nombreCorto() ?? \App\Models\EmpresaConfig::current()->nombreCorto());
 
             return [
                 'id' => $o->id,

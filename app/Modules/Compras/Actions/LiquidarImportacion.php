@@ -59,10 +59,9 @@ class LiquidarImportacion
             // Se liquida lo que Jorge recibió, a lo que quedó en el 1465 y en la
             // cuenta del proveedor. Lo que aún no recibe va por lo pedido, en pesos.
             $costos = app(CostoImportacion::class);
-            $recibidos = RecepcionCompraItem::query()
+            $revisados = RecepcionCompraItem::query()
                 ->whereIn('orden_item_id', $importacion->ordenes->flatMap(fn ($o) => $o->items->pluck('id')))
                 ->whereHas('recepcion', fn ($q) => $q->where('estado', 'confirmada'))
-                ->where(fn ($q) => $q->whereNull('clasificacion')->orWhere('clasificacion', '!=', 'faltante'))
                 ->get()
                 ->groupBy('orden_item_id');
 
@@ -71,18 +70,26 @@ class LiquidarImportacion
                 $volumenes = $this->repartirPorItem($orden->items, (float) ($orden->pivot->volumen_m3 ?? 0), 'cbm_caja');
                 $pesos = $this->repartirPorItem($orden->items, (float) ($orden->pivot->peso_kg ?? 0), 'peso_caja_kg');
                 foreach ($orden->items as $item) {
-                    $suyo = $recibidos[$item->id] ?? null;
+                    // Si bodega ya la revisó, cuenta lo que recibió, aunque sea nada.
+                    $revisado = $revisados[$item->id] ?? null;
+                    $suyo = $revisado?->reject(fn ($l) => $l->clasificacion === 'faltante');
+                    $cantidad = $revisado ? (float) $suyo->sum('cantidad_recibida') : (float) $item->cantidad;
+                    // Lo que no llegó no ocupó contenedor: no carga con flete.
+                    $parte = (float) $item->cantidad > 0 ? $cantidad / (float) $item->cantidad : 1.0;
                     $items->push([
                         'orden_item' => $item,
-                        'peso_pivot' => $pesos[$item->id],
-                        'volumen_pivot' => $volumenes[$item->id],
-                        'cantidad' => $suyo ? (float) $suyo->sum('cantidad_recibida') : (float) $item->cantidad,
-                        'fob' => $suyo
+                        'peso_pivot' => $pesos[$item->id] * $parte,
+                        'volumen_pivot' => $volumenes[$item->id] * $parte,
+                        'cantidad' => $cantidad,
+                        'fob' => $revisado
                             ? round((float) $suyo->sum('subtotal'), 2)
                             : round((float) $item->subtotal * $costos->tasa($orden), 2),
                     ]);
                 }
             }
+
+            // Una línea que no llegó entera no tiene nada que liquidar.
+            $items = $items->filter(fn ($x) => $x['cantidad'] > 0)->values();
 
             if ($items->isEmpty()) {
                 throw new InvalidArgumentException('No hay ítems en las órdenes ligadas.');

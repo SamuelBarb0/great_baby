@@ -203,7 +203,9 @@ const total = computed(() => subtotal.value + iva.value);
 const itemsValidos = computed(() => form.items.filter(i =>
     i.descripcion?.trim() && Number(i.cantidad) > 0 && Number(i.precio_unit) > 0
 ));
-const puedeGuardar = computed(() => form.proveedor_id && form.bodega_id && itemsValidos.value.length > 0);
+// Ninguna moneda extranjera vale un peso: con tasa 1, 3,50 RMB saldrían a 3,50 pesos.
+const faltaTasa = computed(() => form.moneda !== 'COP' && Number(form.tasa_cambio) <= 1);
+const puedeGuardar = computed(() => form.proveedor_id && form.bodega_id && itemsValidos.value.length > 0 && !faltaTasa.value);
 
 const guardar = () => {
     if (procesando.value || !puedeGuardar.value) return;
@@ -304,7 +306,8 @@ const guardar = () => {
                     </div>
                     <div>
                         <label class="text-xs font-semibold">Tasa cambio</label>
-                        <input type="number" step="0.01" v-model.number="form.tasa_cambio" class="input w-full"/>
+                        <input type="number" step="0.01" v-model.number="form.tasa_cambio" class="input w-full" :class="faltaTasa ? 'border-red-500' : ''"/>
+                        <p v-if="faltaTasa" class="text-xs text-red-600 mt-1">Escriba cuántos pesos vale 1 {{ form.moneda }}.</p>
                     </div>
                     <div>
                         <label class="text-xs font-semibold">Fecha esperada</label>

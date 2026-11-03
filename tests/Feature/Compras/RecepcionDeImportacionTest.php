@@ -176,6 +176,39 @@ it('con un faltante, liquida sólo lo recibido y el 1465 cuadra', function () {
         ->and((float) $tres->sum('haber'))->toBe(145600.0);
 });
 
+it('una línea que no llegó entera no se liquida, no carga flete y el 1465 cuadra', function () {
+    $otro = Producto::sinKardexAutomatico(fn () => Producto::create(['referencia' => 'OTRO', 'nombre' => 'Otro', 'precio_proveedor' => 1, 'activo' => true, 'desglose_stock' => false]));
+    auth()->forgetGuards();
+    $orden = CrearOrdenCompra::run([
+        'proveedor_id' => $this->proveedor->id, 'bodega_id' => $this->bodega->id, 'tipo' => 'importacion', 'moneda' => 'CNY', 'tasa_cambio' => 520,
+        'items' => [
+            ['producto_id' => $this->producto->id, 'descripcion' => 'Tetero', 'iva_pct' => 0, 'cantidad' => 100, 'cajas' => 10, 'unidades_por_caja' => 10, 'cbm_caja' => 0.5, 'precio_unit' => 3.5],
+            ['producto_id' => $otro->id, 'descripcion' => 'Otro', 'iva_pct' => 0, 'cantidad' => 100, 'cajas' => 10, 'unidades_por_caja' => 10, 'cbm_caja' => 0.5, 'precio_unit' => 3.5],
+        ],
+    ]);
+    AprobarOrdenCompra::run($orden);
+    $orden = $orden->fresh('items');
+    $imp = ($this->contenedor)($orden);
+    GastoImportacion::create(['importacion_id' => $imp->id, 'concepto' => ConceptoGastoImportacion::Flete, 'descripcion' => 'Flete', 'monto' => 100000, 'monto_base' => 100000, 'capitalizable' => true, 'metodo_prorrateo' => 'volumen']);
+
+    $this->actingAs($this->jorge)->post('/app/compras/recepcion', ['orden_id' => $orden->id, 'items' => [
+        ['orden_item_id' => $orden->items[0]->id, 'cantidad_recibida' => 100, 'clasificacion' => 'apto'],
+        ['orden_item_id' => $orden->items[1]->id, 'cantidad_recibida' => 100, 'clasificacion' => 'faltante', 'motivo_clasificacion' => 'No vino'],
+    ]])->assertRedirect();
+
+    $this->actingAs($this->aracely);
+    LiquidarImportacion::run($imp->fresh());
+
+    $imp = $imp->fresh('lineas');
+    expect($imp->lineas)->toHaveCount(1)
+        ->and((float) $imp->valor_fob)->toBe(182000.0)
+        // Todo el flete cae en lo que sí llegó.
+        ->and((float) $imp->lineas->first()->costo_final_unit)->toBe(2820.0);
+    $tres = MovimientoContable::where('cuenta_puc', '1465')->get();
+    expect((float) $tres->sum('debe'))->toBe(182000.0)
+        ->and((float) $tres->sum('haber'))->toBe(182000.0);
+});
+
 it('liquidar antes de recibir no sube nada, y lo que se reciba después entra al costo real', function () {
     $orden = ($this->orden)();
     $imp = ($this->contenedor)($orden);
