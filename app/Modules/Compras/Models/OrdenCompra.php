@@ -9,6 +9,7 @@ use App\Modules\Compras\Enums\EstadoOrdenCompra;
 use App\Modules\Dropi\Models\InventarioUbicacion;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use OwenIt\Auditing\Auditable;
@@ -140,6 +141,17 @@ class OrdenCompra extends Model implements AuditableContract
             EstadoOrdenCompra::Recibida => $hacia === EstadoOrdenCompra::Cerrada,
             default => false,
         };
+    }
+
+    public function compromisosPago(): HasMany
+    {
+        return $this->hasMany(CompromisoPago::class, 'orden_id');
+    }
+
+    /** El contenedor en que viaja. Es una lista por cómo es la tabla, pero va en uno. */
+    public function importaciones(): BelongsToMany
+    {
+        return $this->belongsToMany(Importacion::class, 'compras_importacion_ordenes', 'orden_id', 'importacion_id');
     }
 
     public function proveedor(): BelongsTo

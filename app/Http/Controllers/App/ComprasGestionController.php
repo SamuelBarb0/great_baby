@@ -109,6 +109,13 @@ class ComprasGestionController extends Controller implements HasMiddleware
             // todo el que entrara a la OC, y aprobar compromete plata.
             'puede_aprobar' => \App\Auth\Permisos::puede($r->user(), 'compras_oc')
                 || ($r->user()?->esAracely() ?? false),
+            'lineas_sin_producto' => $o->esImportacion() ? $o->items
+                ->filter(fn ($i) => ! $i->producto_id && ! $i->variante_id)
+                ->map(fn ($i) => [
+                    'id' => $i->id,
+                    'descripcion' => $i->descripcion,
+                    'referencia' => \App\Modules\Compras\Actions\CrearProductosDeOrden::referenciaDe($i),
+                ])->values()->all() : [],
             'orden' => [
                 'id' => $o->id,
                 'numero' => $o->numero,
@@ -578,6 +585,9 @@ class ComprasGestionController extends Controller implements HasMiddleware
                     'unidades_por_caja' => (int) $i->unidades_por_caja,
                     'destino' => $i->empresa_destino_id ? $i->empresaDestino?->nombreCorto() : null,
                     'para_otra_empresa' => $i->empresa_destino_id && (int) $i->empresa_destino_id !== (int) $principal,
+                    // Sin producto y sin referencia de dónde crearlo: no subirá al inventario.
+                    'no_sube' => $esImportacion && ! $i->producto_id && ! $i->variante_id
+                        && ! \App\Modules\Compras\Actions\CrearProductosDeOrden::referenciaDe($i),
                 ])->filter(fn ($x) => $x['cantidad_pendiente'] > 0)->values(),
             ] : null,
         ]);
@@ -1016,6 +1026,7 @@ class ComprasGestionController extends Controller implements HasMiddleware
                 'total_fob_periodo' => (float) $totalFobPeriodo,
             ],
             'topProveedores' => $topProveedores,
+            'contenedores' => app(\App\Modules\Compras\Services\ReporteContenedores::class)->handle(),
             'siigo' => $cxpSiigo, // ['disponible'=>bool, 'por_nit'=>[...], 'mensaje'=>?string]
         ]);
     }

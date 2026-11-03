@@ -8,11 +8,14 @@ import { fechaCorta } from '@/composables/useFecha';
 import { useEscClose } from '@/composables/useEscClose';
 import AppConfirmModal from '@/Components/AppConfirmModal.vue';
 
+import LineasSinProducto from '../Importacion/LineasSinProducto.vue';
+
 const props = defineProps({
     orden: { type: Object, required: true },
     // El impreso lleva costos de proveedor y es sólo de gerencia.
     puede_pdf: { type: Boolean, default: false },
     puede_aprobar: { type: Boolean, default: false },
+    lineas_sin_producto: { type: Array, default: () => [] },
 });
 
 const modalAnular = ref(false);
@@ -206,6 +209,8 @@ const reenviarRecepcion = (rec) => {
                     </table>
                 </div>
             </div>
+
+            <LineasSinProducto :orden-id="orden.id" :lineas="lineas_sin_producto"/>
 
             <div v-if="pre" class="card p-4 space-y-3">
                 <div class="flex items-start justify-between flex-wrap gap-3">

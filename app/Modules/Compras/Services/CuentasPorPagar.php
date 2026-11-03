@@ -41,7 +41,7 @@ class CuentasPorPagar
     public function pendientes(): Collection
     {
         $recepciones = RecepcionCompra::query()
-            ->with(['orden:id,proveedor_id,condicion_credito_id', 'orden.proveedor:id,nombre_completo,numero_documento'])
+            ->with(['orden:id,proveedor_id,condicion_credito_id,tipo', 'orden.importaciones:compras_importaciones.id,fecha_zarpe', 'orden.proveedor:id,nombre_completo,numero_documento'])
             ->where('estado', 'confirmada')
             ->whereNotNull('factura_proveedor')
             ->get();
@@ -100,6 +100,16 @@ class CuentasPorPagar
         $base = $r->fecha_recepcion?->copy() ?? now('America/Bogota');
 
         $plazo = (int) ($r->orden?->condicionCredito?->plazo_dias ?? 0);
+
+        // Con China la deuda corre desde que zarpa el buque, no desde que llega a
+        // bodega: contar desde la recepción la mostraba semanas más tranquila.
+        if ($r->orden?->esImportacion()) {
+            $zarpe = $r->orden->importaciones->first()?->fecha_zarpe;
+            if ($zarpe) {
+                $base = $zarpe->copy();
+            }
+            $plazo = $plazo ?: (int) setting('compras.credito_dias_zarpe', 90);
+        }
 
         return $base->addDays($plazo)->startOfDay();
     }

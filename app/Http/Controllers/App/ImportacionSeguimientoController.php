@@ -4,6 +4,7 @@ namespace App\Http\Controllers\App;
 
 use App\Auth\Permisos;
 use App\Http\Controllers\Controller;
+use App\Modules\Compras\Actions\CrearProductosDeOrden;
 use App\Modules\Compras\Enums\EstadoImportacion;
 use App\Modules\Compras\Enums\EtapaContenedor;
 use App\Modules\Compras\Models\Importacion;
@@ -76,6 +77,20 @@ class ImportacionSeguimientoController extends Controller implements HasMiddlewa
             fn () => $this->seguimiento->ligarOrden($importacion, $orden),
             "Orden {$orden->numero} agregada al contenedor.",
         );
+    }
+
+    /** Crea los productos que le faltan a una orden, con la referencia escrita o la que trae. */
+    public function crearProductos(Request $r, OrdenCompra $orden): RedirectResponse
+    {
+        abort_unless($orden->esImportacion(), 422, 'Sólo aplica a órdenes de importación.');
+        $data = $r->validate([
+            'referencias' => ['nullable', 'array'],
+            'referencias.*' => ['nullable', 'string', 'max:60'],
+        ]);
+
+        $n = CrearProductosDeOrden::run($orden, array_filter($data['referencias'] ?? []));
+
+        return back()->with('success', "{$n} línea(s) quedaron con su producto.");
     }
 
     public function soltarOrden(Importacion $importacion, OrdenCompra $orden): RedirectResponse

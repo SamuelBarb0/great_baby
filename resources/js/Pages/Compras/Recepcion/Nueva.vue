@@ -64,6 +64,7 @@ if (claveConteo) {
 }
 
 const cajasOtraEmpresa = computed(() => form.items.filter(i => i.para_otra_empresa));
+const sinReferencia = computed(() => props.oc?.items.filter(i => i.no_sube) ?? []);
 
 // Re-audit M2 UX-A7 · clamp reactivo — antes `:max` era solo hint HTML, el
 // usuario podía escribir 30 sobre pendiente 20 y romper el saldo.
@@ -176,6 +177,11 @@ const guardar = () => {
                 </div>
 
                 <div v-if="oc.falta_tasa" class="p-3 rounded-lg bg-red-50 dark:bg-red-950/40 border-l-4 border-red-500 text-red-700 dark:text-red-300 text-sm">{{ oc.falta_tasa }}</div>
+
+                <div v-if="sinReferencia.length" class="p-3 rounded-lg bg-amber-50 dark:bg-amber-950/40 border-l-4 border-amber-500 text-amber-800 dark:text-amber-200 text-sm">
+                    <b>{{ sinReferencia.length }} línea(s) sin referencia no subirán al inventario.</b>
+                    Asígnesela en la <a :href="`/app/compras/oc/${oc.id}`" class="underline">orden de compra</a> antes de confirmar.
+                </div>
 
                 <div v-if="cajasOtraEmpresa.length" class="p-3 rounded-lg bg-sky-50 dark:bg-sky-950/40 border-l-4 border-sky-500 text-sky-800 dark:text-sky-200 text-sm">
                     <b>Para separar:</b>

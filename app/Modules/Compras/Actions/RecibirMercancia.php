@@ -54,6 +54,10 @@ class RecibirMercancia
             OrdenCompra::query()->whereKey($recepcion->orden_id)->lockForUpdate()->first();
 
             $esImportacion = $recepcion->orden->esImportacion();
+            // Sin producto, lo que Jorge acepta no llegaría al inventario.
+            if ($esImportacion) {
+                CrearProductosDeOrden::run($recepcion->orden);
+            }
             $costos = app(CostoImportacion::class);
             $tras = app(TrasRecepcion::class);
 
@@ -88,6 +92,12 @@ class RecibirMercancia
 
                 $ordenItem->cantidad_recibida = (float) $ordenItem->cantidad_recibida + $cantidadRecibida;
                 $ordenItem->save();
+
+                if (! $it->producto_id && ! $it->variante_id) {
+                    $it->producto_id = $ordenItem->producto_id;
+                    $it->variante_id = $ordenItem->variante_id;
+                    $it->save();
+                }
 
                 // La deuda con el proveedor y el 1465 van en pesos, no en su moneda.
                 if ($esImportacion) {

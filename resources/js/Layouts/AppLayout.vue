@@ -9,6 +9,7 @@ import {
     Boxes, Camera, Scissors, Wallet, MapPin, AlertTriangle, Radio, Upload,
     Undo2, ScanLine, Tag, Layers, CreditCard, LayoutGrid, Images, Rocket, ClipboardList,
 } from 'lucide-vue-next';
+import AvisoPagoVencido from '@/Components/AvisoPagoVencido.vue';
 import CommandPalette from '@/Components/CommandPalette.vue';
 import CopilotoChat from '@/Components/CopilotoChat.vue';
 import NotificacionesBell from '@/Components/NotificacionesBell.vue';
@@ -315,6 +316,7 @@ const groups = [
             // El flujo abre también para quien tiene renglones a su cargo: el
             // controlador lo resuelve, el menú sólo lo muestra a contabilidad.
             { name: 'Flujo de caja', href: '/app/tesoreria/flujo-de-caja', icon: BarChart3, permiso: 'contabilidad' },
+            { name: 'Pagos al exterior', href: '/app/compras/pagos-exterior', icon: FileText, permiso: 'compras_pagos_exterior' },
             { name: 'Reporte de compras', href: '/app/compras/reporte', icon: BarChart3, permiso: 'compras_reportes' },
         ],
     },
@@ -725,5 +727,6 @@ const visibleGroups = computed(() => groups
                 </div>
             </transition-group>
         </div>
+        <AvisoPagoVencido/>
     </div>
 </template>

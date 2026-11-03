@@ -165,6 +165,7 @@ final class MenuApp
             'compras_recepcion' => $puede('compras_recepcion'),
             'compras_importacion' => $puede('compras_importacion'),
             'compras_reportes' => $puede('compras_reportes'),
+            'compras_pagos_exterior' => $puede('compras_pagos_exterior'),
             'ubicaciones' => $puede('ubicaciones'),
             // DevolucionProveedorController · esEquipoBodega() || Contador
             // Igual que su controlador: por permiso, no por nombre de rol.

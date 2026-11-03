@@ -3,6 +3,8 @@
 namespace App\Modules\Compras\Services;
 
 use App\Models\EmpresaConfig;
+use App\Modules\Compras\Enums\ConceptoGastoImportacion;
+use App\Modules\Compras\Models\Importacion;
 use App\Modules\Compras\Models\OrdenCompra;
 use App\Modules\Compras\Models\OrdenCompraItem;
 
@@ -31,6 +33,11 @@ use App\Modules\Compras\Models\OrdenCompraItem;
  */
 class PreliquidarOrden
 {
+    /** Cuántos contenedores liquidados se promedian, y desde cuántos vale el promedio. */
+    public const CONTENEDORES_PROMEDIO = 6;
+
+    public const MINIMO_PROMEDIO = 3;
+
     public const DEFAULTS = [
         'comision_pct' => 12,
         'flete_m3' => 358000,
@@ -59,7 +66,49 @@ class PreliquidarOrden
             ->latest('id')
             ->value('parametros_preliquidacion');
 
-        return self::normalizar(is_string($ultima) ? json_decode($ultima, true) : $ultima);
+        return self::normalizar([
+            ...(is_string($ultima) ? (json_decode($ultima, true) ?: []) : ($ultima ?? [])),
+            ...self::promediosReales(),
+        ]);
+    }
+
+    /**
+     * Lo que de verdad costaron los últimos contenedores liquidados. Con menos de
+     * tres no hay promedio que valga, y se sigue heredando de la última orden.
+     *
+     * @return array<string,float>
+     */
+    public static function promediosReales(): array
+    {
+        $contenedores = Importacion::query()
+            ->whereNotNull('fecha_liquidacion')
+            ->with(['ordenes', 'gastos'])
+            ->orderByDesc('fecha_liquidacion')
+            ->limit(self::CONTENEDORES_PROMEDIO)
+            ->get()
+            ->filter(fn ($i) => $i->ordenes->sum(fn ($o) => (float) $o->pivot->volumen_m3) > 0);
+
+        if ($contenedores->count() < self::MINIMO_PROMEDIO) {
+            return [];
+        }
+
+        $metros = (float) $contenedores->sum(fn ($i) => $i->ordenes->sum(fn ($o) => (float) $o->pivot->volumen_m3));
+        $fob = (float) $contenedores->sum('valor_fob');
+        $gastos = $contenedores->flatMap->gastos;
+        $suma = fn (array $c) => (float) $gastos->filter(fn ($g) => in_array($g->concepto, $c, true))->sum('monto_base');
+
+        $flete = $suma([ConceptoGastoImportacion::Flete]);
+        $arancel = $suma([ConceptoGastoImportacion::Arancel]);
+        $iva = $suma([ConceptoGastoImportacion::IvaImportacion]);
+        $colombia = (float) $gastos->sum('monto_base') - $flete - $arancel - $iva;
+
+        // Sólo lo que hay con qué calcular: un gasto sin registrar no significa que valga cero.
+        return array_filter([
+            'flete_m3' => round($flete / $metros, 2),
+            'gasto_colombia_m3' => round($colombia / $metros, 2),
+            'arancel_pct' => $fob + $flete > 0 ? round($arancel / ($fob + $flete) * 100, 2) : 0,
+            'iva_pct' => $fob + $flete + $arancel > 0 ? round($iva / ($fob + $flete + $arancel) * 100, 2) : 0,
+        ], fn ($v) => $v > 0);
     }
 
     /**

@@ -107,6 +107,9 @@ final class Permisos
         'compras_recepcion' => ['Gerente', 'Alistador', 'AdminBodega', 'Contador'],
         'compras_importacion' => ['Gerente', 'AdminBodega', 'Contador'],
         'compras_reportes' => ['Gerente', 'Contador', 'AdminBodega'],
+        // No va con importaciones: esa casilla la tiene bodega, y a Jorge no se le
+        //   puede frenar la pantalla con el aviso de un pago vencido a China.
+        'compras_pagos_exterior' => ['Gerente', 'Contador'],
 
         // INVENTARIO
         'traslados'        => ['Gerente', 'Alistador'],
@@ -248,7 +251,7 @@ final class Permisos
         'Cartera y CRM' => ['facturas', 'pagos', 'contactos', 'cartera_dashboard', 'condiciones_credito', 'cobranzas', 'excepciones_credito', 'crm', 'comisiones', 'comisiones_config', 'metodos_pago'],
         'Contabilidad' => ['contabilidad', 'libro_diario', 'reportes_contables', 'reglas_contables'],
         'Tesorería y caja' => ['cajas', 'arqueo_caja', 'flujo_caja', 'cuentas_por_pagar', 'programacion_pagos'],
-        'Compras' => ['compras_oc', 'compras_recepcion', 'compras_importacion', 'compras_reportes'],
+        'Compras' => ['compras_oc', 'compras_recepcion', 'compras_importacion', 'compras_pagos_exterior', 'compras_reportes'],
         'Inventario' => ['traslados', 'tomas_fisicas', 'alertas_stock', 'kardex', 'stock_bodegas'],
         'Catálogo' => ['productos', 'ubicaciones', 'importar_productos', 'productos.push_siigo'],
         'Servicio al cliente' => ['garantias', 'servicio_cliente', 'bandeja_importaciones'],
@@ -291,6 +294,7 @@ final class Permisos
         'compras_oc' => 'Órdenes de compra',
         'compras_recepcion' => 'Recepción de mercancía',
         'compras_importacion' => 'Importaciones',
+        'compras_pagos_exterior' => 'Pagos al exterior',
         'compras_reportes' => 'Reportes de compras',
         'traslados' => 'Traslados entre bodegas',
         'tomas_fisicas' => 'Tomas físicas',

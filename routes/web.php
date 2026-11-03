@@ -279,6 +279,12 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     Route::post('/compras/importacion/{importacion}/documento', [\App\Http\Controllers\App\ImportacionDocumentosController::class, 'subir'])->middleware('throttle:60,1')->name('app.compras.importacion.documento');
     Route::get('/compras/importacion/documento/{documento}', [\App\Http\Controllers\App\ImportacionDocumentosController::class, 'descargar'])->name('app.compras.importacion.documento.ver');
     Route::delete('/compras/importacion/documento/{documento}', [\App\Http\Controllers\App\ImportacionDocumentosController::class, 'eliminar'])->name('app.compras.importacion.documento.quitar');
+    // Pagos a China: vencimientos, seguimiento y lo que hay que tener listo cada semana.
+    Route::get('/compras/pagos-exterior', [\App\Http\Controllers\App\PagosExteriorController::class, 'index'])->name('app.compras.pagos-exterior');
+    Route::post('/compras/pagos-exterior/{compromiso}/seguimiento', [\App\Http\Controllers\App\PagosExteriorController::class, 'seguimiento'])->middleware('throttle:60,1')->name('app.compras.pagos-exterior.seguimiento');
+    Route::post('/compras/pagos-exterior/{compromiso}/pagado', [\App\Http\Controllers\App\PagosExteriorController::class, 'pagado'])->middleware('throttle:60,1')->name('app.compras.pagos-exterior.pagado');
+    Route::post('/compras/orden/{orden}/plan-pago', [\App\Http\Controllers\App\PagosExteriorController::class, 'plan'])->middleware('throttle:60,1')->name('app.compras.orden.plan-pago');
+    Route::post('/compras/orden/{orden}/productos', [\App\Http\Controllers\App\ImportacionSeguimientoController::class, 'crearProductos'])->middleware('throttle:30,1')->name('app.compras.orden.productos');
     // Armar y seguir el contenedor: sus órdenes, etapas, declaraciones e inspecciones.
     Route::put('/compras/importacion/{importacion}/datos', [\App\Http\Controllers\App\ImportacionSeguimientoController::class, 'actualizar'])->middleware('throttle:60,1')->name('app.compras.importacion.datos');
     Route::post('/compras/importacion/{importacion}/orden', [\App\Http\Controllers\App\ImportacionSeguimientoController::class, 'ligarOrden'])->middleware('throttle:60,1')->name('app.compras.importacion.orden');

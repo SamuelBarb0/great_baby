@@ -92,5 +92,8 @@ Schedule::command('dropi:web-wallet-sync')->everyThirtyMinutes()->withoutOverlap
 Schedule::command('compras:avisar-contenedores-atrasados')
     ->dailyAt('07:00')->timezone('America/Bogota')->withoutOverlapping();
 
+Schedule::command('compras:avisar-pagos-exterior')
+    ->dailyAt('07:05')->timezone('America/Bogota')->withoutOverlapping();
+
 Schedule::command('rrhh:avisar-periodos-prueba')
     ->weeklyOn(1, '07:30')->timezone('America/Bogota')->withoutOverlapping();

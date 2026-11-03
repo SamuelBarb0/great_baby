@@ -60,6 +60,10 @@ class HandleInertiaRequests extends Middleware
                 ] : null,
             ],
             // C-QA-D-8: badge de pedidos B2B nuevos para Aracely (lazy prop, sólo se evalúa si el layout la lee).
+            // Cuotas a China vencidas sin seguimiento: abren el aviso que no se cierra.
+            'pagos_sin_seguimiento' => fn () => \App\Auth\Permisos::puede($user, 'compras_pagos_exterior')
+                ? app(\App\Modules\Compras\Services\PlanDePagos::class)->sinSeguimiento()->all()
+                : [],
             'badges' => [
                 'pedidos_b2b_pendientes' => fn () => $user?->esAracely()
                     ? (int) \App\Modules\Portal\Models\PedidoCliente::where('estado', 'enviado')->count()

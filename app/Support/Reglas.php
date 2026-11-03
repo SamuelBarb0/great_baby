@@ -75,6 +75,9 @@ class Reglas
          * Aracely, Gerencia y Gerente quedan exentos siempre: el control es
          * para que un Contador o un AdminBodega no se apruebe lo suyo.
          */
+        // Lo habitual con China: el plazo corre desde que zarpa el buque.
+        'compras.credito_dias_zarpe' => ['grupo' => 'contable', 'tipo' => 'int', 'valor' => 90, 'etiqueta' => 'Días de crédito con China desde el zarpe', 'descripcion' => 'Plazo con que nace el plan de pagos de una orden de importación.'],
+        'compras.interes_tramos' => ['grupo' => 'contable', 'tipo' => 'json', 'valor' => '[]', 'etiqueta' => 'Tramos de interés por mora con China', 'descripcion' => 'Ejemplo: [{"desde":1,"hasta":30,"pct":1.5}]. Vacío = no se estima interés.'],
         // Sin ella Araceli recibe el aviso, pero el traslado no se puede crear.
         'compras.ubicacion_ecommerce' => ['grupo' => 'contable', 'tipo' => 'int', 'valor' => 0, 'etiqueta' => 'Ubicación de e-commerce para las importaciones', 'descripcion' => 'Id de la ubicación a la que se traslada lo que llega marcado para e-commerce. 0 = sin configurar.'],
         'compras.permitir_auto_aprobar' => ['grupo' => 'contable', 'tipo' => 'bool', 'valor' => false, 'etiqueta' => 'Permitir que quien crea una OC la apruebe', 'descripcion' => 'NO (recomendado) exige que la apruebe otra persona. Gerencia siempre puede.'],
