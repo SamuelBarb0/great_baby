@@ -316,6 +316,7 @@ const groups = [
             // El flujo abre también para quien tiene renglones a su cargo: el
             // controlador lo resuelve, el menú sólo lo muestra a contabilidad.
             { name: 'Flujo de caja', href: '/app/tesoreria/flujo-de-caja', icon: BarChart3, permiso: 'contabilidad' },
+            { name: 'Sugerido de pedido', href: '/app/compras/sugerido', icon: BarChart3, permiso: 'compras_reportes' },
             { name: 'Pagos al exterior', href: '/app/compras/pagos-exterior', icon: FileText, permiso: 'compras_pagos_exterior' },
             { name: 'Reporte de compras', href: '/app/compras/reporte', icon: BarChart3, permiso: 'compras_reportes' },
         ],

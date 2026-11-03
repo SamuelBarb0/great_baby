@@ -23,6 +23,7 @@ const props = defineProps({
     importacion: { type: Object, required: true },
     tipos_documento: { type: Object, default: () => ({}) },
     puede_quitar_documentos: Boolean,
+    max_subida_mb: { type: Number, default: 40 },
     seguimiento: { type: Object, required: true },
     puede_editar_seguimiento: Boolean,
     selectividades: { type: Object, default: () => ({}) },
@@ -95,8 +96,11 @@ const costoTotalEstimado = computed(() => (props.importacion.total_fob || 0) + (
 // Documentos del contenedor: por tipo, la versión más nueva arriba.
 const docForm = reactive({ tipo: 'lista_empaque', archivo: null, notas: '' });
 const subiendoDoc = ref(false);
+// Por encima del límite del servidor el envío tarda y termina en un error de PHP.
+const docMuyGrande = computed(() => !!docForm.archivo && docForm.archivo.size > props.max_subida_mb * 1048576);
+const docMb = computed(() => (docForm.archivo ? Math.ceil(docForm.archivo.size / 1048576) : 0));
 const subirDocumento = () => {
-    if (!docForm.archivo || subiendoDoc.value) return;
+    if (!docForm.archivo || subiendoDoc.value || docMuyGrande.value) return;
     subiendoDoc.value = true;
     router.post(`/app/compras/importacion/${props.importacion.id}/documento`, { ...docForm }, {
         preserveScroll: true, forceFormData: true,
@@ -110,6 +114,9 @@ const documentosPorTipo = computed(() => {
     for (const d of props.importacion.documentos || []) (grupos[d.tipo] ||= []).push(d);
     return Object.keys(props.tipos_documento).filter(t => grupos[t]).map(t => ({ tipo: t, label: props.tipos_documento[t], docs: grupos[t] }));
 });
+// La lista y la factura cambian por proveedor, pero todas traen referencia y cantidad.
+const comparable = (d) => ['prelista_empaque', 'borrador_lista_empaque', 'lista_empaque', 'invoice', 'factura_final'].includes(d.tipo)
+    && d.nombre.toLowerCase().endsWith('.xlsx');
 const kb = (b) => b >= 1048576 ? `${(b / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1024))} KB`;
 
 // Re-audit M2 UX-B10 · moneda ≠ COP se muestra "1,200 USD" en vez de "USD $1,200".
@@ -227,10 +234,14 @@ const fmtMoneda = (monto, mon) => mon === 'COP'
                                accept=".pdf,.xlsx,.xls,.csv,.doc,.docx,.jpg,.jpeg,.png,.webp,.zip"/>
                     </div>
                     <div><label class="text-xs font-semibold">Nota (opcional)</label><input v-model="docForm.notas" class="input w-full" maxlength="500"/></div>
-                    <button @click="subirDocumento" :disabled="!docForm.archivo || subiendoDoc" class="btn-primary text-sm disabled:opacity-50">
+                    <button @click="subirDocumento" :disabled="!docForm.archivo || subiendoDoc || docMuyGrande" class="btn-primary text-sm disabled:opacity-50">
                         <Upload class="h-4 w-4"/>{{ subiendoDoc ? 'Subiendo…' : 'Subir' }}
                     </button>
                 </div>
+                <div v-if="docMuyGrande" class="p-2 rounded bg-red-50 dark:bg-red-950/40 border-l-4 border-red-500 text-red-700 dark:text-red-300 text-xs">
+                    Este archivo pesa {{ docMb }} MB y el máximo es {{ max_subida_mb }} MB. Suba una copia sin las fotos o guarde el original aparte.
+                </div>
+                <div v-if="$page.props.errors?.archivo" class="p-2 rounded bg-red-50 dark:bg-red-950/40 border-l-4 border-red-500 text-red-700 dark:text-red-300 text-xs">{{ $page.props.errors.archivo }}</div>
                 <div v-if="documentosPorTipo.length" class="divide-y divide-surface-100 dark:divide-surface-800">
                     <div v-for="g in documentosPorTipo" :key="g.tipo" class="py-2">
                         <div class="text-sm font-semibold">{{ g.label }}</div>
@@ -240,6 +251,7 @@ const fmtMoneda = (monto, mon) => mon === 'COP'
                             </a>
                             <span class="text-xs">v{{ d.version }}<span v-if="i === 0 && g.docs.length > 1"> · la más reciente</span> · {{ kb(d.tamano) }} · {{ d.subido_por }} · {{ d.subido_en }}</span>
                             <span v-if="d.notas" class="text-xs italic">{{ d.notas }}</span>
+                            <Link v-if="comparable(d)" :href="`/app/compras/importacion/${importacion.id}/documento/${d.id}/comparar`" class="text-xs text-brand-600 hover:underline">Comparar con la orden</Link>
                             <button v-if="puede_quitar_documentos" @click="quitarDocumento(d)" class="text-red-600 hover:text-red-700" :aria-label="`Quitar ${d.nombre}`"><Trash2 class="h-3.5 w-3.5"/></button>
                         </div>
                     </div>

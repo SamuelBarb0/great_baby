@@ -12,6 +12,8 @@ import { avisar, avisarError } from '@/composables/useAviso';
 import { mensajeDeError } from '@/composables/useMensajeError';
 const { money } = useMoney();
 
+import EtiquetaYReferencias from '@/Components/EtiquetaYReferencias.vue';
+
 const props = defineProps({
     historial: { type: Array, default: () => [] },
     producto: { type: Object, default: null },
@@ -803,6 +805,8 @@ const matrizDisenos = ref([]);
                         </div>
                     </div>
                 </div>
+
+                <EtiquetaYReferencias v-if="producto" :producto="producto"/>
 
                 <!-- Aduana + Reposición -->
                 <div class="border-t pt-4 grid grid-cols-1 md:grid-cols-3 gap-3">

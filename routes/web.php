@@ -279,6 +279,17 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     Route::post('/compras/importacion/{importacion}/documento', [\App\Http\Controllers\App\ImportacionDocumentosController::class, 'subir'])->middleware('throttle:60,1')->name('app.compras.importacion.documento');
     Route::get('/compras/importacion/documento/{documento}', [\App\Http\Controllers\App\ImportacionDocumentosController::class, 'descargar'])->name('app.compras.importacion.documento.ver');
     Route::delete('/compras/importacion/documento/{documento}', [\App\Http\Controllers\App\ImportacionDocumentosController::class, 'eliminar'])->name('app.compras.importacion.documento.quitar');
+    // Lo que Alejandro hace en Excel: sugerido, archivo para China, etiquetas y lista de empaque.
+    Route::get('/compras/sugerido', [\App\Http\Controllers\App\HerramientasComprasController::class, 'sugerido'])->middleware('throttle:60,1')->name('app.compras.sugerido');
+    Route::get('/compras/orden/{orden}/excel', [\App\Http\Controllers\App\HerramientasComprasController::class, 'excel'])->middleware('throttle:20,1')->name('app.compras.orden.excel');
+    Route::get('/compras/orden/{orden}/etiquetas', [\App\Http\Controllers\App\HerramientasComprasController::class, 'etiquetasPdf'])->middleware('throttle:20,1')->name('app.compras.orden.etiquetas');
+    Route::post('/catalogo/producto/{producto}/etiqueta', [\App\Http\Controllers\App\HerramientasComprasController::class, 'subirEtiqueta'])->middleware('throttle:30,1')->name('app.catalogo.etiqueta');
+    Route::delete('/catalogo/producto/{producto}/etiqueta', [\App\Http\Controllers\App\HerramientasComprasController::class, 'quitarEtiqueta'])->middleware('throttle:30,1')->name('app.catalogo.etiqueta.quitar');
+    Route::post('/catalogo/producto/{producto}/referencia', [\App\Http\Controllers\App\HerramientasComprasController::class, 'agregarReferencia'])->middleware('throttle:30,1')->name('app.catalogo.referencia');
+    Route::delete('/catalogo/referencia/{referencia}', [\App\Http\Controllers\App\HerramientasComprasController::class, 'quitarReferencia'])->middleware('throttle:30,1')->name('app.catalogo.referencia.quitar');
+    Route::get('/compras/importacion/{importacion}/documento/{documento}/comparar', [\App\Http\Controllers\App\HerramientasComprasController::class, 'comparacion'])->middleware('throttle:30,1')->name('app.compras.importacion.comparar');
+    Route::post('/compras/importacion/{importacion}/empaque/motivo', [\App\Http\Controllers\App\HerramientasComprasController::class, 'guardarMotivo'])->middleware('throttle:60,1')->name('app.compras.importacion.empaque.motivo');
+    Route::post('/compras/importacion/{importacion}/empaque/vincular', [\App\Http\Controllers\App\HerramientasComprasController::class, 'vincularReferencia'])->middleware('throttle:30,1')->name('app.compras.importacion.empaque.vincular');
     // Pagos a China: vencimientos, seguimiento y lo que hay que tener listo cada semana.
     Route::get('/compras/pagos-exterior', [\App\Http\Controllers\App\PagosExteriorController::class, 'index'])->name('app.compras.pagos-exterior');
     Route::post('/compras/pagos-exterior/{compromiso}/seguimiento', [\App\Http\Controllers\App\PagosExteriorController::class, 'seguimiento'])->middleware('throttle:60,1')->name('app.compras.pagos-exterior.seguimiento');

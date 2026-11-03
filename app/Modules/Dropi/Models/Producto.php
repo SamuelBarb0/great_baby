@@ -367,6 +367,35 @@ class Producto extends Model implements AuditableContract, HasMedia
     public function registerMediaCollections(): void
     {
         $this->addMediaCollection('imagenes')->useDisk('public');
+        // Siempre la misma para el mismo producto: se sube una vez y sale en cada orden.
+        $this->addMediaCollection('etiqueta_importacion')->useDisk('public')->singleFile();
+    }
+
+    /** Las otras referencias con que se conoce este producto. */
+    public function referenciasAlternas(): HasMany
+    {
+        return $this->hasMany(ProductoReferencia::class);
+    }
+
+    /** Por su referencia o por cualquiera de las anteriores: es el mismo producto. */
+    public static function buscarPorReferencia(string $referencia): ?self
+    {
+        return static::query()->where('referencia', $referencia)->first()
+            ?? static::query()->whereHas('referenciasAlternas', fn ($q) => $q->where('referencia', $referencia))->first();
+    }
+
+    public function agregarReferencia(string $referencia, ?string $motivo, ?int $userId): ProductoReferencia
+    {
+        $referencia = trim($referencia);
+        $dueno = self::buscarPorReferencia($referencia);
+        if ($dueno && $dueno->id !== $this->id) {
+            throw new \InvalidArgumentException("La referencia «{$referencia}» ya es del producto {$dueno->nombre}.");
+        }
+        if ($referencia === $this->referencia) {
+            throw new \InvalidArgumentException('Esa ya es la referencia de este producto.');
+        }
+
+        return $this->referenciasAlternas()->firstOrCreate(['referencia' => $referencia], ['motivo' => $motivo, 'creado_por' => $userId]);
     }
 
     /**

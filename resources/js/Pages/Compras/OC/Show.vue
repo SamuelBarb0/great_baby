@@ -16,6 +16,8 @@ const props = defineProps({
     puede_pdf: { type: Boolean, default: false },
     puede_aprobar: { type: Boolean, default: false },
     lineas_sin_producto: { type: Array, default: () => [] },
+    puede_excel: { type: Boolean, default: false },
+    etiquetas: { type: Object, default: null },
 });
 
 const modalAnular = ref(false);
@@ -176,6 +178,9 @@ const reenviarRecepcion = (rec) => {
                     <button v-if="!['recibida','cerrada','anulada'].includes(orden.estado)" @click="modalAnular = true" class="btn-ghost text-red-600 border border-red-300">
                         <XCircle class="h-4 w-4"/> Anular
                     </button>
+                    <a v-if="etiquetas && puede_excel" :href="`/app/compras/orden/${orden.id}/excel`" class="btn-ghost">Excel para China</a>
+                    <a v-if="etiquetas" :href="`/app/compras/orden/${orden.id}/etiquetas`" target="_blank" rel="noopener" class="btn-ghost"
+                       :title="`${etiquetas.con} con etiqueta, ${etiquetas.sin} sin etiqueta`">Etiquetas ({{ etiquetas.con }} de {{ etiquetas.con + etiquetas.sin }})</a>
                     <a v-if="puede_pdf" :href="`/compras/orden/${orden.id}/pdf`" target="_blank" rel="noopener"
                         class="btn-ghost">PDF</a>
                     <a v-if="puede_pdf && orden.preliquidacion" :href="`/compras/orden/${orden.id}/preliquidacion/pdf`" target="_blank" rel="noopener" class="btn-ghost">PDF pre-liquidación</a>

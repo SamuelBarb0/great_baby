@@ -1076,6 +1076,8 @@ class ProductosController extends Controller implements HasMiddleware
             'clase_id' => $p->clase_id,
             'posicion_arancelaria' => $p->posicion_arancelaria,
             'arancel_pct' => $p->arancel_pct,
+            'etiqueta_importacion_url' => $p->getFirstMediaUrl('etiqueta_importacion') ?: null,
+            'referencias_alternas' => $p->referenciasAlternas()->get(['id', 'referencia', 'motivo'])->all(),
             'factor_conversion' => (float) $p->factor_conversion,
             'rentabilidad_pct' => (float) $p->rentabilidad_pct,
             'reposicion_max_dias' => $p->reposicion_max_dias,

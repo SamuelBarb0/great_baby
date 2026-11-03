@@ -39,7 +39,7 @@ class CrearProductosDeOrden
                 continue;
             }
 
-            $producto = Producto::query()->where('referencia', $ref)->first()
+            $producto = Producto::buscarPorReferencia($ref)
                 ?? Producto::sinKardexAutomatico(fn () => Producto::create([
                     'referencia' => $ref,
                     'nombre' => self::nombreDe($item, $ref),

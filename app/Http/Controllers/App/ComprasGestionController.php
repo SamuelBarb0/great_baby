@@ -109,6 +109,10 @@ class ComprasGestionController extends Controller implements HasMiddleware
             // todo el que entrara a la OC, y aprobar compromete plata.
             'puede_aprobar' => \App\Auth\Permisos::puede($r->user(), 'compras_oc')
                 || ($r->user()?->esAracely() ?? false),
+            'puede_excel' => \App\Auth\Permisos::puede($r->user(), 'compras_oc') || \App\Auth\Permisos::puede($r->user(), 'compras_pagos_exterior'),
+            'etiquetas' => $o->esImportacion()
+                ? app(\App\Modules\Compras\Services\EtiquetasDeOrden::class)->resumen($o->loadMissing('items.producto.media'))
+                : null,
             'lineas_sin_producto' => $o->esImportacion() ? $o->items
                 ->filter(fn ($i) => ! $i->producto_id && ! $i->variante_id)
                 ->map(fn ($i) => [
@@ -817,6 +821,7 @@ class ComprasGestionController extends Controller implements HasMiddleware
         return Inertia::render('Compras/Importacion/Show', [
             'tipos_documento' => array_diff_key(\App\Modules\Compras\Models\ImportacionDocumento::TIPOS, ['comprobante_gasto' => true]),
             'puede_quitar_documentos' => (bool) auth()->user()?->esAracely(),
+            'max_subida_mb' => ImportacionDocumentosController::limiteMb(),
             'seguimiento' => app(\App\Modules\Compras\Services\SeguimientoContenedor::class)->paraPantalla($imp),
             'puede_editar_seguimiento' => \App\Auth\Permisos::puede(auth()->user(), 'compras_importacion'),
             'selectividades' => \App\Modules\Compras\Models\ImportacionDeclaracion::SELECTIVIDAD,

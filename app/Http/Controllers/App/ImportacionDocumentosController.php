@@ -23,6 +23,21 @@ class ImportacionDocumentosController extends Controller implements HasMiddlewar
 {
     public const MIMES = 'pdf,xlsx,xls,csv,doc,docx,jpg,jpeg,png,webp,zip';
 
+    /** Las listas de empaque traen las fotos de la carga: las reales llegan a casi 100 MB. */
+    public const MAX_MB = 100;
+
+    /**
+     * Lo que de verdad se puede subir en este servidor. Por encima de sus límites
+     * PHP ni siquiera deja responder, así que la pantalla lo avisa antes de enviar.
+     */
+    public static function limiteMb(): int
+    {
+        $subida = \Illuminate\Http\UploadedFile::getMaxFilesize() / 1048576;
+        $post = ini_parse_quantity((string) ini_get('post_max_size')) / 1048576;
+
+        return (int) floor(min(self::MAX_MB, $subida, $post > 0 ? $post : self::MAX_MB));
+    }
+
     public static function middleware(): array
     {
         return [
@@ -37,7 +52,7 @@ class ImportacionDocumentosController extends Controller implements HasMiddlewar
     {
         $data = $r->validate([
             'tipo' => ['required', 'string', Rule::in(array_diff(array_keys(ImportacionDocumento::TIPOS), ['comprobante_gasto']))],
-            'archivo' => ['required', 'file', 'max:20480', 'mimes:'.self::MIMES],
+            'archivo' => ['required', 'file', 'max:'.(self::MAX_MB * 1024), 'mimes:'.self::MIMES],
             'notas' => ['nullable', 'string', 'max:500'],
         ]);
 

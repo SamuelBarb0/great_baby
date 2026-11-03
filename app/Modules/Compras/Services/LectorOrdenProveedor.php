@@ -162,7 +162,7 @@ class LectorOrdenProveedor
         $cbm = self::numero($col('cbm'));
         $conMedidas = $largo > 0 && $ancho > 0 && $alto > 0;
 
-        $producto = $ref ? Producto::query()->where('referencia', $ref)->first(['id', 'nombre']) : null;
+        $producto = $ref ? Producto::buscarPorReferencia($ref) : null;
 
         return [
             'referencia' => $ref,
