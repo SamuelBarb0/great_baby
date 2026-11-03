@@ -209,6 +209,45 @@ it('una línea que no llegó entera no se liquida, no carga flete y el 1465 cuad
         ->and((float) $tres->sum('haber'))->toBe(182000.0);
 });
 
+it('la pantalla anticipa lo que la liquidación va a dar', function () {
+    $orden = ($this->orden)();
+    $imp = ($this->contenedor)($orden);
+    GastoImportacion::create(['importacion_id' => $imp->id, 'concepto' => ConceptoGastoImportacion::Flete, 'descripcion' => 'Flete', 'monto' => 100000, 'monto_base' => 100000, 'capitalizable' => true, 'metodo_prorrateo' => 'volumen']);
+    GastoImportacion::create(['importacion_id' => $imp->id, 'concepto' => ConceptoGastoImportacion::Flete, 'descripcion' => 'Otro', 'monto' => 20000, 'monto_base' => 20000, 'capitalizable' => false, 'metodo_prorrateo' => 'volumen']);
+    $url = "/app/compras/importacion/{$imp->id}";
+
+    // Nada recibido: va por lo pedido, y lo dice.
+    $this->actingAs($this->aracely)->get($url)->assertInertia(fn (Assert $p) => $p
+        ->where('importacion.total_fob', 182000)
+        ->where('importacion.fob_es_previsto', true)
+        ->where('importacion.fob_sin_recibir', 1)
+        ->where('importacion.total_gastos', 120000)
+        ->where('importacion.gastos_al_inventario', 100000));
+
+    // Recibidos 90: cuenta lo recibido.
+    ($this->recibir)($orden, [['cantidad_recibida' => 90, 'clasificacion' => 'apto']])->assertRedirect();
+    $this->actingAs($this->aracely)->get($url)->assertInertia(fn (Assert $p) => $p
+        ->where('importacion.total_fob', 163800)
+        ->where('importacion.fob_sin_recibir', 0));
+
+    // Y la liquidación da lo mismo que se anticipó.
+    LiquidarImportacion::run($imp->fresh());
+    expect((float) $imp->fresh()->valor_fob)->toBe(163800.0)
+        ->and((float) $imp->fresh()->valor_gastos)->toBe(100000.0);
+    $this->actingAs($this->aracely)->get($url)->assertInertia(fn (Assert $p) => $p
+        ->where('importacion.total_fob', 163800)
+        ->where('importacion.fob_es_previsto', false));
+});
+
+it('sin tasa de cambio la pantalla abre y dice qué falta', function () {
+    $imp = ($this->contenedor)(($this->orden)([], 'CNY', 1));
+
+    $this->actingAs($this->aracely)->get("/app/compras/importacion/{$imp->id}")->assertOk()
+        ->assertInertia(fn (Assert $p) => $p
+            ->where('importacion.total_fob', 0)
+            ->where('importacion.fob_aviso', fn ($aviso) => str_contains($aviso, 'Falta la tasa de cambio')));
+});
+
 it('liquidar antes de recibir no sube nada, y lo que se reciba después entra al costo real', function () {
     $orden = ($this->orden)();
     $imp = ($this->contenedor)($orden);

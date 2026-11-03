@@ -11,6 +11,7 @@ use App\Modules\Compras\Models\RecepcionCompraItem;
 use App\Modules\Compras\Services\CostoImportacion;
 use App\Modules\Dropi\Models\InventarioMovimiento;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Collection;
 use InvalidArgumentException;
 use Lorisleiva\Actions\Concerns\AsAction;
 
@@ -26,6 +27,87 @@ use Lorisleiva\Actions\Concerns\AsAction;
 class LiquidarImportacion
 {
     use AsAction;
+
+    /**
+     * Lo que saldría si se liquidara ahora, con las mismas cuentas de la liquidación:
+     * las líneas del contenedor no existen hasta liquidar y la pantalla mostraba $0.
+     *
+     * @return array{fob: float, sin_recibir: int, gastos_al_inventario: float, aviso: ?string}
+     */
+    public function previsto(Importacion $importacion): array
+    {
+        $importacion->loadMissing(['ordenes.items', 'gastos']);
+        $gastos = (float) $this->gastosCapitalizables($importacion)->sum('monto_base');
+
+        try {
+            $lineas = $this->lineasALiquidar($importacion);
+        } catch (InvalidArgumentException $e) {
+            return ['fob' => 0.0, 'sin_recibir' => 0, 'gastos_al_inventario' => $gastos, 'aviso' => $e->getMessage()];
+        }
+
+        return [
+            'fob' => round((float) $lineas->sum('fob'), 2),
+            'sin_recibir' => $lineas->where('revisado', false)->count(),
+            'gastos_al_inventario' => $gastos,
+            'aviso' => null,
+        ];
+    }
+
+    /**
+     * Se liquida lo que Jorge recibió, a lo que quedó en el 1465 y en la
+     * cuenta del proveedor. Lo que aún no recibe va por lo pedido, en pesos.
+     */
+    private function lineasALiquidar(Importacion $importacion): Collection
+    {
+        $costos = app(CostoImportacion::class);
+        $revisados = RecepcionCompraItem::query()
+            ->whereIn('orden_item_id', $importacion->ordenes->flatMap(fn ($o) => $o->items->pluck('id')))
+            ->whereHas('recepcion', fn ($q) => $q->where('estado', 'confirmada'))
+            ->get()
+            ->groupBy('orden_item_id');
+
+        $items = collect();
+        foreach ($importacion->ordenes as $orden) {
+            $volumenes = $this->repartirPorItem($orden->items, (float) ($orden->pivot->volumen_m3 ?? 0), 'cbm_caja');
+            $pesos = $this->repartirPorItem($orden->items, (float) ($orden->pivot->peso_kg ?? 0), 'peso_caja_kg');
+            foreach ($orden->items as $item) {
+                // Si bodega ya la revisó, cuenta lo que recibió, aunque sea nada.
+                $revisado = $revisados[$item->id] ?? null;
+                $suyo = $revisado?->reject(fn ($l) => $l->clasificacion === 'faltante');
+                $cantidad = $revisado ? (float) $suyo->sum('cantidad_recibida') : (float) $item->cantidad;
+                // Lo que no llegó no ocupó contenedor: no carga con flete.
+                $parte = (float) $item->cantidad > 0 ? $cantidad / (float) $item->cantidad : 1.0;
+                $items->push([
+                    'orden_item' => $item,
+                    'revisado' => $revisado !== null,
+                    'peso_pivot' => $pesos[$item->id] * $parte,
+                    'volumen_pivot' => $volumenes[$item->id] * $parte,
+                    'cantidad' => $cantidad,
+                    'fob' => $revisado
+                        ? round((float) $suyo->sum('subtotal'), 2)
+                        : round((float) $item->subtotal * $costos->tasa($orden), 2),
+                ]);
+            }
+        }
+
+        // Una línea que no llegó entera no tiene nada que liquidar.
+        return $items->filter(fn ($x) => $x['cantidad'] > 0)->values();
+    }
+
+    /**
+     * Re-audit M2 R3 PATRÓN O (FUNC-C2) · IVA importación NUNCA se
+     * capitaliza aunque el usuario haya marcado `capitalizable=true`
+     * por error. Si se incluyera, el asiento tendría débito 1435 (por el
+     * prorrateo) MÁS débito 1355 (por el IVA descontable en `liquidacion`)
+     * contra un solo crédito 2205 → Σdebe − Σhaber = monto_iva (violación
+     * partida doble).
+     */
+    private function gastosCapitalizables(Importacion $importacion): Collection
+    {
+        return $importacion->gastos
+            ->where('capitalizable', true)
+            ->reject(fn ($g) => $this->esConceptoIvaImportacion($g));
+    }
 
     public function handle(Importacion $importacion): Importacion
     {
@@ -56,40 +138,7 @@ class LiquidarImportacion
             // pequeño cargaba el mismo flete que el grande. Alejandro reparte los
             // gastos «en los metros cúbicos» de cada ítem (reunión 30-oct).
             //
-            // Se liquida lo que Jorge recibió, a lo que quedó en el 1465 y en la
-            // cuenta del proveedor. Lo que aún no recibe va por lo pedido, en pesos.
-            $costos = app(CostoImportacion::class);
-            $revisados = RecepcionCompraItem::query()
-                ->whereIn('orden_item_id', $importacion->ordenes->flatMap(fn ($o) => $o->items->pluck('id')))
-                ->whereHas('recepcion', fn ($q) => $q->where('estado', 'confirmada'))
-                ->get()
-                ->groupBy('orden_item_id');
-
-            $items = collect();
-            foreach ($importacion->ordenes as $orden) {
-                $volumenes = $this->repartirPorItem($orden->items, (float) ($orden->pivot->volumen_m3 ?? 0), 'cbm_caja');
-                $pesos = $this->repartirPorItem($orden->items, (float) ($orden->pivot->peso_kg ?? 0), 'peso_caja_kg');
-                foreach ($orden->items as $item) {
-                    // Si bodega ya la revisó, cuenta lo que recibió, aunque sea nada.
-                    $revisado = $revisados[$item->id] ?? null;
-                    $suyo = $revisado?->reject(fn ($l) => $l->clasificacion === 'faltante');
-                    $cantidad = $revisado ? (float) $suyo->sum('cantidad_recibida') : (float) $item->cantidad;
-                    // Lo que no llegó no ocupó contenedor: no carga con flete.
-                    $parte = (float) $item->cantidad > 0 ? $cantidad / (float) $item->cantidad : 1.0;
-                    $items->push([
-                        'orden_item' => $item,
-                        'peso_pivot' => $pesos[$item->id] * $parte,
-                        'volumen_pivot' => $volumenes[$item->id] * $parte,
-                        'cantidad' => $cantidad,
-                        'fob' => $revisado
-                            ? round((float) $suyo->sum('subtotal'), 2)
-                            : round((float) $item->subtotal * $costos->tasa($orden), 2),
-                    ]);
-                }
-            }
-
-            // Una línea que no llegó entera no tiene nada que liquidar.
-            $items = $items->filter(fn ($x) => $x['cantidad'] > 0)->values();
+            $items = $this->lineasALiquidar($importacion);
 
             if ($items->isEmpty()) {
                 throw new InvalidArgumentException('No hay ítems en las órdenes ligadas.');
@@ -100,15 +149,7 @@ class LiquidarImportacion
             $totalPeso = $items->sum(fn ($x) => $x['peso_pivot']);
             $totalVolumen = $items->sum(fn ($x) => $x['volumen_pivot']);
 
-            // Re-audit M2 R3 PATRÓN O (FUNC-C2) · IVA importación NUNCA se
-            // capitaliza aunque el usuario haya marcado `capitalizable=true`
-            // por error. Si se incluyera en $gastosCap, el asiento tendría
-            // débito 1435 (por el prorrateo) MÁS débito 1355 (por el IVA
-            // descontable en `liquidacion`) contra un solo crédito 2205 →
-            // Σdebe − Σhaber = monto_iva (violación partida doble).
-            $gastosCap = $importacion->gastos
-                ->where('capitalizable', true)
-                ->reject(fn ($g) => $this->esConceptoIvaImportacion($g));
+            $gastosCap = $this->gastosCapitalizables($importacion);
             $totalGastosCap = (float) $gastosCap->sum('monto_base');
 
             ImportacionLinea::where('importacion_id', $importacion->id)->delete();

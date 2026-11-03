@@ -818,6 +818,9 @@ class ComprasGestionController extends Controller implements HasMiddleware
     {
         $imp = Importacion::with(['lineas', 'gastos', 'documentos.autor:id,name'])->findOrFail($importacion);
         $comprobantes = $imp->documentos->whereNotNull('gasto_id')->groupBy('gasto_id');
+        $previsto = app(\App\Modules\Compras\Actions\LiquidarImportacion::class)->previsto($imp);
+        // Hasta liquidar no hay líneas: lo que se ve es lo que saldría si se liquida ahora.
+        $esPrevisto = $imp->lineas->isEmpty();
         return Inertia::render('Compras/Importacion/Show', [
             'tipos_documento' => array_diff_key(\App\Modules\Compras\Models\ImportacionDocumento::TIPOS, ['comprobante_gasto' => true]),
             'puede_quitar_documentos' => (bool) auth()->user()?->esAracely(),
@@ -861,7 +864,11 @@ class ComprasGestionController extends Controller implements HasMiddleware
                     'subido_por' => $d->autor?->name, 'subido_en' => $d->created_at?->format('Y-m-d H:i'),
                 ])->values()->all(),
                 'total_gastos' => (float) $imp->gastos->sum('monto_base'),
-                'total_fob' => (float) $imp->lineas->sum('costo_fob_total'),
+                'total_fob' => $esPrevisto ? $previsto['fob'] : (float) $imp->lineas->sum('costo_fob_total'),
+                'fob_es_previsto' => $esPrevisto,
+                'fob_sin_recibir' => $previsto['sin_recibir'],
+                'fob_aviso' => $esPrevisto ? $previsto['aviso'] : null,
+                'gastos_al_inventario' => $previsto['gastos_al_inventario'],
             ],
         ]);
     }

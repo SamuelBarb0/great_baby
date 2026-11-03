@@ -92,6 +92,7 @@ const confirmarLiquidar = () => {
 const puedeAgregarGasto = computed(() => props.importacion.estado !== 'liquidada' && props.importacion.estado !== 'cerrada');
 const puedeLiquidar = computed(() => puedeAgregarGasto.value);
 const costoTotalEstimado = computed(() => (props.importacion.total_fob || 0) + (props.importacion.total_gastos || 0));
+const costoAlInventario = computed(() => (props.importacion.total_fob || 0) + (props.importacion.gastos_al_inventario || 0));
 
 // Documentos del contenedor: por tipo, la versión más nueva arriba.
 const docForm = reactive({ tipo: 'lista_empaque', archivo: null, notas: '' });
@@ -176,7 +177,7 @@ const fmtMoneda = (monto, mon) => mon === 'COP'
                          :selectividades="selectividades" :tipos-inspeccion="tipos_inspeccion"/>
 
             <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <div class="card p-4"><div class="text-xs text-surface-500">Total FOB</div><div class="text-xl font-bold">{{ money(importacion.total_fob) }}</div></div>
+                <div class="card p-4"><div class="text-xs text-surface-500">Total FOB<template v-if="importacion.fob_es_previsto"> (previsto)</template></div><div class="text-xl font-bold">{{ money(importacion.total_fob) }}</div></div>
                 <div class="card p-4"><div class="text-xs text-surface-500" :title="'Suma de gastos capitalizables + no capitalizables'">Total gastos</div><div class="text-xl font-bold">{{ money(importacion.total_gastos) }}</div></div>
                 <div class="card p-4"><div class="text-xs text-surface-500">Costo total</div><div class="text-xl font-bold text-brand-600">{{ money(costoTotalEstimado) }}</div></div>
             </div>
@@ -297,10 +298,13 @@ const fmtMoneda = (monto, mon) => mon === 'COP'
                             Se prorratean <b>{{ importacion.gastos.length }}</b> gasto(s) capitalizables al costo unitario de <b>{{ importacion.lineas.length || 'las' }}</b> líneas, se corrige el costo de lo que ya recibió bodega y se genera el asiento contable definitivo. La cantidad no cambia: el stock entra cuando bodega acepta la mercancía.
                         </p>
                         <div class="text-xs bg-surface-50 dark:bg-surface-900/50 rounded p-2 mb-3 space-y-1">
-                            <div class="flex justify-between"><span>FOB total:</span> <b>{{ money(importacion.total_fob) }}</b></div>
+                            <div class="flex justify-between"><span>FOB total (previsto):</span> <b>{{ money(importacion.total_fob) }}</b></div>
                             <div class="flex justify-between"><span>Gastos:</span> <b>{{ money(importacion.total_gastos) }}</b></div>
-                            <div class="flex justify-between text-brand-600 pt-1 border-t border-surface-200 dark:border-surface-700"><span>Costo total al inventario:</span> <b>{{ money(costoTotalEstimado) }}</b></div>
+                            <div class="flex justify-between text-brand-600 pt-1 border-t border-surface-200 dark:border-surface-700"><span>Costo total al inventario:</span> <b>{{ money(costoAlInventario) }}</b></div>
                         </div>
+                        <p v-if="importacion.fob_aviso" class="text-[11px] text-red-600 dark:text-red-400 mb-2">{{ importacion.fob_aviso }}</p>
+                        <p v-if="importacion.fob_sin_recibir > 0" class="text-[11px] text-surface-500 mb-2">{{ importacion.fob_sin_recibir }} línea(s) aún sin recibir van por lo pedido.</p>
+                        <p v-if="importacion.gastos_al_inventario < importacion.total_gastos" class="text-[11px] text-surface-500 mb-2">Los gastos no capitalizables no entran al costo del inventario.</p>
                         <p class="text-[11px] text-amber-700 dark:text-amber-400"><b>Advertencia:</b> Después de liquidar no se pueden agregar gastos ni editar líneas sin reversar.</p>
                     </div>
                 </div>
