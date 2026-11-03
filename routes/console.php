@@ -89,5 +89,8 @@ Schedule::command('dropi:web-wallet-sync')->everyThirtyMinutes()->withoutOverlap
  * avisar a diario sería ruido, pero dejarlo sin aviso es como está hoy —se
  * vence solo y después terminar el contrato ya cuesta indemnización—.
  */
+Schedule::command('compras:avisar-contenedores-atrasados')
+    ->dailyAt('07:00')->timezone('America/Bogota')->withoutOverlapping();
+
 Schedule::command('rrhh:avisar-periodos-prueba')
     ->weeklyOn(1, '07:30')->timezone('America/Bogota')->withoutOverlapping();

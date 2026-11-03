@@ -279,6 +279,17 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     Route::post('/compras/importacion/{importacion}/documento', [\App\Http\Controllers\App\ImportacionDocumentosController::class, 'subir'])->middleware('throttle:60,1')->name('app.compras.importacion.documento');
     Route::get('/compras/importacion/documento/{documento}', [\App\Http\Controllers\App\ImportacionDocumentosController::class, 'descargar'])->name('app.compras.importacion.documento.ver');
     Route::delete('/compras/importacion/documento/{documento}', [\App\Http\Controllers\App\ImportacionDocumentosController::class, 'eliminar'])->name('app.compras.importacion.documento.quitar');
+    // Armar y seguir el contenedor: sus órdenes, etapas, declaraciones e inspecciones.
+    Route::put('/compras/importacion/{importacion}/datos', [\App\Http\Controllers\App\ImportacionSeguimientoController::class, 'actualizar'])->middleware('throttle:60,1')->name('app.compras.importacion.datos');
+    Route::post('/compras/importacion/{importacion}/orden', [\App\Http\Controllers\App\ImportacionSeguimientoController::class, 'ligarOrden'])->middleware('throttle:60,1')->name('app.compras.importacion.orden');
+    Route::delete('/compras/importacion/{importacion}/orden/{orden}', [\App\Http\Controllers\App\ImportacionSeguimientoController::class, 'soltarOrden'])->middleware('throttle:60,1')->name('app.compras.importacion.orden.soltar');
+    Route::post('/compras/importacion/{importacion}/etapa', [\App\Http\Controllers\App\ImportacionSeguimientoController::class, 'marcarEtapa'])->middleware('throttle:60,1')->name('app.compras.importacion.etapa');
+    Route::delete('/compras/importacion/{importacion}/etapa/{etapa}', [\App\Http\Controllers\App\ImportacionSeguimientoController::class, 'quitarEtapa'])->middleware('throttle:60,1')->name('app.compras.importacion.etapa.quitar');
+    Route::post('/compras/importacion/{importacion}/declaracion', [\App\Http\Controllers\App\ImportacionSeguimientoController::class, 'guardarDeclaracion'])->middleware('throttle:60,1')->name('app.compras.importacion.declaracion');
+    Route::put('/compras/importacion/{importacion}/declaracion/{declaracion}', [\App\Http\Controllers\App\ImportacionSeguimientoController::class, 'guardarDeclaracion'])->middleware('throttle:60,1')->name('app.compras.importacion.declaracion.editar');
+    Route::delete('/compras/importacion/{importacion}/declaracion/{declaracion}', [\App\Http\Controllers\App\ImportacionSeguimientoController::class, 'quitarDeclaracion'])->middleware('throttle:60,1')->name('app.compras.importacion.declaracion.quitar');
+    Route::post('/compras/importacion/{importacion}/inspeccion', [\App\Http\Controllers\App\ImportacionSeguimientoController::class, 'registrarInspeccion'])->middleware('throttle:60,1')->name('app.compras.importacion.inspeccion');
+    Route::post('/compras/importacion/{importacion}/inspeccion/{inspeccion}/resolver', [\App\Http\Controllers\App\ImportacionSeguimientoController::class, 'resolverInspeccion'])->middleware('throttle:60,1')->name('app.compras.importacion.inspeccion.resolver');
     Route::post('/compras/importacion/{importacion}/liquidar', [\App\Http\Controllers\App\ComprasGestionController::class, 'importacionLiquidar'])->middleware('throttle:20,1')->name('app.compras.importacion.liquidar');
     Route::get('/inventario', [\App\Http\Controllers\App\InventarioController::class, 'index'])->name('app.inventario.index');
     // Importador Excel del cliente Aracely (formato REPORTE · productos agregados)

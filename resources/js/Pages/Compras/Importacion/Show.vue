@@ -7,6 +7,7 @@ import AppLayout from '@/Layouts/AppLayout.vue';
 import { useMoney } from '@/composables/useMoney';
 import { fechaCorta } from '@/composables/useFecha';
 import { useEscClose } from '@/composables/useEscClose';
+import Seguimiento from './Seguimiento.vue';
 
 /*
  * La fecha de HOY en Colombia, no en UTC.
@@ -22,6 +23,10 @@ const props = defineProps({
     importacion: { type: Object, required: true },
     tipos_documento: { type: Object, default: () => ({}) },
     puede_quitar_documentos: Boolean,
+    seguimiento: { type: Object, required: true },
+    puede_editar_seguimiento: Boolean,
+    selectividades: { type: Object, default: () => ({}) },
+    tipos_inspeccion: { type: Object, default: () => ({}) },
 });
 // Re-audit M2 UX-C2 · useMoney en vez de fmtCOP inline (paridad con Cartera/Contabilidad).
 const { money } = useMoney();
@@ -36,12 +41,6 @@ const { money } = useMoney();
  * lo que uno quiere. Ahora se apaga sola y queda bloqueada, con el motivo a la
  * vista en lugar de un tooltip.
  */
-const esIvaDeImportacion = computed(() => gastoForm.concepto === 'iva_importacion');
-
-watch(esIvaDeImportacion, (es) => {
-    if (es) gastoForm.capitalizable = false;
-});
-
 const modalGasto = ref(false);
 const modalLiquidar = ref(false);
 useEscClose(modalGasto);
@@ -54,6 +53,12 @@ const gastoForm = reactive({
     capitalizable: true, metodo_prorrateo: 'volumen',
     factura_proveedor: '', fecha: hoyBogota(),
 });
+const esIvaDeImportacion = computed(() => gastoForm.concepto === 'iva_importacion');
+
+watch(esIvaDeImportacion, (es) => {
+    if (es) gastoForm.capitalizable = false;
+});
+
 const procesando = ref(false);
 // Soporte del gasto (factura del flete, de la agencia…), opcional.
 const comprobante = ref(null);
@@ -159,6 +164,9 @@ const fmtMoneda = (monto, mon) => mon === 'COP'
                     <a :href="`/compras/importacion/${importacion.id}/pdf`" target="_blank" rel="noopener" class="btn-ghost">PDF</a>
                 </div>
             </div>
+
+            <Seguimiento :importacion="importacion" :seguimiento="seguimiento" :puede-editar="puede_editar_seguimiento"
+                         :selectividades="selectividades" :tipos-inspeccion="tipos_inspeccion"/>
 
             <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <div class="card p-4"><div class="text-xs text-surface-500">Total FOB</div><div class="text-xl font-bold">{{ money(importacion.total_fob) }}</div></div>

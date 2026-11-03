@@ -709,6 +709,8 @@ class ComprasGestionController extends Controller implements HasMiddleware
         }
         if ($estado = $r->query('estado')) $q->where('estado', $estado);
 
+        $seguimiento = app(\App\Modules\Compras\Services\SeguimientoContenedor::class);
+
         return Inertia::render('Compras/Importacion/Index', [
             'filtros' => ['q' => $r->query('q', ''), 'estado' => $estado],
             'importaciones' => $q->orderByDesc('id')->paginate(20)->through(fn ($i) => [
@@ -725,6 +727,7 @@ class ComprasGestionController extends Controller implements HasMiddleware
                 'total_fob' => (float) $i->lineas()->sum('costo_fob_total'),
                 'total_gastos' => (float) $i->gastos()->sum('monto_base'),
                 'lineas_count' => $i->lineas()->count(),
+                'seguimiento' => $seguimiento->resumen($i),
             ]),
             'kpis' => [
                 'total' => Importacion::count(),
@@ -732,6 +735,8 @@ class ComprasGestionController extends Controller implements HasMiddleware
                 'en_transito' => Importacion::whereIn('estado', ['en_transito', 'en_puerto', 'nacionalizada'])->count(),
                 'por_liquidar' => Importacion::whereNotNull('fecha_llegada')->whereNull('fecha_liquidacion')->count(),
                 'liquidados_mes' => Importacion::whereMonth('fecha_liquidacion', now()->month)->whereYear('fecha_liquidacion', now()->year)->count(),
+                'atrasados' => Importacion::where('estado', '!=', 'cerrada')->whereHas('etapas')->with('etapas')->get()
+                    ->filter(fn ($i) => $seguimiento->resumen($i)['dias_atraso'] > 0)->count(),
             ],
         ]);
     }
@@ -743,6 +748,10 @@ class ComprasGestionController extends Controller implements HasMiddleware
         return Inertia::render('Compras/Importacion/Show', [
             'tipos_documento' => array_diff_key(\App\Modules\Compras\Models\ImportacionDocumento::TIPOS, ['comprobante_gasto' => true]),
             'puede_quitar_documentos' => (bool) auth()->user()?->esAracely(),
+            'seguimiento' => app(\App\Modules\Compras\Services\SeguimientoContenedor::class)->paraPantalla($imp),
+            'puede_editar_seguimiento' => \App\Auth\Permisos::puede(auth()->user(), 'compras_importacion'),
+            'selectividades' => \App\Modules\Compras\Models\ImportacionDeclaracion::SELECTIVIDAD,
+            'tipos_inspeccion' => \App\Modules\Compras\Models\ImportacionInspeccion::TIPOS,
             'importacion' => [
                 'id' => $imp->id, 'numero' => $imp->numero,
                 'contenedor' => $imp->contenedor, 'bl_awb' => $imp->bl_awb,

@@ -96,6 +96,21 @@ class Importacion extends Model implements AuditableContract
         return $this->hasMany(ImportacionDocumento::class)->latest('id');
     }
 
+    public function etapas(): HasMany
+    {
+        return $this->hasMany(ImportacionEtapa::class);
+    }
+
+    public function declaraciones(): HasMany
+    {
+        return $this->hasMany(ImportacionDeclaracion::class)->orderBy('id');
+    }
+
+    public function inspecciones(): HasMany
+    {
+        return $this->hasMany(ImportacionInspeccion::class)->latest('fecha');
+    }
+
     public function lineas(): HasMany
     {
         return $this->hasMany(ImportacionLinea::class, 'importacion_id');
