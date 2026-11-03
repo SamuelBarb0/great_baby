@@ -75,6 +75,8 @@ class Reglas
          * Aracely, Gerencia y Gerente quedan exentos siempre: el control es
          * para que un Contador o un AdminBodega no se apruebe lo suyo.
          */
+        // Sin ella Araceli recibe el aviso, pero el traslado no se puede crear.
+        'compras.ubicacion_ecommerce' => ['grupo' => 'contable', 'tipo' => 'int', 'valor' => 0, 'etiqueta' => 'Ubicación de e-commerce para las importaciones', 'descripcion' => 'Id de la ubicación a la que se traslada lo que llega marcado para e-commerce. 0 = sin configurar.'],
         'compras.permitir_auto_aprobar' => ['grupo' => 'contable', 'tipo' => 'bool', 'valor' => false, 'etiqueta' => 'Permitir que quien crea una OC la apruebe', 'descripcion' => 'NO (recomendado) exige que la apruebe otra persona. Gerencia siempre puede.'],
         'contabilidad.permitir_auto_aprobar_asiento' => ['grupo' => 'contable', 'tipo' => 'bool', 'valor' => false, 'etiqueta' => 'Permitir que quien crea un asiento manual lo apruebe', 'descripcion' => 'NO (recomendado). El asiento aprobado viaja a SIIGO, que es la contabilidad oficial.'],
 

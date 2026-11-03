@@ -108,9 +108,9 @@ it('liquida importación prorrateando gastos por valor', function () {
         'tasa_cambio' => 4000,
         'items' => [
             ['producto_id' => $this->producto->id, 'variante_id' => $this->variante->id,
-             'descripcion' => 'Body', 'cantidad' => 100, 'precio_unit' => 1000, 'iva_pct' => 0],
+             'descripcion' => 'Body', 'cantidad' => 100, 'precio_unit' => 0.25, 'iva_pct' => 0],
             ['producto_id' => $prodB->id, 'variante_id' => $prodBVar->id,
-             'descripcion' => 'Chupón', 'cantidad' => 100, 'precio_unit' => 3000, 'iva_pct' => 0],
+             'descripcion' => 'Chupón', 'cantidad' => 100, 'precio_unit' => 0.75, 'iva_pct' => 0],
         ],
     ]);
     AprobarOrdenCompra::run($orden);
@@ -162,8 +162,7 @@ it('liquida importación prorrateando gastos por valor', function () {
         ->and($movs->firstWhere('cuenta_puc', '1355')->debe + 0)->toBe(500000.0)
         ->and((float) $movs->where('cuenta_puc', cta('cta_proveedores_default'))->sum('haber'))->toBe(2500000.0);
 
-    // Fix bug auditor #7: la importación DEBE haber entrado al kardex al liquidar.
-    expect((int) \App\Modules\Dropi\Models\InventarioMovimiento::where('tipo', 'entrada_importacion')
-        ->where('referencia_tipo', \App\Modules\Compras\Models\Importacion::class)
-        ->sum('cantidad'))->toBe(200);
+    // El stock sube cuando bodega acepta, no al liquidar: acá nadie ha recibido.
+    // (Ver RecepcionDeImportacionTest; antes entraba lo pedido sin que nadie lo contara.)
+    expect(\App\Modules\Dropi\Models\InventarioMovimiento::where('tipo', 'entrada_importacion')->count())->toBe(0);
 });

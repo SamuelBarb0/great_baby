@@ -540,19 +540,44 @@ class ComprasGestionController extends Controller implements HasMiddleware
                 'numero' => $o->numero,
                 'proveedor' => $o->proveedor?->razon_social ?: $o->proveedor?->nombre_completo,
                 'estado' => is_object($o->estado) ? $o->estado->value : $o->estado,
-                'fecha_esperada' => optional($o->fecha_esperada)->format('Y-m-d'),
-                'total' => (float) $o->total,
+                'fecha_esperada' => $this->llegadaEsperada($o),
+                'contenedor' => $this->contenedorDe($o)?->contenedor,
+                'total' => $this->totalEnPesos($o),
             ])->all();
+
+        // Jorge no recibe en la moneda del proveedor: en importación ve el valor
+        // en pesos, o el aviso de que falta la tasa antes de que intente confirmar.
+        $esImportacion = (bool) $oc?->esImportacion();
+        $costos = app(\App\Modules\Compras\Services\CostoImportacion::class);
+        $faltaTasa = null;
+        if ($esImportacion) {
+            try {
+                $costos->tasa($oc);
+            } catch (\InvalidArgumentException $e) {
+                $faltaTasa = $e->getMessage();
+            }
+        }
+        $principal = \App\Models\EmpresaConfig::current()->id;
+        if ($oc) {
+            $oc->loadMissing('items.empresaDestino:id,razon_social,nombre_comercial');
+        }
 
         return Inertia::render('Compras/Recepcion/Nueva', [
             'ocs_pendientes' => $ocsPendientes,
             'oc' => $oc ? [
                 'id' => $oc->id, 'numero' => $oc->numero,
                 'proveedor' => $oc->proveedor?->razon_social ?: $oc->proveedor?->nombre_completo,
+                'es_importacion' => $esImportacion,
+                'contenedor' => $this->contenedorDe($oc)?->contenedor,
+                'falta_tasa' => $faltaTasa,
                 'items' => $oc->items->map(fn ($i) => [
                     'id' => $i->id, 'descripcion' => $i->descripcion,
                     'cantidad_pendiente' => (float) $i->cantidad - (float) $i->cantidad_recibida,
-                    'precio_unit' => (float) $i->precio_unit,
+                    'precio_unit' => $esImportacion && ! $faltaTasa ? $costos->fobUnitario($i, $oc) : (float) $i->precio_unit,
+                    'cajas' => (int) $i->cajas,
+                    'unidades_por_caja' => (int) $i->unidades_por_caja,
+                    'destino' => $i->empresa_destino_id ? $i->empresaDestino?->nombreCorto() : null,
+                    'para_otra_empresa' => $i->empresa_destino_id && (int) $i->empresa_destino_id !== (int) $principal,
                 ])->filter(fn ($x) => $x['cantidad_pendiente'] > 0)->values(),
             ] : null,
         ]);
@@ -641,6 +666,7 @@ class ComprasGestionController extends Controller implements HasMiddleware
             }
         }
 
+        try {
         $rc = \Illuminate\Support\Facades\DB::transaction(function () use ($data, $orden, $itemsFusionados) {
             $rc = RecepcionCompra::create([
                 'numero' => RecepcionCompra::siguienteNumero(),
@@ -684,8 +710,41 @@ class ComprasGestionController extends Controller implements HasMiddleware
             // rollback total incluida la recepción recién creada.
             return RecibirMercancia::run($rc);
         });
+        } catch (\InvalidArgumentException $e) {
+            // Sin tasa de cambio o recibiendo de más: que lo lea quien está contando.
+            return back()->withErrors(['recepcion' => $e->getMessage()]);
+        }
 
         return redirect()->route('app.compras.recepcion.show', $rc->id)->with('success', "Recepción {$rc->numero} creada.");
+    }
+
+    /** Sin tasa todavía se muestra lo que hay: la pantalla de recibir avisa que falta. */
+    private function totalEnPesos(OrdenCompra $orden): float
+    {
+        if (! $orden->esImportacion()) {
+            return (float) $orden->total;
+        }
+
+        try {
+            return (float) $orden->total * app(\App\Modules\Compras\Services\CostoImportacion::class)->tasa($orden);
+        } catch (\InvalidArgumentException) {
+            return (float) $orden->total;
+        }
+    }
+
+    /** El contenedor en el que viaja una orden, si ya va en uno. */
+    private function contenedorDe(OrdenCompra $orden): ?Importacion
+    {
+        return Importacion::whereHas('ordenes', fn ($q) => $q->whereKey($orden->id))->first();
+    }
+
+    /** Para Jorge: la estimación del contenedor, y si no va en uno, la fecha de la orden. */
+    private function llegadaEsperada(OrdenCompra $orden): ?string
+    {
+        $contenedor = $this->contenedorDe($orden);
+        $estimada = $contenedor ? app(\App\Modules\Compras\Services\SeguimientoContenedor::class)->resumen($contenedor)['llegada_estimada'] : null;
+
+        return $estimada ?? optional($orden->fecha_esperada)->format('Y-m-d');
     }
 
     // ================== IMPORTACIÓN ==================
@@ -841,7 +900,8 @@ class ComprasGestionController extends Controller implements HasMiddleware
         // valor|cantidad|peso|volumen (antes HTTP aceptaba "fob" que caía al
         // default silenciosamente y rechazaba "peso" que Filament sí ofrece).
         $data = $r->validate([
-            'concepto' => ['required', 'string', 'max:50'],
+            // El modelo lo lee como enum: un concepto que no exista rompe la pantalla.
+            'concepto' => ['required', \Illuminate\Validation\Rule::enum(\App\Modules\Compras\Enums\ConceptoGastoImportacion::class)],
             'descripcion' => ['nullable', 'string', 'max:200'],
             'moneda' => ['required', 'string', 'size:3'],
             'monto' => ['required', 'numeric', 'min:0'],
@@ -855,6 +915,8 @@ class ComprasGestionController extends Controller implements HasMiddleware
             'comprobante' => ['nullable', 'file', 'max:20480', 'mimes:'.ImportacionDocumentosController::MIMES],
         ]);
         unset($data['comprobante']);
+        // El formulario la deja opcional y la columna no: en blanco daba un 500.
+        $data['descripcion'] = ($data['descripcion'] ?? null) ?: \App\Modules\Compras\Enums\ConceptoGastoImportacion::from($data['concepto'])->label();
         $imp = Importacion::findOrFail($importacion);
         abort_if(
             $imp->estado === EstadoImportacion::Liquidada,
@@ -867,7 +929,15 @@ class ComprasGestionController extends Controller implements HasMiddleware
         if ($data['moneda'] !== 'COP' && ((float) $imp->tasa_cambio_liquidacion) <= 0) {
             abort(422, "Falta definir la tasa de cambio de la importación (moneda={$data['moneda']}). Edítala y agrega TRM antes de agregar gastos en moneda extranjera.");
         }
-        $data['monto_base'] = $data['monto'] * (float) ($imp->tasa_cambio_liquidacion ?: 1);
+        // Un gasto en pesos ya está en pesos: multiplicarlo por la tasa convertía
+        // un flete de 5 millones en 2.600 millones. Y el contenedor sólo conoce la
+        // tasa de su moneda: un gasto en otra no tiene con qué convertirse.
+        if ($data['moneda'] !== 'COP' && $data['moneda'] !== $imp->moneda_origen) {
+            return back()->withErrors(['moneda' => "Este contenedor sólo tiene tasa de {$imp->moneda_origen}: registre el gasto en COP o en {$imp->moneda_origen}."]);
+        }
+        $data['monto_base'] = $data['moneda'] === 'COP'
+            ? (float) $data['monto']
+            : $data['monto'] * (float) $imp->tasa_cambio_liquidacion;
         $gasto = $imp->gastos()->create($data);
         if ($r->hasFile('comprobante')) {
             \App\Modules\Compras\Actions\GuardarDocumentoImportacion::run($imp, $r->file('comprobante'), 'comprobante_gasto', $gasto);

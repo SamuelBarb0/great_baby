@@ -162,3 +162,48 @@ it('el pago declarado coincide con el total de la orden con IVA', function () {
 
     expect((float) $p['payments'][0]['value'])->toEqual(285600.0);
 });
+
+it('una importación viaja a SIIGO en pesos, sin lo que no llegó', function () {
+    $oc = OrdenCompra::create([
+        'numero' => 'OC-IMP-1', 'proveedor_id' => $this->proveedor->id, 'bodega_id' => $this->bodega->id,
+        'tipo' => 'importacion', 'moneda' => 'CNY', 'tasa_cambio' => 520,
+        'estado' => 'aprobada', 'fecha_emision' => now()->toDateString(),
+        'subtotal' => 70, 'iva' => 0, 'total' => 70,
+        'creado_por' => User::factory()->create()->id,
+    ]);
+    $item = $oc->items()->create([
+        'producto_id' => $this->producto->id, 'descripcion' => 'Pijama algodón', 'cantidad' => 20,
+        'precio_unit' => 3.5, 'iva_pct' => 0, 'descuento_pct' => 0, 'subtotal' => 70, 'iva' => 0, 'total' => 70,
+    ]);
+    $rec = RecepcionCompra::create([
+        'numero' => 'REC-IMP-1', 'orden_id' => $oc->id, 'bodega_id' => $this->bodega->id,
+        'fecha_recepcion' => now()->toDateString(), 'estado' => 'borrador',
+    ]);
+    $rec->items()->create(['orden_item_id' => $item->id, 'producto_id' => $this->producto->id, 'cantidad_recibida' => 15, 'costo_unit' => 3.5, 'clasificacion' => 'apto']);
+    $rec->items()->create(['orden_item_id' => $item->id, 'producto_id' => $this->producto->id, 'cantidad_recibida' => 5, 'costo_unit' => 3.5, 'clasificacion' => 'faltante', 'motivo_clasificacion' => 'No venían']);
+    App\Modules\Compras\Actions\RecibirMercancia::run($rec);
+
+    Illuminate\Support\Facades\Http::fake([
+        '*/auth' => Illuminate\Support\Facades\Http::response(['access_token' => 'tok', 'expires_in' => 3600], 200),
+        '*/v1/purchases' => Illuminate\Support\Facades\Http::response(['id' => 'siigo-compra-1', 'number' => 1], 200),
+        '*' => Illuminate\Support\Facades\Http::response([], 200),
+    ]);
+    try {
+        app(App\Modules\Siigo\Services\SiigoEmisionService::class)->emitirCompra($rec->fresh());
+    } catch (\Throwable) {
+        // Lo que importa es el payload que salió.
+    }
+
+    $enviado = [];
+    Illuminate\Support\Facades\Http::assertSent(function ($req) use (&$enviado) {
+        if (str_contains($req->url(), '/v1/purchases')) {
+            $enviado = $req->data();
+        }
+
+        return true;
+    });
+
+    expect($enviado['items'])->toHaveCount(1)
+        ->and((float) $enviado['items'][0]['quantity'])->toBe(15.0)
+        ->and((float) $enviado['items'][0]['price'])->toBe(1820.0);
+});

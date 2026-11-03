@@ -282,7 +282,7 @@ const fmtMoneda = (monto, mon) => mon === 'COP'
                     <div>
                         <h3 class="text-lg font-bold mb-1">¿Liquidar importación?</h3>
                         <p class="text-sm text-surface-600 dark:text-surface-400 mb-3">
-                            Se prorratean <b>{{ importacion.gastos.length }}</b> gasto(s) capitalizables al costo unitario de <b>{{ importacion.lineas.length || 'las' }}</b> líneas, se ingresa el stock al kardex y se genera el asiento contable definitivo.
+                            Se prorratean <b>{{ importacion.gastos.length }}</b> gasto(s) capitalizables al costo unitario de <b>{{ importacion.lineas.length || 'las' }}</b> líneas, se corrige el costo de lo que ya recibió bodega y se genera el asiento contable definitivo. La cantidad no cambia: el stock entra cuando bodega acepta la mercancía.
                         </p>
                         <div class="text-xs bg-surface-50 dark:bg-surface-900/50 rounded p-2 mb-3 space-y-1">
                             <div class="flex justify-between"><span>FOB total:</span> <b>{{ money(importacion.total_fob) }}</b></div>
@@ -304,16 +304,19 @@ const fmtMoneda = (monto, mon) => mon === 'COP'
         <div v-if="modalGasto" @click.self="modalGasto = false" class="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
             <div class="card p-6 max-w-md w-full">
                 <h3 class="text-lg font-bold mb-3">Agregar gasto de importación</h3>
+                <div v-if="Object.keys($page.props.errors || {}).length" class="mb-3 p-2 rounded bg-red-50 dark:bg-red-950/40 border-l-4 border-red-500 text-red-700 dark:text-red-300 text-xs">
+                    <div v-for="(msg, k) in $page.props.errors" :key="k">{{ msg }}</div>
+                </div>
                 <div class="space-y-3">
                     <div class="grid grid-cols-2 gap-2">
                         <div><label class="text-xs font-semibold">Concepto</label>
                             <select v-model="gastoForm.concepto" class="input w-full">
                                 <option value="flete">Flete</option>
                                 <option value="seguro">Seguro</option>
-                                <option value="agencia">Agencia aduanera</option>
+                                <option value="agente_aduana">Agencia aduanera</option>
                                 <option value="arancel">Arancel</option>
                                 <option value="iva_importacion">IVA importación</option>
-                                <option value="bodegaje">Bodegaje</option>
+                                <option value="almacenaje">Bodegaje</option>
                                 <option value="transporte_interno">Transporte interno</option>
                                 <option value="otros">Otros</option>
                             </select>

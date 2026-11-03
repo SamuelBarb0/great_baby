@@ -546,7 +546,8 @@ class SiigoEmisionService
 
         // Items: reutiliza referencias de producto/variante del ERP.
         // SIIGO Purchases exige: type, code, quantity, price y taxes[] por item.
-        $items = $r->items->map(function ($i) use ($ivaTaxId) {
+        // Lo que no llegó no se compró.
+        $items = $r->items->reject(fn ($i) => $i->clasificacion === 'faltante')->values()->map(function ($i) use ($ivaTaxId, $r) {
             $ordenItem = $i->ordenItem;
             $producto = $ordenItem?->producto;
             $variante = $ordenItem?->variante;
@@ -558,7 +559,8 @@ class SiigoEmisionService
                 'code' => (string) $code,
                 'description' => (string) ($producto?->nombre ?? 'Ítem'),
                 'quantity' => (float) $i->cantidad_recibida,
-                'price' => (float) ($ordenItem?->precio_unit ?? 0),
+                // SIIGO recibe la compra en pesos: en importación, el costo ya convertido.
+                'price' => (float) ($r->orden->esImportacion() ? $i->costo_unit : ($ordenItem?->precio_unit ?? 0)),
                 'discount' => 0,
             ];
             /*
@@ -736,8 +738,8 @@ class SiigoEmisionService
             // el ítem, no el de barras a ciegas.
             $code = $this->codigoSiigoDe($variante, $producto, $producto?->nombre);
                 $cant = (float) $i->cantidad_recibida;
-                if ($cant <= 0) continue;
-                $precio = (float) ($ordenItem?->precio_unit ?? 0);
+                if ($cant <= 0 || $i->clasificacion === 'faltante') continue;
+                $precio = (float) ($r->orden->esImportacion() ? $i->costo_unit : ($ordenItem?->precio_unit ?? 0));
                 $line = [
                     'type' => 'Product',
                     'code' => (string) $code,

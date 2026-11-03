@@ -25,6 +25,9 @@ class SeguimientoContenedor
     /** Cada cuántos días se repite el aviso de un contenedor que sigue atrasado. */
     public const REPETIR_AVISO_CADA = 3;
 
+    /** Con cuántos días de anticipación se le avisa a quien recibe. */
+    public const AVISAR_LLEGADA_ANTES = 3;
+
     /** @var array<string, array{promedio: float, muestras: int}>|null */
     private ?array $promedios = null;
 
@@ -55,10 +58,13 @@ class SeguimientoContenedor
                 throw new InvalidArgumentException("La orden {$orden->numero} está en {$orden->moneda} y este contenedor en {$imp->moneda_origen}.");
             }
         } else {
-            $imp->moneda_origen = $orden->moneda;
-            if ((float) $imp->tasa_cambio_liquidacion <= 0 && (float) $orden->tasa_cambio > 0) {
+            // La tasa va con su moneda. El formulario de contenedor propone USD a
+            // 4.000: si la orden es en RMB y esa tasa se quedara, cada yuan
+            // valdría 4.000 pesos.
+            if ($imp->moneda_origen !== $orden->moneda || (float) $imp->tasa_cambio_liquidacion <= 0) {
                 $imp->tasa_cambio_liquidacion = $orden->tasa_cambio;
             }
+            $imp->moneda_origen = $orden->moneda;
             $imp->save();
         }
 
@@ -261,6 +267,8 @@ class SeguimientoContenedor
                 'proveedor' => $o->proveedor?->nombre_completo,
                 'moneda' => $o->moneda,
                 'subtotal' => (float) $o->subtotal,
+                'cantidad' => (float) $o->items->sum('cantidad'),
+                'recibido' => (float) $o->items->sum('cantidad_recibida'),
                 'cajas' => (int) $o->items->sum('cajas'),
                 'volumen_m3' => (float) $o->pivot->volumen_m3,
                 'peso_kg' => (float) $o->pivot->peso_kg,
@@ -295,6 +303,73 @@ class SeguimientoContenedor
                 'registrado_por' => $i->autor?->name,
             ])->values()->all(),
         ];
+    }
+
+    /** Si Jorge ya recibió, el contenedor llegó: nadie debería marcarlo dos veces. */
+    public function llegoABodega(OrdenCompra $orden): void
+    {
+        $imp = Importacion::whereHas('ordenes', fn ($q) => $q->whereKey($orden->id))->first();
+        if (! $imp || ImportacionEtapa::where('importacion_id', $imp->id)->where('etapa', EtapaContenedor::EnBodega->value)->exists()) {
+            return;
+        }
+
+        try {
+            $this->marcarEtapa($imp, EtapaContenedor::EnBodega, $this->hoy(), 'Recibido en bodega.', auth()->id());
+        } catch (InvalidArgumentException) {
+            // Faltan declaraciones sin levante: la recepción vale igual, y que el
+            // contenedor siga abierto es justo lo que debe ver Liz.
+        }
+    }
+
+    /**
+     * Le avisa a quien recibe el día, las cajas y el peso, una sola vez por
+     * contenedor, para que prepare personal y espacio.
+     *
+     * @return int cuántos contenedores se avisaron
+     */
+    public function avisarLlegadas(): int
+    {
+        $abiertos = Importacion::query()
+            ->whereNotIn('estado', [EstadoImportacion::Cerrada->value])
+            ->whereNull('aviso_llegada_en')
+            ->whereHas('etapas')
+            ->whereDoesntHave('etapas', fn ($q) => $q->where('etapa', EtapaContenedor::EnBodega->value))
+            ->with(['etapas', 'ordenes.items'])
+            ->get();
+
+        $avisados = 0;
+        $usuarios = null;
+
+        foreach ($abiertos as $imp) {
+            $llegada = $this->resumen($imp)['llegada_estimada'];
+            $enCamino = $imp->etapas->first(fn ($f) => $f->etapa === EtapaContenedor::CaminoBodega);
+            $cerca = $llegada && Carbon::parse($llegada)->lte($this->hoy()->addDays(self::AVISAR_LLEGADA_ANTES));
+            if (! $enCamino && ! $cerca) {
+                continue;
+            }
+
+            $items = $imp->ordenes->flatMap->items;
+            $cajas = (int) $items->sum('cajas');
+            $kilos = (float) $imp->ordenes->sum(fn ($o) => (float) $o->pivot->peso_kg);
+            $metros = (float) $imp->ordenes->sum(fn ($o) => (float) $o->pivot->volumen_m3);
+            // La franja horaria no se puede calcular: la escribe Liz en la nota de la etapa.
+            $nota = $enCamino?->notas ? " {$enCamino->notas}" : '';
+
+            $usuarios ??= User::query()->get()->filter(fn (User $u) => Permisos::puede($u, 'compras_recepcion'))->values();
+            $this->notificar(
+                $usuarios,
+                $imp,
+                'contenedor_por_llegar',
+                "Contenedor {$this->nombre($imp)} llega alrededor del ".($llegada ? Carbon::parse($llegada)->format('d/m') : 'próximo día'),
+                sprintf('%s cajas, %s kg, %s m³.%s', number_format($cajas, 0, ',', '.'), number_format($kilos, 0, ',', '.'), number_format($metros, 1, ',', '.'), $nota),
+            );
+
+            $imp->aviso_llegada_en = $this->hoy();
+            $imp->saveQuietly();
+            $avisados++;
+        }
+
+        return $avisados;
     }
 
     /**

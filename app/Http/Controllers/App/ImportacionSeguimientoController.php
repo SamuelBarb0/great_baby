@@ -10,6 +10,7 @@ use App\Modules\Compras\Models\Importacion;
 use App\Modules\Compras\Models\ImportacionDeclaracion;
 use App\Modules\Compras\Models\ImportacionInspeccion;
 use App\Modules\Compras\Models\OrdenCompra;
+use App\Modules\Compras\Models\RecepcionCompra;
 use App\Modules\Compras\Services\SeguimientoContenedor;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -43,6 +44,13 @@ class ImportacionSeguimientoController extends Controller implements HasMiddlewa
     {
         if (in_array($importacion->estado, [EstadoImportacion::Liquidada, EstadoImportacion::Cerrada], true)) {
             return back()->with('error', 'El contenedor ya está liquidado: sus datos no se pueden cambiar.');
+        }
+
+        // Lo recibido ya está en el libro a esa tasa: cambiarla descuadraría el 1465.
+        if ($r->filled('tasa_cambio_liquidacion')
+            && (float) $r->input('tasa_cambio_liquidacion') !== (float) $importacion->tasa_cambio_liquidacion
+            && RecepcionCompra::where('estado', 'confirmada')->whereIn('orden_id', $importacion->ordenes()->pluck('compras_ordenes.id'))->exists()) {
+            return back()->with('error', 'Ya hay mercancía recibida con esta tasa de cambio: no se puede cambiar.');
         }
 
         $importacion->update($r->validate([

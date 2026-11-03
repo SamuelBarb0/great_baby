@@ -180,6 +180,7 @@ watch(() => props.importacion.id, () => { etapaAbierta.value = null; });
                             <th class="text-right p-2">m³</th>
                             <th class="text-right p-2">Peso kg</th>
                             <th class="text-right p-2">Valor</th>
+                            <th class="text-left p-2">Recibido</th>
                             <th class="text-left p-2">Destino</th>
                             <th v-if="puedeEditar && !cerrado" class="p-2"><span class="sr-only">Acciones</span></th>
                         </tr>
@@ -192,6 +193,10 @@ watch(() => props.importacion.id, () => { etapaAbierta.value = null; });
                             <td class="p-2 text-right">{{ fmt(o.volumen_m3) }}</td>
                             <td class="p-2 text-right">{{ fmt(o.peso_kg) }}</td>
                             <td class="p-2 text-right">{{ fmt(o.subtotal) }} {{ o.moneda }}</td>
+                            <td class="p-2 text-xs">
+                                {{ fmt(o.recibido, 0) }} de {{ fmt(o.cantidad, 0) }}
+                                <a v-if="o.recibido < o.cantidad" :href="`/app/compras/recepcion/nueva?oc=${o.id}`" class="block text-brand-600 hover:underline">Recibir</a>
+                            </td>
                             <td class="p-2 text-xs"><div v-for="d in o.destinos" :key="d.nombre">{{ d.nombre }}: {{ fmt(d.cajas, 0) }} cajas</div></td>
                             <td v-if="puedeEditar && !cerrado" class="p-2 text-right">
                                 <button @click="soltarOrden(o)" class="text-red-600 hover:text-red-700" :aria-label="`Quitar la orden ${o.numero}`"><Trash2 class="h-3.5 w-3.5"/></button>

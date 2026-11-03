@@ -81,6 +81,27 @@ it('liga la orden con su volumen y su peso, y el contenedor toma la moneda y la 
         ->and((float) $imp->tasa_cambio_liquidacion)->toBe(520.0);
 });
 
+it('la tasa del contenedor va con la moneda de la orden, no con la que traía el formulario', function () {
+    // El formulario de contenedor propone USD a 4.000.
+    $this->imp->update(['moneda_origen' => 'USD', 'tasa_cambio_liquidacion' => 4000]);
+    $orden = ($this->orden)();
+
+    $this->actingAs($this->liz)->post("{$this->url}/orden", ['orden_id' => $orden->id])->assertSessionHas('success');
+
+    $imp = $this->imp->fresh();
+    expect($imp->moneda_origen)->toBe('CNY')
+        ->and((float) $imp->tasa_cambio_liquidacion)->toBe(520.0);
+});
+
+it('si la moneda coincide, se respeta la tasa que ya tenía el contenedor', function () {
+    $this->imp->update(['moneda_origen' => 'CNY', 'tasa_cambio_liquidacion' => 530]);
+    $orden = ($this->orden)();
+
+    $this->actingAs($this->liz)->post("{$this->url}/orden", ['orden_id' => $orden->id])->assertSessionHas('success');
+
+    expect((float) $this->imp->fresh()->tasa_cambio_liquidacion)->toBe(530.0);
+});
+
 it('un contenedor ligado por la pantalla ya se puede liquidar', function () {
     $orden = ($this->orden)();
     $this->actingAs($this->liz)->post("{$this->url}/orden", ['orden_id' => $orden->id]);

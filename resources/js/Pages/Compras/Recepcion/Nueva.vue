@@ -1,5 +1,5 @@
 <script setup>
-import { reactive, ref, computed } from 'vue';
+import { reactive, ref, computed, watch } from 'vue';
 import { Head, Link, router } from '@inertiajs/vue3';
 import { Truck, Save, ArrowLeft, AlertTriangle } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
@@ -27,6 +27,10 @@ const form = reactive({
         cantidad_pendiente: i.cantidad_pendiente,
         cantidad_recibida: i.cantidad_pendiente,
         precio_unit: i.precio_unit,
+        cajas: i.cajas,
+        unidades_por_caja: i.unidades_por_caja,
+        destino: i.destino,
+        para_otra_empresa: i.para_otra_empresa,
         lote: '',
         // LOG-J8 · clasificación por línea · default apto para no romper el flujo
         //   actual, pero el logístico puede cambiarlo al descargar.
@@ -35,6 +39,31 @@ const form = reactive({
     })) ?? [],
 });
 const procesando = ref(false);
+
+// Descargar un contenedor toma horas: si se cierra la página, no se pierde lo contado.
+const claveConteo = props.oc ? `conteo-oc-${props.oc.id}` : null;
+const hayConteoGuardado = ref(false);
+if (claveConteo) {
+    try {
+        const guardado = JSON.parse(localStorage.getItem(claveConteo) || 'null');
+        if (guardado) {
+            for (const it of form.items) {
+                const g = guardado[it.orden_item_id];
+                if (g && Number(g.cantidad_recibida) <= it.cantidad_pendiente) Object.assign(it, g);
+            }
+            hayConteoGuardado.value = true;
+        }
+    } catch { /* sin almacenamiento local: el conteo sigue funcionando, sólo no se recuerda */ }
+    watch(() => form.items, (items) => {
+        try {
+            localStorage.setItem(claveConteo, JSON.stringify(Object.fromEntries(items.map(i => [i.orden_item_id, {
+                cantidad_recibida: i.cantidad_recibida, lote: i.lote, clasificacion: i.clasificacion, motivo_clasificacion: i.motivo_clasificacion,
+            }]))));
+        } catch { /* ídem */ }
+    }, { deep: true });
+}
+
+const cajasOtraEmpresa = computed(() => form.items.filter(i => i.para_otra_empresa));
 
 // Re-audit M2 UX-A7 · clamp reactivo — antes `:max` era solo hint HTML, el
 // usuario podía escribir 30 sobre pendiente 20 y romper el saldo.
@@ -67,6 +96,7 @@ const guardar = () => {
         })),
     }, {
         preserveScroll: true,
+        onSuccess: () => { try { localStorage.removeItem(claveConteo); } catch { /* ídem */ } },
         onFinish: () => procesando.value = false,
     });
 };
@@ -109,6 +139,7 @@ const guardar = () => {
                         <tr>
                             <th class="p-3 text-left">Orden</th>
                             <th class="p-3 text-left">Proveedor</th>
+                            <th class="p-3 text-left">Contenedor</th>
                             <th class="p-3 text-left">Estado</th>
                             <th class="p-3 text-left">Se esperaba</th>
                             <th class="p-3 text-right">Total</th>
@@ -119,6 +150,7 @@ const guardar = () => {
                         <tr v-for="o in ocsPendientes" :key="o.id" class="hover:bg-brand-50/40 dark:hover:bg-brand-950/20">
                             <td class="p-3 font-mono text-xs font-bold">{{ o.numero }}</td>
                             <td class="p-3">{{ o.proveedor || '—' }}</td>
+                            <td class="p-3 font-mono text-xs">{{ o.contenedor || '—' }}</td>
                             <td class="p-3 text-xs">{{ o.estado }}</td>
                             <td class="p-3 text-xs">{{ o.fecha_esperada || '—' }}</td>
                             <td class="p-3 text-right">{{ money(o.total) }}</td>
@@ -138,6 +170,16 @@ const guardar = () => {
                     <div class="text-xs uppercase font-bold text-brand-600 mb-1">OC de origen</div>
                     <div class="font-mono font-bold">{{ oc.numero }}</div>
                     <div class="text-sm text-surface-500">{{ oc.proveedor }}</div>
+                    <div v-if="oc.contenedor" class="text-sm text-surface-500">Contenedor <span class="font-mono">{{ oc.contenedor }}</span></div>
+                    <p v-if="oc.es_importacion" class="text-sm mt-2">Cuente producto por producto y corrija lo que llegó distinto. <b>Nada sube al inventario hasta que confirme.</b></p>
+                    <p v-if="hayConteoGuardado" class="text-xs text-surface-500 mt-1">Se recuperó su conteo anterior.</p>
+                </div>
+
+                <div v-if="oc.falta_tasa" class="p-3 rounded-lg bg-red-50 dark:bg-red-950/40 border-l-4 border-red-500 text-red-700 dark:text-red-300 text-sm">{{ oc.falta_tasa }}</div>
+
+                <div v-if="cajasOtraEmpresa.length" class="p-3 rounded-lg bg-sky-50 dark:bg-sky-950/40 border-l-4 border-sky-500 text-sky-800 dark:text-sky-200 text-sm">
+                    <b>Para separar:</b>
+                    <div v-for="i in cajasOtraEmpresa" :key="i.orden_item_id">{{ i.cajas }} cajas de {{ i.descripcion }} son para {{ i.destino }}.</div>
                 </div>
 
                 <div class="card p-4 grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -166,7 +208,10 @@ const guardar = () => {
                             <tbody class="divide-y divide-surface-100 dark:divide-surface-800">
                                 <tr v-for="(it, i) in form.items" :key="i"
                                     :class="it.clasificacion !== 'apto' ? 'bg-amber-50/40 dark:bg-amber-950/20' : ''">
-                                    <td class="p-2" :title="it.descripcion">{{ it.descripcion }}</td>
+                                    <td class="p-2" :title="it.descripcion">
+                                        {{ it.descripcion }}
+                                        <span v-if="it.cajas" class="block text-xs text-surface-500">{{ it.cajas }} cajas de {{ it.unidades_por_caja }}<template v-if="it.destino"> · {{ it.destino }}</template></span>
+                                    </td>
                                     <td class="p-2 text-right font-mono">{{ it.cantidad_pendiente }}</td>
                                     <td class="p-2">
                                         <input type="number" step="0.001" min="0" :max="it.cantidad_pendiente"
@@ -211,8 +256,8 @@ const guardar = () => {
                 </div>
 
                 <div class="flex justify-end">
-                    <button @click="guardar" :disabled="procesando || itemsAConfirmar.length === 0" class="btn-primary disabled:opacity-50">
-                        <Save class="h-4 w-4"/> {{ procesando ? 'Guardando…' : 'Confirmar recepción' }}
+                    <button @click="guardar" :disabled="procesando || itemsAConfirmar.length === 0 || !!oc.falta_tasa" class="btn-primary disabled:opacity-50">
+                        <Save class="h-4 w-4"/> {{ procesando ? 'Guardando…' : (oc.es_importacion ? 'Aceptar y subir al inventario' : 'Confirmar recepción') }}
                     </button>
                 </div>
             </div>

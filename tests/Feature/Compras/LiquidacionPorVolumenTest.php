@@ -42,8 +42,8 @@ it('reparte el gasto por los m³ de cada ítem: cajas × CBM de la caja', functi
         'proveedor_id' => $this->proveedor->id, 'bodega_id' => $this->bodega->id,
         'tipo' => 'importacion', 'moneda' => 'USD', 'tasa_cambio' => 4000,
         'items' => [
-            ($this->nuevoItem)('PEQ', ['cantidad' => 100, 'cajas' => 10, 'unidades_por_caja' => 10, 'cbm_caja' => 0.5, 'precio_unit' => 1000]),
-            ($this->nuevoItem)('GRA', ['cantidad' => 100, 'cajas' => 25, 'unidades_por_caja' => 4, 'cbm_caja' => 0.6, 'precio_unit' => 1000]),
+            ($this->nuevoItem)('PEQ', ['cantidad' => 100, 'cajas' => 10, 'unidades_por_caja' => 10, 'cbm_caja' => 0.5, 'precio_unit' => 0.25]),
+            ($this->nuevoItem)('GRA', ['cantidad' => 100, 'cajas' => 25, 'unidades_por_caja' => 4, 'cbm_caja' => 0.6, 'precio_unit' => 0.25]),
         ],
     ]);
     AprobarOrdenCompra::run($orden);
@@ -75,8 +75,8 @@ it('una orden vieja sin cajas reparte el m³ de la orden por valor entre sus ít
         'proveedor_id' => $this->proveedor->id, 'bodega_id' => $this->bodega->id,
         'tipo' => 'importacion', 'moneda' => 'USD', 'tasa_cambio' => 4000,
         'items' => [
-            ($this->nuevoItem)('VIEJO-A', ['cantidad' => 100, 'precio_unit' => 1000]),
-            ($this->nuevoItem)('VIEJO-B', ['cantidad' => 100, 'precio_unit' => 3000]),
+            ($this->nuevoItem)('VIEJO-A', ['cantidad' => 100, 'precio_unit' => 0.25]),
+            ($this->nuevoItem)('VIEJO-B', ['cantidad' => 100, 'precio_unit' => 0.75]),
         ],
     ]);
     AprobarOrdenCompra::run($orden);

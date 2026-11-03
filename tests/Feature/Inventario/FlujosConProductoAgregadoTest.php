@@ -188,7 +188,7 @@ it('la liquidación de importación ingresa al kardex un producto agregado', fun
         'bodega_id' => $this->destino->id,
         'estado' => 'aprobada',
         'fecha_emision' => now()->toDateString(),
-        'es_importacion' => true,
+        'tipo' => 'importacion',
     ]);
 
     App\Modules\Compras\Models\OrdenCompraItem::create([
@@ -220,6 +220,17 @@ it('la liquidación de importación ingresa al kardex un producto agregado', fun
         'metodo_prorrateo' => 'valor',
         'fecha' => now()->toDateString(),
     ]);
+
+    // El stock entra cuando bodega lo acepta; liquidar sólo le corrige el costo.
+    $recepcion = App\Modules\Compras\Models\RecepcionCompra::create([
+        'numero' => 'REC-AGR-001', 'orden_id' => $orden->id, 'bodega_id' => $this->destino->id,
+        'estado' => 'borrador', 'fecha_recepcion' => now(),
+    ]);
+    $recepcion->items()->create([
+        'orden_item_id' => $orden->items()->first()->id, 'producto_id' => $this->producto->id,
+        'cantidad_recibida' => 30, 'costo_unit' => 8000, 'clasificacion' => 'apto',
+    ]);
+    App\Modules\Compras\Actions\RecibirMercancia::run($recepcion);
 
     app(App\Modules\Compras\Actions\LiquidarImportacion::class)->handle($imp->fresh());
 
