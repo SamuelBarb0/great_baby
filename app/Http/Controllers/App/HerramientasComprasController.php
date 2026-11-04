@@ -33,7 +33,8 @@ class HerramientasComprasController extends Controller
         abort_unless(Permisos::puede($r->user(), 'compras_reportes'), 403, 'Esta parte de Compras necesita su propio acceso.');
 
         $dias = in_array((int) $r->query('dias'), [30, 60, 90, 180, 365], true) ? (int) $r->query('dias') : 90;
-        $objetivo = max(15, min(365, (int) ($r->query('objetivo') ?: 120)));
+        // Alejandro: cubierto a tres meses, máximo.
+        $objetivo = max(15, min(365, (int) ($r->query('objetivo') ?: 90)));
         $q = trim((string) $r->query('q', ''));
         $filas = $sugerido->handle($dias, $objetivo, $q);
 
@@ -42,6 +43,18 @@ class HerramientasComprasController extends Controller
             'resumen' => $sugerido->resumen($filas),
             'filtros' => ['dias' => $dias, 'objetivo' => $objetivo, 'q' => $q],
         ]);
+    }
+
+    /** Producto de línea: siempre debe haber, aunque rote despacio. */
+    public function deLinea(Request $r, \App\Modules\Dropi\Models\Producto $producto): RedirectResponse
+    {
+        abort_unless(Permisos::puede($r->user(), 'compras_reportes'), 403, 'Esta parte de Compras necesita su propio acceso.');
+
+        $data = $r->validate(['de_linea' => ['required', 'boolean']]);
+        // Sin eventos: es un dato de Compras y no le interesa a SIIGO ni al kardex.
+        \App\Modules\Dropi\Models\Producto::whereKey($producto->id)->update(['es_de_linea' => $data['de_linea']]);
+
+        return back()->with('success', $data['de_linea'] ? "{$producto->referencia} quedó como producto de línea." : "{$producto->referencia} ya no es de línea.");
     }
 
     /** Lleva precios de proveedor. */

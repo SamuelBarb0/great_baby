@@ -281,6 +281,7 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     Route::delete('/compras/importacion/documento/{documento}', [\App\Http\Controllers\App\ImportacionDocumentosController::class, 'eliminar'])->name('app.compras.importacion.documento.quitar');
     // Lo que Alejandro hace en Excel: sugerido, archivo para China, etiquetas y lista de empaque.
     Route::get('/compras/sugerido', [\App\Http\Controllers\App\HerramientasComprasController::class, 'sugerido'])->middleware('throttle:60,1')->name('app.compras.sugerido');
+    Route::post('/compras/sugerido/{producto}/de-linea', [\App\Http\Controllers\App\HerramientasComprasController::class, 'deLinea'])->middleware('throttle:60,1')->name('app.compras.sugerido.de-linea');
     Route::get('/compras/orden/{orden}/excel', [\App\Http\Controllers\App\HerramientasComprasController::class, 'excel'])->middleware('throttle:20,1')->name('app.compras.orden.excel');
     Route::get('/compras/orden/{orden}/etiquetas', [\App\Http\Controllers\App\HerramientasComprasController::class, 'etiquetasPdf'])->middleware('throttle:20,1')->name('app.compras.orden.etiquetas');
     Route::post('/catalogo/producto/{producto}/etiqueta', [\App\Http\Controllers\App\HerramientasComprasController::class, 'subirEtiqueta'])->middleware('throttle:30,1')->name('app.catalogo.etiqueta');
