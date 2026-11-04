@@ -87,6 +87,10 @@ class GastosController extends Controller implements HasMiddleware
             // Quien puede aprobar o rechazar · distinto de quien puede pagar.
             'puedeAprobar' => $puedeAprobar,
             'cuentaPorDefecto' => (string) setting('contable.cta_gasto_default'),
+            // El listado de tipos de gasto sale de las reglas, con su cuenta:
+            // la pantalla ya no lo lleva escrito adentro.
+            'catalogoGastos' => collect(self::catalogoGastos())
+                ->map(fn ($t, $clave) => ['valor' => $clave] + $t)->values(),
             // De qué caja puede salir la plata, para los que se pagan en
             // efectivo. Sin esto el gasto no aterriza en ningún arqueo.
             'cajas' => \App\Modules\Contabilidad\Models\Caja::activas()
@@ -127,11 +131,67 @@ class GastosController extends Controller implements HasMiddleware
             'numero' => $numero,
             'solicita_id' => auth()->id(),
             'estado' => 'pendiente',
+            'cuenta_puc' => self::cuentaDeCategoria($data['categoria']),
             'destino_fiscal' => $sinFactura ? DestinoFiscal::Interno : DestinoFiscal::Siigo,
             'motivo_destino' => $sinFactura ? 'Sin factura del proveedor' : null,
             'linea_negocio' => LineaNegocio::GreatBaby,
         ]);
         return back()->with('success', "Solicitud {$numero} creada.");
+    }
+
+    /**
+     * Los tipos de gasto y la cuenta de cada uno.
+     *
+     * Great Baby mando la lista el 2026-11-03: cada concepto con su cuenta
+     * del PUC. Hasta ahora la categoria era una etiqueta suelta y la cuenta
+     * se escribia a mano gasto por gasto, asi que dos papelerias podian ir a
+     * parar a dos cuentas distintas y el informe por cuenta no servia.
+     *
+     * Se lee de las reglas y no de una constante para que el contador pueda
+     * cambiar una cuenta sin que nadie toque codigo.
+     *
+     * @return array<string,array{etiqueta:string,cuenta:string}>
+     */
+    public static function catalogoGastos(): array
+    {
+        $tipos = [
+            'aseo_cafeteria' => 'Aseo y cafetería',
+            'papeleria' => 'Papelería',
+            'arriendo' => 'Arriendo',
+            'envios' => 'Envíos y fletes',
+            'honorarios' => 'Honorarios',
+            'publicidad' => 'Publicidad',
+            'servicio_acueducto' => 'Servicio · acueducto',
+            'servicio_energia' => 'Servicio · energía',
+            'servicio_internet' => 'Servicio · internet',
+            'servicio_celular' => 'Servicio · celular',
+            'servicio_gas' => 'Servicio · gas',
+        ];
+
+        $catalogo = [];
+        foreach ($tipos as $clave => $etiqueta) {
+            $catalogo[$clave] = [
+                'etiqueta' => $etiqueta,
+                'cuenta' => (string) setting('gastos.cta_'.$clave),
+            ];
+        }
+
+        // El cajon de sastre va al final y usa la cuenta de gasto generica.
+        $catalogo['otros'] = [
+            'etiqueta' => 'Otros',
+            'cuenta' => (string) setting('contable.cta_gasto_default'),
+        ];
+
+        return $catalogo;
+    }
+
+    /** La cuenta que le toca a una categoria, o la generica si no la conoce. */
+    private static function cuentaDeCategoria(string $categoria): ?string
+    {
+        $catalogo = self::catalogoGastos();
+
+        return $catalogo[$categoria]['cuenta']
+            ?? ((string) setting('contable.cta_gasto_default') ?: null);
     }
 
     public function aprobar(Request $r, int $gasto): RedirectResponse

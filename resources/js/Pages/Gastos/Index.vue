@@ -1,5 +1,5 @@
 <script setup>
-import { ref, reactive } from 'vue';
+import { ref, reactive, computed } from 'vue';
 import { useBogotaDate } from '@/composables/useBogotaDate';
 import { Head, router } from '@inertiajs/vue3';
 import { Receipt, Plus, CheckCircle, XCircle, CreditCard, BookOpen } from 'lucide-vue-next';
@@ -24,6 +24,8 @@ const props = defineProps({
     // Contador recibia un 403 al apretar el verde.
     puedeAprobar: { type: Boolean, default: false },
     cuentaPorDefecto: { type: String, default: '5195' },
+    // Tipos de gasto con su cuenta · salen de Reglas de negocio.
+    catalogoGastos: { type: Array, default: () => [] },
     destinos: { type: Array, default: () => [] },
     lineas: { type: Array, default: () => [] },
     cajas: { type: Array, default: () => [] },
@@ -72,6 +74,18 @@ const form = reactive({
     categoria: 'papeleria', descripcion: '', monto: 0, proveedor: '', factura_ref: '',
     metodo_pago: 'transferencia', tipo: 'gasto', notas: '',
 });
+
+/*
+ * La cuenta ya no la teclea nadie: la decide la categoría.
+ *
+ * Se muestra debajo del selector para que quien registra el gasto vea a qué
+ * cuenta va a parar antes de guardar. Antes la categoría era una etiqueta y
+ * la cuenta se escribía aparte, así que dos papelerías podían terminar en
+ * dos cuentas distintas y el informe por cuenta no servía para nada.
+ */
+const cuentaDeLaCategoria = computed(
+    () => props.catalogoGastos.find((t) => t.valor === form.categoria)?.cuenta || '',
+);
 const modalRech = ref(null);
 const motivoRech = ref('');
 const procesando = ref(false);
@@ -247,15 +261,18 @@ const badge = (e) => ({ pendiente: 'bg-amber-100 text-amber-800', aprobado: 'bg-
                         </div>
                         <div><label class="text-xs font-semibold">Categoría</label>
                             <select v-model="form.categoria" class="input w-full">
-                                <option value="servicios_publicos">Servicios públicos</option>
-                                <option value="arriendo">Arriendo</option>
-                                <option value="transporte">Transporte</option>
-                                <option value="viaticos">Viáticos</option>
-                                <option value="papeleria">Papelería</option>
-                                <option value="publicidad">Publicidad</option>
-                                <option value="mantenimiento">Mantenimiento</option>
-                                <option value="otros">Otros</option>
+                                <option v-for="t in catalogoGastos" :key="t.valor" :value="t.valor">
+                                    {{ t.etiqueta }}
+                                </option>
                             </select>
+                            <!--
+                                La cuenta ya no se escribe a mano: la trae la
+                                categoría. Se muestra para que quien registra
+                                el gasto vea a dónde va a parar.
+                            -->
+                            <p v-if="cuentaDeLaCategoria" class="text-[11px] text-surface-500 mt-1">
+                                Va a la cuenta <b class="font-mono">{{ cuentaDeLaCategoria }}</b>
+                            </p>
                         </div>
                         <div><label class="text-xs font-semibold">Método pago</label>
                             <select v-model="form.metodo_pago" class="input w-full">

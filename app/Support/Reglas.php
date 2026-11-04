@@ -83,6 +83,31 @@ class Reglas
         // para que el gasto ENTRE al libro, y despues se reclasifica. Antes de
         // esto el gasto no entraba a ningun lado.
         'contable.cta_gasto_default' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '5195', 'etiqueta' => 'Cuenta de gasto por defecto', 'descripcion' => 'PUC Great Baby · 5195 Diversos. Se usa cuando el gasto no trae cuenta propia.'],
+
+        /*
+         * La cuenta de cada tipo de gasto.
+         *
+         * Las mando Great Baby el 2026-11-03, respondiendo el cuestionario de
+         * insumos: cada concepto con su cuenta del PUC. Hasta ahora la
+         * categoria del gasto era una etiqueta suelta y la cuenta se escribia
+         * a mano en cada gasto, asi que dos papelerias podian terminar en dos
+         * cuentas distintas.
+         *
+         * Viven aca y no escritas en el codigo porque el contador las va a
+         * querer mover, y porque el listado de la pantalla de gastos sale de
+         * estas mismas claves: agregar un tipo es agregar una regla.
+         */
+        'gastos.cta_aseo_cafeteria' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '51952501', 'etiqueta' => 'Gasto · Aseo y cafetería', 'descripcion' => 'PUC 51952501 · Elementos de aseo y cafetería.'],
+        'gastos.cta_papeleria' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '51953001', 'etiqueta' => 'Gasto · Papelería', 'descripcion' => 'PUC 51953001 · Útiles de papelería y fotocopias.'],
+        'gastos.cta_arriendo' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '51201001', 'etiqueta' => 'Gasto · Arriendo', 'descripcion' => 'PUC 51201001 · Arrendamientos de construcciones y edificaciones. Es un SERVICIO: su IVA va a la 24081501, no a la de compras.'],
+        'gastos.cta_envios' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '51355001', 'etiqueta' => 'Gasto · Envíos y fletes', 'descripcion' => 'PUC 51355001 · Transporte, fletes y acarreos.'],
+        'gastos.cta_honorarios' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '51101001', 'etiqueta' => 'Gasto · Honorarios', 'descripcion' => 'PUC 51101001 · Honorarios de asesoría contable, que es la hoja que trae el PUC. Si el honorario es jurídico va a la 51102501 y si es técnico a la 51103501. Ojo con la retención: tiene tarifa propia, distinta a compras generales.'],
+        'gastos.cta_publicidad' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '52356004', 'etiqueta' => 'Gasto · Publicidad', 'descripcion' => 'PUC 52356004 · Marketing corporativo. Es gasto de VENTAS (clase 52), no de administración.'],
+        'gastos.cta_servicio_acueducto' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '51352501', 'etiqueta' => 'Gasto · Servicio · acueducto', 'descripcion' => 'PUC 51352501 · Servicios públicos · acueducto y alcantarillado.'],
+        'gastos.cta_servicio_energia' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '51353001', 'etiqueta' => 'Gasto · Servicio · energía', 'descripcion' => 'PUC 51353001 · Servicios públicos · energía eléctrica.'],
+        'gastos.cta_servicio_internet' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '51353501', 'etiqueta' => 'Gasto · Servicio · internet', 'descripcion' => 'PUC 51353501. El grupo se llama «Teléfono», pero la hoja del PUC de Great Baby es INTERNET: el teléfono fijo no tiene cuenta propia.'],
+        'gastos.cta_servicio_celular' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '51353502', 'etiqueta' => 'Gasto · Servicio · celular', 'descripcion' => 'PUC 51353502 · Servicios públicos · celular.'],
+        'gastos.cta_servicio_gas' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '51355501', 'etiqueta' => 'Gasto · Servicio · gas', 'descripcion' => 'PUC 51355501 · Servicios públicos · gas.'],
         // La contrapartida de un gasto causado y todavia no pagado.
         /*
          * Las cuentas de la nómina.
