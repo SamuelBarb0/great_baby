@@ -39,6 +39,26 @@ class PagosProveedorController extends Controller implements HasMiddleware
 
         return Inertia::render('Cartera/PagosProveedor', [
             'filtros' => ['q' => $r->query('q', '')],
+            /*
+             * Los conceptos salen de las reglas activas, no escritos en la
+             * pantalla.
+             *
+             * Estaban escritos a mano —cinco opciones fijas— y el motor busca
+             * la regla por ese mismo texto. De las cinco, solo «compras
+             * generales» tenia regla: las otras cuatro devolvian retencion
+             * CERO en silencio, y quien pagaba no tenia como notarlo. Leyendo
+             * de la tabla, una opcion solo existe si hay una regla detras.
+             */
+            'conceptos' => \DB::table('retenciones_config')
+                ->where('tipo', 'retefuente')->where('activa', true)
+                ->orderBy('concepto')
+                ->get(['concepto', 'tarifa_pct', 'base_minima', 'notas'])
+                ->map(fn ($c) => [
+                    'valor' => $c->concepto,
+                    'etiqueta' => $c->notas ?: $c->concepto,
+                    'tarifa' => (float) $c->tarifa_pct,
+                    'base' => (float) $c->base_minima,
+                ]),
             'pagos' => $q->orderByDesc('fecha')->orderByDesc('id')->paginate(25)->through(fn ($p) => [
                 'id' => $p->id,
                 'fecha' => $p->fecha->format('Y-m-d'),
