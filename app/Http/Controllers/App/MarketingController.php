@@ -76,7 +76,7 @@ class MarketingController extends Controller implements HasMiddleware
             'creativos' => MarketingCreativo::with(['producto:id,nombre,referencia', 'importacion:id,numero,contenedor', 'autor:id,name'])
                 ->where('producto_id', $p->id)->latest()->get()
                 ->map(fn (MarketingCreativo $c) => $c->paraVista($r->user())),
-            'max_kb' => MarketingCreativo::MAX_KB,
+            'max_kb' => MarketingCreativo::limiteKb(),
         ]);
     }
 

@@ -122,6 +122,16 @@ it('ni el vendedor ni contabilidad tocan la ficha ni la visibilidad', function (
 
 // ───────────────────────────── MKT-2 ─────────────────────────────
 
+it('la pantalla promete lo que cabe, no más de lo que aguanta el servidor', function () {
+    $limite = MarketingCreativo::limiteKb();
+
+    expect($limite)->toBeGreaterThan(0)->toBeLessThanOrEqual(MarketingCreativo::MAX_KB)
+        ->toBeLessThanOrEqual((int) (Illuminate\Http\UploadedFile::getMaxFilesize() / 1024));
+
+    $this->actingAs($this->mkt)->get('/app/marketing/creativos')
+        ->assertInertia(fn (Assert $page) => $page->where('max_kb', $limite));
+});
+
 it('Marketing sube creativos y cada área ve según el permiso', function () {
     $this->actingAs($this->mkt)->post('/app/marketing/creativos', [
         'tipo' => 'imagen', 'producto_id' => $this->producto->id, 'permiso' => 'interno',

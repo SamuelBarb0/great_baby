@@ -87,7 +87,7 @@ class MarketingCreativosController extends Controller implements HasMiddleware
                 : [],
             'contenedores' => Importacion::query()->orderByDesc('id')->limit(100)->get(['id', 'numero', 'contenedor'])
                 ->map(fn ($i) => ['id' => $i->id, 'label' => $i->numero.($i->contenedor ? " · {$i->contenedor}" : '')]),
-            'max_kb' => MarketingCreativo::MAX_KB,
+            'max_kb' => MarketingCreativo::limiteKb(),
         ]);
     }
 

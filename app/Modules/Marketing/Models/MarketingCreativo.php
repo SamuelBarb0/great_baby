@@ -98,6 +98,15 @@ class MarketingCreativo extends Model
     }
 
     public function esImagen(): bool { return str_starts_with((string) $this->mime, 'image/'); }
+    /** Lo que de verdad cabe: si el servidor permite menos, por encima de eso la subida falla sin explicar por qué. */
+    public static function limiteKb(): int
+    {
+        $subida = \Illuminate\Http\UploadedFile::getMaxFilesize() / 1024;
+        $post = ini_parse_quantity((string) ini_get('post_max_size')) / 1024;
+
+        return (int) floor(min(self::MAX_KB, $subida, $post > 0 ? $post : self::MAX_KB));
+    }
+
     public function esVideo(): bool { return str_starts_with((string) $this->mime, 'video/'); }
 
     /** Lo que la pantalla necesita de un creativo, con lo que este usuario puede hacer. */

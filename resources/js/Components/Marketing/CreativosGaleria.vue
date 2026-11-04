@@ -1,5 +1,5 @@
 <script setup>
-import { reactive, ref } from 'vue';
+import { computed, reactive, ref } from 'vue';
 import { router } from '@inertiajs/vue3';
 import { Upload, Link2, Download, Trash2, Film, Image as ImageIcon, FileText, ExternalLink, Lock, Eye } from 'lucide-vue-next';
 import AppConfirmModal from '@/Components/AppConfirmModal.vue';
@@ -36,18 +36,36 @@ const progreso = ref(null);
 const errores = ref({});
 const modalConfirm = ref(null);
 
-const elegir = (e) => { archivos.value = Array.from(e.target.files || []); };
-
+const limiteMb = computed(() => Math.floor(props.maxKb / 1024));
 const mb = (bytes) => bytes == null ? '' : (bytes / 1048576).toFixed(bytes < 1048576 ? 2 : 1) + ' MB';
-const pesados = () => archivos.value.filter(f => f.size > props.maxKb * 1024).map(f => f.name);
+
+// Lo que no cabe se dice al elegirlo, no después de esperar la subida. Un video
+// tiene que quedar como video: es lo que cuenta en las piezas del producto.
+const avisoPesado = ref('');
+const elegir = (e) => {
+    const elegidos = Array.from(e.target.files || []);
+    const pesados = elegidos.filter((f) => f.size > props.maxKb * 1024);
+    errores.value = {};
+    if (elegidos.some((f) => f.type.startsWith('video/')) && form.tipo === 'imagen') form.tipo = 'video';
+    if (!pesados.length) {
+        archivos.value = elegidos;
+        avisoPesado.value = '';
+        return;
+    }
+    archivos.value = [];
+    if (inputArchivos.value) inputArchivos.value.value = '';
+    modo.value = 'enlace';
+    avisoPesado.value = `«${pesados[0].name}» pesa ${mb(pesados[0].size)} y el máximo aquí es ${limiteMb.value} MB.`
+        + (elegidos.length > 1 ? ' No se subió ninguno de los que eligió.' : '');
+};
+const cambiarModo = (nuevo) => {
+    modo.value = nuevo;
+    avisoPesado.value = '';
+};
 
 const subir = () => {
     if (subiendo.value) return;
     errores.value = {};
-    if (modo.value === 'archivo' && pesados().length) {
-        errores.value = { archivos: `Pesan más de ${props.maxKb / 1024} MB: ${pesados().join(', ')}. Súbalos como enlace (Drive, Dropbox, YouTube).` };
-        return;
-    }
     subiendo.value = true;
     router.post('/app/marketing/creativos', {
         ...form,
@@ -62,6 +80,7 @@ const subir = () => {
             archivos.value = [];
             form.titulo = '';
             form.enlace_externo = '';
+            avisoPesado.value = '';
             if (inputArchivos.value) inputArchivos.value.value = '';
         },
         onError: (e) => { errores.value = e; },
@@ -96,13 +115,13 @@ const primerError = () => errores.value.archivos || errores.value.enlace_externo
         <!-- Subir -->
         <div v-if="gestiona" class="rounded-lg border border-dashed border-surface-300 p-3 space-y-3">
             <div class="flex items-center gap-2 text-sm">
-                <button @click="modo = 'archivo'" class="px-3 py-1 rounded-full" :class="modo === 'archivo' ? 'bg-brand-600 text-white' : 'bg-surface-100'">
+                <button @click="cambiarModo('archivo')" class="px-3 py-1 rounded-full" :class="modo === 'archivo' ? 'bg-brand-600 text-white' : 'bg-surface-100'">
                     <Upload class="h-3 w-3 inline"/> Archivo
                 </button>
-                <button @click="modo = 'enlace'" class="px-3 py-1 rounded-full" :class="modo === 'enlace' ? 'bg-brand-600 text-white' : 'bg-surface-100'">
+                <button @click="cambiarModo('enlace')" class="px-3 py-1 rounded-full" :class="modo === 'enlace' ? 'bg-brand-600 text-white' : 'bg-surface-100'">
                     <Link2 class="h-3 w-3 inline"/> Enlace externo
                 </button>
-                <span class="text-xs text-surface-500 ml-auto">Hasta {{ maxKb / 1024 }} MB por archivo; lo más pesado, por enlace.</span>
+                <span class="text-xs text-surface-500 ml-auto">Hasta {{ limiteMb }} MB por archivo; lo más pesado, por enlace.</span>
             </div>
 
             <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
@@ -145,8 +164,10 @@ const primerError = () => errores.value.archivos || errores.value.enlace_externo
                     {{ archivos.length }} {{ archivos.length === 1 ? 'archivo' : 'archivos' }} · {{ mb(archivos.reduce((s, f) => s + f.size, 0)) }}
                 </div>
             </div>
-            <div v-else>
-                <input v-model="form.enlace_externo" type="url" class="input w-full" placeholder="https://drive.google.com/…"/>
+            <div v-else class="space-y-2">
+                <div v-if="avisoPesado" class="p-2 rounded bg-amber-50 dark:bg-amber-950/40 border-l-4 border-amber-500 text-xs text-amber-800 dark:text-amber-200">{{ avisoPesado }}</div>
+                <p class="text-xs text-surface-500">Súbalo a Drive, compártalo con «Cualquier persona con el enlace» y pegue el enlace aquí.</p>
+                <input v-model="form.enlace_externo" type="url" class="input w-full" placeholder="https://drive.google.com/…" aria-label="Enlace del archivo"/>
             </div>
 
             <div v-if="Object.keys(errores).length" class="text-xs text-red-600">{{ primerError() }}</div>
