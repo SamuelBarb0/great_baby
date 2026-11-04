@@ -143,14 +143,16 @@ class ContabilidadExtrasController extends Controller implements HasMiddleware
             ->groupBy('origen_type')->orderByDesc('volumen')->get();
 
         // CONT-C6 · Semáforo SIIGO del panel.
-        $siigoAprobados = AsientoManual::where('estado', 'aprobado')->count();
-        $siigoEnSiigo = AsientoManual::where('estado', 'aprobado')->whereNotNull('siigo_journal_id')->count();
-        $siigoPct = $siigoAprobados > 0 ? round(($siigoEnSiigo / $siigoAprobados) * 100, 1) : 100;
-        $siigoSemaforo = $siigoPct >= 95 ? 'verde' : ($siigoPct >= 80 ? 'amarillo' : 'rojo');
+        $siigo = $this->coberturaSiigo($desde, $hasta);
+        $siigoAprobados = $siigo['deberian'];
+        $siigoEnSiigo = $siigo['estan'];
+        $siigoPct = $siigo['pct'];
+        $siigoSemaforo = $siigo['semaforo'];
 
         return Inertia::render('Contabilidad/Panel', [
             'periodo' => ['desde' => $desde, 'hasta' => $hasta, 'incluir_anulados' => $incluirAnulados],
             'kpis' => [
+                'siigo_etiqueta' => $siigo['etiqueta'],
                 'total_debe' => $totalDebe,
                 'total_haber' => $totalHaber,
                 'balance' => round($totalDebe - $totalHaber, 2),
@@ -589,6 +591,57 @@ class ContabilidadExtrasController extends Controller implements HasMiddleware
     /**
      * Mapa FQCN → etiqueta legible. Re-audit M5 UX-M3.
      */
+    /**
+     * Cuántos documentos deberían estar en SIIGO y cuántos están de verdad.
+     *
+     * El semáforo miraba SÓLO `asientos_manuales`. Con cero asientos manuales
+     * aprobados —que es lo normal, casi nadie hace asientos a mano— la cuenta
+     * daba 0/0 y la pantalla pintaba «100 % · verde». El 2026-11-03 el panel
+     * decía 100 % mientras NINGUNA de las 28 facturas había llegado a SIIGO y
+     * la cola llevaba una semana sin worker. El indicador que existía para
+     * avisar era justamente el que tapaba el problema.
+     *
+     * Ahora cuenta las mismas diez familias que reencola `siigo:empujar-
+     * pendientes`, leyendo su lista para que no se separen.
+     *
+     * A propósito NO se filtra por el período de la pantalla: una factura de
+     * octubre sin subir sigue pendiente hoy, y acotarla al rango la escondería
+     * —que es el error que se está corrigiendo—.
+     *
+     * @return array{deberian:int,estan:int,pct:float,semaforo:string,etiqueta:string}
+     */
+    private function coberturaSiigo(string $desde, string $hasta): array
+    {
+        $deberian = 0;
+        $estan = 0;
+
+        foreach (\App\Console\Commands\SiigoEmpujarPendientesCommand::FUENTES as [$tabla, $columna, , $condicion]) {
+            if (! \Illuminate\Support\Facades\Schema::hasTable($tabla)) {
+                continue;
+            }
+
+            $base = \Illuminate\Support\Facades\DB::table($tabla)->whereRaw($condicion);
+
+            $deberian += (clone $base)->count();
+            $estan += (clone $base)->whereNotNull($columna)->where($columna, '<>', '')->count();
+        }
+
+        // Sin documentos que subir no hay nada atrasado: es 100 % de cero, y
+        // decirlo así evita el verde mentiroso de antes.
+        $pct = $deberian > 0 ? round(($estan / $deberian) * 100, 1) : 100.0;
+        $faltan = $deberian - $estan;
+
+        return [
+            'deberian' => $deberian,
+            'estan' => $estan,
+            'pct' => $pct,
+            'semaforo' => $pct >= 95 ? 'verde' : ($pct >= 80 ? 'amarillo' : 'rojo'),
+            'etiqueta' => $deberian === 0
+                ? 'Sin documentos pendientes de subir'
+                : "{$estan} / {$deberian} documentos en SIIGO · faltan {$faltan}",
+        ];
+    }
+
     private function origenLabel(?string $fqcn): string
     {
         return match ($fqcn) {
