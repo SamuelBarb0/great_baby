@@ -74,6 +74,7 @@ class SeguimientoContenedor
             'volumen_m3' => round($orden->items->sum(fn ($i) => (float) $i->cajas * (float) $i->cbm_caja), 4),
             'peso_kg' => round($orden->items->sum(fn ($i) => (float) $i->cajas * (float) $i->peso_caja_kg), 3),
         ]);
+        app(\App\Modules\Marketing\Services\TableroLanzamiento::class)->alDiaConCompras($imp);
     }
 
     public function soltarOrden(Importacion $imp, OrdenCompra $orden): void
@@ -319,6 +320,7 @@ class SeguimientoContenedor
 
         try {
             $this->marcarEtapa($imp, EtapaContenedor::EnBodega, $this->hoy(), 'Recibido en bodega.', auth()->id());
+            app(\App\Modules\Marketing\Services\TableroLanzamiento::class)->avisarLlegada($imp);
         } catch (InvalidArgumentException) {
             // Faltan declaraciones sin levante: la recepción vale igual, y que el
             // contenedor siga abierto es justo lo que debe ver Liz.

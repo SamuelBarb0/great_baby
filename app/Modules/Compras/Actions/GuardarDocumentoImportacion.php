@@ -40,7 +40,7 @@ class GuardarDocumentoImportacion
                 ->lockForUpdate()
                 ->max('version') + 1;
 
-            return ImportacionDocumento::create([
+            $documento = ImportacionDocumento::create([
                 'importacion_id' => $importacion->id,
                 'gasto_id' => $gasto?->id,
                 'tipo' => $tipo,
@@ -52,6 +52,9 @@ class GuardarDocumentoImportacion
                 'notas' => $notas,
                 'subido_por' => auth()->id(),
             ]);
+            app(\App\Modules\Marketing\Services\TableroLanzamiento::class)->alDiaConCompras($importacion);
+
+            return $documento;
         });
     }
 }

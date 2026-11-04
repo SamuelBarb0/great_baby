@@ -184,3 +184,65 @@ it('con las diez tarjetas finalizadas el lanzamiento termina', function () {
     expect($this->lanzamiento->fresh()->finalizado_en)->not->toBeNull()
         ->and(NotificacionErp::where('titulo', 'Lanzamiento terminado')->where('user_id', $this->anny->id)->exists())->toBeTrue();
 });
+
+it('el contenedor y el tablero se ven el uno al otro, sin botones que den 403', function () {
+    $this->actingAs($this->compras)->get("/app/compras/importacion/{$this->imp->id}")
+        ->assertInertia(fn (Assert $p) => $p
+            ->where('marketing.id', $this->lanzamiento->id)
+            ->where('marketing.total', 10)
+            ->where('marketing.finalizadas', 0)
+            ->where('marketing.siguiente', 'Recepción del Contenedor')
+            ->where('marketing.puede_abrir', true));
+
+    // Marketing no entra a Compras: ve el estado aquí y no se le ofrece el contenedor.
+    $this->actingAs($this->anny)->get("/app/marketing/lanzamientos/{$this->lanzamiento->id}")
+        ->assertInertia(fn (Assert $p) => $p
+            ->where('compras.importacion_id', $this->imp->id)
+            ->where('compras.puede_contenedor', false)
+            ->where('compras.puede_productos', true));
+
+    $this->actingAs($this->compras)->get("/app/marketing/lanzamientos/{$this->lanzamiento->id}")
+        ->assertInertia(fn (Assert $p) => $p->where('compras.puede_contenedor', true));
+});
+
+it('la tarjeta 1 se marca con lo que Compras ya hizo, y nunca se desmarca', function () {
+    $tarjeta = $this->lanzamiento->tarjetas()->where('clave', 'recepcion')->first();
+    $hecho = fn (string $texto) => $tarjeta->items()->where('texto', $texto)->first()->hecho_en !== null;
+    expect($hecho('Confirmar fecha estimada de llegada.'))->toBeFalse();
+
+    $this->imp->update(['eta' => '2026-12-01']);
+    expect($hecho('Confirmar fecha estimada de llegada.'))->toBeTrue();
+
+    Illuminate\Support\Facades\Storage::fake('local');
+    App\Modules\Compras\Actions\GuardarDocumentoImportacion::run($this->imp, Illuminate\Http\UploadedFile::fake()->create('lista.xlsx', 10), 'bl');
+    expect($hecho('Adjuntar Packing List.'))->toBeFalse();
+    App\Modules\Compras\Actions\GuardarDocumentoImportacion::run($this->imp, Illuminate\Http\UploadedFile::fake()->create('lista.xlsx', 10), 'lista_empaque');
+    expect($hecho('Adjuntar Packing List.'))->toBeTrue();
+
+    // Lo que sólo una persona sabe sigue sin marcar.
+    expect($hecho('Informar novedades.'))->toBeFalse()->and($hecho('Confirmar los productos que llegan.'))->toBeFalse();
+
+    $this->imp->update(['eta' => null]);
+    expect($hecho('Confirmar fecha estimada de llegada.'))->toBeTrue();
+});
+
+it('la fecha estimada que calcula el sistema también cuenta, al abrir el tablero', function () {
+    app(App\Modules\Compras\Services\SeguimientoContenedor::class)
+        ->marcarEtapa($this->imp, App\Modules\Compras\Enums\EtapaContenedor::Zarpado, now()->subDays(3), null, null);
+
+    $this->actingAs($this->anny)->get("/app/marketing/lanzamientos/{$this->lanzamiento->id}")->assertOk();
+
+    $item = $this->lanzamiento->tarjetas()->where('clave', 'recepcion')->first()
+        ->items()->where('texto', 'Confirmar fecha estimada de llegada.')->first();
+    expect($item->hecho_en)->not->toBeNull();
+});
+
+it('avisa a Marketing cuando la mercancía llega a bodega', function () {
+    $guia = app(App\Modules\Marketing\Services\TableroLanzamiento::class);
+    $guia->avisarLlegada($this->imp);
+
+    $aviso = App\Models\NotificacionErp::where('user_id', $this->anny->id)->where('titulo', 'Llegó a bodega')->first();
+    expect($aviso)->not->toBeNull()
+        ->and($aviso->url)->toBe("/app/marketing/lanzamientos/{$this->lanzamiento->id}");
+});
+

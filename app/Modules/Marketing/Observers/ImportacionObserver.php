@@ -18,4 +18,11 @@ class ImportacionObserver
     {
         $this->tablero->crearPara($importacion, auth()->user());
     }
+
+    public function updated(Importacion $importacion): void
+    {
+        if ($importacion->wasChanged('eta')) {
+            $this->tablero->alDiaConCompras($importacion);
+        }
+    }
 }

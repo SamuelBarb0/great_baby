@@ -10,6 +10,7 @@ use App\Modules\Compras\Enums\EtapaContenedor;
 use App\Modules\Compras\Models\Importacion;
 use App\Modules\Compras\Models\OrdenCompra;
 use App\Modules\Compras\Models\RecepcionCompra;
+use App\Modules\Marketing\Models\Lanzamiento;
 
 /**
  * Qué sigue con una importación, dicho para quien nunca la ha hecho.
@@ -48,10 +49,15 @@ class PasoDeCompra
         $edita = Permisos::puede($u, 'compras_importacion');
 
         if (in_array($imp->estado, [EstadoImportacion::Liquidada, EstadoImportacion::Cerrada], true)) {
+            $lanzamiento = Lanzamiento::where('importacion_id', $imp->id)->value('id');
+
             return $this->paso(6, '¡Listo! Este contenedor quedó cerrado.',
-                'El costo real ya está en el inventario. Lo que falta pagarle a China se ve en Pagos al exterior.',
+                'El costo real ya está en el inventario. Lo que falta pagarle a China se ve en Pagos al exterior, y los productos siguen en Marketing hasta publicarse.',
                 null,
-                Permisos::puede($u, 'compras_pagos_exterior') ? [$this->enlace('Ver pagos al exterior', '/app/compras/pagos-exterior')] : []);
+                array_values(array_filter([
+                    Permisos::puede($u, 'compras_pagos_exterior') ? $this->enlace('Ver pagos al exterior', '/app/compras/pagos-exterior') : null,
+                    $lanzamiento && Permisos::puede($u, 'marketing_lanzamientos') ? $this->enlace('Ver el lanzamiento en Marketing', "/app/marketing/lanzamientos/{$lanzamiento}", false) : null,
+                ])));
         }
 
         if ($imp->ordenes->isEmpty()) {

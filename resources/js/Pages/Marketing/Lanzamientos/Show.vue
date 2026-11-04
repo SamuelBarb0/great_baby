@@ -15,6 +15,7 @@ const props = defineProps({
     tarjetas: { type: Array, required: true },
     listas: { type: Object, required: true },
     puede_aprobar: Boolean,
+    compras: { type: Object, default: null },
     usuarios: { type: Array, required: true },
 });
 
@@ -119,6 +120,18 @@ const ICONO_COMENTARIO = { movimiento: '↦', bloqueo: '⛔', aprobacion: '✅',
                     </p>
                 </div>
             </div>
+
+            <section v-if="compras" class="card p-3 flex flex-wrap items-center justify-between gap-3 text-sm" aria-label="Desde Compras">
+                <div>
+                    <b>En Compras:</b> {{ compras.etapa || 'Aún sin etapas marcadas' }}
+                    <span v-if="compras.llegada_estimada"> · Llegada estimada a bodega: {{ compras.llegada_estimada }}</span>
+                    <span> · Recibidas {{ compras.recibidas.toLocaleString('es-CO') }} de {{ compras.unidades.toLocaleString('es-CO') }} unidades</span>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                    <Link v-if="compras.puede_productos" :href="`/app/marketing/tablero?contenedor=${compras.importacion_id}`" class="btn-ghost text-xs border border-surface-300 dark:border-surface-700">Ver sus productos</Link>
+                    <Link v-if="compras.puede_contenedor" :href="`/app/compras/importacion/${compras.importacion_id}`" class="btn-ghost text-xs border border-surface-300 dark:border-surface-700">Ver el contenedor</Link>
+                </div>
+            </section>
 
             <div v-if="$page.props.flash?.success" class="p-3 rounded-lg bg-emerald-500/15 border-l-4 border-emerald-500 text-emerald-700 text-sm">{{ $page.props.flash.success }}</div>
             <div v-if="$page.props.flash?.error" class="p-3 rounded-lg bg-red-500/15 border-l-4 border-red-500 text-red-700 text-sm">{{ $page.props.flash.error }}</div>

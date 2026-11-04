@@ -79,6 +79,27 @@ class MarketingLanzamientosController extends Controller implements HasMiddlewar
         ]);
     }
 
+    /** Lo que Marketing necesita saber del contenedor, sin entrar a Compras. */
+    private function desdeCompras(Lanzamiento $lanzamiento, ?User $u): ?array
+    {
+        $imp = $lanzamiento->importacion;
+        if (! $imp) {
+            return null;
+        }
+        $resumen = app(\App\Modules\Compras\Services\SeguimientoContenedor::class)->resumen($imp);
+        $ordenes = $imp->ordenes()->with('items:id,orden_id,cantidad,cantidad_recibida')->get();
+
+        return [
+            'importacion_id' => $imp->id,
+            'etapa' => $resumen['etapa_label'],
+            'llegada_estimada' => $resumen['llegada_estimada'],
+            'unidades' => (float) $ordenes->sum(fn ($o) => $o->items->sum('cantidad')),
+            'recibidas' => (float) $ordenes->sum(fn ($o) => $o->items->sum('cantidad_recibida')),
+            'puede_contenedor' => Permisos::puede($u, 'compras_importacion'),
+            'puede_productos' => \App\Modules\Marketing\Models\MarketingCreativo::puedeGestionar($u),
+        ];
+    }
+
     /** Para los contenedores que existían antes del tablero. */
     public function crear(Request $r): RedirectResponse
     {
@@ -90,6 +111,10 @@ class MarketingLanzamientosController extends Controller implements HasMiddlewar
 
     public function show(Request $r, Lanzamiento $lanzamiento): Response
     {
+        // Los contenedores que ya venían andando también quedan al día.
+        if ($lanzamiento->importacion) {
+            $this->tablero->alDiaConCompras($lanzamiento->importacion);
+        }
         $lanzamiento->load([
             'importacion:id,numero,contenedor,estado,eta',
             'tarjetas.items.autor:id,name',
@@ -152,6 +177,7 @@ class MarketingLanzamientosController extends Controller implements HasMiddlewar
             }),
             'listas' => LanzamientoTarjeta::LISTAS,
             'puede_aprobar' => $this->tablero->puedeAprobar($u),
+            'compras' => $this->desdeCompras($lanzamiento, $u),
             'usuarios' => $this->usuariosDelTablero(),
         ]);
     }

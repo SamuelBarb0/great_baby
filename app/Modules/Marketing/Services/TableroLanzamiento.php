@@ -62,6 +62,48 @@ class TableroLanzamiento
         });
     }
 
+    /**
+     * Marca en la tarjeta 1 lo que Compras ya hizo en el contenedor, para no
+     * pedirlo dos veces. Sólo marca, nunca desmarca, y no toca una tarjeta cerrada.
+     * «Confirmar los productos» e «Informar novedades» siguen siendo de una persona.
+     */
+    public function alDiaConCompras(Importacion $importacion): void
+    {
+        $tarjeta = LanzamientoTarjeta::where('clave', 'recepcion')
+            ->whereHas('lanzamiento', fn ($q) => $q->where('importacion_id', $importacion->id))
+            ->whereNotIn('lista', ['finalizado', 'pendiente_aprobacion'])
+            ->first();
+        if (! $tarjeta) {
+            return;
+        }
+
+        $conOrden = $importacion->ordenes()->exists();
+        $hechos = array_keys(array_filter([
+            'Confirmar la compra.' => $conOrden,
+            // La fecha la escriben o la calcula el sistema con las etapas.
+            'Confirmar fecha estimada de llegada.' => $importacion->eta !== null
+                || app(\App\Modules\Compras\Services\SeguimientoContenedor::class)->resumen($importacion)['llegada_estimada'] !== null,
+            'Adjuntar Packing List.' => $importacion->documentos()->where('tipo', 'lista_empaque')->exists(),
+            // Estos dos avisos los manda el sistema al finalizar la tarjeta (ver `avisar`).
+            'Notificar a Araceli.' => $conOrden,
+            'Notificar a Anny.' => $conOrden,
+        ]));
+
+        $tarjeta->items()->whereIn('texto', $hechos)->whereNull('hecho_en')->update(['hecho_en' => now()]);
+    }
+
+    /** Lo que pidió Marketing: enterarse cuando llega, no cuando ya pasó mucho tiempo. */
+    public function avisarLlegada(Importacion $importacion): void
+    {
+        $lanzamiento = Lanzamiento::where('importacion_id', $importacion->id)->first();
+        if (! $lanzamiento) {
+            return;
+        }
+        foreach ($this->usuariosConRol(['Aracely', 'Marketing']) as $destino) {
+            $this->notificar($destino, 'Llegó a bodega', "La mercancía del contenedor {$this->contenedor($lanzamiento)} ya está en bodega.", $lanzamiento, 'success');
+        }
+    }
+
     /** ¿Puede este usuario trabajar la tarjeta (marcar, mover, editar)? */
     public function puedeTrabajar(?User $u, LanzamientoTarjeta $t): bool
     {

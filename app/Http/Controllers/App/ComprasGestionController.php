@@ -773,6 +773,27 @@ class ComprasGestionController extends Controller implements HasMiddleware
     }
 
     /** El contenedor en el que viaja una orden, si ya va en uno. */
+    /** El lanzamiento de este contenedor, para verlo desde Compras. */
+    private function marketingDe(Importacion $imp): ?array
+    {
+        $lanzamiento = \App\Modules\Marketing\Models\Lanzamiento::with('tarjetas:id,lanzamiento_id,numero,titulo,lista')
+            ->where('importacion_id', $imp->id)->first();
+        if (! $lanzamiento) {
+            return null;
+        }
+        $u = auth()->user();
+        $abiertas = $lanzamiento->tarjetas->where('lista', '!=', 'finalizado')->sortBy('numero');
+
+        return [
+            'id' => $lanzamiento->id,
+            'total' => $lanzamiento->tarjetas->count(),
+            'finalizadas' => $lanzamiento->tarjetas->count() - $abiertas->count(),
+            'siguiente' => $abiertas->first()?->titulo,
+            'puede_abrir' => \App\Auth\Permisos::puede($u, 'marketing_lanzamientos'),
+            'puede_productos' => \App\Modules\Marketing\Models\MarketingCreativo::puedeGestionar($u),
+        ];
+    }
+
     private function contenedorDe(OrdenCompra $orden): ?Importacion
     {
         return Importacion::whereHas('ordenes', fn ($q) => $q->whereKey($orden->id))->first();
@@ -849,6 +870,7 @@ class ComprasGestionController extends Controller implements HasMiddleware
         $esPrevisto = $imp->lineas->isEmpty();
         return Inertia::render('Compras/Importacion/Show', [
             'paso' => app(\App\Modules\Compras\Services\PasoDeCompra::class)->deContenedor($imp, auth()->user()),
+            'marketing' => $this->marketingDe($imp),
             'tipos_documento' => array_diff_key(\App\Modules\Compras\Models\ImportacionDocumento::TIPOS, ['comprobante_gasto' => true]),
             'puede_quitar_documentos' => (bool) auth()->user()?->esAracely(),
             'max_subida_mb' => ImportacionDocumentosController::limiteMb(),

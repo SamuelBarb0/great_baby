@@ -2,7 +2,7 @@
 import { ref, reactive, computed, watch, nextTick } from 'vue';
 import { useBogotaDate } from '@/composables/useBogotaDate';
 import { Head, Link, router } from '@inertiajs/vue3';
-import { ArrowLeft, Package, Plus, Zap, AlertTriangle, FileText, Paperclip, Upload, Trash2 } from 'lucide-vue-next';
+import { ArrowLeft, Package, Plus, Zap, AlertTriangle, FileText, Paperclip, Rocket, Upload, Trash2 } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import { useMoney } from '@/composables/useMoney';
 import { fechaCorta } from '@/composables/useFecha';
@@ -23,6 +23,7 @@ const { hoy: hoyBogota } = useBogotaDate();
 const props = defineProps({
     importacion: { type: Object, required: true },
     paso: { type: Object, required: true },
+    marketing: { type: Object, default: null },
     tipos_documento: { type: Object, default: () => ({}) },
     puede_quitar_documentos: Boolean,
     max_subida_mb: { type: Number, default: 40 },
@@ -200,6 +201,23 @@ const fmtMoneda = (monto, mon) => mon === 'COP'
             </div>
 
             <SiguientePaso :paso="paso" @accion="hacer"/>
+
+            <section v-if="marketing" class="card p-4 flex flex-wrap items-center justify-between gap-3" aria-label="Marketing">
+                <div class="flex items-start gap-2">
+                    <Rocket class="h-5 w-5 text-brand-600 mt-0.5 flex-shrink-0"/>
+                    <div>
+                        <div class="text-sm font-bold">En Marketing: {{ marketing.finalizadas }} de {{ marketing.total }} tareas del lanzamiento</div>
+                        <div class="text-xs text-surface-500">
+                            <template v-if="marketing.siguiente">Sigue: {{ marketing.siguiente }}. Este contenedor tiene su propio tablero de lanzamiento.</template>
+                            <template v-else>Lanzamiento terminado.</template>
+                        </div>
+                    </div>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                    <Link v-if="marketing.puede_abrir" :href="`/app/marketing/lanzamientos/${marketing.id}`" class="btn-ghost text-sm border border-surface-300 dark:border-surface-700">Abrir el lanzamiento</Link>
+                    <Link v-if="marketing.puede_productos" :href="`/app/marketing/tablero?contenedor=${importacion.id}`" class="btn-ghost text-sm border border-surface-300 dark:border-surface-700">Ver sus productos</Link>
+                </div>
+            </section>
 
             <div role="tablist" aria-label="Partes del contenedor" class="flex gap-1 border-b border-surface-200 dark:border-surface-800 overflow-x-auto">
                 <button v-for="(nombre, clave) in pestanas" :key="clave" role="tab" :aria-selected="pestana === clave" @click="irA(clave)"
