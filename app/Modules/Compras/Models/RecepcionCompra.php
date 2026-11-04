@@ -5,6 +5,7 @@ namespace App\Modules\Compras\Models;
 use App\Models\User;
 use App\Modules\Dropi\Models\InventarioUbicacion;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
@@ -97,6 +98,27 @@ class RecepcionCompra extends Model implements AuditableContract
                 }
             }
         });
+    }
+
+    /**
+     * Las que de verdad tienen que llegar a SIIGO.
+     *
+     * Una compra marcada INTERNA no se declara: ese es justamente el sentido
+     * del destino fiscal. Pero «pendiente de SIIGO» se estaba definiendo como
+     * «confirmada y sin siigo_id», sin mirar el destino, asi que las compras
+     * internas quedaban en la lista de pendientes PARA SIEMPRE y la tarea
+     * nocturna las reencolaba todas las noches para que volvieran a no
+     * enviarse. El 2026-11-03 eran 2 de las 4 pendientes.
+     *
+     * Sin orden —o sin destino escrito— cuenta como declarable: el default
+     * del sistema es fiscal, y dejar de enviar algo por omision seria peor
+     * que enviarlo de mas.
+     */
+    public function scopeDeclarable(Builder $q): Builder
+    {
+        return $q->whereDoesntHave('orden', fn (Builder $o) => $o->where(
+            'destino_fiscal', \App\Modules\Contabilidad\Enums\DestinoFiscal::Interno->value,
+        ));
     }
 
     public function orden(): BelongsTo

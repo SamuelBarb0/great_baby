@@ -772,7 +772,19 @@ class SiigoController extends Controller implements HasMiddleware
                 ->where('estado', 'fallido')
                 ->where('created_at', '>=', $desdeHoy)
                 ->count(),
-            'productos_sin_siigo_id' => Producto::whereNull('siigo_id')->where('activo', true)->count(),
+            /*
+             * Sin `siigo_id` PROPIO y sin variantes que ya estén allá.
+             *
+             * Un producto granular no viaja a SIIGO: viajan sus variantes, una
+             * por talla/color, y el padre se queda sin id a propósito. Contarlo
+             * como «sin sincronizar» pintaba 28 productos en rojo cuando sus 80
+             * variantes estaban las 80 arriba — y con 28 alarmas falsas fijas,
+             * un producto que sí falle no se distingue de nada.
+             */
+            'productos_sin_siigo_id' => Producto::whereNull('siigo_id')
+                ->where('activo', true)
+                ->whereDoesntHave('variantes', fn ($q) => $q->whereNotNull('siigo_id'))
+                ->count(),
             'total_semana' => SiigoSyncLog::where('created_at', '>=', $desdeSemana)->count(),
         ];
     }
@@ -1101,8 +1113,22 @@ class SiigoController extends Controller implements HasMiddleware
         // decidir qué productos siguen vivos (los soft-deleteados ya no urgen).
         $ids = $rows->pluck('producto_id')->map(fn ($x) => (int) $x)->filter()->all();
         $productos = Producto::whereIn('id', $ids)
+            ->withCount(['variantes as variantes_en_siigo' => fn ($q) => $q->whereNotNull('siigo_id')])
             ->get(['id', 'referencia', 'nombre', 'activo', 'siigo_id'])
             ->keyBy('id');
+
+        /*
+         * Un padre granular falla siempre y no importa: lo que SIIGO vende son
+         * sus variantes, y si ya están arriba el padre no tiene por qué subir.
+         * Listarlo igual llenaba la tarjeta con 28 alarmas permanentes que
+         * nadie podía resolver —la pantalla pedía «sincronizá el producto» y
+         * sincronizarlo nunca le iba a dar id— y tapaban las fallas de verdad.
+         */
+        $rows = $rows->reject(function ($r) use ($productos) {
+            $p = $productos[(int) $r->producto_id] ?? null;
+
+            return $p && ! $p->siigo_id && $p->variantes_en_siigo > 0;
+        });
 
         return $rows->map(function ($r) use ($productos) {
             $pid = (int) $r->producto_id;

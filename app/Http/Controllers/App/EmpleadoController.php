@@ -4,13 +4,25 @@ namespace App\Http\Controllers\App;
 
 use App\Auth\Permisos;
 use App\Http\Controllers\Controller;
+use App\Models\EmpresaConfig;
 use App\Models\NotificacionErp;
+use App\Models\User;
+use App\Modules\Rrhh\Enums\MotivoSalida;
+use App\Modules\Rrhh\Enums\TipoExamenMedico;
 use App\Modules\Rrhh\Models\DocumentoEmpleado;
 use App\Modules\Rrhh\Models\Empleado;
+use App\Modules\Rrhh\Models\EntregaCargo;
+use App\Modules\Rrhh\Models\EntrevistaRetiro;
+use App\Modules\Rrhh\Models\EvaluacionPrueba;
+use App\Modules\Rrhh\Models\Induccion;
+use App\Modules\Rrhh\Models\Liquidacion;
+use App\Modules\Rrhh\Support\IndicadoresRrhh;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controllers\HasMiddleware;
 use Illuminate\Routing\Controllers\Middleware;
+use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -43,6 +55,7 @@ class EmpleadoController extends Controller implements HasMiddleware
             'novedades.registradaPor:id,name',
             'induccionPor:id,name',
             'documentos.subidoPor:id,name',
+            'user:id,email',
         ])->findOrFail($empleado);
 
         return Inertia::render('Rrhh/Empleados/Show', [
@@ -71,6 +84,17 @@ class EmpleadoController extends Controller implements HasMiddleware
                 'user_id' => $e->user_id,
                 'acceso_creado_at' => $e->acceso_creado_at?->toDateString(),
                 'activacion_pendiente' => (bool) $e->activacion_token,
+                /*
+                 * Con qué correo ENTRA, que no siempre es el de la ficha.
+                 *
+                 * `crearAcceso()` respeta el correo que ya tenía la ficha —es
+                 * el que va en el cuadro de novedades para el contador— y
+                 * guarda el del ingreso en el usuario. Los dos son datos
+                 * legítimos y distintos, pero la pantalla sólo mostraba el de
+                 * la ficha: quien lo leía le dictaba a la persona un correo
+                 * con el que no entra. Se muestra el del portal cuando difiere.
+                 */
+                'portal_email' => $e->user?->email,
                 'tipo_retiro' => $e->tipo_retiro,
                 'motivo_retiro' => $e->motivo_retiro,
                 'fecha_retiro' => $e->fecha_retiro?->toDateString(),
@@ -136,19 +160,19 @@ class EmpleadoController extends Controller implements HasMiddleware
                 ->map(fn ($l, $k) => ['valor' => $k, 'label' => $l])->values(),
             // Los exámenes que se le piden a alguien que ya trabaja acá: el de
             // ingreso ya pasó, así que no se ofrece.
-            'tipos_examen' => \App\Modules\Rrhh\Enums\TipoExamenMedico::catalogo(
-                \App\Modules\Rrhh\Enums\TipoExamenMedico::deEmpleado(),
+            'tipos_examen' => TipoExamenMedico::catalogo(
+                TipoExamenMedico::deEmpleado(),
             ),
             // Fase F1 · la entrevista de retiro.
-            'motivos_salida' => \App\Modules\Rrhh\Enums\MotivoSalida::catalogo(),
-            'criterios_retiro' => \App\Modules\Rrhh\Models\EntrevistaRetiro::catalogoCriterios(),
+            'motivos_salida' => MotivoSalida::catalogo(),
+            'criterios_retiro' => EntrevistaRetiro::catalogoCriterios(),
             'entrevista_retiro' => $this->entrevistaDeRetiro($e),
             // Fase F2 · entrega de cargo.
-            'bloques_entrega' => \App\Modules\Rrhh\Models\EntregaCargo::catalogoBloques(),
+            'bloques_entrega' => EntregaCargo::catalogoBloques(),
             'entrega_cargo' => $this->entregaDeCargo($e),
             // F8 · la inducción con su temario.
             'induccion' => $this->induccionDe($e),
-            'temario_en_blanco' => \App\Modules\Rrhh\Models\Induccion::temarioEnBlanco(),
+            'temario_en_blanco' => Induccion::temarioEnBlanco(),
             // F10 · la liquidación definitiva, si ya se fue.
             'liquidacion' => $this->liquidacionDe($e),
             'puedo_liquidar' => [
@@ -159,11 +183,11 @@ class EmpleadoController extends Controller implements HasMiddleware
             ],
             // Qué bloques puede firmar QUIEN está mirando: cada área firma el
             // suyo y nada más.
-            'puedo_firmar' => collect(\App\Modules\Rrhh\Models\EntregaCargo::AREAS)
+            'puedo_firmar' => collect(EntregaCargo::AREAS)
                 ->map(fn ($a) => Permisos::puede($r->user(), $a['permiso'])),
             // Para registrar el retiro desde acá: sin el motivo, el indicador
             // de rotación no puede responder la pregunta de la Junta.
-            'tipos_retiro' => collect(\App\Modules\Rrhh\Support\IndicadoresRrhh::TIPOS_RETIRO)
+            'tipos_retiro' => collect(IndicadoresRrhh::TIPOS_RETIRO)
                 ->map(fn ($l, $k) => ['valor' => $k, 'label' => $l])->values(),
             // Sus novedades, para no tener que ir al cuadro del mes a buscar
             // si esta persona ya se había incapacitado antes.
@@ -174,7 +198,7 @@ class EmpleadoController extends Controller implements HasMiddleware
              * no reemplaza a la primera, y el historial es justo lo que
              * sustenta la decisión si después alguien la reclama.
              */
-            'evaluaciones_prueba' => \App\Modules\Rrhh\Models\EvaluacionPrueba::with('jefe:id,name')
+            'evaluaciones_prueba' => EvaluacionPrueba::with('jefe:id,name')
                 ->where('empleado_id', $e->id)
                 ->orderByDesc('fecha_evaluacion')
                 ->get()
@@ -220,7 +244,7 @@ class EmpleadoController extends Controller implements HasMiddleware
      */
     private function induccionDe(Empleado $e): ?array
     {
-        $i = \App\Modules\Rrhh\Models\Induccion::with('registradaPor:id,name')
+        $i = Induccion::with('registradaPor:id,name')
             ->where('empleado_id', $e->id)->first();
 
         if (! $i) {
@@ -251,7 +275,7 @@ class EmpleadoController extends Controller implements HasMiddleware
      */
     private function liquidacionDe(Empleado $e): ?array
     {
-        $liq = \App\Modules\Rrhh\Models\Liquidacion::with([
+        $liq = Liquidacion::with([
             'liquidadaPor:id,name', 'aprobadaPor:id,name', 'pagadaPor:id,name',
         ])->where('empleado_id', $e->id)->first();
 
@@ -296,7 +320,7 @@ class EmpleadoController extends Controller implements HasMiddleware
      */
     private function entregaDeCargo(Empleado $e): ?array
     {
-        $entrega = \App\Modules\Rrhh\Models\EntregaCargo::with([
+        $entrega = EntregaCargo::with([
             'items', 'recibe:id,name',
             'jefeConfirmoPor:id,name', 'ghConfirmoPor:id,name', 'tesoreriaConfirmoPor:id,name',
         ])->where('empleado_id', $e->id)->first();
@@ -320,7 +344,7 @@ class EmpleadoController extends Controller implements HasMiddleware
             // persona dio dos de las tres conformidades, no hubo tres
             // revisiones por más que el formato esté lleno.
             'firmas_repetidas' => $entrega->firmoVariosBloques(),
-            'firmas' => collect(\App\Modules\Rrhh\Models\EntregaCargo::AREAS)
+            'firmas' => collect(EntregaCargo::AREAS)
                 ->map(fn ($a, $clave) => [
                     'titulo' => $a['titulo'],
                     'cuando' => $entrega->{"{$clave}_confirmo_at"}?->format('Y-m-d H:i'),
@@ -338,7 +362,7 @@ class EmpleadoController extends Controller implements HasMiddleware
      */
     private function entrevistaDeRetiro(Empleado $e): ?array
     {
-        $ev = \App\Modules\Rrhh\Models\EntrevistaRetiro::with('entrevistador:id,name')
+        $ev = EntrevistaRetiro::with('entrevistador:id,name')
             ->where('empleado_id', $e->id)->first();
 
         if (! $ev) {
@@ -366,7 +390,7 @@ class EmpleadoController extends Controller implements HasMiddleware
             'puntos_bajos' => $ev->puntosBajos(),
         ];
 
-        foreach (array_keys(\App\Modules\Rrhh\Models\EntrevistaRetiro::CRITERIOS) as $c) {
+        foreach (array_keys(EntrevistaRetiro::CRITERIOS) as $c) {
             $base["n_{$c}"] = $ev->{"n_{$c}"};
             $base["c_{$c}"] = $ev->{"c_{$c}"};
         }
@@ -386,14 +410,14 @@ class EmpleadoController extends Controller implements HasMiddleware
     {
         $e = Empleado::findOrFail($empleado);
 
-        $ev = \App\Modules\Rrhh\Models\EvaluacionPrueba::with('jefe:id,name')
+        $ev = EvaluacionPrueba::with('jefe:id,name')
             ->where('empleado_id', $e->id)
             ->findOrFail($evaluacion);
 
-        return \Barryvdh\DomPDF\Facade\Pdf::loadView('rrhh.pdf.evaluacion-prueba', [
+        return Pdf::loadView('rrhh.pdf.evaluacion-prueba', [
             'e' => $e,
             'ev' => $ev,
-            'empresa' => \App\Models\EmpresaConfig::current(),
+            'empresa' => EmpresaConfig::current(),
             'generadoPor' => $r->user()->name,
         ])->setPaper('letter')
             ->stream('evaluacion-prueba-'.str($e->nombre)->slug().'.pdf');
@@ -443,7 +467,7 @@ class EmpleadoController extends Controller implements HasMiddleware
             'auxilio_excluido' => ['nullable', 'boolean'],
             'auxilio_excluido_motivo' => [
                 'nullable', 'string', 'max:200',
-                \Illuminate\Validation\Rule::requiredIf(fn () => $r->boolean('auxilio_excluido')),
+                Rule::requiredIf(fn () => $r->boolean('auxilio_excluido')),
             ],
             'banco' => ['nullable', 'string', 'max:80'],
             'tipo_cuenta' => ['nullable', 'in:ahorros,corriente'],
@@ -606,7 +630,7 @@ class EmpleadoController extends Controller implements HasMiddleware
             'email' => ['required', 'email', 'max:150'],
         ], [], ['email' => 'correo']);
 
-        $otro = \App\Models\User::where('email', $data['email'])
+        $otro = User::where('email', $data['email'])
             ->when($e->user_id, fn ($q) => $q->where('id', '!=', $e->user_id))->first();
 
         // Si el correo ya es de otra persona del sistema, enlazarlo le daría
@@ -663,7 +687,7 @@ class EmpleadoController extends Controller implements HasMiddleware
             return 0;
         }
 
-        $gestionHumana = \App\Models\User::permission(Permisos::permiso('rrhh'))->pluck('id');
+        $gestionHumana = User::permission(Permisos::permiso('rrhh'))->pluck('id');
 
         foreach ($porVencer as $e) {
             $faltan = $e->diasDePrueba();

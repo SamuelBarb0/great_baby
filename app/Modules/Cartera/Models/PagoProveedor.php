@@ -4,6 +4,7 @@ namespace App\Modules\Cartera\Models;
 
 use App\Models\Contacto;
 use App\Models\User;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
@@ -50,6 +51,14 @@ class PagoProveedor extends Model implements AuditableContract
     // COMP-B3 · recepción origen del pago. Permite al emisor SIIGO enlazar el
     // voucher egreso a la factura de compra (invoice_id) para que SIIGO baje
     // el saldo de ESA CxP específica en vez de dejarlo como ajuste suelto.
+    /** Los que deben llegar a SIIGO · ver RecepcionCompra::scopeDeclarable(). */
+    public function scopeDeclarable(Builder $q): Builder
+    {
+        return $q->whereDoesntHave('recepcion.orden', fn (Builder $o) => $o->where(
+            'destino_fiscal', \App\Modules\Contabilidad\Enums\DestinoFiscal::Interno->value,
+        ));
+    }
+
     public function recepcion(): BelongsTo
     {
         return $this->belongsTo(\App\Modules\Compras\Models\RecepcionCompra::class, 'recepcion_id');

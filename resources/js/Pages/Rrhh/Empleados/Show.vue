@@ -141,7 +141,18 @@ const resumenFicha = computed(() => {
     return [
         { k: 'Nacimiento', v: f.fecha_nacimiento },
         { k: 'Grupo sanguíneo', v: f.grupo_sanguineo },
-        { k: 'Dirección', v: [f.direccion, f.ciudad].filter(Boolean).join(', ') },
+        /*
+         * Dirección y ciudad, cada una en lo suyo.
+         *
+         * Iban pegadas en un solo renglón bajo la etiqueta «Dirección», y la
+         * ciudad se hereda de la orden de contratación mientras la dirección
+         * se pide aparte. Resultado: la ficha de alguien recién creado decía
+         * «Dirección: Bogotá D.C.» con el aviso de arriba diciendo que faltaba
+         * la dirección. Las dos cosas eran ciertas y se contradecían, porque
+         * `faltantesDeFicha()` mira `direccion` y el renglón mostraba `ciudad`.
+         */
+        { k: 'Dirección', v: f.direccion },
+        { k: 'Ciudad', v: f.ciudad },
         { k: 'Teléfono', v: f.telefono },
         { k: 'Afiliado por', v: f.empresa_afiliadora },
         { k: 'Horario', v: f.horario },
@@ -476,6 +487,15 @@ const tono = (t) => ({
                                 <span v-if="empleado.activacion_pendiente" class="text-amber-600">Sin activar</span>
                                 <span v-else-if="empleado.user_id" class="text-emerald-700">Activo</span>
                                 <span v-else class="text-surface-400">Sin acceso</span>
+                                <!--
+                                    Con qué correo entra, cuando no es el de la
+                                    ficha. Sin esto, quien lee la ficha le dicta
+                                    a la persona un correo con el que no entra.
+                                -->
+                                <span v-if="empleado.portal_email && empleado.portal_email !== empleado.email"
+                                    class="block text-[11px] text-surface-500">
+                                    entra con {{ empleado.portal_email }}
+                                </span>
                             </div>
                             <div v-if="empleado.fecha_retiro">
                                 <span class="text-xs text-surface-400 uppercase block">Se retiró</span>

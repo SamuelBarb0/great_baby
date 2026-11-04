@@ -110,7 +110,7 @@ const signoBalance = computed(() => {
                          ]"></div>
                     <div>
                         <div class="text-xs uppercase font-bold text-brand-600">Semáforo SIIGO</div>
-                        <div class="text-sm text-surface-500">{{ kpis.siigo_en_siigo }} / {{ kpis.siigo_aprobados }} asientos sincronizados</div>
+                        <div class="text-sm text-surface-500">{{ kpis.siigo_etiqueta }}</div>
                     </div>
                 </div>
                 <div class="ml-auto flex items-center gap-4">

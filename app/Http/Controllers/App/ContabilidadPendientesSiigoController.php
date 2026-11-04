@@ -67,7 +67,14 @@ class ContabilidadPendientesSiigoController extends Controller implements HasMid
             ->map(fn ($f) => $this->toRow('factura', $f->id, $f->numero, $f->fecha_emision, (float) $f->total,
                 "/app/facturas/{$f->id}", "/app/facturas/{$f->id}/reenviar-siigo"));
 
+        /*
+         * `declarable()`: una compra marcada INTERNA no va a SIIGO nunca, y
+         * sin este filtro se quedaba en esta lista para siempre, pidiendo un
+         * envio que por diseno no se va a hacer. Eran 2 de las 4 recepciones
+         * pendientes.
+         */
         $recepciones = RecepcionCompra::query()
+            ->declarable()
             ->whereNull('siigo_id')
             ->where('estado', 'confirmada')
             ->orderByDesc('fecha_recepcion')
@@ -77,6 +84,7 @@ class ContabilidadPendientesSiigoController extends Controller implements HasMid
                 "/app/compras/recepcion/{$r->id}", "/app/compras/recepcion/{$r->id}/reenviar-siigo"));
 
         $devoluciones = DevolucionProveedor::query()
+            ->declarable()
             ->whereNull('siigo_id')
             ->where('estado', 'confirmada')
             ->orderByDesc('fecha')
@@ -85,7 +93,15 @@ class ContabilidadPendientesSiigoController extends Controller implements HasMid
             ->map(fn ($d) => $this->toRow('devolucion', $d->id, $d->numero, $d->fecha, (float) $d->total,
                 "/app/compras/devoluciones/{$d->id}", "/app/compras/devoluciones/{$d->id}/reenviar-siigo"));
 
+        /*
+         * Solo los CONFIRMADOS. La pantalla no miraba el estado, asi que un
+         * pago anulado figuraba como «pendiente de SIIGO» —y mandarlo seria
+         * justo lo que no hay que hacer—. La tarea nocturna si lo filtraba,
+         * de modo que los dos numeros nunca coincidian.
+         */
         $pagos = PagoProveedor::query()
+            ->declarable()
+            ->where('estado', 'confirmado')
             ->whereNull('siigo_voucher_id')
             ->orderByDesc('fecha')
             ->limit(200)

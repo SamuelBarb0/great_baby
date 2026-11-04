@@ -6,6 +6,7 @@ use App\Auth\Permisos;
 use App\Http\Controllers\Controller;
 use App\Modules\Rrhh\Enums\TipoNovedad;
 use App\Modules\Rrhh\Models\Empleado;
+use App\Modules\Rrhh\Models\Nomina;
 use App\Modules\Rrhh\Models\Novedad;
 use App\Modules\Rrhh\Support\CuadroDeNovedades;
 use App\Support\ExportadorCsv;
@@ -13,7 +14,10 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controllers\HasMiddleware;
 use Illuminate\Routing\Controllers\Middleware;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\Rules\Enum;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -86,6 +90,8 @@ class NovedadesController extends Controller implements HasMiddleware
     {
         $data = $this->validar($r);
 
+        $this->exigirCorteAbierto($data['periodo']);
+
         $n = new Novedad($data + ['registrada_por_id' => $r->user()->id]);
         $n->empleado()->associate(Empleado::findOrFail($data['empleado_id']));
 
@@ -110,6 +116,12 @@ class NovedadesController extends Controller implements HasMiddleware
         $n = Novedad::findOrFail($novedad);
         $data = $this->validar($r);
 
+        // Los dos cortes: sacar una novedad de un mes ya pagado deja el cuadro
+        // tan desalineado como meterla, y es la forma fácil de hacerlo sin
+        // darse cuenta —se cambia el corte en el desplegable y ya—.
+        $this->exigirCorteAbierto($n->periodo);
+        $this->exigirCorteAbierto($data['periodo']);
+
         $n->fill($data);
         $n->empleado()->associate(Empleado::findOrFail($data['empleado_id']));
 
@@ -124,6 +136,8 @@ class NovedadesController extends Controller implements HasMiddleware
     public function destroy(Request $r, int $novedad): RedirectResponse
     {
         $n = Novedad::findOrFail($novedad);
+
+        $this->exigirCorteAbierto($n->periodo);
 
         /*
          * Se borra blando y queda escrito en la bitácora de la persona. Una
@@ -196,13 +210,40 @@ class NovedadesController extends Controller implements HasMiddleware
 
     // ───────────────────────────── internos ─────────────────────────────
 
+    /**
+     * Un corte cuya nómina ya se aprobó o se pagó no se toca.
+     *
+     * El cuadro del mes es el soporte de lo que se consignó. Si después del
+     * pago alguien le agrega una incapacidad, el contador queda con un cuadro
+     * que no cuadra con la plata que salió, y nadie se entera hasta que
+     * alguien compara los dos papeles.
+     *
+     * La regla ya estaba escrita en la propia pantalla —«una incapacidad que
+     * llega tarde entra al corte siguiente»— pero sólo como texto: el
+     * desplegable de corte igual dejaba elegir el mes cerrado. Es la misma
+     * razón por la que `Nomina::sePuedeRehacer()` sólo acepta el borrador.
+     */
+    private function exigirCorteAbierto(string $periodo): void
+    {
+        $nomina = Nomina::where('periodo', $periodo)->first();
+
+        if (! $nomina || $nomina->sePuedeRehacer()) {
+            return;
+        }
+
+        throw ValidationException::withMessages([
+            'periodo' => "La nómina de {$periodo} ya está {$nomina->estadoLabel()}: "
+                .'lo que llega tarde va al corte siguiente, no a este.',
+        ]);
+    }
+
     private function validar(Request $r): array
     {
         $tipo = TipoNovedad::tryFrom((string) $r->input('tipo'));
 
         $data = $r->validate([
             'empleado_id' => ['required', 'integer', 'exists:rrhh_empleados,id'],
-            'tipo' => ['required', new \Illuminate\Validation\Rules\Enum(TipoNovedad::class)],
+            'tipo' => ['required', new Enum(TipoNovedad::class)],
             'clase' => ['required', 'string', 'max:40'],
             'fecha_inicio' => ['required', 'date'],
             // Una novedad que termina antes de empezar es un error de tipeo que
@@ -226,10 +267,47 @@ class NovedadesController extends Controller implements HasMiddleware
             abort(422, "«{$data['clase']}» no es una clase válida de {$tipo->singular()}.");
         }
 
+        $data = $this->ponerLaMedida($data);
+
         $data['nocturna'] = $r->boolean('nocturna');
         $data['remunerada'] = $r->boolean('remunerada', true);
 
         unset($data['soporte']);
+
+        return $data;
+    }
+
+    /**
+     * Cuánto duró: días, horas, o lo que digan las fechas.
+     *
+     * Toda novedad tiene que traer una medida. De este número salen DOS cosas
+     * que nadie revisa a mano: el descuento del sueldo y el ausentismo que se
+     * lleva a la Junta. Sin medida los dos daban cero, y cero no se distingue
+     * de «no faltó»: una incapacidad de cinco días quedaba registrada, visible
+     * en el cuadro, y pesando nada.
+     *
+     * Cuando hay fecha de terminación la medida se deduce —del 5 al 9 son
+     * cinco días— en vez de pedírsela a quien ya la escribió dos renglones
+     * arriba. Cuando no la hay, no se inventa: se pide.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    private function ponerLaMedida(array $data): array
+    {
+        if (filled($data['dias'] ?? null) || filled($data['horas'] ?? null)) {
+            return $data;
+        }
+
+        if (blank($data['fecha_fin'] ?? null)) {
+            throw ValidationException::withMessages([
+                'dias' => 'Falta cuánto duró: poné los días, las horas, o hasta qué día va. '
+                    .'Sin eso no cuenta ni en el descuento ni en el ausentismo.',
+            ]);
+        }
+
+        $data['dias'] = Carbon::parse($data['fecha_inicio'])
+            ->diffInDays(Carbon::parse($data['fecha_fin'])) + 1;
 
         return $data;
     }
@@ -303,12 +381,41 @@ class NovedadesController extends Controller implements HasMiddleware
             'descuento_manual' => (bool) $n->descuento_manual,
             // La cuenta al lado del número, para que no haya que creerle al
             // sistema: quien revisa el cuadro ve de dónde salió.
-            'descuento_formula' => $sugerido['formula'],
+            'descuento_formula' => $this->formulaConAviso($n, $sugerido),
             'descuento_sugerido' => $sugerido['valor'],
             'observaciones' => $n->observaciones,
             'soporte' => $n->soporte_path ? $n->soporte_nombre : null,
             'periodo' => $n->periodo,
         ];
+    }
+
+    /**
+     * La cuenta, y si no cuadra con lo registrado, que lo diga.
+     *
+     * El número grande es lo que quedó guardado; el renglón de abajo es la
+     * cuenta. Normalmente son lo mismo. Cuando no —porque la novedad se guardó
+     * sin los días y el descuento salió en cero, o porque cambió una regla
+     * después— la pantalla mostraba un valor y debajo una cuenta que daba otro,
+     * sin explicar cuál creer.
+     *
+     * No se corrige solo a propósito: si el corte ya se pagó, ese cero es lo
+     * que de verdad se consignó. Lo que corresponde es decirlo para que alguien
+     * decida, no reescribir el soporte de un pago.
+     *
+     * Lo corregido a mano no entra acá: ya tiene su propio aviso.
+     *
+     * @param  array{valor: float, formula: string}  $sugerido
+     */
+    private function formulaConAviso(Novedad $n, array $sugerido): string
+    {
+        $registrado = (float) $n->descuento;
+
+        if ($n->descuento_manual || abs($registrado - $sugerido['valor']) <= 0.009) {
+            return $sugerido['formula'];
+        }
+
+        return $sugerido['formula'].' · No coincide con lo registrado ($'
+            .number_format($registrado, 0, ',', '.').'): revisalo.';
     }
 
     private function filaIngreso(Empleado $e): array
