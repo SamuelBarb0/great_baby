@@ -386,7 +386,16 @@ const groups = [
                 icon: BarChart3, permiso: 'contabilidad',
             },
             {
-                name: 'Notas crédito y débito', href: '/app/cartera/notas-credito',
+                /*
+                 * Sólo «Notas crédito».
+                 *
+                 * Great Baby confirmó el 2026-11-03 que las notas débito no
+                 * las usan. La pantalla queda —está construida y probada, y
+                 * se llega por la pestaña de arriba— pero el menú no la
+                 * ofrece: un menú que nombra lo que nadie usa hace más largo
+                 * el camino a lo que sí.
+                 */
+                name: 'Notas crédito', href: '/app/cartera/notas-credito',
                 rutas: ['/app/cartera/notas-debito'],
                 icon: FileText, permiso: 'cartera',
             },
