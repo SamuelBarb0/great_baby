@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { Head, Link, router } from '@inertiajs/vue3';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import { Camera, Warehouse, ArrowRightLeft, ArrowLeftRight } from 'lucide-vue-next';
@@ -18,6 +18,7 @@ import { Camera, Warehouse, ArrowRightLeft, ArrowLeftRight } from 'lucide-vue-ne
  * los últimos 20.
  */
 const props = defineProps({
+    pendientes: { type: Array, default: () => [] },
     mis_bodegas: { type: Array, required: true },
     prestamos: { type: Object, required: true },
     bodegas_comerciales: { type: Array, required: true },
@@ -31,6 +32,9 @@ const props = defineProps({
 });
 
 const abiertos = computed(() => props.prestamos?.abiertos ?? []);
+// Lo de hoy: lanzamientos y productos que esperan, y las muestras por recoger.
+const porRecoger = computed(() => abiertos.value.filter((p) => p.es_prestamo && p.estado === 'en_transito'));
+const irAMuestras = () => document.getElementById('muestras')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 const cerrados = computed(() => props.prestamos?.cerrados ?? []);
 
 /**
@@ -80,6 +84,11 @@ const enviar = () => {
     });
 };
 
+// Desde la tarjeta de muestras o un producto: abre directo la solicitud.
+onMounted(() => {
+    if (new URLSearchParams(window.location.search).get('pedir') && puedePedir.value) abrir('pedir');
+});
+
 const estadoChip = (e) => ({
     borrador: 'bg-surface-100 text-surface-700',
     en_transito: 'bg-amber-100 text-amber-900 ring-1 ring-amber-400',
@@ -96,18 +105,38 @@ const firmas = (p) => [
 </script>
 
 <template>
-    <Head title="Marketing · préstamos"/>
+    <Head title="Lo que me toca"/>
     <AppLayout>
         <div class="space-y-5 max-w-6xl mx-auto">
             <div>
-                <h1 class="text-2xl font-bold flex items-center gap-2">
-                    <Camera class="h-6 w-6 text-brand-600"/>
-                    Marketing · préstamos de bodega
-                </h1>
-                <p class="text-sm text-surface-500 mt-1">
-                    Pedí productos prestados a bodega para fotos y videos, y devolvelos cuando termines.
-                    Todo queda registrado en el kardex, sin papelitos.
-                </p>
+                <h1 class="text-2xl font-bold">Lo que me toca</h1>
+                <p class="text-sm text-surface-500 mt-1">Lo que está esperando por Marketing hoy.</p>
+            </div>
+
+            <section class="card divide-y divide-surface-100 dark:divide-surface-800" aria-label="Pendientes">
+                <div v-for="f in pendientes" :key="f.url" class="p-3 flex flex-wrap items-center justify-between gap-3">
+                    <div class="min-w-0">
+                        <div class="text-sm font-semibold">{{ f.titulo }}</div>
+                        <div class="text-xs text-surface-500">{{ f.detalle }}</div>
+                    </div>
+                    <Link :href="f.url" class="btn-primary text-sm">{{ f.boton }}</Link>
+                </div>
+                <div v-for="p in porRecoger" :key="p.id" class="p-3 flex flex-wrap items-center justify-between gap-3">
+                    <div class="min-w-0">
+                        <div class="text-sm font-semibold">Muestra lista para recoger: {{ p.numero }}</div>
+                        <div class="text-xs text-surface-500">{{ p.observaciones || 'Bodega ya la alistó.' }}</div>
+                    </div>
+                    <button type="button" @click="irAMuestras" class="btn-primary text-sm">Ver</button>
+                </div>
+                <p v-if="!pendientes.length && !porRecoger.length" class="p-6 text-sm text-surface-500 text-center">No hay nada esperando. Cuando llegue un contenedor, aparece aquí.</p>
+            </section>
+
+            <div id="muestras">
+                <h2 class="text-lg font-bold flex items-center gap-2">
+                    <Camera class="h-5 w-5 text-brand-600"/>
+                    Muestras de bodega
+                </h2>
+                <p class="text-sm text-surface-500 mt-1">Pida productos prestados para fotos y videos, y devuélvalos cuando termine.</p>
             </div>
 
             <!-- Nuestros almacenes + accesos rápidos -->

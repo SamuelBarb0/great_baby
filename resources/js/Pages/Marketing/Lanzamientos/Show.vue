@@ -1,8 +1,9 @@
 <script setup>
-import { computed, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref } from 'vue';
 import { Head, Link, router } from '@inertiajs/vue3';
 import { Rocket, ArrowLeft, CheckSquare, User, CalendarDays, AlertTriangle, Check, X, MessageSquare, Lock } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
+import SiguientePaso from '@/Pages/Compras/SiguientePaso.vue';
 
 /**
  * Tablero de lanzamiento de un contenedor: 5 listas y 10 tarjetas.
@@ -16,6 +17,7 @@ const props = defineProps({
     listas: { type: Object, required: true },
     puede_aprobar: Boolean,
     compras: { type: Object, default: null },
+    paso: { type: Object, required: true },
     usuarios: { type: Array, required: true },
 });
 
@@ -34,8 +36,10 @@ const FONDOS = {
     finalizado: 'bg-emerald-500/5',
 };
 
+// Una tarjeta es «mía» si esta persona la puede trabajar.
+const soloMias = ref(false);
 const porLista = computed(() => Object.fromEntries(
-    Object.keys(props.listas).map(l => [l, props.tarjetas.filter(t => t.lista === l)]),
+    Object.keys(props.listas).map(l => [l, props.tarjetas.filter(t => t.lista === l && (!soloMias.value || t.puede_trabajar))]),
 ));
 const hechos = (t) => t.items.filter(i => i.hecho).length;
 
@@ -52,6 +56,17 @@ const abrir = (t) => {
     devolucion.activo = false;
 };
 const opciones = { preserveScroll: true, preserveState: true };
+
+// Desde «Lo que sigue» o desde «Lo que me toca» se llega con la tarjeta abierta.
+const hacer = (accion, a) => {
+    const t = props.tarjetas.find((x) => x.id === a?.tarjeta);
+    if (accion === 'abrir-tarjeta' && t) abrir(t);
+};
+onMounted(() => {
+    const id = Number(new URLSearchParams(window.location.search).get('tarjeta'));
+    const t = props.tarjetas.find((x) => x.id === id);
+    if (t) abrir(t);
+});
 
 const marcar = (item, hecho) => router.post(`/app/marketing/lanzamientos/item/${item.id}`, { hecho }, opciones);
 const guardarDatos = () => router.put(`/app/marketing/lanzamientos/tarjeta/${abierta.value.id}`,
@@ -121,6 +136,8 @@ const ICONO_COMENTARIO = { movimiento: '↦', bloqueo: '⛔', aprobacion: '✅',
                 </div>
             </div>
 
+            <SiguientePaso :paso="paso" @accion="hacer"/>
+
             <section v-if="compras" class="card p-3 flex flex-wrap items-center justify-between gap-3 text-sm" aria-label="Desde Compras">
                 <div>
                     <b>En Compras:</b> {{ compras.etapa || 'Aún sin etapas marcadas' }}
@@ -135,6 +152,10 @@ const ICONO_COMENTARIO = { movimiento: '↦', bloqueo: '⛔', aprobacion: '✅',
 
             <div v-if="$page.props.flash?.success" class="p-3 rounded-lg bg-emerald-500/15 border-l-4 border-emerald-500 text-emerald-700 text-sm">{{ $page.props.flash.success }}</div>
             <div v-if="$page.props.flash?.error" class="p-3 rounded-lg bg-red-500/15 border-l-4 border-red-500 text-red-700 text-sm">{{ $page.props.flash.error }}</div>
+
+            <label class="inline-flex items-center gap-2 text-sm cursor-pointer">
+                <input type="checkbox" v-model="soloMias"/> Ver solo las que puedo trabajar
+            </label>
 
             <!-- Las 5 listas -->
             <div class="grid grid-cols-1 md:grid-cols-5 gap-3 items-start">
@@ -151,7 +172,7 @@ const ICONO_COMENTARIO = { movimiento: '↦', bloqueo: '⛔', aprobacion: '✅',
                                 @dragstart="arrastrada = t.id" @dragend="arrastrada = null; sobre = null"
                                 @click="abrir(t)"
                                 class="card p-3 w-full text-left space-y-1 hover:ring-2 hover:ring-brand-300 transition"
-                                :class="t.puede_trabajar && t.lista !== 'finalizado' ? 'cursor-grab' : 'cursor-pointer'">
+                                :class="[t.puede_trabajar && t.lista !== 'finalizado' ? 'cursor-grab' : 'cursor-pointer', t.puede_trabajar && t.lista !== 'finalizado' ? 'border-l-4 border-brand-600' : 'opacity-75']">
                             <div class="text-sm font-semibold leading-tight" :class="t.lista === 'finalizado' ? 'line-through text-surface-500' : ''">
                                 {{ t.numero }}. {{ t.titulo }}
                             </div>
@@ -241,6 +262,7 @@ const ICONO_COMENTARIO = { movimiento: '↦', bloqueo: '⛔', aprobacion: '✅',
 
                 <!-- Movimientos -->
                 <div class="flex flex-wrap gap-2">
+                    <Link v-if="abierta.clave === 'muestras' && abierta.lista !== 'finalizado'" href="/app/marketing?pedir=1" class="btn-ghost border border-brand-300 text-sm">Pedir la muestra a bodega</Link>
                     <button v-for="[lista, texto] in destinos(abierta)" :key="lista" @click="mover(abierta, lista)" class="btn-primary text-sm">{{ texto }}</button>
                     <button v-if="abierta.puede_trabajar && !['finalizado', 'bloqueado', 'pendiente_aprobacion'].includes(abierta.lista)"
                             @click="pedirBloqueo(abierta)" class="btn-ghost border border-red-300 text-red-700 text-sm">Bloquear</button>

@@ -140,6 +140,7 @@ class MarketingLanzamientosController extends Controller implements HasMiddlewar
                 return [
                     'id' => $t->id,
                     'numero' => $t->numero,
+                    'clave' => $t->clave,
                     'titulo' => $t->titulo,
                     'area' => $t->area,
                     'area_label' => LanzamientoTarjeta::AREAS[$t->area] ?? $t->area,
@@ -178,6 +179,7 @@ class MarketingLanzamientosController extends Controller implements HasMiddlewar
             'listas' => LanzamientoTarjeta::LISTAS,
             'puede_aprobar' => $this->tablero->puedeAprobar($u),
             'compras' => $this->desdeCompras($lanzamiento, $u),
+            'paso' => app(\App\Modules\Marketing\Services\PasoDeMarketing::class)->deLanzamiento($lanzamiento, $u),
             'usuarios' => $this->usuariosDelTablero(),
         ]);
     }

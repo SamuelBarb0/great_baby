@@ -1,5 +1,5 @@
 <script setup>
-import { computed, reactive, ref } from 'vue';
+import { computed, reactive, ref, watch } from 'vue';
 import { router } from '@inertiajs/vue3';
 import { Upload, Link2, Download, Trash2, Film, Image as ImageIcon, FileText, ExternalLink, Lock, Eye } from 'lucide-vue-next';
 import AppConfirmModal from '@/Components/AppConfirmModal.vue';
@@ -16,6 +16,8 @@ const props = defineProps({
     gestiona: { type: Boolean, default: false },
     maxKb: { type: Number, required: true },
     fijos: { type: Object, default: () => ({}) },
+    // La pieza que le falta al producto: lo que se sube cuenta como eso.
+    tipoInicial: { type: String, default: 'imagen' },
     productos: { type: Array, default: () => [] },
     contenedores: { type: Array, default: () => [] },
 });
@@ -27,7 +29,7 @@ const PERMISOS = {
 };
 const TIPOS = { video: 'Video', reel: 'Reel', imagen: 'Imagen', otro: 'Otro' };
 
-const form = reactive({ tipo: 'imagen', titulo: '', permiso: 'interno', enlace_externo: '', producto_id: null, importacion_id: null });
+const form = reactive({ tipo: props.tipoInicial, titulo: '', permiso: 'interno', enlace_externo: '', producto_id: null, importacion_id: null });
 const archivos = ref([]);
 const inputArchivos = ref(null);
 const modo = ref('archivo');
@@ -35,6 +37,7 @@ const subiendo = ref(false);
 const progreso = ref(null);
 const errores = ref({});
 const modalConfirm = ref(null);
+watch(() => props.tipoInicial, (tipo) => { form.tipo = tipo; });
 
 const limiteMb = computed(() => Math.floor(props.maxKb / 1024));
 const mb = (bytes) => bytes == null ? '' : (bytes / 1048576).toFixed(bytes < 1048576 ? 2 : 1) + ' MB';

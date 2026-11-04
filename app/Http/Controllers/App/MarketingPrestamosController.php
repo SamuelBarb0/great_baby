@@ -114,6 +114,7 @@ class MarketingPrestamosController extends Controller implements HasMiddleware
         $cerrados = array_values(array_filter($prestamos, fn ($p) => ! in_array($p, $abiertos, true)));
 
         return Inertia::render('Marketing/Panel', [
+            'pendientes' => app(\App\Modules\Marketing\Services\PasoDeMarketing::class)->pendientes(auth()->user()),
             'mis_bodegas' => $misBodegas,
             'prestamos' => [
                 'abiertos' => $abiertos,

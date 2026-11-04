@@ -44,7 +44,7 @@ const claseBoton = (a) => (a.principal ? 'btn-primary text-sm' : 'btn-ghost text
             <template v-for="a in paso.acciones" :key="a.etiqueta">
                 <Link v-if="a.tipo === 'enlace'" :href="a.href" :class="claseBoton(a)">{{ a.etiqueta }}</Link>
                 <a v-else-if="a.tipo === 'descarga'" :href="a.href" :class="claseBoton(a)">{{ a.etiqueta }}</a>
-                <button v-else type="button" @click="$emit('accion', a.accion)" :class="claseBoton(a)">{{ a.etiqueta }}</button>
+                <button v-else type="button" @click="$emit('accion', a.accion, a)" :class="claseBoton(a)">{{ a.etiqueta }}</button>
             </template>
         </div>
     </section>

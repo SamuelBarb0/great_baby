@@ -71,7 +71,8 @@ class MarketingController extends Controller implements HasMiddleware
                 'piezas_reel' => (bool) $p->piezas_reel,
                 'piezas_imagenes' => (int) $p->piezas_imagenes,
             ],
-            'etapa' => $etapas->para(collect([$p]))[$p->id],
+            'etapa' => $etapa = $etapas->para(collect([$p]))[$p->id],
+            'paso' => app(\App\Modules\Marketing\Services\PasoDeMarketing::class)->deProducto($p, $etapa),
             'etapas' => EtapasProducto::ETAPAS,
             'creativos' => MarketingCreativo::with(['producto:id,nombre,referencia', 'importacion:id,numero,contenedor', 'autor:id,name'])
                 ->where('producto_id', $p->id)->latest()->get()
@@ -117,7 +118,7 @@ class MarketingController extends Controller implements HasMiddleware
      */
     public function publicar(Request $r, int $producto): RedirectResponse
     {
-        $data = $r->validate(['publicado' => ['required', 'boolean']]);
+        $data = $r->validate(['publicado' => ['required', 'boolean'], 'listo' => ['nullable', 'boolean']]);
         $p = Producto::findOrFail($producto);
 
         if ($data['publicado'] && ! $p->activo) {
@@ -126,6 +127,8 @@ class MarketingController extends Controller implements HasMiddleware
 
         $p->update([
             'publicado' => (bool) $data['publicado'],
+            // «Publicar» es un solo paso: terminado y visible para Ventas.
+            'listo_publicar' => ! empty($data['listo']) ? true : $p->listo_publicar,
             'publicado_cambiado_en' => now(),
             'publicado_cambiado_por' => $r->user()->id,
         ]);
@@ -161,7 +164,7 @@ class MarketingController extends Controller implements HasMiddleware
             ->when($contenedorId, fn ($qb) => $qb->whereIn('id', array_keys($cantidades)))
             ->when($q !== '', fn ($qb) => $qb->where(fn ($w) => $w->where('referencia', 'like', "%{$q}%")->orWhere('nombre', 'like', "%{$q}%")))
             ->orderBy('referencia')
-            ->get(['id', 'referencia', 'nombre', 'activo', 'publicado', 'listo_publicar', 'piezas_video', 'piezas_reel', 'piezas_imagenes']);
+            ->get(['id', 'referencia', 'nombre', 'activo', 'publicado', 'listo_publicar', 'piezas_video', 'piezas_reel', 'piezas_imagenes', 'copy_comercial', 'publico_objetivo']);
 
         // La etapa se calcula, no se guarda, así que se filtra después de
         // calcularla. Sin contenedor ni búsqueda solo se listan los productos
@@ -188,6 +191,7 @@ class MarketingController extends Controller implements HasMiddleware
                 'publicado' => (bool) $p->publicado,
                 'listo_publicar' => (bool) $p->listo_publicar,
                 'cantidad' => $cantidades[$p->id] ?? null,
+                'paso' => app(\App\Modules\Marketing\Services\PasoDeMarketing::class)->deProducto($p, $info[$p->id]),
                 ...$info[$p->id],
             ]),
             'total' => $productos->count(),

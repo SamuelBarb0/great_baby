@@ -1,7 +1,7 @@
 <script setup>
 import { reactive, ref, watch } from 'vue';
 import { Head, Link, router } from '@inertiajs/vue3';
-import { LayoutGrid, Search, Eye, EyeOff, Pencil, Images, Check } from 'lucide-vue-next';
+import { LayoutGrid, Search, Check } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import EtapaProducto from '@/Components/Marketing/EtapaProducto.vue';
 
@@ -32,31 +32,25 @@ const ir = (pagina = 1) => router.get('/app/marketing/tablero', { ...f, page: pa
     { preserveState: true, preserveScroll: true, replace: true });
 watch(f, () => { clearTimeout(espera); espera = setTimeout(() => ir(1), 350); });
 
-// Piezas: se editan en la fila y se guardan al salir del campo.
-const piezas = reactive(Object.fromEntries(props.productos.map(p => [p.id, { ...p.piezas.pedidas }])));
-watch(() => props.productos, (ps) => ps.forEach(p => { piezas[p.id] = { ...p.piezas.pedidas }; }));
-const guardando = ref(null);
-const guardarPiezas = (p) => {
-    const x = piezas[p.id];
-    guardando.value = p.id;
-    router.put(`/app/marketing/producto/${p.id}/piezas`, {
-        piezas_video: !!x.video, piezas_reel: !!x.reel, piezas_imagenes: Number(x.imagen) || 0,
-    }, { preserveScroll: true, preserveState: true, onFinish: () => guardando.value = null });
+// Lo que sigue con cada producto. «Publicar» se hace aquí; lo demás, en su ficha.
+const publicando = ref(null);
+const publicar = (p) => {
+    publicando.value = p.id;
+    router.post(`/app/marketing/producto/${p.id}/publicar`, { publicado: true, listo: true },
+        { preserveScroll: true, preserveState: true, onFinish: () => publicando.value = null });
 };
-
-const publicar = (p, valor) => router.post(`/app/marketing/producto/${p.id}/publicar`, { publicado: valor },
-    { preserveScroll: true, preserveState: true });
+const principal = (p) => p.paso.acciones.find((a) => a.principal) || null;
 
 const fmt = (n) => n == null ? '' : Number(n).toLocaleString('es-CO', { maximumFractionDigits: 0 });
 </script>
 
 <template>
-    <Head title="Tablero de marketing"/>
+    <Head title="Productos"/>
     <AppLayout>
         <div class="space-y-4">
             <div>
-                <h1 class="text-2xl font-bold flex items-center gap-2"><LayoutGrid class="h-6 w-6 text-brand-600"/>Tablero de marketing</h1>
-                <p class="text-sm text-surface-500 mt-1">Dónde va cada producto, de la compra a la publicación. Elija un contenedor para ver lo que trae.</p>
+                <h1 class="text-2xl font-bold flex items-center gap-2"><LayoutGrid class="h-6 w-6 text-brand-600"/>Productos</h1>
+                <p class="text-sm text-surface-500 mt-1">Qué le falta a cada producto para publicarse. Elija un contenedor para ver solo lo que trae.</p>
             </div>
 
             <div v-if="$page.props.flash?.success" class="p-3 rounded-lg bg-emerald-500/15 border-l-4 border-emerald-500 text-emerald-700 text-sm">{{ $page.props.flash.success }}</div>
@@ -89,10 +83,10 @@ const fmt = (n) => n == null ? '' : Number(n).toLocaleString('es-CO', { maximumF
             </div>
 
             <div v-else class="card divide-y divide-surface-100 dark:divide-surface-800">
-                <div v-for="p in productos" :key="p.id" class="p-3 grid gap-3 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,2fr)_auto] items-start">
+                <div v-for="p in productos" :key="p.id" class="p-3 grid gap-3 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,2fr)_auto] items-center">
                     <div class="min-w-0">
                         <div class="text-xs font-mono text-surface-500">{{ p.referencia }}</div>
-                        <div class="font-semibold truncate">{{ p.nombre }}</div>
+                        <Link :href="`/app/marketing/producto/${p.id}/ficha`" class="font-semibold truncate block hover:underline">{{ p.nombre }}</Link>
                         <div class="text-xs text-surface-500 mt-0.5">
                             <span v-if="p.cantidad">{{ fmt(p.cantidad) }} und en el contenedor · </span>
                             <span :class="p.publicado ? 'text-emerald-700' : 'text-amber-700'">{{ p.publicado ? 'Visible para Ventas' : 'Oculto para Ventas' }}</span>
@@ -101,24 +95,19 @@ const fmt = (n) => n == null ? '' : Number(n).toLocaleString('es-CO', { maximumF
                     </div>
 
                     <div class="min-w-0 space-y-2">
-                        <EtapaProducto :etapa="p" :etapas="etapas"/>
-                        <div class="flex items-center gap-3 text-xs flex-wrap">
-                            <span class="text-surface-500">Piezas:</span>
-                            <label class="inline-flex items-center gap-1"><input type="checkbox" v-model="piezas[p.id].video" @change="guardarPiezas(p)"/> video</label>
-                            <label class="inline-flex items-center gap-1"><input type="checkbox" v-model="piezas[p.id].reel" @change="guardarPiezas(p)"/> reel</label>
-                            <label class="inline-flex items-center gap-1">
-                                <input type="number" min="0" max="50" v-model="piezas[p.id].imagen" @change="guardarPiezas(p)" class="input w-16 py-0.5 text-xs"/> imágenes
-                            </label>
-                            <span class="text-surface-400">subidas: {{ p.piezas.hechas.video }} video · {{ p.piezas.hechas.reel }} reel · {{ p.piezas.hechas.imagen }} img</span>
-                            <span v-if="guardando === p.id" class="text-surface-400">guardando…</span>
-                        </div>
+                        <EtapaProducto :etapa="p" :etapas="etapas" compacto/>
+                        <p class="text-sm">{{ p.paso.titulo }}</p>
+                        <p v-if="p.dias_desde_llegada !== null && p.etapa !== 'publicado'" class="text-xs" :class="p.dias_desde_llegada > 7 ? 'text-amber-700 font-semibold' : 'text-surface-500'">
+                            {{ p.dias_desde_llegada === 0 ? 'Llegó hoy' : `Llegó hace ${p.dias_desde_llegada} ${p.dias_desde_llegada === 1 ? 'día' : 'días'}` }}
+                        </p>
                     </div>
 
-                    <div class="flex items-center gap-1 lg:justify-end flex-wrap">
-                        <Link :href="`/app/marketing/producto/${p.id}/ficha`" class="btn-ghost text-xs"><Pencil class="h-3 w-3"/> Ficha</Link>
-                        <Link :href="`/app/marketing/creativos?producto=${p.id}`" class="btn-ghost text-xs"><Images class="h-3 w-3"/> Creativos</Link>
-                        <button v-if="p.publicado" @click="publicar(p, false)" class="btn-ghost text-xs" title="Ocultar para Ventas"><EyeOff class="h-3 w-3"/> Ocultar</button>
-                        <button v-else @click="publicar(p, true)" :disabled="!p.activo" class="btn-ghost text-xs text-emerald-700" title="Activar para Ventas"><Eye class="h-3 w-3"/> Activar</button>
+                    <div class="lg:justify-self-end">
+                        <template v-if="principal(p)">
+                            <button v-if="principal(p).accion === 'publicar'" @click="publicar(p)" :disabled="publicando === p.id" class="btn-primary text-sm">{{ publicando === p.id ? 'Publicando…' : 'Publicar' }}</button>
+                            <Link v-else :href="`/app/marketing/producto/${p.id}/ficha?ir=${principal(p).accion}`" class="btn-primary text-sm">{{ principal(p).etiqueta }}</Link>
+                        </template>
+                        <Link v-else :href="`/app/marketing/producto/${p.id}/ficha`" class="btn-ghost text-sm border border-surface-300 dark:border-surface-700">Ver ficha</Link>
                     </div>
                 </div>
             </div>
