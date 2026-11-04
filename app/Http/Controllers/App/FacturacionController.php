@@ -187,9 +187,19 @@ class FacturacionController extends Controller implements HasMiddleware
             'facturador.user_id' => $r->user()->id,
         ]);
 
-        // Delego al controller existente (reusa toda la lógica de cartera).
+        /*
+         * Delego al controller existente (reusa toda la lógica de cartera).
+         *
+         * Va la Request ADEMÁS del id: la firma de allá es
+         * `facturar(Request $r, int $pedido)` y lo primero que hace es
+         * `$this->puedeFacturar($r->user())`. Pasándole sólo el id, PHP
+         * reventaba con un TypeError antes de entrar al método y la bandeja
+         * del Facturador devolvía 500 en TODO pedido — el rol entero no podía
+         * facturar, y la pantalla se quedaba en «Facturando…» sin decir nada.
+         */
         $delegado = app(\App\Http\Controllers\App\PedidosB2BController::class);
-        return $delegado->facturar($pedido->id);
+
+        return $delegado->facturar($r, $pedido->id);
     }
 
     /**
