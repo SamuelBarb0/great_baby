@@ -263,7 +263,10 @@ const reenviarRecepcion = (rec) => {
                         <Container class="h-5 w-5 text-brand-600"/>
                         <div>
                             <div class="text-xs uppercase tracking-widest font-bold text-brand-600">Pre-liquidación</div>
-                            <div class="text-xs text-surface-500">Costo estimado puesto en Colombia, antes de pedir</div>
+                            <div class="text-xs text-surface-500">
+                                Costo estimado puesto en Colombia, antes de pedir
+                                <template v-if="orden.modelo_compra"> · {{ orden.modelo_compra === 'fabrica' ? 'Fábrica directa' : 'Trading' }}</template>
+                            </div>
                         </div>
                     </div>
                     <div class="text-right">

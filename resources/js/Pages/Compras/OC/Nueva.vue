@@ -12,6 +12,8 @@ const props = defineProps({
     // permite elección explícita al crear OC (fallback: primera si solo hay 1).
     bodegas: { type: Array, default: () => [] },
     // Importación: parámetros y tasa de la última OC pre-liquidada, y los dos
+    // Comisión y mínimo de trading y de fábrica directa.
+    modelosCompra: { type: Object, default: () => ({}) },
     // destinos posibles de cada línea (Great Baby / E-commerce).
     parametrosIniciales: { type: Object, default: () => ({}) },
     // Moneda → tasa de su última OC de importación (nunca la de otra moneda).
@@ -51,6 +53,7 @@ const form = reactive({
     tasa_cambio: 1,
     fecha_esperada: '',
     observaciones: '',
+    modelo_compra: 'trading',
     parametros_preliquidacion: { ...props.parametrosIniciales },
     items: [],
 });
@@ -71,6 +74,15 @@ watch(() => form.tipo, (tipo) => {
 watch(() => form.moneda, (moneda) => {
     if (form.tipo === 'importacion' && props.tasasIniciales[moneda]) form.tasa_cambio = props.tasasIniciales[moneda];
 }, { immediate: false });
+
+// Trading o fábrica cambian la comisión y el mínimo; los mínimos están en yuanes.
+const aplicarModelo = () => {
+    const modelo = props.modelosCompra?.[form.modelo_compra];
+    if (!modelo) return;
+    form.parametros_preliquidacion.comision_pct = modelo.comision_pct;
+    form.parametros_preliquidacion.valor_minimo = form.moneda === 'CNY' ? modelo.valor_minimo : 0;
+};
+watch(() => [form.modelo_compra, form.moneda], aplicarModelo);
 
 const sincronizarCantidad = (it) => {
     if (Number(it.cajas) > 0 && Number(it.unidades_por_caja) > 0) {
@@ -337,6 +349,16 @@ const guardar = () => {
                             de {{ fmt(capacidad) }} m³ · {{ fmt(ocupacion, 1) }} %
                             <span v-for="d in cbmPorDestino" :key="d.id" class="text-surface-500"> · {{ d.nombre }} {{ fmt(d.cbm) }} m³</span>
                         </div>
+                    </div>
+                    <div class="min-w-[14rem]">
+                        <label class="text-xs font-semibold" for="oc-modelo">Se compra con</label>
+                        <select id="oc-modelo" v-model="form.modelo_compra" class="input w-full text-sm">
+                            <option value="trading">Trading (agente)</option>
+                            <option value="fabrica">Fábrica directa</option>
+                        </select>
+                        <p class="text-[11px] text-surface-500 mt-0.5">
+                            Comisión {{ fmt(form.parametros_preliquidacion.comision_pct, 0) }} %<template v-if="form.parametros_preliquidacion.valor_minimo > 0"> · mínimo {{ fmt(form.parametros_preliquidacion.valor_minimo, 0) }} ¥</template>
+                        </p>
                     </div>
                     <button type="button" @click="verParametros = !verParametros" class="btn-ghost text-xs">
                         {{ verParametros ? 'Ocultar' : 'Ver' }} parámetros de la pre-liquidación

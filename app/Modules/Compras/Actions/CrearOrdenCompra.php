@@ -23,12 +23,16 @@ class CrearOrdenCompra
     public function handle(array $data): OrdenCompra
     {
         return DB::transaction(function () use ($data) {
+            $esImportacion = ($data['tipo'] ?? 'nacional') === 'importacion';
+            $modelo = $data['modelo_compra'] ?? PreliquidarOrden::TRADING;
+
             $orden = OrdenCompra::create([
                 'numero' => OrdenCompra::siguienteNumero(),
                 'proveedor_id' => $data['proveedor_id'],
                 'bodega_id' => $data['bodega_id'] ?? null,
                 'condicion_credito_id' => $data['condicion_credito_id'] ?? null,
                 'tipo' => $data['tipo'] ?? 'nacional',
+                'modelo_compra' => $esImportacion ? $modelo : null,
                 'moneda' => $data['moneda'] ?? 'COP',
                 'tasa_cambio' => $data['tasa_cambio'] ?? 1,
                 'fecha_emision' => now(),
@@ -37,8 +41,8 @@ class CrearOrdenCompra
                 'creado_por' => auth()->id(),
                 'observaciones' => $data['observaciones'] ?? null,
                 // Sólo las importaciones se pre-liquidan; nacen con los de la última.
-                'parametros_preliquidacion' => ($data['tipo'] ?? 'nacional') === 'importacion'
-                    ? PreliquidarOrden::normalizar($data['parametros_preliquidacion'] ?? PreliquidarOrden::parametrosIniciales())
+                'parametros_preliquidacion' => $esImportacion
+                    ? PreliquidarOrden::normalizar($data['parametros_preliquidacion'] ?? PreliquidarOrden::parametrosIniciales($modelo, $data['moneda'] ?? 'CNY'))
                     : null,
             ]);
 

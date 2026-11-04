@@ -78,6 +78,9 @@ class Reglas
         // Lo habitual con China: el plazo corre desde que zarpa el buque.
         'compras.credito_dias_zarpe' => ['grupo' => 'contable', 'tipo' => 'int', 'valor' => 90, 'etiqueta' => 'Días de crédito con China desde el zarpe', 'descripcion' => 'Plazo con que nace el plan de pagos de una orden de importación.'],
         'compras.interes_tramos' => ['grupo' => 'contable', 'tipo' => 'json', 'valor' => '[]', 'etiqueta' => 'Tramos de interés por mora con China', 'descripcion' => 'Ejemplo: [{"desde":1,"hasta":30,"pct":1.5}]. Vacío = no se estima interés.'],
+        // Word de Alejandro: dependen de si la orden va con trading o con fábrica directa.
+        'compras.minimo_trading' => ['grupo' => 'contable', 'tipo' => 'int', 'valor' => 220000, 'etiqueta' => 'Valor mínimo del contenedor con trading (¥)', 'descripcion' => 'Por debajo de este valor la pre-liquidación avisa. Depende del flete del momento.'],
+        'compras.minimo_fabrica' => ['grupo' => 'contable', 'tipo' => 'int', 'valor' => 180000, 'etiqueta' => 'Valor mínimo del contenedor con fábrica directa (¥)', 'descripcion' => 'Por debajo de este valor la pre-liquidación avisa. Depende del flete del momento.'],
         // Sin ella Araceli recibe el aviso, pero el traslado no se puede crear.
         'compras.ubicacion_ecommerce' => ['grupo' => 'contable', 'tipo' => 'int', 'valor' => 0, 'etiqueta' => 'Ubicación de e-commerce para las importaciones', 'descripcion' => 'Id de la ubicación a la que se traslada lo que llega marcado para e-commerce. 0 = sin configurar.'],
         'compras.permitir_auto_aprobar' => ['grupo' => 'contable', 'tipo' => 'bool', 'valor' => false, 'etiqueta' => 'Permitir que quien crea una OC la apruebe', 'descripcion' => 'NO (recomendado) exige que la apruebe otra persona. Gerencia siempre puede.'],

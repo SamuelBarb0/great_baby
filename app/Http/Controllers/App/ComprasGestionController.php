@@ -222,6 +222,10 @@ class ComprasGestionController extends Controller implements HasMiddleware
             // Importación: con qué parámetros y tasa nace la pre-liquidación, y
             // para quién va cada línea (Great Baby o el e-commerce de Aracely).
             'parametrosIniciales' => PreliquidarOrden::parametrosIniciales(),
+            'modelosCompra' => [
+                PreliquidarOrden::TRADING => PreliquidarOrden::delModelo(PreliquidarOrden::TRADING),
+                PreliquidarOrden::FABRICA => PreliquidarOrden::delModelo(PreliquidarOrden::FABRICA),
+            ],
             'tasasIniciales' => PreliquidarOrden::tasasIniciales(),
             'empresasDestino' => self::empresasDestino(),
         ]);
@@ -346,6 +350,7 @@ class ComprasGestionController extends Controller implements HasMiddleware
             // Re-audit M2 UX-A4 · bodega ahora obligatoria al crear (antes silenciosa).
             'bodega_id' => ['required', 'integer', 'exists:inventario_ubicaciones,id'],
             'tipo' => ['required', 'string', 'max:30'],
+            'modelo_compra' => ['nullable', 'string', 'in:trading,fabrica'],
             'moneda' => ['required', 'string', 'size:3'],
             'tasa_cambio' => ['required', 'numeric', 'min:0'],
             'fecha_esperada' => ['nullable', 'date'],

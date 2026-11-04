@@ -140,8 +140,40 @@ it('la OC nueva hereda los parámetros de la última importación', function () 
     ]);
 
     expect(PreliquidarOrden::parametrosIniciales()['flete_m3'])->toEqual(400000.0)
-        ->and(PreliquidarOrden::parametrosIniciales()['comision_pct'])->toEqual(5.0)
         ->and(PreliquidarOrden::tasaInicial('CNY'))->toEqual(520.0);
+});
+
+it('la comisión y el mínimo salen de trading o fábrica, no de la última orden', function () {
+    ocImportacion($this, lineasTopwin(), [
+        'modelo_compra' => 'fabrica',
+        'parametros_preliquidacion' => PreliquidarOrden::parametrosIniciales('fabrica'),
+    ]);
+
+    $trading = PreliquidarOrden::parametrosIniciales('trading');
+    $fabrica = PreliquidarOrden::parametrosIniciales('fabrica');
+
+    expect($trading['comision_pct'])->toEqual(12.0)
+        ->and($trading['valor_minimo'])->toEqual(220000.0)
+        ->and($fabrica['comision_pct'])->toEqual(0.0)
+        ->and($fabrica['valor_minimo'])->toEqual(180000.0)
+        ->and(PreliquidarOrden::parametrosIniciales('fabrica', 'USD')['valor_minimo'])->toEqual(0.0);
+});
+
+it('reproduce el ejemplo del Word de Alejandro con trading y con fábrica', function () {
+    $base = ['flete_m3' => 24320000 / 68, 'gasto_colombia_m3' => 32600000 / 68] + PreliquidarOrden::DEFAULTS;
+    $s = app(PreliquidarOrden::class);
+
+    // 30 ¥, tasa 520, caja de 60 con 0,2 m³. Él llega a 23.236,48 redondeando cada paso.
+    expect($s->porUnidad(PreliquidarOrden::delModelo('trading') + $base, 520, 30, 60, 0.2)['costo'])->toEqualWithDelta(23236.48, 0.05)
+        ->and($s->porUnidad(PreliquidarOrden::delModelo('fabrica') + $base, 520, 30, 60, 0.2)['costo'])->toEqualWithDelta(21364.51, 0.01);
+});
+
+it('avisa cuando el pedido no llega al mínimo de su modelo', function () {
+    $orden = ocImportacion($this, lineasTopwin(), ['modelo_compra' => 'fabrica']);
+    $avisos = implode(' ', app(PreliquidarOrden::class)->handle($orden->fresh())['avisos']);
+
+    expect($orden->modelo_compra)->toBe('fabrica')
+        ->and($avisos)->toContain('por debajo del mínimo de 180.000,00 CNY');
 });
 
 it('la tasa heredada es la de la misma moneda, no la de otra importación', function () {

@@ -38,6 +38,13 @@ class PreliquidarOrden
 
     public const MINIMO_PROMEDIO = 3;
 
+    public const TRADING = 'trading';
+
+    public const FABRICA = 'fabrica';
+
+    /** Gastos en China más la comisión del agente. Con fábrica directa no aplica. */
+    private const COMISION_TRADING = 12;
+
     public const DEFAULTS = [
         'comision_pct' => 12,
         'flete_m3' => 358000,
@@ -58,7 +65,7 @@ class PreliquidarOrden
      *
      * @return array<string,float>
      */
-    public static function parametrosIniciales(): array
+    public static function parametrosIniciales(string $modelo = self::TRADING, string $moneda = 'CNY'): array
     {
         $ultima = OrdenCompra::query()
             ->where('tipo', 'importacion')
@@ -69,7 +76,26 @@ class PreliquidarOrden
         return self::normalizar([
             ...(is_string($ultima) ? (json_decode($ultima, true) ?: []) : ($ultima ?? [])),
             ...self::promediosReales(),
+            // Esto no se hereda: una orden de fábrica no le deja su 0 % a la de trading.
+            ...self::delModelo($modelo, $moneda),
         ]);
+    }
+
+    /**
+     * Lo que cambia entre trading y fábrica directa.
+     *
+     * @return array{comision_pct: float, valor_minimo: float}
+     */
+    public static function delModelo(string $modelo, string $moneda = 'CNY'): array
+    {
+        $esFabrica = $modelo === self::FABRICA;
+        // Los mínimos están en yuanes: en otra moneda no se pueden comparar.
+        $minimo = $esFabrica ? setting('compras.minimo_fabrica', 180000) : setting('compras.minimo_trading', 220000);
+
+        return [
+            'comision_pct' => $esFabrica ? 0.0 : (float) self::COMISION_TRADING,
+            'valor_minimo' => $moneda === 'CNY' ? (float) $minimo : 0.0,
+        ];
     }
 
     /**
