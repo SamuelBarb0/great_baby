@@ -4,6 +4,7 @@ namespace App\Modules\Compras\Actions;
 
 use App\Modules\Compras\Enums\EstadoOrdenCompra;
 use App\Modules\Compras\Models\OrdenCompra;
+use App\Modules\Compras\Services\ColoresDeImportacion;
 use App\Modules\Compras\Models\OrdenCompraItem;
 use App\Modules\Compras\Models\RecepcionCompra;
 use App\Modules\Compras\Services\CostoImportacion;
@@ -57,6 +58,7 @@ class RecibirMercancia
             // Sin producto, lo que Jorge acepta no llegaría al inventario.
             if ($esImportacion) {
                 CrearProductosDeOrden::run($recepcion->orden);
+                app(ColoresDeImportacion::class)->resolverEnRecepcion($recepcion);
             }
             $costos = app(CostoImportacion::class);
             $tras = app(TrasRecepcion::class);
@@ -82,7 +84,10 @@ class RecibirMercancia
 
                 // Re-audit FUNC-C1 · guard sobre-recepción atómico.
                 $pendiente = (float) $ordenItem->cantidad - (float) $ordenItem->cantidad_recibida;
-                if ($cantidadRecibida > $pendiente + 0.0001) {
+                // De China llega agrupado y en otras cantidades por color: en una
+                // importación el tope es el total de la referencia, y lo revisa
+                // `recepcionCrear`. Una compra nacional sigue topada por línea.
+                if (! $esImportacion && $cantidadRecibida > $pendiente + 0.0001) {
                     throw new InvalidArgumentException(sprintf(
                         'Sobre-recepción bloqueada · item "%s": pedido %.3f, ya recibido %.3f, esta recepción %.3f (pendiente %.3f).',
                         $ordenItem->descripcion ?? '?', $ordenItem->cantidad, $ordenItem->cantidad_recibida,

@@ -29,7 +29,7 @@ class OrdenCompraItem extends Model implements AuditableContract
         'subtotal', 'iva', 'total', 'costo_prorrateado_unit',
         'cajas', 'unidades_por_caja', 'caja_largo_cm', 'caja_ancho_cm', 'caja_alto_cm',
         'cbm_caja', 'peso_caja_kg', 'empresa_destino_id',
-        'tipo_linea', 'componente_de_item_id',
+        'tipo_linea', 'componente_de_item_id', 'color_nombre',
     ];
 
     protected $casts = [

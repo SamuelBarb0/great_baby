@@ -375,6 +375,7 @@ class ComprasGestionController extends Controller implements HasMiddleware
             'items.*.peso_caja_kg' => ['nullable', 'numeric', 'gt:0'],
             'items.*.empresa_destino_id' => ['nullable', 'integer', 'exists:empresa_config,id'],
             'items.*.tipo_linea' => ['nullable', 'string', 'in:producto,componente'],
+            'items.*.color_nombre' => ['nullable', 'string', 'max:60'],
             'parametros_preliquidacion' => ['nullable', 'array'],
         ]);
         if ($data['tipo'] === 'importacion' && isset($data['parametros_preliquidacion'])) {
@@ -531,9 +532,34 @@ class ComprasGestionController extends Controller implements HasMiddleware
                     // LOG-J8 · destino al descargar (apto/averia/cuarentena/revision/faltante) + motivo.
                     'clasificacion' => $i->clasificacion ?? 'apto',
                     'motivo_clasificacion' => $i->motivo_clasificacion,
+                    'color_nombre' => $i->color_nombre,
+                    'sin_identificar' => app(\App\Modules\Compras\Services\ColoresDeImportacion::class)->saldoSinIdentificar($i, (int) $rc->bodega_id),
                 ])->all(),
             ],
         ]);
+    }
+
+    /** Lo que llegó revuelto pasa a su color sin rehacer la recepción. */
+    public function recepcionReclasificar(Request $r, RecepcionCompra $recepcion): RedirectResponse
+    {
+        abort_unless(\App\Auth\Permisos::puede($r->user(), 'compras_recepcion'), 403,
+            'Esta parte de Compras necesita su propio acceso.');
+
+        $data = $r->validate([
+            'item_id' => ['required', 'integer'],
+            'color' => ['required', 'string', 'max:60'],
+            'cantidad' => ['required', 'numeric', 'gt:0'],
+        ]);
+        $fila = $recepcion->items()->whereKey($data['item_id'])->firstOrFail();
+
+        try {
+            $destino = app(\App\Modules\Compras\Services\ColoresDeImportacion::class)
+                ->reclasificar($fila, $data['color'], (float) $data['cantidad'], $r->user()?->id);
+        } catch (\InvalidArgumentException $e) {
+            return back()->withErrors(['reclasificar' => $e->getMessage()]);
+        }
+
+        return back()->with('success', "Pasaron {$data['cantidad']} a {$destino->color_nombre}.");
     }
 
     /**
@@ -625,7 +651,13 @@ class ComprasGestionController extends Controller implements HasMiddleware
                     'no_sube' => $esImportacion && ! $i->producto_id && ! $i->variante_id && ! $i->esComponente()
                         && ! \App\Modules\Compras\Actions\CrearProductosDeOrden::referenciaDe($i),
                     'es_componente' => $i->esComponente(),
+                    'referencia' => \App\Modules\Compras\Actions\CrearProductosDeOrden::referenciaDe($i),
+                    'color_nombre' => $i->color_nombre,
+                    // Ya tiene stock sin colores: el color queda en la recepción y su stock sigue siendo uno.
+                    'sin_colores' => $esImportacion && $i->producto
+                        && ! app(\App\Modules\Compras\Services\ColoresDeImportacion::class)->admiteColores($i->producto),
                 ])->filter(fn ($x) => $x['cantidad_pendiente'] > 0)->values(),
+                'colores' => \App\Modules\Catalogo\Models\Color::query()->where('activo', true)->orderBy('nombre')->pluck('nombre')->values(),
             ] : null,
         ]);
     }
@@ -675,6 +707,8 @@ class ComprasGestionController extends Controller implements HasMiddleware
             // Default: apto (comportamiento retro-compatible con el flujo anterior).
             'items.*.clasificacion' => ['nullable', 'string', 'in:apto,averia,cuarentena,revision,faltante'],
             'items.*.motivo_clasificacion' => ['nullable', 'string', 'max:180'],
+            'items.*.color_nombre' => ['nullable', 'string', 'max:60'],
+            'motivo_exceso' => ['nullable', 'string', 'max:300'],
         ]);
 
         $orden = OrdenCompra::with('items')->findOrFail($data['orden_id']);
@@ -693,7 +727,8 @@ class ComprasGestionController extends Controller implements HasMiddleware
         $itemsFusionados = [];
         foreach ($data['items'] as $it) {
             $clas = $it['clasificacion'] ?? 'apto';
-            $key = (int) $it['orden_item_id'] . ':' . $clas;
+            $color = trim((string) ($it['color_nombre'] ?? '')) ?: null;
+            $key = (int) $it['orden_item_id'] . ':' . $clas . ':' . mb_strtolower((string) $color);
             if (isset($itemsFusionados[$key])) {
                 $itemsFusionados[$key]['cantidad_recibida'] += (float) $it['cantidad_recibida'];
                 $itemsFusionados[$key]['lote'] = $itemsFusionados[$key]['lote'] ?: ($it['lote'] ?? null);
@@ -709,7 +744,20 @@ class ComprasGestionController extends Controller implements HasMiddleware
                     'lote' => $it['lote'] ?? null,
                     'clasificacion' => $clas,
                     'motivo_clasificacion' => $it['motivo_clasificacion'] ?? null,
+                    'color_nombre' => $color,
                 ];
+            }
+        }
+
+        // El conteo de Don Jorge es la verdad, así que contar de más no se bloquea:
+        // sólo se le pide el motivo, para que quede dicho contra la orden.
+        if ($orden->esImportacion()) {
+            $excesos = app(\App\Modules\Compras\Services\ColoresDeImportacion::class)->excesos($orden, array_values($itemsFusionados));
+            if ($excesos && blank($data['motivo_exceso'] ?? null)) {
+                return back()->withErrors(['recepcion' => 'Se contó más de lo esperado en '.implode(', ', array_keys($excesos)).': escriba el motivo.']);
+            }
+            if ($excesos) {
+                $data['observaciones'] = trim(($data['observaciones'] ?? '')."\nLlegó de más (".implode(', ', array_keys($excesos))."): {$data['motivo_exceso']}");
             }
         }
 
@@ -732,9 +780,13 @@ class ComprasGestionController extends Controller implements HasMiddleware
                 $ocItem = $orden->items->firstWhere('id', $it['orden_item_id']);
                 $costoUnit = (float) $ocItem->precio_unit;
                 $cantidad = (float) $it['cantidad_recibida'];
+                // Otro color del que se pidió en esta línea no es la variante de la línea.
+                $color = $it['color_nombre'] ?? $ocItem->color_nombre;
+                $mismoColor = mb_strtolower((string) $color) === mb_strtolower((string) $ocItem->color_nombre);
                 $rc->items()->create([
                     'orden_item_id' => $ocItem->id,
-                    'variante_id' => $ocItem->variante_id,
+                    'color_nombre' => $color,
+                    'variante_id' => $mismoColor ? $ocItem->variante_id : null,
                     // Copiaba sólo la variante. Los productos AGREGADOS —la
                     // mayor parte del catálogo de Great Baby— no tienen
                     // variante, así que llegaban acá sin nada con qué

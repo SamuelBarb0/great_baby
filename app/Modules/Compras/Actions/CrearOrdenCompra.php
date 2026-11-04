@@ -54,6 +54,7 @@ class CrearOrdenCompra
                     'producto_id' => $esComponente ? null : ($it['producto_id'] ?? null),
                     'variante_id' => $esComponente ? null : ($it['variante_id'] ?? null),
                     'tipo_linea' => $esComponente ? OrdenCompraItem::TIPO_COMPONENTE : OrdenCompraItem::TIPO_PRODUCTO,
+                    'color_nombre' => $esComponente ? null : (trim((string) ($it['color_nombre'] ?? '')) ?: null),
                     'descripcion' => $it['descripcion'],
                     'cantidad' => $it['cantidad'],
                     'precio_unit' => $it['precio_unit'],

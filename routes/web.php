@@ -270,6 +270,7 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     Route::get('/compras/recepcion/nueva', [\App\Http\Controllers\App\ComprasGestionController::class, 'recepcionForm'])->name('app.compras.recepcion.nueva');
     Route::post('/compras/recepcion', [\App\Http\Controllers\App\ComprasGestionController::class, 'recepcionCrear'])->middleware('throttle:60,1')->name('app.compras.recepcion.crear');
     Route::get('/compras/recepcion/{recepcion}', [\App\Http\Controllers\App\ComprasGestionController::class, 'recepcionShow'])->name('app.compras.recepcion.show');
+    Route::post('/compras/recepcion/{recepcion}/reclasificar', [\App\Http\Controllers\App\ComprasGestionController::class, 'recepcionReclasificar'])->middleware('throttle:60,1')->name('app.compras.recepcion.reclasificar');
     Route::get('/compras/importacion', [\App\Http\Controllers\App\ComprasGestionController::class, 'importacionIndex'])->name('app.compras.importacion');
     Route::get('/compras/importacion/nueva', [\App\Http\Controllers\App\ComprasGestionController::class, 'importacionForm'])->name('app.compras.importacion.nueva');
     Route::get('/compras/importacion/{importacion}', [\App\Http\Controllers\App\ComprasGestionController::class, 'importacionShow'])->name('app.compras.importacion.show');

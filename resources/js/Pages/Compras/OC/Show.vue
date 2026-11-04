@@ -244,6 +244,7 @@ const reenviarRecepcion = (rec) => {
                             <tr v-for="it in orden.items" :key="it.id">
                                 <td class="p-2">
                                     {{ it.descripcion }}
+                                    <span v-if="it.color_nombre" class="block text-[11px] text-surface-500">Color: {{ it.color_nombre }}</span>
                                     <span v-if="it.tipo_linea === 'componente'" class="block text-[11px] text-sky-700 dark:text-sky-400 font-semibold">Componente · no sube al inventario</span>
                                 </td>
                                 <td class="p-2 text-right">{{ it.cantidad }}</td>

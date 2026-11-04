@@ -42,7 +42,7 @@ const lineaNueva = () => ({
     descripcion: '', cantidad: 1, precio_unit: 0,
     // En importación el IVA se paga en aduana: va en la pre-liquidación, no en la OC.
     iva_pct: form?.tipo === 'importacion' ? 0 : 19, descuento_pct: 0,
-    cajas: null, unidades_por_caja: null, cbm_caja: null, empresa_destino_id: null, tipo_linea: 'producto',
+    cajas: null, unidades_por_caja: null, cbm_caja: null, empresa_destino_id: null, tipo_linea: 'producto', color_nombre: '',
 });
 
 const form = reactive({
@@ -419,6 +419,7 @@ const guardar = () => {
                                     <th class="text-right p-1">CBM caja</th>
                                     <th class="text-left p-1">Destino</th>
                                     <th class="text-left p-1">Tipo</th>
+                                    <th class="text-left p-1">Color</th>
                                 </template>
                                 <th class="text-right p-1">Cant</th>
                                 <th class="text-right p-1">Precio</th>
@@ -458,6 +459,10 @@ const guardar = () => {
                                             <option value="producto">Producto</option>
                                             <option value="componente">Componente</option>
                                         </select>
+                                    </td>
+                                    <td class="p-1">
+                                        <input v-model="it.color_nombre" :disabled="it.tipo_linea === 'componente'" maxlength="60" placeholder="Opcional"
+                                               class="input w-24 text-sm" :aria-label="`Color de ${it.descripcion || 'la línea'}`"/>
                                     </td>
                                 </template>
                                 <td class="p-1"><input type="number" step="0.001" v-model.number="it.cantidad" :readonly="esImportacion && it.cajas > 0 && it.unidades_por_caja > 0" class="input w-20 text-right text-sm"/></td>

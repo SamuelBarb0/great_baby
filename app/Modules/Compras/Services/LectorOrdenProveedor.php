@@ -32,6 +32,7 @@ class LectorOrdenProveedor
     private const COLUMNAS = [
         'ref' => ['REF', 'REFERENCIA', 'ITEM', 'ITEM NO', 'ARTICULO'],
         'contacto' => ['CONTACTO'],
+        'color' => ['COLOR', 'COLOUR', 'COLORES'],
         'descripcion' => ['DESCRIPCION', 'DESCRIPTION', 'NOMBRE'],
         'cajas' => ['CAJAS', 'CTNS', 'CARTONS', 'BULTOS'],
         'unidades_por_caja' => ['CTN/CAJA', 'UDS/CAJA', 'UNIDADES/CAJA', 'PCS/CTN', 'QTY/CTN'],
@@ -228,6 +229,7 @@ class LectorOrdenProveedor
             'peso_caja_kg' => ($p = self::numero($col('peso'))) > 0 ? $p : null,
             'empresa_destino_id' => null,
             'tipo_linea' => 'producto',
+            'color_nombre' => self::texto($col('color')),
             // Importación: el IVA se paga en aduana y ya va en la pre-liquidación.
             'iva_pct' => 0,
             'descuento_pct' => 0,

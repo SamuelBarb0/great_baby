@@ -4,6 +4,7 @@ namespace App\Modules\Compras\Actions;
 
 use App\Modules\Compras\Models\OrdenCompra;
 use App\Modules\Compras\Models\OrdenCompraItem;
+use App\Modules\Compras\Services\ColoresDeImportacion;
 use App\Modules\Compras\Services\CostoImportacion;
 use App\Modules\Dropi\Models\Producto;
 use InvalidArgumentException;
@@ -30,7 +31,14 @@ class CrearProductosDeOrden
         $resueltas = 0;
 
         foreach ($orden->items as $item) {
-            if ($item->producto_id || $item->variante_id || $item->esComponente()) {
+            if ($item->variante_id || $item->esComponente()) {
+                continue;
+            }
+
+            // Ya tiene producto: sólo le falta la variante de su color, si la pidió.
+            if ($item->producto_id) {
+                $this->ponerColor($item);
+
                 continue;
             }
 
@@ -50,10 +58,25 @@ class CrearProductosDeOrden
 
             $item->producto_id = $producto->id;
             $item->save();
+            $this->ponerColor($item);
             $resueltas++;
         }
 
         return $resueltas;
+    }
+
+    /** La variante nace aquí porque su código de barras viaja a China con la etiqueta. */
+    private function ponerColor(OrdenCompraItem $item): void
+    {
+        if (! $item->color_nombre) {
+            return;
+        }
+
+        $variante = app(ColoresDeImportacion::class)->varianteDe(Producto::findOrFail($item->producto_id), $item->color_nombre);
+        if ($variante) {
+            $item->variante_id = $variante->id;
+            $item->save();
+        }
     }
 
     /**

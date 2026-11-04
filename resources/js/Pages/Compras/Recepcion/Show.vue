@@ -1,4 +1,5 @@
 <script setup>
+import { reactive } from 'vue';
 import { ref } from 'vue';
 import { Head, Link, router } from '@inertiajs/vue3';
 import { ArrowLeft, Truck, Cloud, CloudOff, RefreshCw } from 'lucide-vue-next';
@@ -43,6 +44,16 @@ const reenviarSiigo = () => {
             });
         },
     };
+};
+
+// Lo que llegó revuelto se clasifica después, sin rehacer la recepción.
+const reclasificar = reactive({});
+const pasarAColor = (it) => {
+    const r = reclasificar[it.id] ?? {};
+    router.post(`/app/compras/recepcion/${props.recepcion.id}/reclasificar`, { item_id: it.id, color: r.color, cantidad: r.cantidad }, {
+        preserveScroll: true,
+        onSuccess: () => { reclasificar[it.id] = {}; },
+    });
 };
 </script>
 
@@ -117,6 +128,7 @@ const reenviarSiigo = () => {
                             <th class="text-right p-2">Costo unit</th>
                             <th class="text-right p-2">Subtotal</th>
                             <th class="text-left p-2">Lote</th>
+                            <th class="text-left p-2">Color</th>
                             <th class="text-left p-2">Destino</th>
                             <th class="text-left p-2">Motivo</th>
                             <th class="text-left p-2">Obs</th>
@@ -129,6 +141,7 @@ const reenviarSiigo = () => {
                             <td class="p-2 text-right">{{ money(it.costo_unit) }}</td>
                             <td class="p-2 text-right font-bold">{{ money(it.subtotal) }}</td>
                             <td class="p-2 text-xs">{{ it.lote || '—' }}</td>
+                            <td class="p-2 text-xs">{{ it.color_nombre || '—' }}</td>
                             <td class="p-2">
                                 <!-- LOG-J8 · chip del destino -->
                                 <span class="inline-block px-1.5 py-0.5 rounded text-[10px] font-bold uppercase"
@@ -147,6 +160,15 @@ const reenviarSiigo = () => {
                         </tr>
                     </tbody>
                 </table>
+                <template v-for="it in recepcion.items" :key="`sin-${it.id}`">
+                    <form v-if="it.sin_identificar > 0" @submit.prevent="pasarAColor(it)" class="mt-3 p-3 rounded-lg bg-amber-50 dark:bg-amber-950/40 border-l-4 border-amber-500 flex flex-wrap items-end gap-2 text-sm">
+                        <div class="flex-1 min-w-[12rem]"><b>{{ it.sin_identificar }} sin identificar.</b> Cuando sepa de qué color son, páselas aquí. El total no cambia.</div>
+                        <input v-model="(reclasificar[it.id] ??= {}).color" required maxlength="60" placeholder="Color" class="input w-36 text-sm" :aria-label="`Color para ${it.id}`"/>
+                        <input v-model.number="(reclasificar[it.id] ??= {}).cantidad" required type="number" step="1" min="1" :max="it.sin_identificar" placeholder="Cantidad" class="input w-24 text-sm" :aria-label="`Cantidad para ${it.id}`"/>
+                        <button class="btn-primary text-sm">Pasar al color</button>
+                    </form>
+                </template>
+                <p v-if="$page.props.errors?.reclasificar" class="mt-2 text-sm text-red-600">{{ $page.props.errors.reclasificar }}</p>
             </div>
 
             <div v-if="recepcion.observaciones" class="card p-4">

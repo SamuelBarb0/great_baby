@@ -21,6 +21,7 @@ const form = reactive({
     factura_proveedor: '',
     transportista: '',
     observaciones: '',
+    motivo_exceso: '',
     items: props.oc?.items.map(i => ({
         orden_item_id: i.id,
         descripcion: i.descripcion,
@@ -29,6 +30,10 @@ const form = reactive({
         precio_unit: i.precio_unit,
         cajas: i.cajas,
         es_componente: i.es_componente,
+        referencia: i.referencia,
+        color_nombre: i.color_nombre || '',
+        sin_colores: i.sin_colores,
+        extra: false,
         unidades_por_caja: i.unidades_por_caja,
         destino: i.destino,
         para_otra_empresa: i.para_otra_empresa,
@@ -47,7 +52,11 @@ const hayConteoGuardado = ref(false);
 if (claveConteo) {
     try {
         const guardado = JSON.parse(localStorage.getItem(claveConteo) || 'null');
-        if (guardado) {
+        if (Array.isArray(guardado)) {
+            const base = Object.fromEntries(form.items.map(i => [i.orden_item_id, i]));
+            form.items = guardado.filter(g => base[g.orden_item_id]).map(g => ({ ...base[g.orden_item_id], ...g }));
+            hayConteoGuardado.value = true;
+        } else if (guardado) {
             for (const it of form.items) {
                 const g = guardado[it.orden_item_id];
                 if (g && Number(g.cantidad_recibida) <= it.cantidad_pendiente) Object.assign(it, g);
@@ -57,12 +66,42 @@ if (claveConteo) {
     } catch { /* sin almacenamiento local: el conteo sigue funcionando, sólo no se recuerda */ }
     watch(() => form.items, (items) => {
         try {
-            localStorage.setItem(claveConteo, JSON.stringify(Object.fromEntries(items.map(i => [i.orden_item_id, {
-                cantidad_recibida: i.cantidad_recibida, lote: i.lote, clasificacion: i.clasificacion, motivo_clasificacion: i.motivo_clasificacion,
-            }]))));
+            localStorage.setItem(claveConteo, JSON.stringify(items.map(i => ({
+                orden_item_id: i.orden_item_id, cantidad_recibida: i.cantidad_recibida, lote: i.lote,
+                clasificacion: i.clasificacion, motivo_clasificacion: i.motivo_clasificacion,
+                color_nombre: i.color_nombre, extra: i.extra,
+            }))));
         } catch { /* ídem */ }
     }, { deep: true });
 }
+
+// Otro color dentro de la misma línea: de China llega agrupado.
+const otroColor = (it, color = '') => {
+    form.items.splice(form.items.indexOf(it) + 1, 0, {
+        ...it, cantidad_recibida: 0, color_nombre: color, lote: '', clasificacion: 'apto', motivo_clasificacion: '', extra: true,
+    });
+};
+const quitarFila = (it) => form.items.splice(form.items.indexOf(it), 1);
+
+// La cuenta que importa es la de la referencia: cada color puede subir o bajar.
+const cuentas = computed(() => {
+    const grupos = {};
+    for (const it of form.items) {
+        if (it.es_componente) continue;
+        const clave = it.referencia || `Línea ${it.orden_item_id}`;
+        grupos[clave] ??= { referencia: clave, contado: 0, esperado: 0, lineas: new Set() };
+        const g = grupos[clave];
+        if (!g.lineas.has(it.orden_item_id)) {
+            g.lineas.add(it.orden_item_id);
+            g.esperado += Number(it.cantidad_pendiente) || 0;
+        }
+        if (it.clasificacion !== 'faltante') g.contado += Number(it.cantidad_recibida) || 0;
+    }
+    return Object.values(grupos);
+});
+const excesos = computed(() => props.oc?.es_importacion ? cuentas.value.filter(c => c.contado > c.esperado + 0.0001) : []);
+const conReparto = computed(() => props.oc?.es_importacion ? cuentas.value.filter(c => c.lineas.size > 1 || form.items.some(i => i.extra && (i.referencia || `Línea ${i.orden_item_id}`) === c.referencia)) : []);
+const distinto = (it) => props.oc?.es_importacion && !it.es_componente && !it.extra && Number(it.cantidad_recibida) !== Number(it.cantidad_pendiente);
 
 const cajasOtraEmpresa = computed(() => form.items.filter(i => i.para_otra_empresa));
 const sinReferencia = computed(() => props.oc?.items.filter(i => i.no_sube) ?? []);
@@ -72,7 +111,8 @@ const sinReferencia = computed(() => props.oc?.items.filter(i => i.no_sube) ?? [
 const clampCantidad = (it) => {
     const n = Number(it.cantidad_recibida);
     if (isNaN(n) || n < 0) it.cantidad_recibida = 0;
-    else if (n > it.cantidad_pendiente) it.cantidad_recibida = it.cantidad_pendiente;
+    // En una importación el tope es el total de la referencia, no cada línea.
+    else if (!props.oc?.es_importacion && n > it.cantidad_pendiente) it.cantidad_recibida = it.cantidad_pendiente;
 };
 
 // Re-audit M2 UX-M12 · deshabilitar submit si ningún ítem tiene cantidad > 0.
@@ -83,6 +123,7 @@ const totalRecepcion = computed(() => itemsAConfirmar.value.reduce((s, i) => s +
 
 const guardar = () => {
     if (procesando.value || itemsAConfirmar.value.length === 0) return;
+    if (excesos.value.length && !form.motivo_exceso.trim()) return;
     procesando.value = true;
     router.post('/app/compras/recepcion', {
         orden_id: form.orden_id,
@@ -90,12 +131,14 @@ const guardar = () => {
         factura_proveedor: form.factura_proveedor,
         transportista: form.transportista,
         observaciones: form.observaciones,
+        motivo_exceso: form.motivo_exceso || null,
         items: itemsAConfirmar.value.map(i => ({
             orden_item_id: i.orden_item_id,
             cantidad_recibida: i.cantidad_recibida,
             lote: i.lote || null,
             clasificacion: i.clasificacion || 'apto',
             motivo_clasificacion: i.motivo_clasificacion || null,
+            color_nombre: i.color_nombre || null,
         })),
     }, {
         preserveScroll: true,
@@ -185,6 +228,20 @@ const guardar = () => {
                     Asígnesela en la <a :href="`/app/compras/oc/${oc.id}`" class="underline">orden de compra</a> antes de confirmar.
                 </div>
 
+                <datalist id="colores-recepcion"><option v-for="c in oc.colores" :key="c" :value="c"/></datalist>
+
+                <div v-if="conReparto.length" class="p-3 rounded-lg bg-surface-50 dark:bg-surface-900 border-l-4 border-surface-400 text-sm">
+                    <b>Total por referencia.</b> Cada color puede subir o bajar; lo que importa es que el total cuadre.
+                    <div v-for="c in conReparto" :key="c.referencia" :class="c.contado !== c.esperado ? 'text-amber-700 dark:text-amber-400 font-semibold' : ''">
+                        {{ c.referencia }}: {{ c.contado }} de {{ c.esperado }}
+                    </div>
+                </div>
+
+                <div v-if="excesos.length" class="p-3 rounded-lg bg-amber-50 dark:bg-amber-950/40 border-l-4 border-amber-500 text-sm space-y-2">
+                    <div><b>Se contó de más:</b> <span v-for="(c, n) in excesos" :key="c.referencia"><template v-if="n">, </template>{{ c.referencia }} ({{ c.contado }} de {{ c.esperado }})</span>. Se puede guardar, pero diga por qué.</div>
+                    <input v-model="form.motivo_exceso" maxlength="300" required class="input w-full text-sm" placeholder="Motivo de lo que llegó de más" aria-label="Motivo de lo que llegó de más"/>
+                </div>
+
                 <div v-if="cajasOtraEmpresa.length" class="p-3 rounded-lg bg-sky-50 dark:bg-sky-950/40 border-l-4 border-sky-500 text-sky-800 dark:text-sky-200 text-sm">
                     <b>Para separar:</b>
                     <div v-for="i in cajasOtraEmpresa" :key="i.orden_item_id">{{ i.cajas }} cajas de {{ i.descripcion }} son para {{ i.destino }}.</div>
@@ -215,15 +272,23 @@ const guardar = () => {
                             </thead>
                             <tbody class="divide-y divide-surface-100 dark:divide-surface-800">
                                 <tr v-for="(it, i) in form.items" :key="i"
-                                    :class="it.clasificacion !== 'apto' ? 'bg-amber-50/40 dark:bg-amber-950/20' : ''">
+                                    :class="it.clasificacion !== 'apto' || distinto(it) ? 'bg-amber-50/40 dark:bg-amber-950/20' : ''">
                                     <td class="p-2" :title="it.descripcion">
                                         {{ it.descripcion }}
                                         <span v-if="it.es_componente" class="block text-xs text-sky-700 dark:text-sky-400 font-semibold">Componente · se cuenta, pero no sube al inventario</span>
+                                        <span v-if="oc.es_importacion && !it.es_componente" class="block mt-1">
+                                            <input v-model="it.color_nombre" list="colores-recepcion" maxlength="60" placeholder="Color (opcional)"
+                                                   class="input w-40 text-xs" :aria-label="`Color de ${it.descripcion}`"/>
+                                            <button type="button" @click="otroColor(it)" class="btn-ghost text-xs ml-1">+ Otro color</button>
+                                            <button type="button" @click="otroColor(it, 'Sin identificar')" class="btn-ghost text-xs">+ Sin identificar</button>
+                                            <button v-if="it.extra" type="button" @click="quitarFila(it)" class="btn-ghost text-xs text-red-600">Quitar</button>
+                                        </span>
+                                        <span v-if="it.sin_colores && it.color_nombre" class="block text-xs text-amber-700 dark:text-amber-400 mt-0.5">Este producto ya tiene stock sin colores: el color queda en esta recepción y el stock sigue siendo uno solo.</span>
                                         <span v-if="it.cajas" class="block text-xs text-surface-500">{{ it.cajas }} cajas de {{ it.unidades_por_caja }}<template v-if="it.destino"> · {{ it.destino }}</template></span>
                                     </td>
                                     <td class="p-2 text-right font-mono">{{ it.cantidad_pendiente }}</td>
                                     <td class="p-2">
-                                        <input type="number" step="0.001" min="0" :max="it.cantidad_pendiente"
+                                        <input type="number" step="0.001" min="0" :max="oc.es_importacion ? null : it.cantidad_pendiente"
                                                v-model.number="it.cantidad_recibida"
                                                @change="clampCantidad(it)"
                                                @blur="clampCantidad(it)"
