@@ -533,7 +533,10 @@ class ComprasGestionController extends Controller implements HasMiddleware
                     'clasificacion' => $i->clasificacion ?? 'apto',
                     'motivo_clasificacion' => $i->motivo_clasificacion,
                     'color_nombre' => $i->color_nombre,
-                    'sin_identificar' => app(\App\Modules\Compras\Services\ColoresDeImportacion::class)->saldoSinIdentificar($i, (int) $rc->bodega_id),
+                    // El saldo es de la variante: dos filas «Sin identificar» comparten uno solo.
+                    'sin_identificar' => $rc->items->firstWhere('variante_id', $i->variante_id)?->id === $i->id
+                        ? app(\App\Modules\Compras\Services\ColoresDeImportacion::class)->saldoSinIdentificar($i, (int) $rc->bodega_id)
+                        : 0.0,
                 ])->all(),
             ],
         ]);

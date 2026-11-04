@@ -184,6 +184,23 @@ it('lo sin identificar pasa a su color sin cambiar el total ni el costo', functi
     ])->assertSessionHasErrors('reclasificar');
 });
 
+it('dos filas sin identificar del mismo producto muestran un solo saldo', function () {
+    $orden = ($this->orden)([($this->linea)('909', 10), ($this->linea)('909', 10)]);
+    [$a, $b] = $orden->items->all();
+    ($this->recibir)($orden, [
+        ['orden_item_id' => $a->id, 'cantidad_recibida' => 6, 'color_nombre' => 'Azul'],
+        ['orden_item_id' => $a->id, 'cantidad_recibida' => 4, 'color_nombre' => 'Sin identificar'],
+        ['orden_item_id' => $b->id, 'cantidad_recibida' => 10],
+    ])->assertRedirect()->assertSessionHasNoErrors();
+
+    $rec = RecepcionCompra::first();
+    $this->actingAs($this->jorge)->get("/app/compras/recepcion/{$rec->id}")->assertOk()
+        ->assertInertia(function ($p) {
+            $saldos = collect($p->toArray()['props']['recepcion']['items'])->pluck('sin_identificar')->filter()->values()->all();
+            expect($saldos)->toEqual([14.0]);
+        });
+});
+
 it('cada color nace con su código de barras antes de ir a China', function () {
     $orden = ($this->orden)([($this->linea)('906', 10, 'Azul'), ($this->linea)('906', 10, 'Morado claro')]);
 

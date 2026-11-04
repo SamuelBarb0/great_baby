@@ -34,6 +34,7 @@ const form = reactive({
         color_nombre: i.color_nombre || '',
         sin_colores: i.sin_colores,
         extra: false,
+        repartir: false,
         unidades_por_caja: i.unidades_por_caja,
         destino: i.destino,
         para_otra_empresa: i.para_otra_empresa,
@@ -78,7 +79,7 @@ if (claveConteo) {
 // Otro color dentro de la misma línea: de China llega agrupado.
 const otroColor = (it, color = '') => {
     form.items.splice(form.items.indexOf(it) + 1, 0, {
-        ...it, cantidad_recibida: 0, color_nombre: color, lote: '', clasificacion: 'apto', motivo_clasificacion: '', extra: true,
+        ...it, cantidad_recibida: 0, color_nombre: color, lote: '', clasificacion: 'apto', motivo_clasificacion: '', extra: true, repartir: true,
     });
 };
 const quitarFila = (it) => form.items.splice(form.items.indexOf(it), 1);
@@ -276,10 +277,12 @@ const guardar = () => {
                                     <td class="p-2" :title="it.descripcion">
                                         {{ it.descripcion }}
                                         <span v-if="it.es_componente" class="block text-xs text-sky-700 dark:text-sky-400 font-semibold">Componente · se cuenta, pero no sube al inventario</span>
-                                        <span v-if="oc.es_importacion && !it.es_componente" class="block mt-1">
-                                            <input v-model="it.color_nombre" list="colores-recepcion" maxlength="60" placeholder="Color (opcional)"
+                                        <button v-if="oc.es_importacion && !it.es_componente && !it.repartir && !it.color_nombre && !it.extra"
+                                                type="button" @click="it.repartir = true" class="block text-xs text-brand-600 hover:underline mt-0.5">Repartir por color</button>
+                                        <span v-else-if="oc.es_importacion && !it.es_componente" class="flex flex-wrap items-center gap-1 mt-1">
+                                            <input v-model="it.color_nombre" list="colores-recepcion" maxlength="60" placeholder="Color"
                                                    class="input w-40 text-xs" :aria-label="`Color de ${it.descripcion}`"/>
-                                            <button type="button" @click="otroColor(it)" class="btn-ghost text-xs ml-1">+ Otro color</button>
+                                            <button type="button" @click="otroColor(it)" class="btn-ghost text-xs">+ Otro color</button>
                                             <button type="button" @click="otroColor(it, 'Sin identificar')" class="btn-ghost text-xs">+ Sin identificar</button>
                                             <button v-if="it.extra" type="button" @click="quitarFila(it)" class="btn-ghost text-xs text-red-600">Quitar</button>
                                         </span>
