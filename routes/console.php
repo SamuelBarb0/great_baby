@@ -8,6 +8,26 @@ Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
 
+/*
+ * Quien efectivamente vacía la cola.
+ *
+ * Todo lo de abajo encola trabajo, y hasta hoy no había nadie corriendo un
+ * `queue:work`: los documentos se encolaban y se quedaban ahí. Peor, los jobs
+ * de SIIGO caducan a las 12 horas (`retryUntil`), así que pasado ese plazo el
+ * worker los descarta SIN llamar a la API y el documento no llega nunca. El
+ * 2026-11-03 había 112 trabajos de una semana atrás, todos muertos, y la
+ * cobertura en SIIGO era 0 % de 28 facturas sin que nada lo avisara.
+ *
+ * Con esto basta el cron de un minuto que ya pide Laravel (`schedule:run`):
+ * cada minuto se levanta un worker, vacía lo que haya y se va. `--max-time`
+ * lo corta antes del minuto siguiente y el candado de 2 min evita que se
+ * apilen si una corrida se cuelga.
+ */
+Schedule::command('queue:work --queue=siigo,default --stop-when-empty --max-time=55 --tries=3')
+    ->everyMinute()
+    ->withoutOverlapping(2)
+    ->runInBackground();
+
 // §6 diseño Dropi — libera locks vencidos del alistador cada 2 min.
 Schedule::command('dropi:liberar-locks')->everyTwoMinutes()->withoutOverlapping();
 

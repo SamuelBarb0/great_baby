@@ -10,6 +10,7 @@ use App\Modules\Contabilidad\Enums\DestinoFiscal;
 use App\Modules\Siigo\Clients\SiigoClient;
 use App\Modules\Siigo\Exceptions\PagoSinFacturaEnSiigo;
 use App\Modules\Siigo\Models\SiigoConfig;
+use App\Modules\Siigo\Support\ClaveIdempotencia;
 use App\Modules\Siigo\Support\CuentasSiigo;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -99,26 +100,36 @@ class SiigoEmisionService
 
         // 2. HTTP a SIIGO — FUERA de la transacción, con try/finally para limpiar la bandera SIEMPRE
         try {
-            $response = $cliente->request('POST', '/v1/invoices', $payload, 1, "inv:{$factura->id}");
+            $response = $cliente->request('POST', '/v1/invoices', $payload, 1, ClaveIdempotencia::para('inv', $factura));
         } catch (\Throwable $e) {
-            // Excepción de red / DNS / timeout: liberar bandera y agendar reintento
+            /*
+             * Red / DNS / timeout / rate limit: liberar la bandera y relanzar.
+             *
+             * Acá se encolaba un `ReintentarEmisionDian` ADEMÁS de lanzar la
+             * excepción. Pero quien llama a `emitir()` es justamente ese job,
+             * que ya reintenta solo con su `$tries` y su `$backoff`: cada
+             * fallo dejaba DOS intentos futuros en vez de uno, y la cola se
+             * duplicaba sola. El 2026-11-03 pasó de 112 trabajos a 440 en una
+             * hora; antes había dejado 1.062 en `failed_jobs`.
+             *
+             * Agendar el reintento es trabajo de quien llama, no de acá.
+             */
             $factura->update(['emitiendo_at' => null]);
-            \App\Jobs\ReintentarEmisionDian::dispatch($factura->id)->delay(now()->addMinute());
             NotificacionErp::crear([
                 'tipo' => 'timbrado_rechazado',
                 'titulo' => "Error de red al emitir {$factura->numero}",
-                'mensaje' => 'Se agendaron reintentos automáticos. Error: ' . $e->getMessage(),
+                'mensaje' => 'Error: ' . $e->getMessage(),
                 'color' => 'warning',
                 'icono' => 'heroicon-o-arrow-path',
                 'url' => '/app/facturas',
             ]);
-            throw new RuntimeException("Error de red hacia SIIGO: {$e->getMessage()} — se agendó reintento.");
+            throw new RuntimeException("Error de red hacia SIIGO: {$e->getMessage()}");
         }
 
         if ($response->failed()) {
-            // Rechazo HTTP de SIIGO (4xx/5xx): agendar reintento + limpiar bandera
+            // Rechazo HTTP de SIIGO (4xx/5xx). El reintento lo agenda el job
+            // que nos llamó, igual que arriba: acá sólo se libera la bandera.
             $factura->update(['emitiendo_at' => null]);
-            \App\Jobs\ReintentarEmisionDian::dispatch($factura->id)->delay(now()->addMinutes(5));
 
             $msg = (string) ($response->json('Errors.0.Message')
                 ?? $response->json('message')
@@ -127,7 +138,7 @@ class SiigoEmisionService
             NotificacionErp::crear([
                 'tipo' => 'timbrado_rechazado',
                 'titulo' => "SIIGO rechazó {$factura->numero} (HTTP {$response->status()})",
-                'mensaje' => $msg . ' — se agendó reintento en 5min.',
+                'mensaje' => $msg,
                 'color' => 'danger',
                 'icono' => 'heroicon-o-x-circle',
                 'url' => '/app/facturas',
@@ -198,16 +209,28 @@ class SiigoEmisionService
                 'url' => '/app/facturas',
             ]);
         } else {
+            /*
+             * La factura SÍ quedó en SIIGO; lo que falló es el sello de la DIAN.
+             *
+             * Acá se encolaba un reintento, y el aviso decía «se agendaron
+             * reintentos automáticos». Las dos cosas eran mentira: el job mira
+             * si la factura ya tiene `siigo_id` y se va sin hacer nada, porque
+             * volver a emitirla crearía un duplicado fiscal y gastaría
+             * numeración de la DIAN. Lo que falta es re-timbrar, que es otra
+             * operación y se hace desde SIIGO Nube.
+             *
+             * Queda el aviso, diciendo lo que de verdad hay que hacer.
+             */
             NotificacionErp::crear([
                 'tipo' => 'timbrado_rechazado',
                 'titulo' => "DIAN rechazó factura {$factura->numero}",
-                'mensaje' => "Stamp: {$factura->stamp_status}. Se agendaron reintentos automáticos.",
+                'mensaje' => "Está en SIIGO como {$factura->numero_siigo}, pero la DIAN no la timbró "
+                    ."(estado «{$factura->stamp_status}»). Hay que corregirla y volver a timbrarla "
+                    .'desde SIIGO Nube: desde acá reenviarla la duplicaría.',
                 'color' => 'danger',
                 'icono' => 'heroicon-o-x-circle',
                 'url' => '/app/facturas',
             ]);
-            // Agenda reintento con backoff exponencial
-            \App\Jobs\ReintentarEmisionDian::dispatch($factura->id)->delay(now()->addMinute());
         }
 
         return $factura;
@@ -624,7 +647,7 @@ class SiigoEmisionService
         // A2 FIX · B1 CRÍTICO · Idempotency-Key previene FC proveedor
         //   duplicada en SIIGO cuando hay timeout+retry (tries=5 del job).
         //   El path consolidado (línea ~509) ya lo pasa; faltaba acá.
-        $response = $this->cliente->request('POST', '/v1/purchases', $payload, 1, "rec:{$r->id}");
+        $response = $this->cliente->request('POST', '/v1/purchases', $payload, 1, ClaveIdempotencia::para('rec', $r));
 
         if ($response->failed()) {
             $msg = (string) ($response->json('Errors.0.Message')
@@ -963,7 +986,7 @@ class SiigoEmisionService
             'medio' => $p->medio_pago,
         ]);
 
-        $response = $this->cliente->request('POST', '/v1/vouchers', $payload, 1, "pventa:{$p->id}");
+        $response = $this->cliente->request('POST', '/v1/vouchers', $payload, 1, ClaveIdempotencia::para('pventa', $p));
 
         if ($response->failed()) {
             $msg = (string) ($response->json('Errors.0.Message')
@@ -1142,7 +1165,9 @@ class SiigoEmisionService
         ], fn ($v) => $v !== null && $v !== []);
 
         $r = $cliente->request('POST', '/v1/customers', $payload, 1,
-            $principal ? "cli:{$c->id}" : "cli:{$c->id}:cfg{$cliente->configId()}");
+            $principal
+                ? ClaveIdempotencia::para('cli', $c)
+                : ClaveIdempotencia::para('cli', $c).':cfg'.$cliente->configId());
 
         // `successful()` y no `ok()`: SIIGO responde 201 al crear el tercero y
         // `ok()` sólo acepta 200, así que daba por fallido un alta correcta.
@@ -1242,7 +1267,7 @@ class SiigoEmisionService
             'nc_id' => $nc->id, 'numero' => $nc->numeroCompleto(),
         ]);
 
-        $response = $this->cliente->request('POST', '/v1/credit-notes', $payload, 1, "nc:{$nc->id}");
+        $response = $this->cliente->request('POST', '/v1/credit-notes', $payload, 1, ClaveIdempotencia::para('nc', $nc));
 
         if ($response->failed()) {
             $msg = (string) ($response->json('Errors.0.Message')
@@ -1372,7 +1397,7 @@ class SiigoEmisionService
             'modo' => $enlazadoAFactura ? 'DebtPayment' : 'Detailed',
         ]);
 
-        $response = $this->cliente->request('POST', '/v1/payment-receipts', $payload, 1, "pprov:{$p->id}");
+        $response = $this->cliente->request('POST', '/v1/payment-receipts', $payload, 1, ClaveIdempotencia::para('pprov', $p));
 
         if ($response->failed()) {
             // SIIGO alterna entre `Errors` y `errors` según el endpoint; si no
@@ -1443,7 +1468,7 @@ class SiigoEmisionService
         // Idempotency-Key: sin ella, un reintento del job crea una SEGUNDA nota
         //   débito en SIIGO · es un documento fiscal, duplicarlo obliga a
         //   anularlo ante la DIAN. Mismo patrón que inv:/nc:/rec:/asman:/pprov:.
-        $response = $this->cliente->request('POST', '/v1/debit-notes', $payload, 1, "nd:{$nd->id}");
+        $response = $this->cliente->request('POST', '/v1/debit-notes', $payload, 1, ClaveIdempotencia::para('nd', $nd));
 
         if ($response->failed()) {
             $msg = (string) ($response->json('Errors.0.Message')
@@ -1507,7 +1532,7 @@ class SiigoEmisionService
             'asiento_id' => $a->id, 'lineas' => count($items), 'valor' => $a->valor_total,
         ]);
 
-        $response = $this->cliente->request('POST', '/v1/journals', $payload, 1, "asman:{$a->id}");
+        $response = $this->cliente->request('POST', '/v1/journals', $payload, 1, ClaveIdempotencia::para('asman', $a));
 
         if ($response->failed()) {
             $msg = (string) ($response->json('Errors.0.Message')
@@ -1708,7 +1733,7 @@ class SiigoEmisionService
             'mov_id' => $m->id, 'tipo' => $m->tipo, 'valor' => $valor,
         ]);
 
-        $response = $this->cliente->request('POST', '/v1/journals', $payload, 1, "invmov:{$m->id}");
+        $response = $this->cliente->request('POST', '/v1/journals', $payload, 1, ClaveIdempotencia::para('invmov', $m));
 
         if ($response->failed()) {
             $msg = (string) ($response->json('Errors.0.Message')
