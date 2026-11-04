@@ -35,12 +35,12 @@ class LectorOrdenProveedor
         'descripcion' => ['DESCRIPCION', 'DESCRIPTION', 'NOMBRE'],
         'cajas' => ['CAJAS', 'CTNS', 'CARTONS', 'BULTOS'],
         'unidades_por_caja' => ['CTN/CAJA', 'UDS/CAJA', 'UNIDADES/CAJA', 'PCS/CTN', 'QTY/CTN'],
-        'precio' => ['PRECIO', 'PRICE', 'PRECIO RMB', 'UNIT PRICE'],
+        'precio' => ['PRECIO', 'PRICE', 'PRECIO RMB', 'UNIT PRICE', 'UNIT PRICE RMB', 'UNIT PRICE USD'],
         'largo' => ['M1', 'LARGO'],
         'ancho' => ['M2', 'ANCHO'],
         'alto' => ['M3', 'ALTO'],
         'cbm' => ['CBM', 'CBM/CTN', 'CBM CAJA'],
-        'peso' => ['PESO', 'G.W.', 'GW', 'PESO BRUTO'],
+        'peso' => ['PESO', 'G.W.', 'GW', 'PESO BRUTO', 'PESO/CAJA KGS'],
     ];
 
     /**
@@ -97,14 +97,59 @@ class LectorOrdenProveedor
         if ($hojasLeidas === 0) {
             throw new \RuntimeException('No encontré la fila de encabezados (REF, CAJAS, CTN/CAJA, PRECIO) en ninguna hoja.');
         }
+        [$lineas, $componentes, $repetidas] = $this->marcarComponentes($lineas);
+        if ($componentes > 0) {
+            $avisos[] = "{$componentes} fila(s) con la misma referencia de otra y precio 0 quedaron como componente: no suben al inventario y su costo va al producto. Se puede cambiar en la columna Tipo.";
+        }
+        if ($repetidas > 0) {
+            $avisos[] = "{$repetidas} referencia(s) se repiten con precio: cuentan como inventario del mismo producto. Si una fila es empaque o una parte, márquela como componente.";
+        }
         if ($sinRef = count(array_filter($lineas, fn ($l) => $l['referencia'] === null))) {
             $avisos[] = "{$sinRef} fila(s) sin REF: entran con el número de fila; mira la foto en el Excel para saber qué son.";
         }
-        if ($sinProducto = count(array_filter($lineas, fn ($l) => $l['referencia'] !== null && ! $l['producto_id']))) {
+        if ($sinProducto = count(array_filter($lineas, fn ($l) => $l['referencia'] !== null && ! $l['producto_id'] && $l['tipo_linea'] !== 'componente'))) {
             $avisos[] = "{$sinProducto} referencia(s) no están en el catálogo: entran sin producto y no van a sumar stock al recibir.";
         }
 
         return ['lineas' => $lineas, 'avisos' => $avisos];
+    }
+
+    /**
+     * Es sólo una sugerencia, porque una factura puede traer el empaque con precio
+     * (Word de Alejandro, sección 7): quien arma la orden decide en la columna Tipo.
+     *
+     * @return array{0: array<int,array>, 1: int, 2: int} líneas, componentes marcados y referencias repetidas con precio
+     */
+    private function marcarComponentes(array $lineas): array
+    {
+        $grupos = [];
+        foreach ($lineas as $i => $l) {
+            if ($l['referencia'] !== null) {
+                $grupos[$l['referencia']][] = $i;
+            }
+        }
+
+        $componentes = 0;
+        $repetidas = 0;
+        foreach ($grupos as $indices) {
+            if (count($indices) < 2) {
+                continue;
+            }
+            $conPrecio = array_filter($indices, fn ($i) => $lineas[$i]['precio_unit'] > 0);
+            if (count($conPrecio) > 1) {
+                $repetidas++;
+            }
+            if ($conPrecio === []) {
+                continue;
+            }
+            foreach (array_diff($indices, $conPrecio) as $i) {
+                $lineas[$i]['tipo_linea'] = 'componente';
+                $lineas[$i]['producto_id'] = null;
+                $componentes++;
+            }
+        }
+
+        return [$lineas, $componentes, $repetidas];
     }
 
     /**
@@ -182,6 +227,7 @@ class LectorOrdenProveedor
             'cbm_caja' => $cbm > 0 ? round($cbm, 6) : ($conMedidas ? round($largo * $ancho * $alto / 1_000_000, 6) : null),
             'peso_caja_kg' => ($p = self::numero($col('peso'))) > 0 ? $p : null,
             'empresa_destino_id' => null,
+            'tipo_linea' => 'producto',
             // Importación: el IVA se paga en aduana y ya va en la pre-liquidación.
             'iva_pct' => 0,
             'descuento_pct' => 0,

@@ -17,6 +17,11 @@ class OrdenCompraItem extends Model implements AuditableContract
 
     protected $table = 'compra_orden_items';
 
+    public const TIPO_PRODUCTO = 'producto';
+
+    /** Parte o empaque de otro producto de la orden: no sube al inventario. */
+    public const TIPO_COMPONENTE = 'componente';
+
     protected $fillable = [
         'orden_id', 'producto_id', 'variante_id',
         'descripcion', 'cantidad', 'cantidad_recibida',
@@ -24,6 +29,7 @@ class OrdenCompraItem extends Model implements AuditableContract
         'subtotal', 'iva', 'total', 'costo_prorrateado_unit',
         'cajas', 'unidades_por_caja', 'caja_largo_cm', 'caja_ancho_cm', 'caja_alto_cm',
         'cbm_caja', 'peso_caja_kg', 'empresa_destino_id',
+        'tipo_linea', 'componente_de_item_id',
     ];
 
     protected $casts = [
@@ -95,6 +101,11 @@ class OrdenCompraItem extends Model implements AuditableContract
     public function cbmTotal(): float
     {
         return (float) $this->cbm_caja * (int) $this->cajas;
+    }
+
+    public function esComponente(): bool
+    {
+        return $this->tipo_linea === self::TIPO_COMPONENTE;
     }
 
     public function pendiente(): float

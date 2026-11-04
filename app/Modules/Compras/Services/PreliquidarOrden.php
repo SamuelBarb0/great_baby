@@ -192,6 +192,29 @@ class PreliquidarOrden
      *
      * @return array{parametros:array<string,float>, tasa_cambio:float, lineas:array<int,array>, totales:array, por_destino:array<int,array>, avisos:array<int,string>}
      */
+    /**
+     * El empaque y las partes van al costo del producto que se vende: su costo total
+     * se reparte entre las unidades de la línea a la que pertenecen. El total del
+     * contenedor no cambia, porque esa plata ya estaba en las filas del componente.
+     */
+    private function sumarComponentes(array $lineas): array
+    {
+        $deComponentes = [];
+        foreach ($lineas as $l) {
+            if ($l['es_componente'] && $l['componente_de_item_id']) {
+                $deComponentes[$l['componente_de_item_id']] = ($deComponentes[$l['componente_de_item_id']] ?? 0) + (float) $l['costo_total'];
+            }
+        }
+
+        foreach ($lineas as $i => $l) {
+            if (isset($deComponentes[$l['id']]) && $l['unidad'] && $l['cantidad'] > 0) {
+                $lineas[$i]['costo_con_componentes'] = round($l['unidad']['costo'] + $deComponentes[$l['id']] / $l['cantidad'], 2);
+            }
+        }
+
+        return $lineas;
+    }
+
     public function handle(OrdenCompra $orden): array
     {
         $orden->loadMissing('items.producto:id,arancel_pct');
@@ -231,6 +254,9 @@ class PreliquidarOrden
                 'cbm_total' => round($cbm, 6),
                 'arancel_pct' => $pLinea['arancel_pct'],
                 'arancel_del_producto' => $pLinea !== $p,
+                'es_componente' => $item->esComponente(),
+                'componente_de_item_id' => $item->componente_de_item_id,
+                'costo_con_componentes' => null,
                 'valor_moneda' => round($valor, 2),
                 'unidad' => $unidad ? array_map(fn ($v) => round($v, 2), $unidad) : null,
                 'costo_total' => $unidad ? round($unidad['costo'] * $cantidad, 2) : null,
@@ -252,7 +278,13 @@ class PreliquidarOrden
             $destinos[$destino]['valor_moneda'] += $valor;
         }
 
+        $lineas = $this->sumarComponentes($lineas);
+
         $avisos = [];
+        $sueltos = collect($lineas)->filter(fn ($l) => $l['es_componente'] && ! $l['componente_de_item_id'])->count();
+        if ($sueltos > 0) {
+            $avisos[] = "{$sueltos} componente(s) sin un producto con su misma referencia: su costo no se le suma a nada.";
+        }
         if ($p['capacidad_m3'] > 0 && $tot['cbm'] > $p['capacidad_m3']) {
             $avisos[] = sprintf('El pedido ocupa %.2f m³: se pasa %.2f m³ de la capacidad del contenedor (%s m³).',
                 $tot['cbm'], $tot['cbm'] - $p['capacidad_m3'], rtrim(rtrim(number_format($p['capacidad_m3'], 2, '.', ''), '0'), '.'));

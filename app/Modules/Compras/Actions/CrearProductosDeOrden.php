@@ -30,7 +30,7 @@ class CrearProductosDeOrden
         $resueltas = 0;
 
         foreach ($orden->items as $item) {
-            if ($item->producto_id || $item->variante_id) {
+            if ($item->producto_id || $item->variante_id || $item->esComponente()) {
                 continue;
             }
 

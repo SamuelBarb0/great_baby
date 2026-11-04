@@ -43,10 +43,13 @@ class CrearOrdenCompra
             ]);
 
             foreach ($data['items'] as $it) {
+                // Un componente no tiene producto propio: así no sube al inventario.
+                $esComponente = ($it['tipo_linea'] ?? null) === OrdenCompraItem::TIPO_COMPONENTE;
                 OrdenCompraItem::create([
                     'orden_id' => $orden->id,
-                    'producto_id' => $it['producto_id'] ?? null,
-                    'variante_id' => $it['variante_id'] ?? null,
+                    'producto_id' => $esComponente ? null : ($it['producto_id'] ?? null),
+                    'variante_id' => $esComponente ? null : ($it['variante_id'] ?? null),
+                    'tipo_linea' => $esComponente ? OrdenCompraItem::TIPO_COMPONENTE : OrdenCompraItem::TIPO_PRODUCTO,
                     'descripcion' => $it['descripcion'],
                     'cantidad' => $it['cantidad'],
                     'precio_unit' => $it['precio_unit'],
@@ -63,9 +66,29 @@ class CrearOrdenCompra
                 ]);
             }
 
+            $this->ligarComponentes($orden);
+
             RecalcularTotalesOC::make()->handle($orden);
 
             return $orden->fresh(['items', 'proveedor']);
+        });
+    }
+
+    /** Cada componente pertenece a la primera línea normal con su misma referencia. */
+    private function ligarComponentes(OrdenCompra $orden): void
+    {
+        $items = $orden->items()->orderBy('id')->get();
+        $principales = $items->reject->esComponente()
+            ->filter(fn (OrdenCompraItem $i) => CrearProductosDeOrden::referenciaDe($i))
+            ->unique(fn (OrdenCompraItem $i) => CrearProductosDeOrden::referenciaDe($i))
+            ->keyBy(fn (OrdenCompraItem $i) => CrearProductosDeOrden::referenciaDe($i));
+
+        $items->filter->esComponente()->each(function (OrdenCompraItem $c) use ($principales) {
+            $principal = $principales[CrearProductosDeOrden::referenciaDe($c)] ?? null;
+            if ($principal) {
+                $c->componente_de_item_id = $principal->id;
+                $c->save();
+            }
         });
     }
 }

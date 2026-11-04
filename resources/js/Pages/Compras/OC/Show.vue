@@ -242,7 +242,10 @@ const reenviarRecepcion = (rec) => {
                         </thead>
                         <tbody class="divide-y">
                             <tr v-for="it in orden.items" :key="it.id">
-                                <td class="p-2">{{ it.descripcion }}</td>
+                                <td class="p-2">
+                                    {{ it.descripcion }}
+                                    <span v-if="it.tipo_linea === 'componente'" class="block text-[11px] text-sky-700 dark:text-sky-400 font-semibold">Componente · no sube al inventario</span>
+                                </td>
                                 <td class="p-2 text-right">{{ it.cantidad }}</td>
                                 <td class="p-2 text-right" :class="it.cantidad_recibida < it.cantidad ? 'text-amber-600' : 'text-emerald-600'">{{ it.cantidad_recibida }}</td>
                                 <td class="p-2 text-right">{{ enMoneda(it.precio_unit) }}</td>
@@ -327,7 +330,11 @@ const reenviarRecepcion = (rec) => {
                         </thead>
                         <tbody class="divide-y">
                             <tr v-for="l in pre.lineas" :key="l.id">
-                                <td class="p-1">{{ l.descripcion }}</td>
+                                <td class="p-1">
+                                    {{ l.descripcion }}
+                                    <span v-if="l.es_componente" class="block text-[10px] text-sky-700 dark:text-sky-400 font-semibold">Componente · su costo va al producto</span>
+                                    <span v-if="l.costo_con_componentes" class="block text-[10px] text-sky-700 dark:text-sky-400 font-semibold">Con sus componentes: {{ money(l.costo_con_componentes) }} por unidad</span>
+                                </td>
                                 <td class="p-1 text-right">{{ fmt(l.cajas, 0) }}</td>
                                 <td class="p-1 text-right">{{ fmt(l.unidades_por_caja, 0) }}</td>
                                 <td class="p-1 text-right">{{ fmt(l.cbm_caja, 4) }}</td>

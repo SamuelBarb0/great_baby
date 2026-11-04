@@ -80,7 +80,7 @@ class PasoDeCompra
     {
         $aprueba = Permisos::puede($u, 'compras_oc') || ($u?->esAracely() ?? false);
         $porCrear = $orden->items
-            ->filter(fn ($i) => ! $i->producto_id && ! $i->variante_id && CrearProductosDeOrden::referenciaDe($i))
+            ->filter(fn ($i) => ! $i->producto_id && ! $i->variante_id && ! $i->esComponente() && CrearProductosDeOrden::referenciaDe($i))
             ->count();
 
         if ($porCrear > 0) {

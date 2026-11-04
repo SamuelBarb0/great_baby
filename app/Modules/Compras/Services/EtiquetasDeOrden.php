@@ -35,7 +35,8 @@ class EtiquetasDeOrden
     /** @return list<array{referencia: ?string, descripcion: string, cajas: int, etiqueta: ?string, barras: ?string}> imágenes en data URI */
     public function paraPdf(OrdenCompra $orden): array
     {
-        return $orden->items->map(function (OrdenCompraItem $i) {
+        // El empaque no lleva etiqueta ni código propio: los lleva el producto.
+        return $orden->items->reject->esComponente()->values()->map(function (OrdenCompraItem $i) {
             $codigo = $this->codigoDe($i);
             $etiqueta = $i->producto?->getFirstMedia('etiqueta_importacion');
 

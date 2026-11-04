@@ -69,7 +69,7 @@ class CostoImportacion
         if (! isset($this->estimados[$orden->id])) {
             $this->estimados[$orden->id] = collect(app(PreliquidarOrden::class)->handle($orden)['lineas'] ?? [])
                 ->filter(fn ($l) => isset($l['unidad']['costo']))
-                ->mapWithKeys(fn ($l) => [$l['id'] => (float) $l['unidad']['costo']])
+                ->mapWithKeys(fn ($l) => [$l['id'] => (float) ($l['costo_con_componentes'] ?? $l['unidad']['costo'])])
                 ->all();
         }
 

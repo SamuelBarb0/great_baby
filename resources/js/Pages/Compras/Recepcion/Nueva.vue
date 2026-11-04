@@ -28,6 +28,7 @@ const form = reactive({
         cantidad_recibida: i.cantidad_pendiente,
         precio_unit: i.precio_unit,
         cajas: i.cajas,
+        es_componente: i.es_componente,
         unidades_por_caja: i.unidades_por_caja,
         destino: i.destino,
         para_otra_empresa: i.para_otra_empresa,
@@ -217,6 +218,7 @@ const guardar = () => {
                                     :class="it.clasificacion !== 'apto' ? 'bg-amber-50/40 dark:bg-amber-950/20' : ''">
                                     <td class="p-2" :title="it.descripcion">
                                         {{ it.descripcion }}
+                                        <span v-if="it.es_componente" class="block text-xs text-sky-700 dark:text-sky-400 font-semibold">Componente · se cuenta, pero no sube al inventario</span>
                                         <span v-if="it.cajas" class="block text-xs text-surface-500">{{ it.cajas }} cajas de {{ it.unidades_por_caja }}<template v-if="it.destino"> · {{ it.destino }}</template></span>
                                     </td>
                                     <td class="p-2 text-right font-mono">{{ it.cantidad_pendiente }}</td>

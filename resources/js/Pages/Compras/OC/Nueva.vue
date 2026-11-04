@@ -40,7 +40,7 @@ const lineaNueva = () => ({
     descripcion: '', cantidad: 1, precio_unit: 0,
     // En importación el IVA se paga en aduana: va en la pre-liquidación, no en la OC.
     iva_pct: form?.tipo === 'importacion' ? 0 : 19, descuento_pct: 0,
-    cajas: null, unidades_por_caja: null, cbm_caja: null, empresa_destino_id: null,
+    cajas: null, unidades_por_caja: null, cbm_caja: null, empresa_destino_id: null, tipo_linea: 'producto',
 });
 
 const form = reactive({
@@ -396,6 +396,7 @@ const guardar = () => {
                                     <th class="text-right p-1">Uds/caja</th>
                                     <th class="text-right p-1">CBM caja</th>
                                     <th class="text-left p-1">Destino</th>
+                                    <th class="text-left p-1">Tipo</th>
                                 </template>
                                 <th class="text-right p-1">Cant</th>
                                 <th class="text-right p-1">Precio</th>
@@ -411,7 +412,10 @@ const guardar = () => {
                                     <input v-model="it.descripcion" class="input w-full text-sm"
                                            :class="it.producto_id ? 'border-emerald-400' : ''"
                                            placeholder="Descripción libre…"/>
-                                    <div v-if="it.producto_id" class="text-[10px] text-emerald-600 font-semibold mt-0.5">
+                                    <div v-if="it.tipo_linea === 'componente'" class="text-[10px] text-sky-700 dark:text-sky-400 font-semibold mt-0.5">
+                                        componente · se cuenta al recibir, no sube al inventario y su costo va al producto de la misma referencia
+                                    </div>
+                                    <div v-else-if="it.producto_id" class="text-[10px] text-emerald-600 font-semibold mt-0.5">
                                         ✓ del catálogo · suma stock al recibir
                                     </div>
                                     <div v-else-if="(it.descripcion || '').trim()" class="text-[10px] text-amber-600 mt-0.5">
@@ -425,6 +429,12 @@ const guardar = () => {
                                     <td class="p-1">
                                         <select v-model="it.empresa_destino_id" class="input w-28 text-sm">
                                             <option v-for="e in empresasDestino" :key="e.id" :value="e.codigo === 'great_baby' ? null : e.id">{{ e.nombre }}</option>
+                                        </select>
+                                    </td>
+                                    <td class="p-1">
+                                        <select v-model="it.tipo_linea" class="input w-28 text-sm" :aria-label="`Tipo de ${it.descripcion || 'la línea'}`">
+                                            <option value="producto">Producto</option>
+                                            <option value="componente">Componente</option>
                                         </select>
                                     </td>
                                 </template>

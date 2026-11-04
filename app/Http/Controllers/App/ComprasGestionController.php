@@ -136,7 +136,7 @@ class ComprasGestionController extends Controller implements HasMiddleware
                 ? app(\App\Modules\Compras\Services\EtiquetasDeOrden::class)->resumen($o->loadMissing('items.producto.media'))
                 : null,
             'lineas_sin_producto' => $o->esImportacion() ? $o->items
-                ->filter(fn ($i) => ! $i->producto_id && ! $i->variante_id)
+                ->filter(fn ($i) => ! $i->producto_id && ! $i->variante_id && ! $i->esComponente())
                 ->map(fn ($i) => [
                     'id' => $i->id,
                     'descripcion' => $i->descripcion,
@@ -369,6 +369,7 @@ class ComprasGestionController extends Controller implements HasMiddleware
             'items.*.cbm_caja' => ['nullable', 'numeric', 'gt:0'],
             'items.*.peso_caja_kg' => ['nullable', 'numeric', 'gt:0'],
             'items.*.empresa_destino_id' => ['nullable', 'integer', 'exists:empresa_config,id'],
+            'items.*.tipo_linea' => ['nullable', 'string', 'in:producto,componente'],
             'parametros_preliquidacion' => ['nullable', 'array'],
         ]);
         if ($data['tipo'] === 'importacion' && isset($data['parametros_preliquidacion'])) {
@@ -616,8 +617,9 @@ class ComprasGestionController extends Controller implements HasMiddleware
                     'destino' => $i->empresa_destino_id ? $i->empresaDestino?->nombreCorto() : null,
                     'para_otra_empresa' => $i->empresa_destino_id && (int) $i->empresa_destino_id !== (int) $principal,
                     // Sin producto y sin referencia de dónde crearlo: no subirá al inventario.
-                    'no_sube' => $esImportacion && ! $i->producto_id && ! $i->variante_id
+                    'no_sube' => $esImportacion && ! $i->producto_id && ! $i->variante_id && ! $i->esComponente()
                         && ! \App\Modules\Compras\Actions\CrearProductosDeOrden::referenciaDe($i),
+                    'es_componente' => $i->esComponente(),
                 ])->filter(fn ($x) => $x['cantidad_pendiente'] > 0)->values(),
             ] : null,
         ]);
