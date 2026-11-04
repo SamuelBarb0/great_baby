@@ -171,7 +171,8 @@ class OrdenCompra extends Model implements AuditableContract
 
     public function items(): HasMany
     {
-        return $this->hasMany(OrdenCompraItem::class, 'orden_id');
+        // En el orden en que se escribieron: sin esto la base las devuelve como quiera.
+        return $this->hasMany(OrdenCompraItem::class, 'orden_id')->orderBy('id');
     }
 
     public function recepciones(): HasMany
