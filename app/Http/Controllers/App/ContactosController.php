@@ -294,13 +294,65 @@ class ContactosController extends Controller implements HasMiddleware
         ]);
     }
 
+    /**
+     * Saca del documento lo que es puro formato.
+     *
+     * Puntos, espacios y comas: un NIT es un numero, no un monto. El guion se
+     * DEJA, para que la validacion pueda ver el digito de verificacion y
+     * explicarlo; si se quitara aca, `901738354-7` llegaria como un numero de
+     * diez digitos indistinguible de uno legitimo.
+     */
+    private static function limpiarDocumento(string $valor): string
+    {
+        return trim(str_replace(['.', ' ', ',', "\xC2\xA0"], '', $valor));
+    }
+
     public function guardar(Request $r, ?Contacto $contacto = null): RedirectResponse
     {
         $existe = $contacto?->exists ?? false;
 
+        /*
+         * El documento se limpia antes de validar.
+         *
+         * Great Baby lo pidio el 2026-11-03: «que se exija la cedula o NIT sin
+         * puntos ... actualmente digitan los numeros mal y crean el tercero
+         * mal». Los puntos, espacios y comas son ruido de formato y se quitan
+         * solos. El digito de verificacion NO: ese se rechaza con un mensaje,
+         * porque un `-7` al final tambien puede ser un numero mal tecleado y
+         * no hay como distinguir una cosa de la otra.
+         */
+        $r->merge([
+            'numero_documento' => self::limpiarDocumento((string) $r->input('numero_documento')),
+        ]);
+
         $datos = $r->validate([
             'tipo_documento' => ['required', 'in:CC,CE,NIT,PP'],
             'numero_documento' => ['required', 'string', 'max:30',
+                /*
+                 * El digito de verificacion NO identifica a nadie: se calcula
+                 * a partir del propio NIT. Escribirlo hace que el mismo
+                 * tercero entre dos veces, una con el y otra sin el, y
+                 * despues la cartera de ese cliente no cuadra con ninguna.
+                 *
+                 * Se rechaza en vez de quitarlo en silencio porque un `-7` al
+                 * final tambien puede ser un numero mal tecleado, y no hay
+                 * forma de distinguir una cosa de la otra.
+                 */
+                function (string $campo, mixed $valor, \Closure $falla) {
+                    $v = (string) $valor;
+
+                    if (preg_match('/^(\d{6,})-(\d)$/', $v, $m)) {
+                        $falla("El NIT va sin el dígito de verificación: escribí {$m[1]}, no {$v}. "
+                            .'Ese dígito se calcula a partir del NIT, no identifica a nadie, y es lo '
+                            .'que hace que el mismo tercero quede creado dos veces.');
+
+                        return;
+                    }
+
+                    if (! preg_match('/^[0-9A-Za-z]+$/', $v)) {
+                        $falla('El documento va sin puntos, espacios ni guiones: sólo el número.');
+                    }
+                },
                 \Illuminate\Validation\Rule::unique('contactos', 'numero_documento')->ignore($contacto?->id)],
             'nombre_completo' => ['required', 'string', 'max:180'],
             'razon_social' => ['nullable', 'string', 'max:180'],

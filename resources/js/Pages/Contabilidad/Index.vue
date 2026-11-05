@@ -143,8 +143,8 @@ const linkTodosMovs = computed(() =>
                             <tr v-for="c in porCuenta" :key="c.cuenta_puc" class="border-b border-surface-100 dark:border-surface-900 hover:bg-surface-50 dark:hover:bg-surface-900/30">
                                 <!-- Re-audit UX-A4 · label del PUC (tooltip + segunda línea). -->
                                 <td class="py-2">
-                                    <div class="font-mono font-semibold text-brand-600" :title="pucLabel(c.cuenta_puc)">{{ c.cuenta_puc }}</div>
-                                    <div class="text-[10px] text-surface-500">{{ pucLabel(c.cuenta_puc) }}</div>
+                                    <div class="font-mono font-semibold text-brand-600" :title="c.cuenta_nombre || pucLabel(c.cuenta_puc)">{{ c.cuenta_puc }}</div>
+                                    <div class="text-[10px] text-surface-500">{{ c.cuenta_nombre || pucLabel(c.cuenta_puc) }}</div>
                                 </td>
                                 <td class="text-right font-mono">{{ money(c.debe) }}</td>
                                 <td class="text-right font-mono">{{ money(c.haber) }}</td>
@@ -201,7 +201,7 @@ const linkTodosMovs = computed(() =>
                                     <span :class="m.anulado ? 'opacity-70' : ''">{{ fechaCorta(m.fecha) }}</span>
                                     <span v-if="m.anulado" class="ml-1 text-[10px] font-bold text-red-600 uppercase">Anulado</span>
                                 </td>
-                                <td class="font-mono text-brand-600" :class="m.anulado ? 'opacity-70' : ''" :title="pucLabel(m.cuenta_puc)">{{ m.cuenta_puc }}</td>
+                                <td class="font-mono text-brand-600" :class="m.anulado ? 'opacity-70' : ''" :title="m.cuenta_nombre || pucLabel(m.cuenta_puc)">{{ m.cuenta_puc }}</td>
                                 <td class="text-xs" :class="m.anulado ? 'opacity-70' : ''" :title="m.descripcion">{{ m.descripcion }}</td>
                                 <td class="text-xs text-surface-500" :class="m.anulado ? 'opacity-70' : ''">{{ m.origen }}</td>
                                 <td class="text-right font-mono" :class="[m.debe > 0 ? 'text-blue-600 font-bold' : 'text-surface-400', m.anulado ? 'opacity-70' : '']">{{ m.debe > 0 ? money(m.debe) : '—' }}</td>

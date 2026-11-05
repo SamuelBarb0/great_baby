@@ -161,7 +161,17 @@ class RegistrarAsientoWalletDropi
 
         return match ($tipo) {
             // Ingreso del cliente final vía Dropi → aumenta wallet, cancela CxC.
-            TipoMovimientoWallet::PagoGuia => [self::CUENTA_WALLET, '1305', "Pago wallet Dropi — {$ref}"],
+            /*
+             * La CxC sale de la MISMA regla que usa la factura.
+             *
+             * Estaba escrita a mano como '1305'. Mientras la regla también
+             * valía '1305' coincidían de casualidad; el 2026-11-05 la regla
+             * pasó a '13050501' —la subcuenta que sí recibe movimiento— y de
+             * haber quedado esto quieto, la factura habría cargado la deuda en
+             * una cuenta y el pago la habría abonado en otra: la cartera de
+             * Dropi no se cerraba nunca.
+             */
+            TipoMovimientoWallet::PagoGuia => [self::CUENTA_WALLET, (string) setting('contable.cta_cxc_default'), "Pago wallet Dropi — {$ref}"],
             // Retiro a banco físico: sale de wallet, entra a bancos.
             TipoMovimientoWallet::RetiroBanco => ['1110', self::CUENTA_WALLET, 'Retiro wallet Dropi → banco GB'],
             // 9.2 · Casi todas las «indemnizaciones» de la wallet son SALIDAS

@@ -142,6 +142,10 @@ class ContabilidadExtrasController extends Controller implements HasMiddleware
             ->selectRaw('origen_type, COUNT(DISTINCT origen_id) as docs, SUM(CASE WHEN deleted_at IS NULL THEN COALESCE(debe,0) ELSE 0 END) as volumen')
             ->groupBy('origen_type')->orderByDesc('volumen')->get();
 
+        $nombresCuenta = \App\Modules\Contabilidad\Support\NombresDeCuenta::para(
+            $topCuentas->pluck('cuenta_puc')
+        );
+
         // CONT-C6 · Semáforo SIIGO del panel.
         $siigo = $this->coberturaSiigo($desde, $hasta);
         $siigoAprobados = $siigo['deberian'];
@@ -163,8 +167,11 @@ class ContabilidadExtrasController extends Controller implements HasMiddleware
                 'siigo_pct' => $siigoPct,
                 'siigo_semaforo' => $siigoSemaforo,
             ],
+            // El nombre sale del plan de cuentas, no del diccionario de apodos:
+            // por prefijo, 41350104 y 41350110 salían con el mismo texto.
             'topCuentas' => $topCuentas->map(fn ($r) => [
                 'cuenta' => $r->cuenta_puc,
+                'cuenta_nombre' => $nombresCuenta[$r->cuenta_puc] ?? null,
                 'debe' => (float) $r->debe, 'haber' => (float) $r->haber,
                 'movs' => (int) $r->movs,
             ]),
@@ -247,11 +254,18 @@ class ContabilidadExtrasController extends Controller implements HasMiddleware
                 )
                 ->first();
 
-            $movs = (clone $baseMovs)
-                ->orderBy('id')->get()
+            $filasMov = (clone $baseMovs)->orderBy('id')->get();
+            // El nombre real del plan: por prefijo, dos subcuentas distintas de
+            // 4135 salían con el mismo texto, una encima de la otra.
+            $nombresMov = \App\Modules\Contabilidad\Support\NombresDeCuenta::para(
+                $filasMov->pluck('cuenta_puc')
+            );
+
+            $movs = $filasMov
                 ->map(fn ($m) => [
                     'id' => $m->id,
                     'cuenta' => $m->cuenta_puc,
+                    'cuenta_nombre' => $nombresMov[$m->cuenta_puc] ?? null,
                     'debe' => (float) $m->debe, 'haber' => (float) $m->haber,
                     'descripcion' => $m->descripcion,
                     'fecha' => $m->fecha instanceof \Carbon\Carbon ? $m->fecha->toDateString() : $m->fecha,
@@ -594,52 +608,14 @@ class ContabilidadExtrasController extends Controller implements HasMiddleware
     /**
      * Cuántos documentos deberían estar en SIIGO y cuántos están de verdad.
      *
-     * El semáforo miraba SÓLO `asientos_manuales`. Con cero asientos manuales
-     * aprobados —que es lo normal, casi nadie hace asientos a mano— la cuenta
-     * daba 0/0 y la pantalla pintaba «100 % · verde». El 2026-11-03 el panel
-     * decía 100 % mientras NINGUNA de las 28 facturas había llegado a SIIGO y
-     * la cola llevaba una semana sin worker. El indicador que existía para
-     * avisar era justamente el que tapaba el problema.
+     * La cuenta vive en `CoberturaSiigo` porque Discrepancias muestra el mismo
+     * indicador y las dos pantallas llegaron a decir cosas opuestas.
      *
-     * Ahora cuenta las mismas diez familias que reencola `siigo:empujar-
-     * pendientes`, leyendo su lista para que no se separen.
-     *
-     * A propósito NO se filtra por el período de la pantalla: una factura de
-     * octubre sin subir sigue pendiente hoy, y acotarla al rango la escondería
-     * —que es el error que se está corrigiendo—.
-     *
-     * @return array{deberian:int,estan:int,pct:float,semaforo:string,etiqueta:string}
+     * @return array{deberian:int,estan:int,faltan:int,pct:float,semaforo:string,etiqueta:string}
      */
     private function coberturaSiigo(string $desde, string $hasta): array
     {
-        $deberian = 0;
-        $estan = 0;
-
-        foreach (\App\Console\Commands\SiigoEmpujarPendientesCommand::FUENTES as [$tabla, $columna, , $condicion]) {
-            if (! \Illuminate\Support\Facades\Schema::hasTable($tabla)) {
-                continue;
-            }
-
-            $base = \Illuminate\Support\Facades\DB::table($tabla)->whereRaw($condicion);
-
-            $deberian += (clone $base)->count();
-            $estan += (clone $base)->whereNotNull($columna)->where($columna, '<>', '')->count();
-        }
-
-        // Sin documentos que subir no hay nada atrasado: es 100 % de cero, y
-        // decirlo así evita el verde mentiroso de antes.
-        $pct = $deberian > 0 ? round(($estan / $deberian) * 100, 1) : 100.0;
-        $faltan = $deberian - $estan;
-
-        return [
-            'deberian' => $deberian,
-            'estan' => $estan,
-            'pct' => $pct,
-            'semaforo' => $pct >= 95 ? 'verde' : ($pct >= 80 ? 'amarillo' : 'rojo'),
-            'etiqueta' => $deberian === 0
-                ? 'Sin documentos pendientes de subir'
-                : "{$estan} / {$deberian} documentos en SIIGO · faltan {$faltan}",
-        ];
+        return \App\Modules\Contabilidad\Support\CoberturaSiigo::calcular();
     }
 
     private function origenLabel(?string $fqcn): string

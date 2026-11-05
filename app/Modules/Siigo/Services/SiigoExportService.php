@@ -250,7 +250,7 @@ class SiigoExportService
         if ($documento instanceof GastoOperativo) {
             $monto = (float) $documento->monto;
             $ctaGasto = (string) setting('siigo.cta_gasto_default', '5195');
-            $ctaBanco = (string) setting('siigo.cta_banco_default', '1110');
+            $ctaBanco = (string) setting('siigo.cta_banco_default');
             return [
                 ['account' => ['code' => CuentasSiigo::codigo($ctaGasto), 'movement' => 'Debit'], 'description' => (string) $documento->descripcion, 'value' => $monto],
                 ['account' => ['code' => CuentasSiigo::codigo($ctaBanco), 'movement' => 'Credit'], 'description' => (string) $documento->descripcion, 'value' => $monto],
@@ -263,7 +263,7 @@ class SiigoExportService
             if (abs($dif) < 0.01) {
                 return [];
             }
-            $ctaBanco = (string) ($documento->cuenta_puc ?: setting('siigo.cta_banco_default', '1110'));
+            $ctaBanco = (string) ($documento->cuenta_puc ?: setting('siigo.cta_banco_default'));
             $ctaClearing = (string) setting('siigo.cta_conciliacion_default', '139535');
             // dif>0: el extracto tiene más que el sistema → falta registrar ingreso al banco.
             $bancoDebita = $dif > 0;

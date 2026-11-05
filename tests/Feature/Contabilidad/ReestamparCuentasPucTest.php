@@ -59,7 +59,7 @@ it('sin --aplicar no escribe nada', function () {
         ->assertSuccessful();
 
     expect($m->fresh()->cuenta_puc)->toBe('1305');
-})->skip('Reestampado parqueado: cta_cxc_default quedó en 1305 (decisión: la cuenta real de Dropi manda). Este feature asume que la regla apunta a una subcuenta movible distinta de 1305, así que queda contradicho. QA debe reconciliarlo con Silvia.');
+});
 
 it('con --aplicar mueve el movimiento a la cuenta de la regla', function () {
     $m = movEn('1305');

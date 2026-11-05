@@ -13,6 +13,8 @@ const props = defineProps({
     filtros: { type: Object, required: true },
     pagos: { type: Object, required: true },
     kpis: { type: Object, required: true },
+    // Conceptos de retención con tarifa y base · salen de las reglas activas.
+    conceptos: { type: Array, default: () => [] },
 });
 
 // La Torre SIIGO enlaza aca con `?destacar=<id>` cuando el documento no tiene
@@ -89,6 +91,18 @@ const anular = async (p) => {
     };
 };
 const reenviar = (p) => accionDeFila(p.id, `/app/cartera/pagos-proveedor/${p.id}/reenviar-siigo`);
+/*
+ * Va ARRIBA de `form`, que la usa para la fecha por defecto.
+ *
+ * Estaba declarada 86 lineas mas abajo, asi que `form` llamaba a
+ * `hoyBogota()` antes de que existiera y el componente entero reventaba al
+ * montar con «Cannot access before initialization». La pantalla de pagos a
+ * proveedor quedaba EN BLANCO: no se podia registrar ni un pago desde la
+ * interfaz, y como el error vive en la consola del navegador, desde afuera
+ * parecia una pagina que no cargaba y ya.
+ */
+const { hoy: hoyBogota } = useBogotaDate();
+
 const form = reactive({
     fecha: hoyBogota(),
     contacto_id: null,
@@ -101,6 +115,15 @@ const form = reactive({
     cuenta_puc_egreso: '', // QA-FIX #10 · backend resuelve default desde settings
     observaciones: '',
 });
+
+/**
+ * El concepto elegido, para mostrar su tarifa debajo del desplegable.
+ *
+ * Funcion y no `computed`: en este componente el `computed` reventaba con un
+ * «Cannot access before initialization» al montar. Una funcion se resuelve
+ * cuando la plantilla la llama y no depende del orden de las declaraciones.
+ */
+const conceptoElegido = () => props.conceptos.find((c) => c.valor === form.concepto_retencion);
 const buscar = ref('');
 const encontrados = ref([]);
 
@@ -166,7 +189,6 @@ import { watch } from 'vue';
  * siguiente. Acá eso no era un filtro incómodo sino la fecha que queda
  * escrita en el documento.
  */
-const { hoy: hoyBogota } = useBogotaDate();
 const preview = ref({ lineas: [], total: 0, neto: 0, es_autorretenedor: false });
 let debPreview;
 const cargarPreview = () => {
@@ -385,12 +407,18 @@ const guardar = () => {
                             <div>
                                 <label class="text-xs font-semibold">Concepto retención *</label>
                                 <select v-model="form.concepto_retencion" required class="input w-full text-sm">
-                                    <option value="compras_generales">Compras generales</option>
-                                    <option value="servicios_generales">Servicios generales</option>
-                                    <option value="honorarios">Honorarios</option>
-                                    <option value="arrendamientos">Arrendamientos</option>
-                                    <option value="transporte_carga">Transporte carga</option>
+                                    <option v-for="c in conceptos" :key="c.valor" :value="c.valor">
+                                        {{ c.etiqueta }}
+                                    </option>
                                 </select>
+                                <!--
+                                    Se muestra la tarifa y la base: quien paga
+                                    tiene que poder ver por qué le retuvo eso,
+                                    o por qué no le retuvo nada.
+                                -->
+                                <p v-if="conceptoElegido()" class="text-[11px] text-surface-500 mt-1">
+                                    {{ conceptoElegido().tarifa }} % desde {{ money(conceptoElegido().base) }}
+                                </p>
                             </div>
                             <div>
                                 <label class="text-xs font-semibold">Ciudad</label>

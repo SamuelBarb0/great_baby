@@ -45,13 +45,31 @@ class Reglas
 
         // ============ CONTABILIDAD · cuentas por defecto ============
         // Actualizados 2026-09-28 con PUC oficial Great Baby SAS (NIT 901738354).
-        // ⚠ Las cuentas de INGRESO/COSTO/INVENTARIO específicas de producto deben ser
-        // confirmadas con Silvia (contadora) porque dependen de la línea (accesorios/ropa/etc).
-        // Dejamos GRUPO de 4 dígitos como default; en la ficha contable de cada producto
-        // se puede sobrescribir con la subcuenta específica (6 dígitos).
-        'contable.cta_cxc_default' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '1305', 'etiqueta' => 'Cuenta CxC por defecto (Clientes)', 'descripcion' => 'PUC Great Baby · 1305 Clientes (cuenta real en uso por Dropi/ventas). Confirmar subcuenta movible con Silvia si el plan la exige.'],
+        //
+        // ⚠ ACÁ VA SIEMPRE UNA CUENTA HOJA, nunca un grupo de 4 o 6 dígitos.
+        //
+        // Hasta el 2026-11-05 el default era el GRUPO, con la idea de que la ficha
+        // de cada producto lo sobrescribiera con la subcuenta. Nadie sobrescribió
+        // nada: las 21 facturas de producción quedaron asentadas en 4135 y 1305,
+        // que el plan marca como NO MOVIBLES. Y no reventaba, que es lo peor: el
+        // mapeo a SIIGO resuelve un grupo por su «primera descendiente activa», así
+        // que el día que se conectara SIIGO los ingresos enteros de Great Baby
+        // entraban como 41350101 ALIMENTACIÓN E HIDRATACIÓN.
+        'contable.cta_cxc_default' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '13050501', 'etiqueta' => 'Cuenta CxC por defecto (Clientes)', 'descripcion' => 'PUC 13050501 Clientes nacionales. Era 1305, el grupo, que no admite movimiento.'],
         'dropi.empresa' => ['grupo' => 'dropi', 'tipo' => 'string', 'valor' => 'ecommerce', 'etiqueta' => 'Razón social que factura lo de Dropi', 'descripcion' => 'Código de EmpresaConfig (canal e-commerce) con el que se factura lo de Dropi.'],
-        'contable.cta_ingreso_default' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '4135', 'etiqueta' => 'Cuenta ingreso por defecto', 'descripcion' => '⚠ Confirmar subcuenta específica con Silvia (4135xx según categoría)'],
+        /*
+         * El ingreso NO se decide acá en el caso normal.
+         *
+         * Great Baby parte las ventas por categoría de producto: la 41350101 es
+         * alimentación, la 41350104 juguetería, la 41350110 vestuario, y así diez
+         * cuentas. El asiento de venta agrupa las líneas de la factura por la
+         * cuenta del producto —y si no la tiene, la de su categoría—; esta regla
+         * es sólo el cajón de lo que no tiene ninguna de las dos.
+         *
+         * 413505 «Venta de mercancías» es hoja y admite movimiento, así que lo que
+         * caiga acá se ve y se puede reclasificar. Antes era 4135, el grupo.
+         */
+        'contable.cta_ingreso_default' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '413505', 'etiqueta' => 'Cuenta ingreso por defecto', 'descripcion' => 'PUC 413505 Venta de mercancías. Sólo se usa cuando el producto y su categoría no traen cuenta propia; lo normal es que el ingreso vaya a la 4135xx de su categoría.'],
         'contable.cta_iva_venta_default' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '240805', 'etiqueta' => 'Cuenta IVA venta por defecto', 'descripcion' => 'PUC Great Baby · 240805 IVA generado en ventas'],
         'contable.cta_iva_compra_default' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '240810', 'etiqueta' => 'Cuenta IVA compra descontable', 'descripcion' => 'PUC Great Baby · 240810 IVA descontable por compras'],
         'contable.cta_costo_default' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '6135', 'etiqueta' => 'Cuenta costo por defecto', 'descripcion' => '⚠ Confirmar subcuenta específica con Silvia (6135xx según categoría)'],
@@ -91,6 +109,31 @@ class Reglas
         // para que el gasto ENTRE al libro, y despues se reclasifica. Antes de
         // esto el gasto no entraba a ningun lado.
         'contable.cta_gasto_default' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '5195', 'etiqueta' => 'Cuenta de gasto por defecto', 'descripcion' => 'PUC Great Baby · 5195 Diversos. Se usa cuando el gasto no trae cuenta propia.'],
+
+        /*
+         * La cuenta de cada tipo de gasto.
+         *
+         * Las mando Great Baby el 2026-11-03, respondiendo el cuestionario de
+         * insumos: cada concepto con su cuenta del PUC. Hasta ahora la
+         * categoria del gasto era una etiqueta suelta y la cuenta se escribia
+         * a mano en cada gasto, asi que dos papelerias podian terminar en dos
+         * cuentas distintas.
+         *
+         * Viven aca y no escritas en el codigo porque el contador las va a
+         * querer mover, y porque el listado de la pantalla de gastos sale de
+         * estas mismas claves: agregar un tipo es agregar una regla.
+         */
+        'gastos.cta_aseo_cafeteria' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '51952501', 'etiqueta' => 'Gasto · Aseo y cafetería', 'descripcion' => 'PUC 51952501 · Elementos de aseo y cafetería.'],
+        'gastos.cta_papeleria' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '51953001', 'etiqueta' => 'Gasto · Papelería', 'descripcion' => 'PUC 51953001 · Útiles de papelería y fotocopias.'],
+        'gastos.cta_arriendo' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '51201001', 'etiqueta' => 'Gasto · Arriendo', 'descripcion' => 'PUC 51201001 · Arrendamientos de construcciones y edificaciones. Es un SERVICIO: su IVA va a la 24081501, no a la de compras.'],
+        'gastos.cta_envios' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '51355001', 'etiqueta' => 'Gasto · Envíos y fletes', 'descripcion' => 'PUC 51355001 · Transporte, fletes y acarreos.'],
+        'gastos.cta_honorarios' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '51101001', 'etiqueta' => 'Gasto · Honorarios', 'descripcion' => 'PUC 51101001 · Honorarios de asesoría contable, que es la hoja que trae el PUC. Si el honorario es jurídico va a la 51102501 y si es técnico a la 51103501. Ojo con la retención: tiene tarifa propia, distinta a compras generales.'],
+        'gastos.cta_publicidad' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '52356004', 'etiqueta' => 'Gasto · Publicidad', 'descripcion' => 'PUC 52356004 · Marketing corporativo. Es gasto de VENTAS (clase 52), no de administración.'],
+        'gastos.cta_servicio_acueducto' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '51352501', 'etiqueta' => 'Gasto · Servicio · acueducto', 'descripcion' => 'PUC 51352501 · Servicios públicos · acueducto y alcantarillado.'],
+        'gastos.cta_servicio_energia' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '51353001', 'etiqueta' => 'Gasto · Servicio · energía', 'descripcion' => 'PUC 51353001 · Servicios públicos · energía eléctrica.'],
+        'gastos.cta_servicio_internet' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '51353501', 'etiqueta' => 'Gasto · Servicio · internet', 'descripcion' => 'PUC 51353501. El grupo se llama «Teléfono», pero la hoja del PUC de Great Baby es INTERNET: el teléfono fijo no tiene cuenta propia.'],
+        'gastos.cta_servicio_celular' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '51353502', 'etiqueta' => 'Gasto · Servicio · celular', 'descripcion' => 'PUC 51353502 · Servicios públicos · celular.'],
+        'gastos.cta_servicio_gas' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '51355501', 'etiqueta' => 'Gasto · Servicio · gas', 'descripcion' => 'PUC 51355501 · Servicios públicos · gas.'],
         // La contrapartida de un gasto causado y todavia no pagado.
         /*
          * Las cuentas de la nómina.
@@ -137,7 +180,20 @@ class Reglas
         'contable.cta_liquidacion_descuentos' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '13651501', 'etiqueta' => 'Liquidación · otros descuentos', 'descripcion' => '⚠ CONFIRMAR CON LA CONTADORA. Es la contrapartida de lo que se le descuenta a alguien en su liquidación (un préstamo pendiente, una dotación no devuelta). El plan de esta empresa sólo trae 1365 con dos hijas —Educación y Calamidad doméstica— y ninguna describe el caso general, así que el valor de acá es provisional. Afecta sólo a las liquidaciones que traen descuentos.'],
         'contable.cta_liquidacion_cesantias_consignadas' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '23803001', 'etiqueta' => 'Liquidación · cesantías ya consignadas al fondo', 'descripcion' => 'PUC 23803001 Fondos de cesantías y/o pensiones. Es la parte de las cesantías que la empresa ya giró al fondo: el trabajador las cobra allá, no acá. Por eso en la liquidación se descuentan del neto y en el libro se acreditan a esta cuenta en vez de salir del banco.'],
         'contable.cta_gastos_por_pagar' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '2335', 'etiqueta' => 'Cuenta de gastos por pagar', 'descripcion' => 'PUC Great Baby · 2335 Costos y gastos por pagar'],
-        'contable.cta_bancos_default' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '111010', 'etiqueta' => 'Cuenta bancos por defecto', 'descripcion' => 'PUC 111010 Moneda nacional · Davivienda. Era 112005, que el plan marca como AGRUPADORA y no admite movimiento: asentar ahí es lo que tiene hoy al libro entero contra cuentas que no se pueden mover. Si se abre otro banco, acá se cambia.'],
+        /*
+         * El banco por el que sale la plata.
+         *
+         * Era 111010 «Moneda nacional · Davivienda», y Great Baby NO TIENE
+         * Davivienda: esa cuenta la inventamos nosotros. En producción quedó con
+         * saldo $-6.182.038, un banco en rojo porque sólo salió la nómina y nunca
+         * entró nada.
+         *
+         * Silvia lo confirmó el 2026-11-04 («no tenemos davivienda, sólo son dos
+         * cuentas bancolombia y una tarjeta prepago») y el extracto de septiembre
+         * lo cierra: cuenta de ahorros Bancolombia 30300002664, sucursal Éxito
+         * Bucaramanga, de donde salen todos los «PAGO A PROVE».
+         */
+        'contable.cta_bancos_default' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '11200501', 'etiqueta' => 'Cuenta bancos por defecto', 'descripcion' => 'PUC 11200501 Bancolombia Great Baby Cta Ahorros **2664 · la cuenta operativa, confirmada contra el extracto. Si se paga desde otra, acá se cambia.'],
         'contable.cta_caja_default' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '11050501', 'etiqueta' => 'Cuenta caja general', 'descripcion' => 'PUC 11050501 Caja general. Era 110505, que es la agrupadora del mismo nombre y no admite movimiento.'],
         'contable.cta_proveedores_default' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '220505', 'etiqueta' => 'Cuenta proveedores nacionales', 'descripcion' => 'PUC Great Baby · 220505 Proveedores nacionales'],
         // Faltaba registrarla: el código la pedía con `setting()` pero la clave
@@ -299,7 +355,10 @@ class Reglas
          */
         'siigo.reparto_modo' => ['grupo' => 'siigo', 'tipo' => 'string', 'valor' => 'cantidad', 'etiqueta' => 'SIIGO · Como se declara un reparto', 'descripcion' => '«cantidad» = menos unidades al precio real (recomendado) · «precio» = mismas unidades a precio menor'],
         'siigo.cta_gasto_default' => ['grupo' => 'siigo', 'tipo' => 'string', 'valor' => '5195', 'etiqueta' => 'SIIGO · Cuenta de gasto por defecto', 'descripcion' => 'PUC débito para gastos sin asiento previo'],
-        'siigo.cta_banco_default' => ['grupo' => 'siigo', 'tipo' => 'string', 'valor' => '1110', 'etiqueta' => 'SIIGO · Cuenta de banco por defecto', 'descripcion' => 'PUC de bancos'],
+        // La misma cuenta que `contable.cta_bancos_default`: la operativa de
+        // Bancolombia. Era 1110, el encabezado «Bancos», que no recibe
+        // movimiento — SIIGO lo rechaza.
+        'siigo.cta_banco_default' => ['grupo' => 'siigo', 'tipo' => 'string', 'valor' => '11200501', 'etiqueta' => 'SIIGO · Cuenta de banco por defecto', 'descripcion' => 'PUC 11200501 Bancolombia Great Baby Cta Ahorros **2664, confirmada contra el extracto.'],
         'siigo.cta_conciliacion_default' => ['grupo' => 'siigo', 'tipo' => 'string', 'valor' => '139535', 'etiqueta' => 'SIIGO · Partida conciliatoria por defecto', 'descripcion' => 'PUC para la diferencia de conciliación'],
         'siigo.proveedor_importacion_doc' => ['grupo' => 'siigo', 'tipo' => 'string', 'valor' => '', 'etiqueta' => 'SIIGO · NIT proveedor de importaciones', 'descripcion' => 'Identificación por defecto para comprobantes de importación'],
         // UBIC-6 · resolución DIAN FV auto-asignada a nuevas ubicaciones de venta.
@@ -452,6 +511,10 @@ class Reglas
         [$ok, $val, $err] = self::castear($clave, $valor);
         if (! $ok) throw new \InvalidArgumentException("Regla {$clave}: {$err}");
 
+        if ($err = self::cuentaAgrupadora($clave, (string) $val)) {
+            throw new \InvalidArgumentException("Regla {$clave}: {$err}");
+        }
+
         ReglaNegocio::updateOrCreate(
             ['clave' => $clave],
             [
@@ -463,6 +526,91 @@ class Reglas
             ]
         );
         self::limpiarRequestCache();
+    }
+
+    /**
+     * Impide guardar una cuenta que el PUC marca como agrupadora.
+     *
+     * Es el candado que faltaba. Las reglas de cuenta se llenaron con grupos
+     * —1305, 4135, 112005, 236540— y nada se quejó: los asientos se escribían
+     * igual, el libro cuadraba igual, y el error sólo se iba a ver el día que
+     * SIIGO rechazara el documento, o peor, el día que NO lo rechazara y lo
+     * metiera en la primera subcuenta que encontrara.
+     *
+     * Aplica a las cuentas del PUC de Great Baby. Eso incluye `contable.cta_*`,
+     * `gastos.cta_*` y CINCO de las `siigo.*`, que a pesar del prefijo guardan
+     * códigos del plan de Great Baby y no del catálogo de SIIGO. Las tres que
+     * terminan en `_siigo` sí son de SIIGO —22050501, 1435010101, 24082001— y
+     * no viven en esta tabla, así que quedan fuera.
+     *
+     * La distinción no es cosmética: la propia pantalla de SIIGO avisa que
+     * `siigo.cta_gasto_default` (5195), `siigo.cta_banco_default` (1110) y
+     * `siigo.cta_sobrante_inventario_default` (4295) son encabezados, y que
+     * `siigo.cta_perdida_inventario_default` (5299) ni siquiera existe en el
+     * plan. La primera versión de este candado las dejó pasar.
+     *
+     * Una cuenta que no está en el catálogo se deja pasar: puede ser una
+     * instalación nueva con `plan_cuentas` vacío, y negarse ahí rompería el
+     * seeding. Lo que no se deja pasar es una cuenta que SÍ existe y que el
+     * propio plan dice que no recibe movimiento.
+     *
+     * @return string|null el motivo del rechazo, o null si la cuenta sirve
+     */
+    /**
+     * Reglas con prefijo `siigo.` que igual guardan una cuenta del PUC de
+     * Great Baby. Lista explícita y no un patrón, porque la diferencia con las
+     * `_siigo` no se ve en el nombre de la clave.
+     */
+    private const CUENTAS_PUC_DE_SIIGO = [
+        'siigo.cta_gasto_default',
+        'siigo.cta_banco_default',
+        'siigo.cta_conciliacion_default',
+        'siigo.cta_perdida_inventario_default',
+        'siigo.cta_sobrante_inventario_default',
+    ];
+
+    private static function cuentaAgrupadora(string $clave, string $valor): ?string
+    {
+        $esDelPuc = str_starts_with($clave, 'contable.cta_')
+            || str_starts_with($clave, 'gastos.cta_')
+            || in_array($clave, self::CUENTAS_PUC_DE_SIIGO, true);
+
+        if (! $esDelPuc) {
+            return null;
+        }
+
+        $codigo = trim($valor);
+        if ($codigo === '') {
+            return null;
+        }
+
+        try {
+            $cuenta = \App\Modules\Contabilidad\Models\PlanCuenta::where('codigo', $codigo)
+                ->first(['codigo', 'nombre', 'permite_movimiento']);
+        } catch (\Throwable) {
+            // Sin tabla todavía (instalación nueva, migración a medias) no hay
+            // nada contra qué validar. No es motivo para bloquear.
+            return null;
+        }
+
+        if (! $cuenta || $cuenta->permite_movimiento) {
+            return null;
+        }
+
+        $hijas = \App\Modules\Contabilidad\Models\PlanCuenta::where('codigo', 'like', $codigo.'%')
+            ->where('codigo', '!=', $codigo)
+            ->where('permite_movimiento', true)
+            ->where('activa', true)
+            ->orderBy('codigo')
+            ->limit(3)
+            ->pluck('codigo')
+            ->all();
+
+        $sugerencia = $hijas === []
+            ? ' Buscá una subcuenta de detalle en el plan de cuentas.'
+            : ' Usá una de sus subcuentas: '.implode(', ', $hijas).'.';
+
+        return "la cuenta {$codigo} ({$cuenta->nombre}) agrupa, no recibe movimiento.".$sugerencia;
     }
 
     /** Siembra en BD los defaults que aún no existen. Idempotente + concurrent-safe (firstOrCreate). */

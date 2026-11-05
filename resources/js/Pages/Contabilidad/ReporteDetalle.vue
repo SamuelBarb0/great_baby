@@ -186,7 +186,7 @@ const tieneMeta = computed(() => props.meta && props.meta.numero);
                                 </td>
                                 <td class="p-2">
                                     <div class="font-mono font-bold text-brand-600">{{ m.cuenta }}</div>
-                                    <div class="text-[10px] text-surface-500">{{ pucLabel(m.cuenta) }}</div>
+                                    <div class="text-[10px] text-surface-500">{{ m.cuenta_nombre || pucLabel(m.cuenta) }}</div>
                                 </td>
                                 <td class="p-2 text-xs">{{ m.descripcion }}</td>
                                 <td class="p-2 text-right text-blue-600">{{ m.debe > 0 ? money(m.debe) : '—' }}</td>
