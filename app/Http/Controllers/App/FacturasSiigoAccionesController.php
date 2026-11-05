@@ -78,10 +78,21 @@ class FacturasSiigoAccionesController extends Controller implements HasMiddlewar
         }
 
         \App\Jobs\ReintentarEmisionDian::dispatch($factura->id);
-        $this->log('ok', "Factura {$factura->numero} reencolada a SIIGO a mano", $factura);
+
+        /*
+         * Se registra como «encolado», no como «ok».
+         *
+         * Decía `ok`, y en la bitácora de SIIGO eso se lee como «llegó». No
+         * llegó: lo único que pasó es que el trabajo entró a la fila. El
+         * 2026-11-05 el log de desarrollo tenía seis líneas seguidas en `ok`
+         * —«reencolada a SIIGO a mano»— con las seis facturas todavía sin
+         * `siigo_id` y los trabajos sin un solo intento, porque no había
+         * worker. Quien leyera ese log se iba tranquilo.
+         */
+        $this->log('encolado', "Factura {$factura->numero} puesta en la fila de envío a mano (todavía no enviada)", $factura);
 
         return back()->with('flash', ['type' => 'success',
-            'message' => "Factura {$factura->numero} encolada. Si la cola está corriendo, viaja en segundos."]);
+            'message' => "Factura {$factura->numero} en la fila de envío. Si queda sin intento, la cola no se está procesando."]);
     }
 
     public function reenviarMail(Request $r, FacturaVenta $factura, SiigoEmisionService $svc): RedirectResponse

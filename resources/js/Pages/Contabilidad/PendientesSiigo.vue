@@ -82,7 +82,10 @@ const reenviar = async (p) => {
             credentials: 'same-origin',
         });
         if (resp.ok) {
-            toast.value = { type: 'success', text: `${p.numero} encolado a SIIGO · se refrescará automáticamente` };
+            // «Encolado» no es «enviado»: si no hay worker corriendo, el
+            // documento se queda en la fila y la fila de abajo va a seguir
+            // diciendo «sin intento aún». Se dice, en vez de dejar creer.
+            toast.value = { type: 'success', text: `${p.numero} en la fila de envío. Si sigue acá abajo sin intento, la cola no se está procesando.` };
             setTimeout(() => router.reload({ preserveScroll: true }), 2500);
         } else {
             const body = await resp.text().catch(() => '');
@@ -108,18 +111,41 @@ const enviarTodosVisibles = async () => {
         onConfirmar: async () => {
             modalConfirm.value = null;
             enviandoLote.value = true;
+            /*
+             * Se cuenta cómo le fue a cada uno y se dice.
+             *
+             * Antes el bucle disparaba los `fetch` y tiraba todas las
+             * respuestas a la basura: si los 28 documentos fallaban, la
+             * pantalla recargaba idéntica y no aparecía ni un mensaje. Es
+             * literalmente lo que reportó Yeniffer el 2026-11-05 — «mandé esto
+             * a SIIGO y no pasó nada».
+             */
+            let encolados = 0;
+            const fallas = [];
             try {
                 for (const p of filtrados.value) {
-                    await fetch(p.url_reenviar, {
-                        method: 'POST',
-                        headers: {
-                            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content ?? '',
-                            'X-Requested-With': 'XMLHttpRequest',
-                            'Accept': 'application/json',
-                        },
-                        credentials: 'same-origin',
-                    });
+                    try {
+                        const resp = await fetch(p.url_reenviar, {
+                            method: 'POST',
+                            headers: {
+                                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content ?? '',
+                                'X-Requested-With': 'XMLHttpRequest',
+                                'Accept': 'application/json',
+                            },
+                            credentials: 'same-origin',
+                        });
+                        if (resp.ok) encolados++;
+                        else fallas.push(`${p.numero} (HTTP ${resp.status})`);
+                    } catch (e) {
+                        fallas.push(`${p.numero} (${mensajeDeError(e, 'sin respuesta')})`);
+                    }
                 }
+
+                toast.value = fallas.length === 0
+                    ? { type: 'success', text: `${encolados} documento(s) en la fila de envío. Si quedan acá abajo sin intento, la cola no se está procesando.` }
+                    : { type: 'error', text: `${encolados} encolado(s), ${fallas.length} no: ${fallas.slice(0, 3).join(' · ')}${fallas.length > 3 ? '…' : ''}` };
+                setTimeout(() => { toast.value = null; }, 10000);
+
                 router.reload({ preserveScroll: true });
             } finally {
                 enviandoLote.value = false;
