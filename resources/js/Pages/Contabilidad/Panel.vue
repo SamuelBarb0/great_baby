@@ -134,7 +134,7 @@ const signoBalance = computed(() => {
                             <tr v-for="c in topCuentas" :key="c.cuenta">
                                 <td class="p-2">
                                     <div class="font-mono">{{ c.cuenta }}</div>
-                                    <div class="text-[10px] text-surface-500">{{ pucLabel(c.cuenta) }}</div>
+                                    <div class="text-[10px] text-surface-500">{{ c.cuenta_nombre || pucLabel(c.cuenta) }}</div>
                                 </td>
                                 <td class="p-2 text-right text-blue-600">{{ money(c.debe) }}</td>
                                 <td class="p-2 text-right text-purple-600">{{ money(c.haber) }}</td>

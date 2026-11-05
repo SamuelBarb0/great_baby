@@ -86,15 +86,23 @@ class ContabilidadController extends Controller implements HasMiddleware
 
     private function balanceComprobacion(string $desde, string $hasta, bool $incluirAnulados = false): array
     {
-        return MovimientoContable::query()
+        $filas = MovimientoContable::query()
             ->when($incluirAnulados, fn ($q) => $q->withTrashed())
             ->whereBetween('fecha', [$desde, $hasta])
             ->selectRaw('cuenta_puc, SUM(debe) as debe, SUM(haber) as haber, SUM(debe - haber) as saldo')
             ->groupBy('cuenta_puc')
             ->orderBy('cuenta_puc')
-            ->get()
+            ->get();
+
+        // El nombre real del plan de cuentas. El diccionario de apodos del
+        // front resuelve por prefijo, y desde que el ingreso se parte por
+        // categoria dos subcuentas distintas de 4135 salian con el mismo texto.
+        $nombres = \App\Modules\Contabilidad\Support\NombresDeCuenta::para($filas->pluck('cuenta_puc'));
+
+        return $filas
             ->map(fn ($r) => [
                 'cuenta_puc' => $r->cuenta_puc,
+                'cuenta_nombre' => $nombres[$r->cuenta_puc] ?? null,
                 'debe' => (float) $r->debe,
                 'haber' => (float) $r->haber,
                 'saldo' => (float) $r->saldo,
@@ -103,17 +111,22 @@ class ContabilidadController extends Controller implements HasMiddleware
 
     private function movimientosRecientes(string $desde, string $hasta, int $limit = 50, bool $incluirAnulados = false): array
     {
-        return MovimientoContable::query()
+        $filas = MovimientoContable::query()
             ->when($incluirAnulados, fn ($q) => $q->withTrashed())
             ->with(['user:id,name'])
             ->whereBetween('fecha', [$desde, $hasta])
             ->orderByDesc('fecha')->orderByDesc('id')
             ->limit($limit)
-            ->get()
+            ->get();
+
+        $nombres = \App\Modules\Contabilidad\Support\NombresDeCuenta::para($filas->pluck('cuenta_puc'));
+
+        return $filas
             ->map(fn ($m) => [
                 'id' => $m->id,
                 'fecha' => $m->fecha instanceof \Carbon\Carbon ? $m->fecha->toDateString() : (string) $m->fecha,
                 'cuenta_puc' => $m->cuenta_puc,
+                'cuenta_nombre' => $nombres[$m->cuenta_puc] ?? null,
                 'debe' => (float) $m->debe,
                 'haber' => (float) $m->haber,
                 'descripcion' => $m->descripcion,

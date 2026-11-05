@@ -89,6 +89,12 @@ const reintentar = (id) => {
                     <div>
                         <div class="text-xs uppercase font-semibold text-surface-500">Semáforo</div>
                         <div class="text-xl font-black uppercase">{{ kpis.semaforo }}</div>
+                        <!--
+                            El semáforo solo no dice sobre QUÉ está verde. Antes
+                            decía VERDE con cero de cero y nadie podía saberlo
+                            mirando la pantalla.
+                        -->
+                        <div class="text-[11px] text-surface-500">{{ kpis.etiqueta_cobertura }}</div>
                     </div>
                 </div>
                 <div class="h-10 border-l border-surface-200 dark:border-surface-800"></div>
@@ -98,7 +104,8 @@ const reintentar = (id) => {
                         <div class="font-black text-lg">{{ kpis.pct_sync }}%</div>
                     </div>
                     <div>
-                        <div class="text-[10px] uppercase text-surface-500">Aprobados</div>
+                        <!-- Decía «Aprobados» cuando sólo contaba asientos manuales. -->
+                        <div class="text-[10px] uppercase text-surface-500">Deben estar</div>
                         <div class="font-black text-lg">{{ kpis.total_aprobados }}</div>
                     </div>
                     <div>
