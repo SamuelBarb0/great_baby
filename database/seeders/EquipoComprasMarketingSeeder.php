@@ -6,7 +6,6 @@ use App\Auth\Permisos;
 use App\Models\User;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Str;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 use Spatie\Permission\PermissionRegistrar;
@@ -18,9 +17,9 @@ use Spatie\Permission\PermissionRegistrar;
  * Se puede correr las veces que haga falta, también en producción:
  * - El rol sólo recibe sus casillas la primera vez. Si ya tiene permisos es porque
  *   alguien lo configuró en /app/roles, y eso no se pisa.
- * - El usuario se busca por correo. Si no existe se crea con una contraseña al azar
- *   que se muestra una sola vez; si ya existe sólo se le asegura el rol y su
- *   contraseña no se toca.
+ * - El usuario se busca por correo. Si no existe se crea con la contraseña inicial
+ *   (la misma de las demás cuentas del ERP) y hay que pedirle que la cambie; si ya
+ *   existe sólo se le asegura el rol y su contraseña no se toca.
  *
  * Los correos son provisionales: cambiarlos en USUARIOS antes de correrlo en producción.
  *
@@ -29,6 +28,8 @@ use Spatie\Permission\PermissionRegistrar;
 class EquipoComprasMarketingSeeder extends Seeder
 {
     public const ROLES = ['Compras', 'Marketing'];
+
+    public const CLAVE_INICIAL = 'greatbaby2026';
 
     /** [correo, nombre, rol] */
     public const USUARIOS = [
@@ -54,21 +55,20 @@ class EquipoComprasMarketingSeeder extends Seeder
                 continue;
             }
 
-            $clave = Str::password(14, symbols: false);
             $usuario = User::create([
                 'name' => $nombre,
                 'email' => $correo,
-                'password' => Hash::make($clave),
+                'password' => Hash::make(self::CLAVE_INICIAL),
             ]);
             $usuario->forceFill(['email_verified_at' => now()])->save();
             $usuario->assignRole($rol);
             $nuevos++;
 
-            $this->command?->line("  {$correo}: creado con rol {$rol} · contraseña: {$clave}");
+            $this->command?->line("  {$correo}: creado con rol {$rol}");
         }
 
         if ($nuevos > 0) {
-            $this->command?->warn('  Las contraseñas nuevas se muestran sólo esta vez: entréguelas y pida cambiarlas.');
+            $this->command?->warn('  Cuentas nuevas con la contraseña inicial '.self::CLAVE_INICIAL.': pida cambiarla al entrar.');
         }
     }
 

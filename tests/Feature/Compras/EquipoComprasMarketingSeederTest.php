@@ -30,7 +30,8 @@ it('crea los roles con sus permisos y las tres cuentas', function () {
         $u = User::where('email', $correo)->firstOrFail();
         expect($u->name)->toBe($nombre)
             ->and($u->hasRole($rol))->toBeTrue()
-            ->and($u->email_verified_at)->not->toBeNull();
+            ->and($u->email_verified_at)->not->toBeNull()
+            ->and(Hash::check(EquipoComprasMarketingSeeder::CLAVE_INICIAL, $u->password))->toBeTrue();
     }
 });
 
