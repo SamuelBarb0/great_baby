@@ -446,7 +446,7 @@ class ContabilidadExtrasController extends Controller implements HasMiddleware
         $cob = fn (string $tabla, string $col, ?callable $filtro = null) => $this->cobertura($tabla, $col, $filtro);
 
         $deMovimientos = $cob('movimientos_contables', 'siigo_journal_id');
-        $deFacturas = $cob('facturas_venta', 'siigo_id', fn ($q) => $q->where('es_electronica', true));
+        $deFacturas = $cob('facturas_venta', 'siigo_id', fn ($q) => $q->whereIn('destino_fiscal', ['siigo', 'reparto']));
 
         return Inertia::render('Contabilidad/Reportes', [
             'reportes' => [

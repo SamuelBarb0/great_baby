@@ -191,8 +191,28 @@ it('el pedido elige la empresa y la factura la hereda', function () {
     expect($f)->not->toBeNull()
         ->and($f->empresa_id)->toBe($this->arsutex->id)
         ->and($f->numero)->toStartWith('ARS-')
-        // Cuenta de Arsutex apagada: nace interna, no electrónica por la de otra.
-        ->and((bool) $f->es_electronica)->toBeFalse();
+        /*
+         * Nace fiscal aunque la cuenta de Arsutex esté apagada.
+         *
+         * Antes esta prueba pedía lo contrario —`es_electronica` en false— y
+         * con eso protegía algo real: que la factura de Arsutex no saliera por
+         * la cuenta de Great Baby. Pero el precio era que la factura quedaba
+         * marcada «no viaja» PARA SIEMPRE, porque nadie vuelve a evaluar esa
+         * columna. El día que se configurara Arsutex, sus facturas viejas
+         * seguían sin salir y sin aparecer en ninguna bandeja.
+         *
+         * Lo que de verdad protege no es la marca sino `validarConfig()`, que
+         * resuelve la cuenta por `empresa_id` y se niega nombrando la empresa.
+         * Eso es lo que se verifica abajo: la factura queda pendiente y
+         * visible, y al intentar emitirla el servicio la frena.
+         */
+        ->and((bool) $f->es_electronica)->toBeTrue()
+        ->and($f->destino_fiscal)->toBe(\App\Modules\Contabilidad\Enums\DestinoFiscal::Siigo);
+
+    // La protección real: no sale por la cuenta de otra empresa.
+    expect(fn () => app(SiigoEmisionService::class)->emitir($f))
+        ->toThrow(RuntimeException::class);
+    Http::assertNothingSent();
 });
 
 it('la empresa se cambia antes de facturar, no después', function () {

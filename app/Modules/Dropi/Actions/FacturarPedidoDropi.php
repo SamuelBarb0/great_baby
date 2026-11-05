@@ -114,11 +114,30 @@ class FacturarPedidoDropi
                 return null;
             }
             $siigo = \App\Modules\Siigo\Models\SiigoConfig::deEmpresa($empresa->id);
-            // En Great Baby lo de Dropi va con su propia resolución (7-nov). Sin
-            // ella la factura queda sólo en el ERP en vez de salir a SIIGO con
-            // la resolución de Great Baby; la emisión tampoco lo dejaría.
-            $siigoActivo = (bool) ($siigo->activo ?? false)
-                && (! $siigo->esPrincipal() || (int) $siigo->tipo_documento_dropi_id > 0);
+
+            /*
+             * Dos cosas distintas que estaban mezcladas en una sola bandera.
+             *
+             * 1 · ¿Esta factura PUEDE salir con resolución propia? En Great
+             *     Baby lo de Dropi va con la suya (7-nov): sin ella saldría con
+             *     la resolución de Great Baby, y la emisión tampoco la dejaría
+             *     pasar. Eso es configuración y no cambia de un minuto a otro:
+             *     desde el 2026-11-10 hay resolución propia, prefijo ECOM.
+             *
+             * 2 · ¿SIIGO está vivo AHORA? Eso sí cambia, y no puede decidir el
+             *     destino de la factura: con la integración caída nacía marcada
+             *     «no viaja» y quedaba así PARA SIEMPRE, porque nadie la vuelve
+             *     a evaluar. Es el mismo defecto que tenían la factura B2B y la
+             *     manual, corregido el 2026-11-05.
+             *
+             * Así que el destino se declara —lo de Dropi va al fiscal— y lo
+             * único que lo puede frenar es no tener con qué numerarla.
+             */
+            $tieneResolucionPropia = ! ($siigo?->esPrincipal() ?? true)
+                || (int) ($siigo?->tipo_documento_dropi_id ?? 0) > 0;
+
+            $destinoFactura = \App\Modules\Contabilidad\Enums\DestinoFiscal::Siigo;
+            $viajaASiigo = $destinoFactura->tieneParteFiscal() && $tieneResolucionPropia;
 
             $factura = FacturaVenta::create([
                 'empresa_id' => $empresa->id,
@@ -138,7 +157,8 @@ class FacturarPedidoDropi
                 'impuestos' => round($total - $subtotal, 2),
                 'total' => $total,
                 'saldo' => $total,
-                'es_electronica' => $siigoActivo,
+                'destino_fiscal' => $destinoFactura,
+                'es_electronica' => $viajaASiigo,
                 'origen_type' => DropiPedido::class,
                 'origen_id' => $p->id,
                 'observaciones' => "Dropi guía {$p->guia} · orden {$p->dropi_orden_id} · remisión "

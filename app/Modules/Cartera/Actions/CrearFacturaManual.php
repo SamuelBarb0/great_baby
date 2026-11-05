@@ -134,8 +134,16 @@ class CrearFacturaManual
             throw new InvalidArgumentException('Para que la factura no vaya a lo fiscal hay que escribir por qué.');
         }
 
-        $siigoActivo = (bool) (SiigoConfig::current()->activo ?? false);
-        $viajaASiigo = $siigoActivo && $destino->tieneParteFiscal();
+        /*
+         * El destino manda, no el estado de SIIGO en este segundo.
+         *
+         * Antes era `$siigoActivo && $destino->tieneParteFiscal()`. Con SIIGO
+         * caído la factura nacía marcada «no viaja» y quedaba así para
+         * siempre, porque nadie la vuelve a evaluar. Que la integración esté
+         * arriba o abajo no cambia si la factura se declara: cambia cuándo
+         * sale. De eso se ocupan la cola y el interruptor `push_auto`.
+         */
+        $viajaASiigo = $destino->tieneParteFiscal();
 
         return DB::transaction(function () use (
             $contacto, $emision, $vencimiento, $destino, $linea,

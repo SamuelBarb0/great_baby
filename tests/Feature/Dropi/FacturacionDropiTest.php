@@ -248,8 +248,11 @@ it('4.6 · despachar escaneando la guía devuelve la factura que salió', functi
     $r = $this->actingAs(facAracely())->postJson('/dropi/escaner/despachar', ['pedido_id' => $p->id, 'guia' => 'E-1'])
         ->assertOk()->json();
 
+    // Decía 'interna' porque la factura nacía no electrónica cuando SIIGO
+    // estaba apagado. Desde el 2026-11-05 el destino manda sobre el estado de
+    // la integración: lo de Dropi se declara, así que queda encolada.
     expect($r['factura']['numero'])->toBe(FacturaVenta::find($p->fresh()->factura_venta_id)->numero)
-        ->and($r['factura']['estado'])->toBe('interna');
+        ->and($r['factura']['estado'])->toBe('enviando_siigo');
 });
 
 it('4.6 · con la facturación apagada el escáner dice por qué y Aracely factura a mano', function () {

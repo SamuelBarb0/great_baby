@@ -633,14 +633,38 @@ class PedidosB2BController extends Controller implements HasMiddleware
                 ->latest('vigente_desde')
                 ->value('plazo_dias') ?? 30;
 
-            // LOG-J7+SIIGO · Si la integración Siigo está activa, la factura nace
-            //   electrónica (es_electronica=true) para que `ReintentarEmisionDian`
-            //   la mande a /v1/invoices SIEMPRE después de commit. Si Siigo está
-            //   apagado, cae a factura interna (DIAN manual) sin perder el flujo.
-            //   Multiempresa · factura la razón social que eligió el pedido, con
-            //   su prefijo y su cuenta de SIIGO (NULL = Great Baby).
+            /*
+             * Quién decide si la factura viaja a SIIGO: el DESTINO FISCAL.
+             *
+             * Decía `es_electronica => (bool) $siigoActivo`, o sea que miraba
+             * si la integración estaba viva en ese segundo e ignoraba por
+             * completo lo que había elegido el usuario. Dos consecuencias, las
+             * dos malas:
+             *
+             *   · Con SIIGO caído, una factura FISCAL nacía marcada «no va» y
+             *     quedaba así para siempre: nada la vuelve a evaluar. Fue lo
+             *     que pasó en producción — 20 facturas fiscales, cero en SIIGO,
+             *     y la bandeja de pendientes mostrando 0 porque filtra por la
+             *     misma columna.
+             *   · Con SIIGO vivo, una factura marcada INTERNA nacía electrónica
+             *     igual y se iba para allá. Declarar algo que alguien decidió
+             *     expresamente no declarar es el peor de los dos.
+             *
+             * Que SIIGO esté arriba o abajo no cambia el destino de la
+             * factura: cambia cuándo sale. Para eso está la cola y el
+             * interruptor `push_auto`.
+             *
+             * Multiempresa · factura la razón social que eligió el pedido, con
+             * su prefijo y su cuenta de SIIGO (NULL = Great Baby).
+             */
             $empresa = \App\Models\EmpresaConfig::porId($p->empresa_id);
-            $siigoActivo = \App\Modules\Siigo\Models\SiigoConfig::deEmpresa($empresa->id)->activo ?? false;
+
+            // El pedido B2B no lleva destino propio —la columna sólo existe en
+            // los documentos donde alguien lo decide— así que su factura nace
+            // fiscal, igual que el default de la tabla. Se escribe explícito
+            // para que de acá salga la marca y no de un default silencioso.
+            $destinoFactura = \App\Modules\Contabilidad\Enums\DestinoFiscal::Siigo;
+            $viajaASiigo = $destinoFactura->tieneParteFiscal();
 
             $f = FacturaVenta::create([
                 'empresa_id' => $empresa->id,
@@ -655,7 +679,8 @@ class PedidosB2BController extends Controller implements HasMiddleware
                 'impuestos' => $p->iva,
                 'total' => $p->total,
                 'saldo' => $p->total,
-                'es_electronica' => (bool) $siigoActivo,
+                'destino_fiscal' => $destinoFactura,
+                'es_electronica' => $viajaASiigo,
                 /*
                  * El vendedor y la bodega VIAJAN del pedido a la factura.
                  *

@@ -59,7 +59,10 @@ class ContabilidadPendientesSiigoController extends Controller implements HasMid
          */
         $facturas = FacturaVenta::query()
             ->whereNull('siigo_id')
-            ->where('es_electronica', true)
+            // Por destino fiscal y no por `es_electronica`: esa marca se
+            // escribe al crear la factura y en produccion quedo en 0 para
+            // las 20 fiscales, que asi desaparecian de esta bandeja.
+            ->whereIn('destino_fiscal', ['siigo', 'reparto'])
             ->where('estado', '<>', 'anulada')
             ->orderByDesc('fecha_emision')
             ->limit(200)

@@ -38,9 +38,24 @@ class SiigoEmpujarPendientesCommand extends Command
      * agrega un tipo, el panel lo cuenta sin que haya que acordarse.
      */
     public const FUENTES = [
+        /*
+         * Por DESTINO FISCAL, no por `es_electronica`.
+         *
+         * `es_electronica` se escribe una vez, al crear la factura, y hasta
+         * el 2026-11-05 se escribía mirando si SIIGO estaba vivo en ese
+         * segundo. En producción SIIGO estaba en 401, así que las 20 facturas
+         * fiscales nacieron con la marca en 0 y este barrido las saltaba —
+         * para siempre, porque nadie la vuelve a evaluar. Resultado: 20
+         * facturas marcadas «Fiscal», ninguna en SIIGO, y la bandeja de
+         * pendientes diciendo 0.
+         *
+         * `destino_fiscal` es lo que eligió una persona y no se mueve solo.
+         * Filtrar por él hace que una factura fiscal sin enviar aparezca,
+         * aunque haya nacido mal marcada: el barrido se cura solo.
+         */
         'facturas' => [
             'facturas_venta', 'siigo_id', \App\Jobs\ReintentarEmisionDian::class,
-            "es_electronica = 1 AND estado <> 'anulada'",
+            "destino_fiscal IN ('siigo','reparto') AND estado <> 'anulada'",
         ],
         'notas-credito' => [
             'notas_credito', 'siigo_id', \App\Modules\Siigo\Jobs\PushNotaCreditoASiigo::class,
