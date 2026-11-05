@@ -202,11 +202,10 @@ final class Permisos
         'portal_colaborador' => ['Colaborador'],
         'mapa_colombia'    => ['AdminBodega', 'Gerente'],
         // La parrilla de contenido la gateaba `esAracely()`, así que el rol
-        //   Marketing la veía en el menú y recibía 403. Se deja como permiso
-        //   propio con la lista vacía (hoy sólo gerencia, igual que antes),
-        //   para que dárselo a Marketing sea marcar una casilla y no un cambio
-        //   de código.
-        'marketing_parrilla' => [],
+        //   Marketing la veía en el menú y recibía 403. Es permiso propio, y de
+        //   Marketing por defecto: la parrilla es su trabajo diario, y dependía
+        //   de que alguien marcara la casilla en cada instalación.
+        'marketing_parrilla' => ['Marketing'],
         // Ver y bajar los creativos que Marketing comparte: los vendedores
         //   (mayorista) los usan con sus clientes. Dropship es Aracely, root.
         'marketing_material' => ['Vendedor', 'Marketing'],

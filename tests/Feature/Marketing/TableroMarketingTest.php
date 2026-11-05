@@ -317,3 +317,10 @@ it('sigue al producto de la compra al contenedor, a bodega, al contenido y a pub
         ->assertInertia(fn (Assert $page) => $page->has('productos', 0));
     expect($otro->id)->not->toBe($this->producto->id);
 });
+
+it('el rol Marketing trabaja la parrilla sin que nadie marque una casilla', function () {
+    $laura = User::factory()->create();
+    $laura->assignRole(Spatie\Permission\Models\Role::firstOrCreate(['name' => 'Marketing', 'guard_name' => 'web']));
+
+    $this->actingAs($laura)->get('/app/marketing/parrilla')->assertOk();
+});

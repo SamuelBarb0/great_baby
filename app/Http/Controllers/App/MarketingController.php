@@ -31,9 +31,8 @@ class MarketingController extends Controller implements HasMiddleware
         return [
             new Middleware(function (Request $r, \Closure $next) {
                 // Era `esAracely()` fijo: el rol Marketing veía la parrilla en el
-                // menú y recibía 403. Ahora es un permiso propio —hoy sólo de
-                // gerencia, igual que antes— que se le puede dar a Marketing desde
-                // /app/roles sin tocar código.
+                // menú y recibía 403. Ahora es un permiso propio, de Marketing por
+                // defecto, que se puede ajustar desde /app/roles sin tocar código.
                 abort_unless(\App\Auth\Permisos::puede($r->user(), 'marketing_parrilla'), 403);
                 return $next($r);
             }, only: ['parrilla', 'postCrear', 'postActualizar', 'postEtapa', 'postEliminar']),
