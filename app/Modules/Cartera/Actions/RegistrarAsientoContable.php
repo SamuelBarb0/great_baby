@@ -78,16 +78,18 @@ class RegistrarAsientoContable
                 }
             }
 
-            // Ingreso por venta
+            // Ingreso por venta · una línea por cuenta, no una sola por factura.
             $ingreso = (float) $factura->subtotal - (float) $factura->descuento;
-            $lineas[] = [
-                'fecha' => $factura->fecha_emision,
-                'cuenta_puc' => setting('contable.cta_ingreso_default'), 'tercero_type' => $terceroTipo, 'tercero_id' => $factura->contacto_id,
-                'debe' => 0, 'haber' => $ingreso,
-                'origen_type' => FacturaVenta::class, 'origen_id' => $factura->id,
-                'descripcion' => "Venta {$factura->numero}",
-                'user_id' => $userId,
-            ];
+            foreach ($this->ingresoPorCuenta($factura, $ingreso) as $cuenta => $monto) {
+                $lineas[] = [
+                    'fecha' => $factura->fecha_emision,
+                    'cuenta_puc' => $cuenta, 'tercero_type' => $terceroTipo, 'tercero_id' => $factura->contacto_id,
+                    'debe' => 0, 'haber' => $monto,
+                    'origen_type' => FacturaVenta::class, 'origen_id' => $factura->id,
+                    'descripcion' => "Venta {$factura->numero}",
+                    'user_id' => $userId,
+                ];
+            }
 
             // IVA por pagar (si aplica)
             if ((float) $factura->impuestos > 0) {
@@ -111,6 +113,94 @@ class RegistrarAsientoContable
                 $this->repartirPorDestino($factura, $lineas)
             );
         });
+    }
+
+    /**
+     * Parte el ingreso de la factura por cuenta contable.
+     *
+     * Great Baby no lleva una sola cuenta de ingresos: el PUC las separa por
+     * categoría de producto —41350101 alimentación, 41350104 juguetería,
+     * 41350110 vestuario, y así diez— y el estado de resultados de Silvia se
+     * lee por esa división. Mandar todo a una sola cuenta la deja ciega.
+     *
+     * De dónde sale la cuenta de cada ítem, en este orden:
+     *   1. la de la ficha del producto (`productos.cta_ingreso`)
+     *   2. la de su categoría, subiendo por el árbol hasta encontrar una
+     *   3. la regla `contable.cta_ingreso_default`, que es el cajón de sastre
+     *
+     * El descuento de cabecera se prorratea entre las cuentas en proporción a
+     * lo que aporta cada una, porque es un descuento sobre la venta entera y no
+     * sobre una línea. El sobrante del redondeo se le carga a la cuenta más
+     * grande: la suma tiene que dar EXACTA o `registrarAsientoAtomico` rechaza
+     * el asiento entero, que es justo lo que queremos que pase.
+     *
+     * @return array<string,float> cuenta_puc => monto
+     */
+    private function ingresoPorCuenta(FacturaVenta $factura, float $ingresoTotal): array
+    {
+        $porDefecto = (string) setting('contable.cta_ingreso_default');
+
+        // Una factura sin ítems —o en cero— se comporta como antes: una línea.
+        if ($ingresoTotal <= 0) {
+            return [$porDefecto => round($ingresoTotal, 2)];
+        }
+
+        $base = [];
+        foreach ($factura->items()->with('producto.categoriaMaestra.padre')->get() as $item) {
+            $cuenta = $this->cuentaDeIngresoDe($item) ?: $porDefecto;
+            $base[$cuenta] = ($base[$cuenta] ?? 0) + (float) $item->subtotal;
+        }
+
+        $suma = array_sum($base);
+        if ($suma <= 0) {
+            return [$porDefecto => round($ingresoTotal, 2)];
+        }
+
+        $repartido = [];
+        $acumulado = 0.0;
+        foreach ($base as $cuenta => $monto) {
+            $valor = round($ingresoTotal * ($monto / $suma), 2);
+            $repartido[$cuenta] = $valor;
+            $acumulado += $valor;
+        }
+
+        $resto = round($ingresoTotal - $acumulado, 2);
+        if (abs($resto) >= 0.01) {
+            $mayor = (string) array_search(max($repartido), $repartido, true);
+            $repartido[$mayor] = round($repartido[$mayor] + $resto, 2);
+        }
+
+        return $repartido;
+    }
+
+    /**
+     * La cuenta de ingreso que le toca a un ítem, o null si nadie la definió.
+     *
+     * Sube por el árbol de categorías porque el catálogo las tiene anidadas
+     * —Ropa › Bodys, Ropa › Sets— y la cuenta se configura en la madre: pedirle
+     * a alguien que la repita en cada hija es pedir que se desalineen.
+     */
+    private function cuentaDeIngresoDe(\App\Modules\Cartera\Models\FacturaVentaItem $item): ?string
+    {
+        $producto = $item->producto;
+        if (! $producto) {
+            return null;
+        }
+
+        if (filled($producto->cta_ingreso)) {
+            return (string) $producto->cta_ingreso;
+        }
+
+        $categoria = $producto->categoriaMaestra;
+        $saltos = 0;
+        while ($categoria && $saltos++ < 10) {
+            if (filled($categoria->cuenta_puc_ingreso)) {
+                return (string) $categoria->cuenta_puc_ingreso;
+            }
+            $categoria = $categoria->padre;
+        }
+
+        return null;
     }
 
     /**

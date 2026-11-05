@@ -104,9 +104,11 @@ it('al despachar: remisión 1:1 y factura a consumidor final por el valor de pro
         ->and((float) $f->items[0]->impuesto_pct)->toBe(19.0)
         ->and($f->items[0]->variante_id)->toBe($this->variante->id)
         ->and($f->origen_type)->toBe(DropiPedido::class)
-        // El asiento de la venta: 1305 por el total.
+        // El asiento de la venta: la CxC por el total. La cuenta se lee de la
+        // regla y no se escribe acá: cuando pasó de 1305 a 13050501 esta
+        // prueba se cayó aunque el comportamiento era correcto.
         ->and((float) MovimientoContable::where('origen_type', FacturaVenta::class)->where('origen_id', $f->id)
-            ->where('cuenta_puc', '1305')->sum('debe'))->toBe(119000.0);
+            ->where('cuenta_puc', (string) setting('contable.cta_cxc_default'))->sum('debe'))->toBe(119000.0);
 });
 
 it('con SIIGO activo la factura nace electrónica y se encola', function () {
@@ -175,9 +177,9 @@ it('el pago de Dropi cierra la factura con un solo crédito al 1305, y el revers
         ->and($f->saldo)->toEqual(0)
         ->and($f->estado->value)->toBe('pagada');
 
-    // El 1305 se acredita una sola vez (el recibo), no también desde la wallet.
-    $credito1305 = (float) MovimientoContable::where('cuenta_puc', '1305')->sum('haber');
-    expect($credito1305)->toBe(119000.0)
+    // La CxC se acredita una sola vez (el recibo), no también desde la wallet.
+    $creditoCxC = (float) MovimientoContable::where('cuenta_puc', (string) setting('contable.cta_cxc_default'))->sum('haber');
+    expect($creditoCxC)->toBe(119000.0)
         ->and((float) MovimientoContable::where('cuenta_puc', '111015')->sum('debe'))->toBe(119000.0);
 
     // Dropi corrige el estado de la guía y reversa el pago.
