@@ -2,9 +2,10 @@
 import { reactive, ref, computed, watch } from 'vue';
 import { Head, Link, router } from '@inertiajs/vue3';
 import axios from 'axios';
-import { ShoppingCart, Plus, Trash2, Save, FileSpreadsheet, Calculator } from 'lucide-vue-next';
+import { ShoppingCart, Plus, Trash2, Save, FileSpreadsheet, Calculator, UserPlus } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import { useMoney } from '@/composables/useMoney';
+import { useEscClose } from '@/composables/useEscClose';
 
 const props = defineProps({
     proveedores: { type: Array, required: true },
@@ -143,12 +144,14 @@ const cargarExcel = async (e) => {
 };
 
 // COMP-B10 · autocomplete proveedor
+// Copia local: el proveedor creado desde aquí entra a la lista sin recargar la página.
+const proveedoresLista = ref([...props.proveedores]);
 const busquedaProveedor = ref('');
 const proveedorAbierto = ref(false);
 const proveedoresFiltrados = computed(() => {
     const q = busquedaProveedor.value.trim().toLowerCase();
     if (q.length < 2) return [];
-    return props.proveedores
+    return proveedoresLista.value
         .filter(p => (p.nombre || '').toLowerCase().includes(q)
                    || (p.numero_documento || '').toLowerCase().includes(q))
         .slice(0, 15);
@@ -164,6 +167,42 @@ if (typeof window !== 'undefined') {
         if (!e.target.closest('.md\\:col-span-2.relative')) proveedorAbierto.value = false;
     });
 }
+
+// Proveedor nuevo sin salir de la orden: Compras cambia mucho de proveedor, y
+// Contactos (donde se creaban) es de contabilidad porque también muestra clientes.
+const modalProveedor = ref(false);
+useEscClose(modalProveedor);
+const proveedorNuevo = reactive({ nombre: '', tipo_documento: 'NIT', numero_documento: '', email: '', telefono: '' });
+const erroresProveedor = ref({});
+const creandoProveedor = ref(false);
+const abrirProveedorNuevo = () => {
+    Object.assign(proveedorNuevo, { nombre: busquedaProveedor.value.trim(), tipo_documento: 'NIT', numero_documento: '', email: '', telefono: '' });
+    erroresProveedor.value = {};
+    proveedorAbierto.value = false;
+    modalProveedor.value = true;
+};
+const crearProveedor = async () => {
+    if (creandoProveedor.value) return;
+    creandoProveedor.value = true;
+    erroresProveedor.value = {};
+    try {
+        const { data } = await axios.post('/app/compras/proveedor', { ...proveedorNuevo });
+        const p = data.proveedor;
+        if (!proveedoresLista.value.some(x => x.id === p.id)) proveedoresLista.value.push(p);
+        elegirProveedor(p);
+        avisoProveedor.value = data.ya_existia
+            ? `«${p.nombre}» ya estaba registrado con ese documento: quedó elegido como proveedor.`
+            : `Proveedor «${p.nombre}» creado y elegido.`;
+        modalProveedor.value = false;
+    } catch (err) {
+        erroresProveedor.value = err.response?.status === 422
+            ? Object.fromEntries(Object.entries(err.response.data.errors ?? {}).map(([k, v]) => [k, v[0]]))
+            : { general: err.response?.data?.message || 'No se pudo crear el proveedor. Intente de nuevo.' };
+    } finally {
+        creandoProveedor.value = false;
+    }
+};
+const avisoProveedor = ref('');
 
 const addItem = () => form.items.push(lineaNueva());
 const fmt = (n, d = 2) => Number(n || 0).toLocaleString('es-CO', { minimumFractionDigits: d, maximumFractionDigits: d });
@@ -271,7 +310,12 @@ const guardar = () => {
                         Ahora: input de búsqueda incremental (nombre o NIT) + lista desplegable con hits.
                     -->
                     <div class="md:col-span-2 relative">
-                        <label class="text-xs font-semibold">Proveedor</label>
+                        <div class="flex items-center justify-between h-6">
+                            <label class="text-xs font-semibold">Proveedor</label>
+                            <button type="button" @click="abrirProveedorNuevo" class="text-xs font-semibold text-brand-600 hover:underline flex items-center gap-1">
+                                <UserPlus class="h-3.5 w-3.5"/> Nuevo proveedor
+                            </button>
+                        </div>
                         <input
                             type="text" class="input w-full"
                             :placeholder="form.proveedor_id ? '' : 'Busca por nombre o NIT…'"
@@ -297,6 +341,7 @@ const guardar = () => {
                         <p v-if="proveedorAbierto && busquedaProveedor.length >= 2 && proveedoresFiltrados.length === 0"
                            class="absolute z-10 mt-1 w-full rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/40 px-3 py-2 text-[11px] text-amber-700">
                             Sin coincidencias con «{{ busquedaProveedor }}».
+                            <button type="button" @click="abrirProveedorNuevo" class="font-semibold text-brand-600 hover:underline ml-1">Crearlo</button>
                         </p>
                     </div>
                     <!-- Re-audit M2 UX-A4 · selector de bodega destino. -->
@@ -486,6 +531,56 @@ const guardar = () => {
                     <div class="text-sm text-surface-500">IVA: <b>{{ money(iva) }}</b></div>
                     <div class="text-xl font-bold text-brand-600">Total: {{ money(total) }}</div>
                 </div>
+            </div>
+
+            <p v-if="avisoProveedor" class="text-sm text-emerald-700 dark:text-emerald-400">{{ avisoProveedor }}</p>
+
+            <div v-if="modalProveedor" @click.self="modalProveedor = false" class="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+                <form @submit.prevent="crearProveedor" class="card p-6 max-w-md w-full space-y-3" aria-labelledby="titulo-proveedor">
+                    <h3 id="titulo-proveedor" class="text-lg font-bold flex items-center gap-2">
+                        <UserPlus class="h-5 w-5 text-brand-600"/> Nuevo proveedor
+                    </h3>
+                    <div>
+                        <label class="text-xs font-semibold" for="prov-nombre">Nombre o razón social <span class="text-red-500">*</span></label>
+                        <input id="prov-nombre" v-model="proveedorNuevo.nombre" class="input w-full" maxlength="180" autofocus/>
+                        <p v-if="erroresProveedor.nombre" class="text-xs text-red-600 mt-1">{{ erroresProveedor.nombre }}</p>
+                    </div>
+                    <div class="grid grid-cols-3 gap-2">
+                        <div>
+                            <label class="text-xs font-semibold" for="prov-tipo">Documento</label>
+                            <select id="prov-tipo" v-model="proveedorNuevo.tipo_documento" class="input w-full">
+                                <option value="NIT">NIT</option>
+                                <option value="CC">CC</option>
+                                <option value="CE">CE</option>
+                                <option value="PP">Pasaporte</option>
+                            </select>
+                        </div>
+                        <div class="col-span-2">
+                            <label class="text-xs font-semibold" for="prov-numero">Número <span class="text-red-500">*</span></label>
+                            <input id="prov-numero" v-model="proveedorNuevo.numero_documento" class="input w-full" maxlength="30"/>
+                        </div>
+                    </div>
+                    <p v-if="erroresProveedor.numero_documento" class="text-xs text-red-600 -mt-2">{{ erroresProveedor.numero_documento }}</p>
+                    <p v-else class="text-[11px] text-surface-500 -mt-2">Si es del exterior y no tiene NIT, use el número de su registro o el de su factura.</p>
+                    <div class="grid grid-cols-2 gap-2">
+                        <div>
+                            <label class="text-xs font-semibold" for="prov-email">Correo</label>
+                            <input id="prov-email" v-model="proveedorNuevo.email" type="email" class="input w-full" maxlength="120"/>
+                            <p v-if="erroresProveedor.email" class="text-xs text-red-600 mt-1">{{ erroresProveedor.email }}</p>
+                        </div>
+                        <div>
+                            <label class="text-xs font-semibold" for="prov-telefono">Teléfono / WeChat</label>
+                            <input id="prov-telefono" v-model="proveedorNuevo.telefono" class="input w-full" maxlength="30"/>
+                        </div>
+                    </div>
+                    <p v-if="erroresProveedor.general" class="text-sm text-red-600">{{ erroresProveedor.general }}</p>
+                    <div class="flex justify-end gap-2 pt-1">
+                        <button type="button" @click="modalProveedor = false" class="btn-ghost">Cancelar</button>
+                        <button type="submit" :disabled="creandoProveedor" class="btn-primary disabled:opacity-50">
+                            {{ creandoProveedor ? 'Creando…' : 'Crear y elegir' }}
+                        </button>
+                    </div>
+                </form>
             </div>
 
             <div class="h-16" aria-hidden="true"></div>

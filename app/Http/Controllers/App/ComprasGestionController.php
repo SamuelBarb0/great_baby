@@ -250,6 +250,61 @@ class ComprasGestionController extends Controller implements HasMiddleware
      * Lee el Excel de pedido del proveedor y devuelve las líneas para que el
      * formulario las muestre. No crea nada: la OC se guarda con «Crear OC».
      */
+    public function proveedorCrear(Request $r): JsonResponse
+    {
+        abort_unless($r->user()?->puedeArmarOrdenes(), 403,
+            'Los proveedores de una orden los crea Compras, bodega o contabilidad.');
+
+        $datos = $r->validate([
+            'nombre' => ['required', 'string', 'max:180'],
+            'tipo_documento' => ['required', 'in:NIT,CC,CE,PP'],
+            'numero_documento' => ['required', 'string', 'max:30'],
+            'email' => ['nullable', 'email', 'max:120'],
+            'telefono' => ['nullable', 'string', 'max:30'],
+        ], [
+            'nombre.required' => 'Escriba el nombre del proveedor.',
+            'numero_documento.required' => 'Escriba el número de documento. Si es del exterior, el de su registro o su factura.',
+            'email.email' => 'Ese correo no parece válido.',
+        ]);
+        $numero = trim($datos['numero_documento']);
+
+        // Un documento repetido es el mismo contacto: puede ser ya cliente, y se marca
+        // también proveedor. Sólo se devuelve su nombre y documento: quien compra no
+        // tiene por qué ver los datos de un cliente.
+        $existente = \App\Models\Contacto::withTrashed()->where('numero_documento', $numero)->first();
+        if ($existente) {
+            if ($existente->trashed() || ! $existente->activo) {
+                throw \Illuminate\Validation\ValidationException::withMessages([
+                    'numero_documento' => 'Ese documento es de un contacto '.($existente->trashed() ? 'eliminado' : 'inactivo')
+                        .'. Pídale a contabilidad que lo recupere.',
+                ]);
+            }
+            if (! $existente->es_proveedor) {
+                $existente->update(['es_proveedor' => true]);
+            }
+
+            return response()->json(['proveedor' => $this->proveedorParaLaOrden($existente), 'ya_existia' => true]);
+        }
+
+        $nuevo = \App\Models\Contacto::create([
+            'tipo_documento' => $datos['tipo_documento'],
+            'numero_documento' => $numero,
+            'nombre_completo' => trim($datos['nombre']),
+            'email' => $datos['email'] ?? null,
+            'telefono' => $datos['telefono'] ?? null,
+            'es_proveedor' => true,
+            'activo' => true,
+        ]);
+
+        return response()->json(['proveedor' => $this->proveedorParaLaOrden($nuevo), 'ya_existia' => false], 201);
+    }
+
+    /** La misma forma que la lista de proveedores de la orden nueva. */
+    private function proveedorParaLaOrden(\App\Models\Contacto $c): array
+    {
+        return ['id' => $c->id, 'nombre' => $c->razon_social ?: $c->nombre_completo, 'numero_documento' => $c->numero_documento];
+    }
+
     public function ocLeerExcel(Request $r, LectorOrdenProveedor $lector): JsonResponse
     {
         $r->validate([

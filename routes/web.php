@@ -150,6 +150,8 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     Route::get('/compras/oc/nueva', [\App\Http\Controllers\App\ComprasGestionController::class, 'ocForm'])->name('app.compras.oc.nueva');
     Route::post('/compras/oc', [\App\Http\Controllers\App\ComprasGestionController::class, 'ocCrear'])->middleware('throttle:60,1')->name('app.compras.oc.crear');
     // Compras slice 1 · orden de importación desde el Excel de Alejandro + pre-liquidación.
+    // Crear el proveedor desde la orden nueva, sin abrir Contactos (que también muestra clientes).
+    Route::post('/compras/proveedor', [\App\Http\Controllers\App\ComprasGestionController::class, 'proveedorCrear'])->middleware('throttle:20,1')->name('app.compras.proveedor.crear');
     Route::post('/compras/oc/leer-excel', [\App\Http\Controllers\App\ComprasGestionController::class, 'ocLeerExcel'])->middleware('throttle:20,1')->name('app.compras.oc.leer-excel');
     Route::post('/compras/oc/{orden}/parametros', [\App\Http\Controllers\App\ComprasGestionController::class, 'ocParametros'])->middleware('throttle:60,1')->name('app.compras.oc.parametros');
     Route::get('/compras/calculadora', [\App\Http\Controllers\App\ComprasGestionController::class, 'calculadora'])->name('app.compras.calculadora');
