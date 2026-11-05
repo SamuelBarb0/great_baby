@@ -100,16 +100,18 @@ final class Permisos
         'reglas_contables' => ['Contador'],
 
         // COMPRAS
-        'compras_oc'       => ['Gerente'],
+        // `Compras` es el rol de Alejandro y Liz. No recibe `compras_recepcion`: contar
+        //   y subir el stock es el aval de Jorge, y eso abriría la pantalla de contar.
+        'compras_oc'       => ['Gerente', 'Compras'],
         // Recibir mercancia lo hace bodega, y el Contador la consulta. Los dos
         //   entraban por `esEquipoBodega() || esContable()`; si no quedan acá,
         //   el dia que la casilla mande pierden la pantalla.
         'compras_recepcion' => ['Gerente', 'Alistador', 'AdminBodega', 'Contador'],
-        'compras_importacion' => ['Gerente', 'AdminBodega', 'Contador'],
-        'compras_reportes' => ['Gerente', 'Contador', 'AdminBodega'],
+        'compras_importacion' => ['Gerente', 'AdminBodega', 'Contador', 'Compras'],
+        'compras_reportes' => ['Gerente', 'Contador', 'AdminBodega', 'Compras'],
         // No va con importaciones: esa casilla la tiene bodega, y a Jorge no se le
         //   puede frenar la pantalla con el aviso de un pago vencido a China.
-        'compras_pagos_exterior' => ['Gerente', 'Contador'],
+        'compras_pagos_exterior' => ['Gerente', 'Contador', 'Compras'],
 
         // INVENTARIO
         'traslados'        => ['Gerente', 'Alistador'],
@@ -122,7 +124,7 @@ final class Permisos
         //   Las acciones destructivas (eliminar, forzar push, duplicar) ya
         //   piden esRoot aparte en ProductosController, así que el Contador
         //   solo puede leer/editar · lo mínimo para su rol fiscal.
-        'productos'        => ['Gerente', 'Contador'],
+        'productos'        => ['Gerente', 'Contador', 'Compras'],
         // Jorge administra sus bodegas: la pantalla ya se le abria.
         'ubicaciones'      => ['Gerente', 'AdminBodega'],
         // Entraba por `puede('productos')`, que incluye al Contador.

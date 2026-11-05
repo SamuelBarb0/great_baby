@@ -61,6 +61,16 @@ class User extends Authenticatable implements FilamentUser
     }
 
     /**
+     * Quien arma órdenes de compra: la casilla «Órdenes de compra», además de bodega
+     * y contabilidad, que entraban desde antes. Sin ella, marcar la casilla en la
+     * pantalla de Roles no abría ni la lista ni la orden nueva.
+     */
+    public function puedeArmarOrdenes(): bool
+    {
+        return $this->esEquipoBodega() || $this->esContable() || $this->tieneAcceso('compras_oc');
+    }
+
+    /**
      * Puente entre los helpers de perfil y la pantalla de Roles.
      *
      * Estos helpers preguntaban `hasAnyRole([...])` con la lista escrita en
@@ -170,6 +180,9 @@ class User extends Authenticatable implements FilamentUser
                 => '/app/mi-espacio',
             $this->tieneAcceso('rrhh_requisiciones') => '/app/rrhh/requisiciones',
             $this->esAdminBodega() || $this->esAlistador() || $this->hasRole('Despachador') => '/app/logistica/cola-jorge',
+            // Compras (y quien sólo tenga órdenes o contenedores) arranca por sus
+            //   órdenes. Va después de bodega: Jorge también ve contenedores.
+            $this->tieneAcceso('compras_oc') || $this->tieneAcceso('compras_importacion') => '/app/compras',
             default                    => '/app/cosas-del-dia',
         };
     }

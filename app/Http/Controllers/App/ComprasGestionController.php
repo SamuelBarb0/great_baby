@@ -126,11 +126,12 @@ class ComprasGestionController extends Controller implements HasMiddleware
              * Contador, el Gerente y el admin de bodega entran
              * legítimamente a la OC, ven «PDF» y reciben 403.
              */
-            'puede_pdf' => $r->user()?->esAracely() ?? false,
+            'puede_pdf' => \App\Auth\Permisos::tieneAlguno($r->user(), ['compras_oc', 'compras_importacion']),
             // Mismo motivo que `puede_pdf`: el botón «Aprobar» salía para
             // todo el que entrara a la OC, y aprobar compromete plata.
-            'puede_aprobar' => \App\Auth\Permisos::puede($r->user(), 'compras_oc')
-                || ($r->user()?->esAracely() ?? false),
+            'puede_aprobar' => (\App\Auth\Permisos::puede($r->user(), 'compras_oc')
+                || ($r->user()?->esAracely() ?? false))
+                && ! \App\Modules\Compras\Actions\AprobarOrdenCompra::laCreoQuienAprueba($o, $r->user()),
             'puede_excel' => \App\Auth\Permisos::puede($r->user(), 'compras_oc') || \App\Auth\Permisos::puede($r->user(), 'compras_pagos_exterior'),
             'etiquetas' => $o->esImportacion()
                 ? app(\App\Modules\Compras\Services\EtiquetasDeOrden::class)->resumen($o->loadMissing('items.producto.media'))
@@ -204,8 +205,8 @@ class ComprasGestionController extends Controller implements HasMiddleware
          * siempre: bodega y contabilidad arman la orden, y `ocAprobar`
          * exige ademas la casilla `compras_oc` para firmarla.
          */
-        abort_unless(request()->user()?->esEquipoBodega() || request()->user()?->esContable(), 403,
-            'Las ordenes de compra las arma bodega o contabilidad.');
+        abort_unless(request()->user()?->puedeArmarOrdenes(), 403,
+            'Las ordenes de compra las arma Compras, bodega o contabilidad.');
 
         return Inertia::render('Compras/OC/Nueva', [
             // COMP-B10 · incluir numero_documento para búsqueda por NIT en el autocomplete.
@@ -342,8 +343,8 @@ class ComprasGestionController extends Controller implements HasMiddleware
          * siempre: bodega y contabilidad arman la orden, y `ocAprobar`
          * exige ademas la casilla `compras_oc` para firmarla.
          */
-        abort_unless($r->user()?->esEquipoBodega() || $r->user()?->esContable(), 403,
-            'Las ordenes de compra las arma bodega o contabilidad.');
+        abort_unless($r->user()?->puedeArmarOrdenes(), 403,
+            'Las ordenes de compra las arma Compras, bodega o contabilidad.');
 
         $data = $r->validate([
             'proveedor_id' => ['required', 'integer', 'exists:contactos,id'],
@@ -424,8 +425,8 @@ class ComprasGestionController extends Controller implements HasMiddleware
          * siempre: bodega y contabilidad arman la orden, y `ocAprobar`
          * exige ademas la casilla `compras_oc` para firmarla.
          */
-        abort_unless(request()->user()?->esEquipoBodega() || request()->user()?->esContable(), 403,
-            'Las ordenes de compra las arma bodega o contabilidad.');
+        abort_unless(request()->user()?->puedeArmarOrdenes(), 403,
+            'Las ordenes de compra las arma Compras, bodega o contabilidad.');
 
         $o = OrdenCompra::with('items')->findOrFail($orden);
 

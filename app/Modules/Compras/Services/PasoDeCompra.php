@@ -78,7 +78,8 @@ class PasoDeCompra
 
     private function porAprobar(OrdenCompra $orden, ?User $u): array
     {
-        $aprueba = Permisos::puede($u, 'compras_oc') || ($u?->esAracely() ?? false);
+        $laCreoEl = \App\Modules\Compras\Actions\AprobarOrdenCompra::laCreoQuienAprueba($orden, $u);
+        $aprueba = (Permisos::puede($u, 'compras_oc') || ($u?->esAracely() ?? false)) && ! $laCreoEl;
         $porCrear = $orden->items
             ->filter(fn ($i) => ! $i->producto_id && ! $i->variante_id && ! $i->esComponente() && CrearProductosDeOrden::referenciaDe($i))
             ->count();
@@ -94,7 +95,9 @@ class PasoDeCompra
         }
 
         return $this->paso(1, 'Revise la orden y apruébela.',
-            'Mientras no esté aprobada, no se puede poner en un contenedor.',
+            $laCreoEl
+                ? 'Quien crea una orden no la aprueba: pídasela a otra persona de Compras o a Gerencia.'
+                : 'Mientras no esté aprobada, no se puede poner en un contenedor.',
             'Compras',
             $aprueba ? [$this->accion('Aprobar la orden', 'aprobar')] : []);
     }

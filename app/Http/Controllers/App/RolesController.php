@@ -110,7 +110,9 @@ class RolesController extends Controller implements HasMiddleware
             ],
             'permisos' => ['array'],
             'permisos.*' => ['string', Rule::in(
-                array_map(fn ($s) => Permisos::permiso($s), array_keys(Permisos::MATRIZ))
+                // Las cuatro casillas de cada sección: con sólo el `ver`, guardar un rol con
+                // crear, editar o eliminar marcado se rechazaba como «permiso inválido».
+                array_merge(...array_map(fn ($s) => Permisos::permisosDe($s), array_keys(Permisos::MATRIZ)))
             )],
             'usuarios' => ['array'],
             'usuarios.*' => ['integer', 'exists:users,id'],

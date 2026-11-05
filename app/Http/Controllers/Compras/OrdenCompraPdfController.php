@@ -13,6 +13,7 @@ class OrdenCompraPdfController extends Controller
     public function pdf(OrdenCompra $orden): Response
     {
         abort_unless(auth()->check(), 401);
+        abort_unless(\App\Auth\Permisos::tieneAlguno(auth()->user(), ['compras_oc', 'compras_importacion']), 403);
 
         $orden->load(['items.producto', 'items.variante', 'proveedor', 'bodega', 'creador']);
 
@@ -25,6 +26,7 @@ class OrdenCompraPdfController extends Controller
     public function preliquidacion(OrdenCompra $orden, PreliquidarOrden $preliquidar): Response
     {
         abort_unless(auth()->check(), 401);
+        abort_unless(\App\Auth\Permisos::tieneAlguno(auth()->user(), ['compras_oc', 'compras_importacion']), 403);
         abort_unless($orden->esImportacion(), 404);
 
         $orden->load(['items', 'proveedor']);

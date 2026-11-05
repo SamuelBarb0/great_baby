@@ -925,13 +925,16 @@ Route::middleware(['web', 'auth'])->group(function () {
     Route::get('/catalogo/variante/{variante}/etiqueta', [CodigoBarrasController::class, 'etiqueta'])->name('catalogo.variante.etiqueta');
     Route::get('/catalogo/etiquetas-lote', [EtiquetasMasivasController::class, 'pdf'])->name('catalogo.etiquetas.lote');
 
-    // Compras: sólo Aracely/Gerencia (fix auditor #19 — antes cualquier autenticado veía costos de proveedor)
+    // PDF de Compras: los abre quien tiene la sección de esa pantalla, que ya ve esos costos.
+    // Cada controlador lo revisa (fix auditor #19: antes los veía cualquier autenticado).
+    // Re-audit M2 R3 PATRÓN R (SEG-A6) · throttle en PDFs (DomPDF es CPU-heavy).
+    Route::get('/compras/orden/{orden}/pdf', [OrdenCompraPdfController::class, 'pdf'])->middleware('throttle:20,1')->name('compras.orden.pdf');
+    Route::get('/compras/orden/{orden}/preliquidacion/pdf', [OrdenCompraPdfController::class, 'preliquidacion'])->middleware('throttle:20,1')->name('compras.orden.preliquidacion.pdf');
+    Route::get('/compras/recepcion/{recepcion}/pdf', [RecepcionPdfController::class, 'pdf'])->middleware('throttle:20,1')->name('compras.recepcion.pdf');
+    Route::get('/compras/importacion/{importacion}/pdf', [ImportacionPdfController::class, 'pdf'])->middleware('throttle:20,1')->name('compras.importacion.pdf');
+
+    // Compras: sólo Aracely/Gerencia
     Route::middleware(['auth', \App\Http\Middleware\SoloAracely::class])->group(function () {
-        // Re-audit M2 R3 PATRÓN R (SEG-A6) · throttle en PDFs (DomPDF es CPU-heavy).
-        Route::get('/compras/orden/{orden}/pdf', [OrdenCompraPdfController::class, 'pdf'])->middleware('throttle:20,1')->name('compras.orden.pdf');
-        Route::get('/compras/orden/{orden}/preliquidacion/pdf', [OrdenCompraPdfController::class, 'preliquidacion'])->middleware('throttle:20,1')->name('compras.orden.preliquidacion.pdf');
-        Route::get('/compras/recepcion/{recepcion}/pdf', [RecepcionPdfController::class, 'pdf'])->middleware('throttle:20,1')->name('compras.recepcion.pdf');
-        Route::get('/compras/importacion/{importacion}/pdf', [ImportacionPdfController::class, 'pdf'])->middleware('throttle:20,1')->name('compras.importacion.pdf');
         Route::get('/compras/plantilla/oc', [PlantillaImportOCController::class, 'descargar'])->name('compras.plantilla.oc');
         Route::post('/compras/import/oc', [ImportOCController::class, 'importar'])->middleware('throttle:10,1')->name('compras.import.oc');
     });

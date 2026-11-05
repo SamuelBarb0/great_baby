@@ -40,7 +40,7 @@ class ComprasController extends Controller implements HasMiddleware
                  * La misma puerta que la gestión, para que no vuelvan a
                  * separarse.
                  */
-                abort_unless($r->user()?->esEquipoBodega() || $r->user()?->esContable(), 403);
+                abort_unless($r->user()?->puedeArmarOrdenes(), 403);
                 return $next($r);
             }),
         ];

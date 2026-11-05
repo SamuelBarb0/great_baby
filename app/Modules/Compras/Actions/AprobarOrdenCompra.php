@@ -11,6 +11,19 @@ class AprobarOrdenCompra
 {
     use AsAction;
 
+    /** Segregación de funciones: ¿esta persona creó la orden y no le toca aprobarla? */
+    public static function laCreoQuienAprueba(OrdenCompra $orden, ?\App\Models\User $u): bool
+    {
+        if (! $u || $orden->creado_por === null || $orden->creado_por !== $u->id) {
+            return false;
+        }
+        if ($u->hasAnyRole(['Aracely', 'Gerencia', 'Gerente'])) {
+            return false;
+        }
+
+        return ! (bool) (function_exists('setting') ? setting('compras.permitir_auto_aprobar', false) : false);
+    }
+
     public function handle(OrdenCompra $orden): OrdenCompra
     {
         if (! in_array($orden->estado, [EstadoOrdenCompra::Borrador, EstadoOrdenCompra::Enviada], true)) {
@@ -23,9 +36,6 @@ class AprobarOrdenCompra
         //   crea NO aprueba, salvo rol Aracely/Gerencia (dueño real del negocio).
         //   Excepción configurable vía `setting('compras.permitir_auto_aprobar', false)`
         //   por si en operación pequeña Aracely opera sola.
-        $u = auth()->user();
-        $mismoUsuario = $orden->creado_por !== null && $u && $orden->creado_por === $u->id;
-        $esGerencia = $u && ($u->hasRole('Aracely') || $u->hasRole('Gerencia') || $u->hasRole('Gerente'));
         /*
          * El default decia `true` mientras el comentario de arriba decia
          * `false`, asi que `! $permitirAuto` era SIEMPRE falso: el control
@@ -33,8 +43,7 @@ class AprobarOrdenCompra
          * estaba registrada en `Reglas::DEFAULTS`, asi que tampoco se podia
          * arreglar desde la interfaz. Ahora es `false` y esta registrada.
          */
-        $permitirAuto = (bool) (function_exists('setting') ? setting('compras.permitir_auto_aprobar', false) : false);
-        if ($mismoUsuario && ! $esGerencia && ! $permitirAuto) {
+        if (self::laCreoQuienAprueba($orden, auth()->user())) {
             abort(403, 'Segregación de funciones: quien crea una OC no puede aprobarla. '
                 .'Pedile la aprobación a Gerencia, o desactivá «Permitir que quien crea una OC la apruebe» '
                 .'en Reglas de negocio → Contable.');

@@ -141,7 +141,7 @@ final class MenuApp
 
             // ComprasController (listado de OC) · misma puerta que la gestión:
             //   quien crea una OC tiene que poder ver la lista de las suyas.
-            'compras_lista' => $puede('bodega') || $puede('contabilidad'),
+            'compras_lista' => $puede('bodega') || $puede('contabilidad') || $puede('compras_oc'),
             /*
              * ComprasGestionController (nueva OC, importacion, reporte, recepcion).
              *
@@ -155,7 +155,7 @@ final class MenuApp
              * `MenuCoincideConAccesoTest` se pone en rojo. Que es como se
              * encontro esto.
              */
-            'compras_gestion' => $puede('bodega') || $puede('contabilidad'),
+            'compras_gestion' => $puede('bodega') || $puede('contabilidad') || $puede('compras_oc'),
             /*
              * Dentro de Compras, tres pantallas tienen casilla propia desde que
              * se cablearon: recepcion, importaciones y el reporte. El menu las
