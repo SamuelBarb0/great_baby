@@ -347,7 +347,10 @@ class Reglas
          */
         'siigo.reparto_modo' => ['grupo' => 'siigo', 'tipo' => 'string', 'valor' => 'cantidad', 'etiqueta' => 'SIIGO · Como se declara un reparto', 'descripcion' => '«cantidad» = menos unidades al precio real (recomendado) · «precio» = mismas unidades a precio menor'],
         'siigo.cta_gasto_default' => ['grupo' => 'siigo', 'tipo' => 'string', 'valor' => '5195', 'etiqueta' => 'SIIGO · Cuenta de gasto por defecto', 'descripcion' => 'PUC débito para gastos sin asiento previo'],
-        'siigo.cta_banco_default' => ['grupo' => 'siigo', 'tipo' => 'string', 'valor' => '1110', 'etiqueta' => 'SIIGO · Cuenta de banco por defecto', 'descripcion' => 'PUC de bancos'],
+        // La misma cuenta que `contable.cta_bancos_default`: la operativa de
+        // Bancolombia. Era 1110, el encabezado «Bancos», que no recibe
+        // movimiento — SIIGO lo rechaza.
+        'siigo.cta_banco_default' => ['grupo' => 'siigo', 'tipo' => 'string', 'valor' => '11200501', 'etiqueta' => 'SIIGO · Cuenta de banco por defecto', 'descripcion' => 'PUC 11200501 Bancolombia Great Baby Cta Ahorros **2664, confirmada contra el extracto.'],
         'siigo.cta_conciliacion_default' => ['grupo' => 'siigo', 'tipo' => 'string', 'valor' => '139535', 'etiqueta' => 'SIIGO · Partida conciliatoria por defecto', 'descripcion' => 'PUC para la diferencia de conciliación'],
         'siigo.proveedor_importacion_doc' => ['grupo' => 'siigo', 'tipo' => 'string', 'valor' => '', 'etiqueta' => 'SIIGO · NIT proveedor de importaciones', 'descripcion' => 'Identificación por defecto para comprobantes de importación'],
         // UBIC-6 · resolución DIAN FV auto-asignada a nuevas ubicaciones de venta.
@@ -526,9 +529,17 @@ class Reglas
      * SIIGO rechazara el documento, o peor, el día que NO lo rechazara y lo
      * metiera en la primera subcuenta que encontrara.
      *
-     * Sólo aplica a las cuentas del PUC de Great Baby (`contable.cta_*` y
-     * `gastos.cta_*`). Las `siigo.cta_*` son del catálogo de SIIGO, que es otro
-     * plan y no vive en esta tabla.
+     * Aplica a las cuentas del PUC de Great Baby. Eso incluye `contable.cta_*`,
+     * `gastos.cta_*` y CINCO de las `siigo.*`, que a pesar del prefijo guardan
+     * códigos del plan de Great Baby y no del catálogo de SIIGO. Las tres que
+     * terminan en `_siigo` sí son de SIIGO —22050501, 1435010101, 24082001— y
+     * no viven en esta tabla, así que quedan fuera.
+     *
+     * La distinción no es cosmética: la propia pantalla de SIIGO avisa que
+     * `siigo.cta_gasto_default` (5195), `siigo.cta_banco_default` (1110) y
+     * `siigo.cta_sobrante_inventario_default` (4295) son encabezados, y que
+     * `siigo.cta_perdida_inventario_default` (5299) ni siquiera existe en el
+     * plan. La primera versión de este candado las dejó pasar.
      *
      * Una cuenta que no está en el catálogo se deja pasar: puede ser una
      * instalación nueva con `plan_cuentas` vacío, y negarse ahí rompería el
@@ -537,9 +548,26 @@ class Reglas
      *
      * @return string|null el motivo del rechazo, o null si la cuenta sirve
      */
+    /**
+     * Reglas con prefijo `siigo.` que igual guardan una cuenta del PUC de
+     * Great Baby. Lista explícita y no un patrón, porque la diferencia con las
+     * `_siigo` no se ve en el nombre de la clave.
+     */
+    private const CUENTAS_PUC_DE_SIIGO = [
+        'siigo.cta_gasto_default',
+        'siigo.cta_banco_default',
+        'siigo.cta_conciliacion_default',
+        'siigo.cta_perdida_inventario_default',
+        'siigo.cta_sobrante_inventario_default',
+    ];
+
     private static function cuentaAgrupadora(string $clave, string $valor): ?string
     {
-        if (! str_starts_with($clave, 'contable.cta_') && ! str_starts_with($clave, 'gastos.cta_')) {
+        $esDelPuc = str_starts_with($clave, 'contable.cta_')
+            || str_starts_with($clave, 'gastos.cta_')
+            || in_array($clave, self::CUENTAS_PUC_DE_SIIGO, true);
+
+        if (! $esDelPuc) {
             return null;
         }
 
