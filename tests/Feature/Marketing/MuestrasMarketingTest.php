@@ -202,6 +202,76 @@ it('rechazarla le avisa a quien la pidió con el motivo', function () {
         ->toContain('No hay stock de verano');
 });
 
+it('Jorge, a cargo sólo de la bodega, recorre el préstamo y la devolución', function () {
+    // El almacén MKT- no está a su cargo, y no tendría por qué: le llega el aviso
+    // porque responde por la bodega de donde sale la mercancía.
+    $jorge = User::factory()->create(['name' => 'Jorge']);
+    $jorge->assignRole(Role::firstOrCreate(['name' => 'AdminBodega', 'guard_name' => 'web']));
+    $this->bodega->update(['responsable_user_id' => $jorge->id]);
+
+    $t = pedirMuestras($this);
+    expect(app(App\Modules\Marketing\Services\MuestrasMarketing::class)->aprobadores($t->fresh()))->toContain($jorge->id);
+
+    $this->actingAs($jorge)->get("/app/inventario/traslados/{$t->id}")->assertOk();
+    $this->actingAs($jorge)->post("/app/inventario/traslados/{$t->id}/aprobar")->assertSessionHas('success');
+    $this->actingAs($jorge)->post("/app/inventario/traslados/{$t->id}/items", [
+        'variante_id' => $this->variante->id, 'cantidad' => 3,
+    ])->assertSessionHasNoErrors()->assertRedirect();
+    expect($t->fresh()->items()->count())->toBe(1);
+
+    $this->actingAs($jorge)->post("/app/inventario/traslados/{$t->id}/enviar")->assertSessionHas('success');
+    $this->actingAs($jorge)->post("/app/inventario/traslados/{$t->id}/recibir", [
+        'recogido_por' => $this->laura->id, 'estado_mercancia' => 'completo',
+    ])->assertSessionHas('success');
+    expect($t->fresh()->estado)->toBe(EstadoTraslado::Recibido)
+        ->and(app(StockService::class)->saldoFisico($this->variante->id, $this->almacen->id))->toBe(3);
+
+    // Devolución: Marketing la pide y Jorge la recibe en su bodega.
+    $this->actingAs($this->laura)->post('/app/marketing/prestamo', [
+        'origen_id' => $this->almacen->id, 'destino_id' => $this->bodega->id, 'prestamo_id' => $t->id,
+        'observaciones' => 'Terminamos las fotos',
+    ])->assertSessionHas('success');
+    $devolucion = conItems(Traslado::latest('id')->firstOrFail(), $this->variante, 3);
+
+    $this->actingAs($jorge)->post("/app/inventario/traslados/{$devolucion->id}/enviar")->assertSessionHas('success');
+    $this->actingAs($jorge)->post("/app/inventario/traslados/{$devolucion->id}/recibir", [
+        'recogido_por' => $this->laura->id, 'estado_mercancia' => 'completo',
+    ])->assertSessionHas('success');
+    expect($devolucion->fresh()->estado)->toBe(EstadoTraslado::Recibido)
+        ->and(app(StockService::class)->saldoFisico($this->variante->id, $this->bodega->id))->toBe(20);
+});
+
+it('el admin de otra bodega no toca las muestras ajenas', function () {
+    $otro = User::factory()->create();
+    $otro->assignRole(Role::firstOrCreate(['name' => 'AdminBodega', 'guard_name' => 'web']));
+    InventarioUbicacion::create([
+        'codigo' => 'CAL-01', 'nombre' => 'Bodega Cali', 'categoria' => CategoriaUbicacion::Venta,
+        'activa' => true, 'responsable_user_id' => $otro->id,
+    ]);
+    $t = conItems(pedirMuestras($this), $this->variante, 3);
+
+    $this->actingAs($otro)->post("/app/inventario/traslados/{$t->id}/aprobar")->assertForbidden();
+    $this->actingAs($otro)->post("/app/inventario/traslados/{$t->id}/enviar")->assertForbidden();
+    expect($t->fresh()->aprobado_at)->toBeNull();
+});
+
+it('en un traslado normal el admin de bodega sigue necesitando las dos puntas', function () {
+    $jorge = User::factory()->create();
+    $jorge->assignRole(Role::firstOrCreate(['name' => 'AdminBodega', 'guard_name' => 'web']));
+    $this->bodega->update(['responsable_user_id' => $jorge->id]);
+    $ajena = InventarioUbicacion::create(['codigo' => 'CAL-01', 'nombre' => 'Cali', 'categoria' => CategoriaUbicacion::Venta, 'activa' => true]);
+    $suya = InventarioUbicacion::create(['codigo' => 'BOG-02', 'nombre' => 'Bogotá 2', 'categoria' => CategoriaUbicacion::Venta, 'activa' => true, 'responsable_user_id' => $jorge->id]);
+
+    $haciaAjena = Traslado::create(['numero' => 'TRA-T-1', 'origen_id' => $this->bodega->id, 'destino_id' => $ajena->id, 'motivo' => 'reposicion', 'fecha_solicitud' => now()->toDateString()]);
+    conItems($haciaAjena, $this->variante, 1);
+    $this->actingAs($jorge)->post("/app/inventario/traslados/{$haciaAjena->id}/enviar")->assertForbidden();
+
+    // Entre dos bodegas suyas la pantalla ya lo dejaba entrar y el envío le daba 403.
+    $entreLasSuyas = Traslado::create(['numero' => 'TRA-T-2', 'origen_id' => $this->bodega->id, 'destino_id' => $suya->id, 'motivo' => 'reposicion', 'fecha_solicitud' => now()->toDateString()]);
+    conItems($entreLasSuyas, $this->variante, 1);
+    $this->actingAs($jorge)->post("/app/inventario/traslados/{$entreLasSuyas->id}/enviar")->assertSessionHas('success');
+});
+
 it('un traslado normal entre bodegas no cambia', function () {
     $otra = InventarioUbicacion::create([
         'codigo' => 'MED-01', 'nombre' => 'Bodega Medellín',

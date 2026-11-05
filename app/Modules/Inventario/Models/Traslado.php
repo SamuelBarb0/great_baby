@@ -55,6 +55,22 @@ class Traslado extends Model implements AuditableContract
     }
 
     /**
+     * ¿Le toca a esta persona, que responde por bodegas? Pide las dos puntas,
+     * salvo a quien administra la bodega en las muestras de Marketing: el almacén
+     * MKT- es de Marketing, no suyo, y es a él a quien `MuestrasMarketing::aprobadores`
+     * le avisa por responder de la bodega. Pedirle las dos lo dejaba con el aviso
+     * en la mano y un 403 al abrirlo.
+     */
+    public function loOperaEnBodega(\App\Models\User $u): bool
+    {
+        $puntas = $this->esMuestra() && $u->esAdminBodega()
+            ? [(int) ($this->esPrestamoMarketing() ? $this->origen_id : $this->destino_id)]
+            : [(int) $this->origen_id, (int) $this->destino_id];
+
+        return array_diff($puntas, $u->bodegasAsignadasIds()) === [];
+    }
+
+    /**
      * Re-audit M3 PATRÓN γ · state machine formal para traslados:
      *   Borrador → EnTransito|Anulado
      *   EnTransito → Recibido|Anulado

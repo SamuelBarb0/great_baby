@@ -616,8 +616,7 @@ class InventarioGestionController extends Controller implements HasMiddleware
         // scope por bodega
         $u = $r->user();
         if (! $u->esAracely()) {
-            $bod = $u->bodegasAsignadasIds();
-            abort_unless(in_array((int)$t->origen_id, $bod, true) && in_array((int)$t->destino_id, $bod, true), 403);
+            abort_unless($t->loOperaEnBodega($u), 403);
         }
         \App\Modules\Inventario\Models\TrasladoItem::updateOrCreate(
             [
@@ -639,8 +638,7 @@ class InventarioGestionController extends Controller implements HasMiddleware
         );
         $u = $r->user();
         if (! $u->esAracely()) {
-            $bod = $u->bodegasAsignadasIds();
-            abort_unless(in_array((int)$t->origen_id, $bod, true) && in_array((int)$t->destino_id, $bod, true), 403);
+            abort_unless($t->loOperaEnBodega($u), 403);
         }
         \App\Modules\Inventario\Models\TrasladoItem::where('traslado_id', $t->id)->whereKey($itemId)->delete();
         return back()->with('success', 'Ítem eliminado.');
@@ -659,12 +657,7 @@ class InventarioGestionController extends Controller implements HasMiddleware
         if (! $u || $u->esAracely()) {
             return;
         }
-        $bodegas = $u->bodegasAsignadasIds();
-        abort_unless(
-            in_array((int) $t->origen_id, $bodegas, true) && in_array((int) $t->destino_id, $bodegas, true),
-            403,
-            'Este traslado es de otra bodega.'
-        );
+        abort_unless($t->loOperaEnBodega($u), 403, 'Este traslado es de otra bodega.');
     }
 
     /**
@@ -1398,8 +1391,7 @@ class InventarioGestionController extends Controller implements HasMiddleware
         );
         $u = $r->user();
         if (! $u->esAracely()) {
-            $bod = $u->bodegasAsignadasIds();
-            abort_unless(in_array((int) $t->origen_id, $bod, true) && in_array((int) $t->destino_id, $bod, true), 403);
+            abort_unless($t->loOperaEnBodega($u), 403);
         }
 
         $filas = $this->parsearArchivoSku($r);
