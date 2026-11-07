@@ -52,9 +52,6 @@ class HandleInertiaRequests extends Middleware
                 // el sidebar no puede ofrecer algo que después responda 403 —
                 // que era lo que pasaba con las listas de roles del Vue.
                 'menu' => $user ? \App\Auth\MenuApp::clavesDe($user) : [],
-                // En qué empresa está parada (general o e-commerce) y si puede
-                // cambiar. NULL = no ve el selector. Ver App\Support\EspacioTrabajo.
-                'espacio' => $user ? \App\Support\EspacioTrabajo::paraPantalla($user) : null,
                 'cliente' => $cliente ? [
                     'id' => $cliente->id,
                     'email' => $cliente->email,

@@ -215,54 +215,21 @@ it('cuenta los pedidos que esperan cada llave y muestra las que no están en el 
         ->and($previa['resumen']['con_pedidos'])->toBe(2);
 });
 
-it('desde la pantalla se busca y se vincula una llave a un producto agregado o a una variante', function () {
-    $aracely = User::factory()->create();
-    $aracely->assignRole(Role::firstOrCreate(['name' => 'Aracely', 'guard_name' => 'web']));
+it('vincularLlave une una llave a un producto agregado y rechaza un producto con desglose', function () {
     InventarioMovimiento::create(['producto_id' => $this->tapete->id, 'ubicacion_id' => $this->venta->id, 'tipo' => 'entrada_compra', 'cantidad' => 3, 'costo_unit' => 1000]);
     app(SincronizarPedidosDropi::class)->importarPedidos([catPedido('GV-1', 'ARCHIVADO-2')]);
     app(CatalogoDropi::class)->actualizar();
 
-    $this->actingAs($aracely)->getJson('/app/dropi/catalogo/buscar?q=tapete')
-        ->assertOk()
-        ->assertJsonFragment(['valor' => 'p:' . $this->tapete->id, 'agregado' => true]);
+    // El buscador del modal (/admin «Vincular con el ERP») ofrece el agregado.
+    expect(\App\Modules\Dropi\Support\DestinosVinculo::buscar('tapete'))->toHaveKey('p:' . $this->tapete->id);
 
-    $this->actingAs($aracely)->post('/app/dropi/catalogo/vincular-llave', ['llave' => 'ARCHIVADO-2', 'destino' => 'p:' . $this->tapete->id])
-        ->assertSessionHas('success');
+    $r = app(CatalogoDropi::class)->vincularLlave('ARCHIVADO-2', 'p:' . $this->tapete->id, null);
 
-    expect(DropiVinculoProducto::where('sku_dropi', 'ARCHIVADO-2')->value('producto_id'))->toBe($this->tapete->id)
+    expect($r['items'])->toBe(1)
+        ->and(DropiVinculoProducto::where('sku_dropi', 'ARCHIVADO-2')->value('producto_id'))->toBe($this->tapete->id)
         ->and(DropiPedido::where('guia', 'GV-1')->value('estado'))->toBe(EstadoPedidoDropi::Pending);
 
-    // Un producto con desglose no se vincula entero: avisa, no rompe.
-    $this->actingAs($aracely)->post('/app/dropi/catalogo/vincular-llave', ['llave' => 'DES-01', 'destino' => 'p:' . $this->coche->id])
-        ->assertSessionHas('error');
-    // Destino con otro formato: no pasa la validación.
-    $this->actingAs($aracely)->post('/app/dropi/catalogo/vincular-llave', ['llave' => 'X', 'destino' => '5'])
-        ->assertSessionHasErrors('destino');
-
-    $alistador = User::factory()->create();
-    $alistador->assignRole(Role::firstOrCreate(['name' => 'Alistador', 'guard_name' => 'web']));
-    $this->actingAs($alistador)->getJson('/app/dropi/catalogo/buscar?q=tapete')->assertForbidden();
-    $this->actingAs($alistador)->post('/app/dropi/catalogo/vincular-llave', ['llave' => 'D2341', 'destino' => 'p:' . $this->tapete->id])->assertForbidden();
-});
-
-it('la pantalla es de Aracely, encola la lectura y vincula', function () {
-    $aracely = User::factory()->create();
-    $aracely->assignRole(Role::firstOrCreate(['name' => 'Aracely', 'guard_name' => 'web']));
-    $alistador = User::factory()->create();
-    $alistador->assignRole(Role::firstOrCreate(['name' => 'Alistador', 'guard_name' => 'web']));
-
-    $this->actingAs($alistador)->get('/app/dropi/catalogo')->assertForbidden();
-
-    $this->actingAs($aracely)->get('/app/dropi/catalogo')->assertOk()
-        ->assertInertia(fn (Assert $p) => $p->component('Dropi/Catalogo')->where('leido_at', null));
-
-    $this->actingAs($aracely)->post('/app/dropi/catalogo/leer')->assertRedirect();
-    Queue::assertPushed(LeerCatalogoDropiJob::class);
-
-    app(CatalogoDropi::class)->actualizar();
-    $this->actingAs($aracely)->get('/app/dropi/catalogo')
-        ->assertInertia(fn (Assert $p) => $p->where('resumen.enlazar', 3)->where('resumen.productos', 8));
-
-    $this->actingAs($aracely)->post('/app/dropi/catalogo/vincular')->assertSessionHas('success');
-    expect(DropiVinculoProducto::count())->toBe(4);   // YA-01 + los 3 nuevos
+    // Un producto con desglose no se vincula entero.
+    expect(fn () => app(CatalogoDropi::class)->vincularLlave('DES-01', 'p:' . $this->coche->id, null))
+        ->toThrow(DomainException::class);
 });

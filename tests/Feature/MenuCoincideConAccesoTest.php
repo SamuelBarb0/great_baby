@@ -119,30 +119,6 @@ const MENU_APP = [
     '/app/plantillas' => 'configuracion',
     '/app/siigo' => 'siigo',
 
-    // Menú del espacio e-commerce (`ecommerceGroups` en AppLayout.vue). Los
-    // enlaces con `?linea=dropi` son pantallas de arriba con filtro: misma puerta.
-    '/app/ecommerce/ventas' => 'dropi_admin',
-    '/app/dropi' => 'dropi_admin',
-    '/app/dropi/reportes' => 'dropi_admin',
-    '/app/dropi/alistador' => 'dropi_operacion',
-    '/app/dropi/escaner-camara' => 'dropi_operacion',
-    '/app/dropi/devolucion/registrar' => 'dropi_operacion',
-    '/app/dropi/discrepancias' => 'dropi_admin',
-    '/app/dropi/cortes' => 'dropi_admin',
-    '/app/dropi/wallet' => 'dropi_admin',
-    '/app/catalogo/productos/nuevo' => 'catalogo',
-    '/app/dropi/catalogo' => 'dropi_admin',
-    '/app/dropi/productos/importar' => 'dropi_admin',
-    '/app/dropi/inventario-en-vivo' => 'dropi_operacion',
-    '/app/contabilidad/panel?linea=dropi' => 'contabilidad',
-    '/app/cartera?linea=dropi' => 'cartera',
-    '/app/cartera/reportes?linea=dropi' => 'cartera',
-    '/app/cartera/notas-credito?linea=dropi' => 'cartera',
-    '/app/facturas?linea=dropi' => 'cartera',
-    '/app/pagos?linea=dropi' => 'cartera',
-    '/app/cartera/movimientos?linea=dropi' => 'cartera',
-    '/app/contabilidad/balance-general?linea=dropi' => 'contabilidad',
-    '/app/contabilidad/estado-resultados?linea=dropi' => 'contabilidad',
 ];
 
 /*

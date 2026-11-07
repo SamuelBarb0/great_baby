@@ -53,9 +53,6 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     Route::get('/mapa-colombia', \App\Http\Controllers\App\MapaColombiaController::class)->name('app.mapa');
     Route::post('/logout', [\App\Http\Controllers\App\AuthController::class, 'logout'])->name('app.logout');
 
-    // Espacio de trabajo · ERP general o e-commerce (Dropi). Ver App\Support\EspacioTrabajo.
-    Route::post('/espacio', [\App\Http\Controllers\App\EspacioController::class, 'cambiar'])->middleware('throttle:30,1')->name('app.espacio.cambiar');
-    Route::get('/ecommerce/ventas', [\App\Http\Controllers\App\EcommerceVentasController::class, 'index'])->name('app.ecommerce.ventas');
 
     // Reglas de Negocio (admin)
     Route::get('/reglas', [\App\Http\Controllers\App\ReglasController::class, 'index'])->name('app.reglas');
@@ -459,12 +456,6 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     // Dropi · Reportes/Inventario/Import (DRP-C)
     Route::get('/dropi/inventario-en-vivo', [\App\Http\Controllers\App\DropiReportesController::class, 'inventarioEnVivo'])->name('app.dropi.inventario');
     Route::get('/dropi/reportes', [\App\Http\Controllers\App\DropiReportesController::class, 'reportes'])->name('app.dropi.reportes');
-    // Catálogo propio por la API oficial: foto, vista previa y vínculos seguros.
-    Route::get('/dropi/catalogo', [\App\Http\Controllers\App\DropiCatalogoController::class, 'index'])->name('app.dropi.catalogo');
-    Route::post('/dropi/catalogo/leer', [\App\Http\Controllers\App\DropiCatalogoController::class, 'leer'])->middleware('throttle:6,1')->name('app.dropi.catalogo.leer');
-    Route::post('/dropi/catalogo/vincular', [\App\Http\Controllers\App\DropiCatalogoController::class, 'vincular'])->middleware('throttle:10,1')->name('app.dropi.catalogo.vincular');
-    Route::get('/dropi/catalogo/buscar', [\App\Http\Controllers\App\DropiCatalogoController::class, 'buscar'])->middleware('throttle:120,1')->name('app.dropi.catalogo.buscar');
-    Route::post('/dropi/catalogo/vincular-llave', [\App\Http\Controllers\App\DropiCatalogoController::class, 'vincularLlave'])->middleware('throttle:60,1')->name('app.dropi.catalogo.vincular-llave');
     Route::get('/dropi/productos/importar', [\App\Http\Controllers\App\DropiReportesController::class, 'importarForm'])->name('app.dropi.productos.importar');
     Route::post('/dropi/productos/importar', [\App\Http\Controllers\App\DropiReportesController::class, 'importarProcesar'])->name('app.dropi.productos.importar.procesar');
     Route::get('/catalogo', [\App\Http\Controllers\App\CatalogoController::class, 'index'])->name('app.catalogo.index');

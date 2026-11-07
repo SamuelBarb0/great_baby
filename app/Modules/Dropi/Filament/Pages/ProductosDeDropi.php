@@ -16,7 +16,7 @@ use Illuminate\Support\Facades\Cache;
  * «Productos de Dropi» en el panel Dropi (/admin): el catálogo propio leído por
  * la API, cruzado con el ERP, y el lugar donde se vincula cada llave.
  *
- * Toda la lógica está en CatalogoDropi (la misma que usa /app/dropi/catalogo);
+ * Toda la lógica está en CatalogoDropi;
  * esta página sólo la pinta y la dispara.
  */
 class ProductosDeDropi extends Page
