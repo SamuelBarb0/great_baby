@@ -186,6 +186,24 @@ it('panel contable, cartera, reportes de cartera y notas crédito separan Dropi 
         ->and($props('/app/cartera/notas-credito?linea=great_baby')['kpis']['total'])->toBe(1);
 });
 
+it('«Contabilidad Dropi» muestra sólo los movimientos del mes, no lo de meses anteriores', function () {
+    $this->travelTo(now('America/Bogota')->subMonthNoOverflow()->startOfMonth()->addDays(9)->setTime(10, 0));
+    $viejo = sepPedidoDespachado('SEP-ANT');                // 100.000 del mes pasado
+    $viejo->transicionar(EstadoPedidoDropi::Entregado, 'api');
+    $this->travelBack();
+
+    $mesPasado = now('America/Bogota')->subMonthNoOverflow()->format('Y-m');
+    $antes = app(App\Modules\Dropi\Services\ContabilidadDropi::class)->delMes($mesPasado);
+    $ahora = app(App\Modules\Dropi\Services\ContabilidadDropi::class)->delMes(now('America/Bogota')->format('Y-m'));
+
+    expect((float) $antes['resultados']['ingresos']['total'])->toBe(100000.0)          // en su mes sí está
+        ->and((float) $antes['balance']['resultado'])->toBe((float) $antes['resultados']['utilidad_neta'])
+        ->and((float) $antes['balance']['resultado'])->toBeGreaterThan(0.0)
+        ->and((float) $ahora['balance']['resultado'])->toBe(0.0)          // en el mes actual ya no
+        ->and((float) $ahora['balance']['activo']['total'])->toBe(0.0)
+        ->and($ahora['balance']['cuadra'])->toBeTrue();
+});
+
 it('«Contabilidad Dropi» del panel da los mismos números que contabilidad filtrada a Dropi', function () {
     $p = sepPedidoDespachado('SEP-6');                    // 100.000 de ingreso Dropi
     $p->transicionar(EstadoPedidoDropi::Entregado, 'api');

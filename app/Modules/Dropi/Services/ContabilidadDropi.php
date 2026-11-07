@@ -34,7 +34,7 @@ class ContabilidadDropi
             : CarbonImmutable::now($zona)->startOfMonth();
         $fin = $inicio->endOfMonth();
         $hoy = CarbonImmutable::now($zona);
-        // El balance es a una fecha: el cierre del mes, o hoy si el mes no ha terminado.
+        // Las cuentas van hasta el cierre del mes, o hoy si el mes no ha terminado.
         $corte = $fin->greaterThan($hoy) ? $hoy : $fin;
 
         $ejes = FiltroEjes::de(LineaNegocio::Dropi->value, 'todas');
@@ -49,8 +49,11 @@ class ContabilidadDropi
         $utilidadNeta = round($utilidadBruta - $gastos['total'], 2);
         $margen = fn (float $v) => $ingresos['total'] > 0 ? round($v / $ingresos['total'] * 100, 1) : null;
 
-        // ---- Balance general al corte (acumulado, como contabilidad) ----
-        $saldos = EstadosFinancieros::saldosPorCuenta(null, $corte->toDateString(), false, $ejes);
+        // ---- Movimiento de las cuentas EN EL MES (no acumulado) ----
+        // Pedido de Great Baby: esta página muestra sólo el mes elegido. Lo de
+        // meses anteriores sigue en el balance general de contabilidad
+        // (/app/contabilidad/balance-general?linea=dropi), que sí es acumulado.
+        $saldos = EstadosFinancieros::saldosPorCuenta($inicio->toDateString(), $corte->toDateString(), false, $ejes);
         $activo = EstadosFinancieros::agruparClase($saldos, '1', 'debito');
         $pasivo = EstadosFinancieros::agruparClase($saldos, '2', 'credito');
         $patrimonio = EstadosFinancieros::agruparClase($saldos, '3', 'credito');

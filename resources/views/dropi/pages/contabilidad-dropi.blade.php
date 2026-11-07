@@ -73,9 +73,10 @@
             </div>
         </x-filament::section>
 
-        {{-- Balance general --}}
+        {{-- Movimientos del mes por cuenta (no es el balance acumulado) --}}
         <x-filament::section>
-            <x-slot name="heading">Balance general al {{ $d['periodo']['corte'] }}</x-slot>
+            <x-slot name="heading">Movimientos del mes · {{ $d['periodo']['inicio'] }} → {{ $d['periodo']['corte'] }}</x-slot>
+            <x-slot name="description">Sólo lo de este mes. El balance acumulado está en Contabilidad › Balance general (línea Dropi).</x-slot>
             @foreach([['Activo', $b['activo']], ['Pasivo', $b['pasivo']], ['Patrimonio', $b['patrimonio']]] as [$titulo, $grupo])
                 <div style="{{ $total }}"><span>{{ $titulo }}</span><span>{{ $money($grupo['total']) }}</span></div>
                 @foreach($grupo['cuentas'] as $cta)
