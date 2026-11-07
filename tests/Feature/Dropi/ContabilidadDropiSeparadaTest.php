@@ -186,6 +186,39 @@ it('panel contable, cartera, reportes de cartera y notas crédito separan Dropi 
         ->and($props('/app/cartera/notas-credito?linea=great_baby')['kpis']['total'])->toBe(1);
 });
 
+it('«Contabilidad Dropi» del panel da los mismos números que contabilidad filtrada a Dropi', function () {
+    $p = sepPedidoDespachado('SEP-6');                    // 100.000 de ingreso Dropi
+    $p->transicionar(EstadoPedidoDropi::Entregado, 'api');
+    app(ConciliarWalletDropi::class)->conciliar([sepPagoWallet($p, 9106, 119000)]);
+    sepVentaGreatBaby(595000);                            // no debe aparecer
+    $aracely = App\Models\User::factory()->create();
+    $aracely->assignRole(Role::firstOrCreate(['name' => 'Aracely', 'guard_name' => 'web']));
+    $mes = now('America/Bogota')->format('Y-m');
+    $desde = now('America/Bogota')->startOfMonth()->toDateString();
+    $hasta = now('America/Bogota')->toDateString();
+
+    $d = app(App\Modules\Dropi\Services\ContabilidadDropi::class)->delMes($mes);
+    $pyg = $this->actingAs($aracely)->get("/app/contabilidad/estado-resultados?linea=dropi&desde={$desde}&hasta={$hasta}")->viewData('page')['props'];
+    $bal = $this->actingAs($aracely)->get("/app/contabilidad/balance-general?linea=dropi&hasta={$hasta}")->viewData('page')['props'];
+
+    expect((float) $d['resultados']['ingresos']['total'])->toBe(100000.0)
+        ->and((float) $d['resultados']['ingresos']['total'])->toBe((float) $pyg['ingresos']['total'])
+        ->and((float) $d['resultados']['utilidad_neta'])->toBe((float) $pyg['utilidad_neta'])
+        ->and((float) $d['balance']['activo']['total'])->toBe((float) $bal['activo']['total'])
+        ->and($d['balance']['cuadra'])->toBeTrue()
+        ->and((float) $d['cartera']['facturado_mes'])->toBe(119000.0)   // la de Great Baby no
+        ->and((float) $d['cartera']['cobrado_mes'])->toBe(119000.0)
+        ->and((float) $d['cartera']['por_cobrar'])->toBe(0.0);
+
+    // La página del panel: la ve contabilidad, no el alistador.
+    Filament\Facades\Filament::setCurrentPanel('admin');
+    $this->actingAs($aracely)->get('/admin/contabilidad-dropi')->assertOk()
+        ->assertSee('Contabilidad Dropi')->assertSee('$100.000')->assertSee('Cuadra');
+    $alistador = App\Models\User::factory()->create();
+    $alistador->assignRole(Role::firstOrCreate(['name' => 'Alistador', 'guard_name' => 'web']));
+    $this->actingAs($alistador)->get('/admin/contabilidad-dropi')->assertForbidden();
+});
+
 it('dropi:reestampar-linea mueve al libro Dropi lo del e-commerce que nació en Great Baby, sin tocar montos', function () {
     $p = sepPedidoDespachado('SEP-4');
     $f = FacturaVenta::findOrFail($p->factura_venta_id);

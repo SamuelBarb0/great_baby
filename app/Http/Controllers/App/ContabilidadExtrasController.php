@@ -318,27 +318,10 @@ class ContabilidadExtrasController extends Controller implements HasMiddleware
      * diferencia sin pantalla que la mostrara. El libro diario si filtraba, asi
      * que dos pantallas daban numeros distintos del mismo mes.
      */
+    /** Ver App\Modules\Contabilidad\Support\EstadosFinancieros (mismo cálculo que «Contabilidad Dropi»). */
     private function saldosPorCuenta(?string $desde, string $hasta, bool $incluirAnulados, ?FiltroEjes $ejes = null): \Illuminate\Support\Collection
     {
-        $filas = MovimientoContable::query()
-            ->when($incluirAnulados, fn ($q) => $q->withTrashed())
-            ->when($ejes, fn ($q) => $ejes->aplicar($q))
-            ->when($desde, fn ($q) => $q->where('fecha', '>=', $desde))
-            ->where('fecha', '<=', $hasta)
-            ->selectRaw('cuenta_puc, SUM(debe) AS debe, SUM(haber) AS haber')
-            ->groupBy('cuenta_puc')
-            ->get();
-
-        $nombres = \App\Modules\Contabilidad\Models\PlanCuenta::query()
-            ->whereIn('codigo', $filas->pluck('cuenta_puc'))
-            ->pluck('nombre', 'codigo');
-
-        return $filas->map(fn ($f) => [
-            'codigo' => (string) $f->cuenta_puc,
-            'nombre' => $nombres[$f->cuenta_puc] ?? 'Cuenta fuera del plan',
-            'debe' => (float) $f->debe,
-            'haber' => (float) $f->haber,
-        ]);
+        return \App\Modules\Contabilidad\Support\EstadosFinancieros::saldosPorCuenta($desde, $hasta, $incluirAnulados, $ejes);
     }
 
     /**
@@ -351,22 +334,7 @@ class ContabilidadExtrasController extends Controller implements HasMiddleware
      */
     private function agruparClase(\Illuminate\Support\Collection $saldos, string $clase, string $naturaleza): array
     {
-        $cuentas = $saldos
-            ->filter(fn ($c) => str_starts_with($c['codigo'], $clase))
-            ->map(function ($c) use ($naturaleza) {
-                $c['saldo'] = $naturaleza === 'debito'
-                    ? round($c['debe'] - $c['haber'], 2)
-                    : round($c['haber'] - $c['debe'], 2);
-                return $c;
-            })
-            ->filter(fn ($c) => abs($c['saldo']) > 0.009)
-            ->sortBy('codigo')
-            ->values();
-
-        return [
-            'cuentas' => $cuentas->all(),
-            'total' => round($cuentas->sum('saldo'), 2),
-        ];
+        return \App\Modules\Contabilidad\Support\EstadosFinancieros::agruparClase($saldos, $clase, $naturaleza);
     }
 
     /**
