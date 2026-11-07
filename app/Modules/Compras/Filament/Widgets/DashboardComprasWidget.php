@@ -58,7 +58,7 @@ class DashboardComprasWidget extends StatsOverviewWidget
             Stat::make('OC con fecha vencida', $vencidas)
                 ->description('Retraso del proveedor')
                 ->color($vencidas > 0 ? 'danger' : 'success')
-                ->url(OrdenCompraResource::getUrl('index', ['tableFilters' => ['vencidas' => ['value' => true]]])),
+                ->url(OrdenCompraResource::getUrl('index', ['filters' => ['vencidas' => ['value' => true]]])),
 
             Stat::make('Contenedores activos', $impPendientes)
                 ->description($impPorLiquidar . ' listos para liquidar')

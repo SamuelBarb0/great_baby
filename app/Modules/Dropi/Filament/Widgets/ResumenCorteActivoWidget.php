@@ -54,19 +54,19 @@ class ResumenCorteActivoWidget extends StatsOverviewWidget
                     $corte->pedidos_despachados,
                 ])
                 ->icon('heroicon-o-truck')
-                ->url(DropiPedidoResource::getUrl('index', ['tableFilters' => ['corte_id' => ['value' => $corte->id]]])),
+                ->url(DropiPedidoResource::getUrl('index', ['filters' => ['corte_id' => ['value' => $corte->id]]])),
 
             Stat::make('Pendientes por inventario', (string) $corte->pedidos_pendientes_inv)
                 ->description('Esperan devolución compatible · clic para ver')
                 ->color($corte->pedidos_pendientes_inv > 0 ? 'danger' : 'success')
                 ->icon('heroicon-o-exclamation-triangle')
-                ->url(DropiPedidoResource::getUrl('index', ['tableFilters' => ['estado' => ['value' => 'pendiente_inventario']]])),
+                ->url(DropiPedidoResource::getUrl('index', ['filters' => ['estado' => ['value' => 'pendiente_inventario']]])),
 
             Stat::make('Por conciliar (histórico)', (string) $porConciliar)
                 ->description('Acumulado · ignora el filtro de periodo')
                 ->color('warning')
                 ->icon('heroicon-o-banknotes')
-                ->url(DropiPedidoResource::getUrl('index', ['tableFilters' => ['estado' => ['value' => 'despachado']]])),
+                ->url(DropiPedidoResource::getUrl('index', ['filters' => ['estado' => ['value' => 'despachado']]])),
 
             Stat::make('Pedidos totales', (string) $pedidosAcumulados)
                 ->description('En toda la historia · clic para ver')

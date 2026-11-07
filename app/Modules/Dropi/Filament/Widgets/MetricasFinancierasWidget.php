@@ -69,19 +69,19 @@ class MetricasFinancierasWidget extends StatsOverviewWidget
                 ->description('Precio proveedor · pedidos pagados')
                 ->color('success')
                 ->icon('heroicon-o-arrow-trending-up')
-                ->url(DropiPedidoResource::getUrl('index', ['tableFilters' => ['estado' => ['value' => 'pagado']]])),
+                ->url(DropiPedidoResource::getUrl('index', ['filters' => ['estado' => ['value' => 'pagado']]])),
 
             Stat::make('Devoluciones ' . $labelPeriodo, $fmt($devoluciones))
                 ->description($pctDevoluciones . '% de las ventas del periodo')
                 ->color($pctDevoluciones > 10 ? 'danger' : ($pctDevoluciones > 5 ? 'warning' : 'success'))
                 ->icon('heroicon-o-arrow-uturn-left')
-                ->url(DropiPedidoResource::getUrl('index', ['tableFilters' => ['estado' => ['value' => 'devuelto']]])),
+                ->url(DropiPedidoResource::getUrl('index', ['filters' => ['estado' => ['value' => 'devuelto']]])),
 
             Stat::make('Retirado a banco', $fmt($retirado))
                 ->description($labelPeriodo . ' · reportado por la wallet')
                 ->color('info')
                 ->icon('heroicon-o-banknotes')
-                ->url(DropiWalletMovimientoResource::getUrl('index', ['tableFilters' => ['tipo' => ['value' => 'retiro_banco']]])),
+                ->url(DropiWalletMovimientoResource::getUrl('index', ['filters' => ['tipo' => ['value' => 'retiro_banco']]])),
 
             Stat::make('Gastos wallet', $fmt($gastos))
                 ->description('Indemnizaciones + fletes + tarjeta · ' . $labelPeriodo)
