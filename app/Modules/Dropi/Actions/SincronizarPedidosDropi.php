@@ -390,12 +390,14 @@ class SincronizarPedidosDropi
         $cambio = false;
 
         foreach ($dto->items as $item) {
-            $varianteId = $this->resolverEstado->varianteIdPara($item->skuDropi);
+            // Variante, o producto agregado (sin variantes) si así se vinculó.
+            $destino = $this->resolverEstado->destinoPara($item->skuDropi);
 
             $registro = DropiPedidoItem::updateOrCreate(
                 ['pedido_id' => $pedido->id, 'sku_dropi' => $item->skuDropi],
                 array_filter([
-                    'variante_id' => $varianteId,
+                    'variante_id' => $destino['variante_id'] ?? null,
+                    'producto_id' => $destino['producto_id'] ?? null,
                     'cantidad' => $item->cantidad,
                     'precio_proveedor_unit' => $item->precioProveedorUnit,
                     'producto_nombre' => $item->productoNombre,
