@@ -28,9 +28,6 @@ return [
         // proveedores de esa bodega, si los hubiera, se ignoran).
         'bodega_id' => env('DROPI_BODEGA_ID') ? (int) env('DROPI_BODEGA_ID') : null,
         'proveedor_id' => env('DROPI_PROVEEDOR_ID') ? (int) env('DROPI_PROVEEDOR_ID') : null,
-        // De dónde sirve Dropi las fotos de productos (la API manda sólo la ruta,
-        // `gallery[].urlS3`). Sacado de su web pública y verificado el 6-nov.
-        'imagenes_url' => env('DROPI_IMAGENES_URL', 'https://d39ru7awumhhs2.cloudfront.net'),
     ],
 
     'web' => [

@@ -107,8 +107,7 @@ it('el panel Dropi está organizado en Operación, Productos, Dinero y Configura
     $this->actingAs($this->aracely)->get('/admin/ventas-ecommerce')->assertNotFound();
 });
 
-it('Mis productos en Dropi muestra el catálogo con foto, precio, stock y si está vinculado', function () {
-    config()->set('dropi.api.imagenes_url', 'https://cdn.test');
+it('Mis productos en Dropi muestra el catálogo sin fotos, con precio, stock y si está vinculado', function () {
     admFoto([
         [
             'id' => 1, 'name' => 'Volante de Juguete con Música', 'type' => 'VARIABLE', 'sku' => null, 'user' => ['id' => 151057],
@@ -128,13 +127,13 @@ it('Mis productos en Dropi muestra el catálogo con foto, precio, stock y si est
 
     Livewire::test(\App\Modules\Dropi\Filament\Pages\MisProductosDropi::class)
         ->assertSee('Volante de Juguete con Música')
-        ->assertSee('https://cdn.test/colombia/products/1/principal.gif', false)   // la foto principal, no la primera
+        ->assertDontSee('principal.gif', false)                                     // Dropi no deja subir fotos: no se muestran
         ->assertSee('$12.500 – $13.000')
         ->assertSee('Stock 10')
         ->assertSee('Vinculado en parte')                                           // 1 de 2 variaciones
         ->assertSee('Bebé')
         ->assertSee('Cascos para niños')
-        ->assertSee('Sin foto')
+        ->assertDontSee('Sin foto')
         ->set('filtro', 'sin_stock')
         ->assertSee('Cascos para niños')
         ->assertDontSee('Volante de Juguete con Música')
@@ -144,7 +143,8 @@ it('Mis productos en Dropi muestra el catálogo con foto, precio, stock y si est
         ->assertDontSee('Cascos para niños');
 
     $foto = app(CatalogoDropi::class)->foto()['productos'][0];
-    expect($foto['descripcion'])->toBe('Volante con luces y música');
+    expect($foto['descripcion'])->toBe('Volante con luces y música')
+        ->and($foto)->not->toHaveKey('imagen');                                      // tampoco se guardan
 });
 
 it('Mis productos en Dropi avisa si todavía no se ha leído Dropi', function () {

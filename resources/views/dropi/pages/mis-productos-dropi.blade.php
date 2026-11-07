@@ -49,13 +49,6 @@
                 @foreach(array_slice($lista, 0, $this->mostrar) as $p)
                     <div wire:key="mp-{{ $p['id'] }}" x-data="{ abierto: false }"
                          style="border:1px solid rgba(148,163,184,.25);border-radius:.85rem;overflow:hidden;display:flex;flex-direction:column;">
-                        <div style="aspect-ratio:1/1;background:rgba(148,163,184,.12);display:flex;align-items:center;justify-content:center;">
-                            @if($p['imagen'])
-                                <img src="{{ $p['imagen'] }}" alt="{{ $p['nombre'] }}" loading="lazy" style="width:100%;height:100%;object-fit:cover;">
-                            @else
-                                <span style="color:#9ca3af;font-size:.8rem;">Sin foto</span>
-                            @endif
-                        </div>
                         <div style="padding:.75rem;display:flex;flex-direction:column;gap:.35rem;flex:1;">
                             <div style="font-weight:600;line-height:1.25;">{{ $p['nombre'] }}</div>
                             <div style="font-size:.72rem;color:#9ca3af;">

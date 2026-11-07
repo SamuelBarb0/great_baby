@@ -7,8 +7,8 @@ use BackedEnum;
 use Filament\Pages\Page;
 
 /**
- * «Mis productos en Dropi»: el catálogo propio tal como está en Dropi (foto,
- * precios, stock, variaciones) y si cada uno ya está vinculado al ERP.
+ * «Mis productos en Dropi»: el catálogo propio tal como está en Dropi (precios,
+ * stock, variaciones; sin fotos: Great Baby no puede subir las suyas a Dropi) y si cada uno ya está vinculado al ERP.
  *
  * Sólo lee la foto que deja «Leer de Dropi» (en «Vincular con el ERP»): no
  * llama a Dropi al abrirse, así que carga al instante.

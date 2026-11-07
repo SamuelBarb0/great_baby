@@ -381,7 +381,6 @@ class CatalogoDropi
                 'tipo' => $p['tipo'],
                 'sku' => $p['sku'],
                 'privado' => $p['privado'],
-                'imagen' => $p['imagen'] ?? null,
                 'categorias' => $p['categorias'] ?? [],
                 'descripcion' => $p['descripcion'] ?? null,
                 'stock' => array_sum(array_column($variaciones, 'stock')),
@@ -426,12 +425,6 @@ class CatalogoDropi
             ];
         }
 
-        // Foto principal: Dropi manda la ruta (`urlS3`) y la sirve desde su CDN.
-        $galeria = collect($p['gallery'] ?? []);
-        $foto = $galeria->firstWhere('main', true) ?? $galeria->first();
-        $rutaFoto = $foto['urlS3'] ?? null;
-        $imagen = $foto['url'] ?? ($rutaFoto ? rtrim((string) config('dropi.api.imagenes_url'), '/') . '/' . ltrim($rutaFoto, '/') : null);
-
         $descripcion = trim(preg_replace('/\s+/u', ' ', html_entity_decode(strip_tags((string) ($p['description'] ?? '')), ENT_QUOTES | ENT_HTML5, 'UTF-8')));
 
         return [
@@ -441,7 +434,6 @@ class CatalogoDropi
             'sku' => $sku !== '' ? $sku : null,
             'sku_valido' => MapearPedidoDropiWeb::skuValido($sku),
             'privado' => (bool) ($p['privated_product'] ?? false),
-            'imagen' => $imagen,
             'categorias' => collect($p['categories'] ?? [])->pluck('name')->filter()->values()->all(),
             'descripcion' => $descripcion !== '' ? mb_substr($descripcion, 0, 400) : null,
             'llaves' => $llaves,
