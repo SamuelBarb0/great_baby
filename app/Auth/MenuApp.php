@@ -200,6 +200,19 @@ final class MenuApp
 
             // El módulo Dropi se opera desde /admin, que ahora es sólo Dropi.
             'dropi' => Permisos::puedeAccederPanel($u),
+
+            /*
+             * Espacio e-commerce · las pantallas de Dropi que ya vivían en
+             * `/app/dropi/*` y no tenían entrada en el menú. Cada clave copia
+             * la puerta de su controller:
+             *
+             *   · DropiOperacionController / DropiReportesController (alistador,
+             *     devolución, escáner, inventario en vivo) · esAracely() || esAlistador()
+             *   · DropiController, DropiGestionController, discrepancias,
+             *     reportes, importar productos y Ventas e-commerce · esAracely()
+             */
+            'dropi_operacion' => $u->esAracely() || $u->esAlistador(),
+            'dropi_admin' => $u->esAracely(),
         ];
     }
 

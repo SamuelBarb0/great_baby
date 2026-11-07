@@ -13,6 +13,7 @@ import { mensajeDeError } from '@/composables/useMensajeError';
 const { money } = useMoney();
 
 import EtiquetaYReferencias from '@/Components/EtiquetaYReferencias.vue';
+import AbrirEnDropi from '@/Components/AbrirEnDropi.vue';
 
 const props = defineProps({
     historial: { type: Array, default: () => [] },
@@ -614,6 +615,7 @@ const matrizDisenos = ref([]);
                             title="Duplicar · crea un producto nuevo con los mismos datos">
                         <Copy class="h-4 w-4"/> Duplicar
                     </button>
+                    <AbrirEnDropi :datos="form"/>
                     <button v-if="!esNuevo" @click="eliminar" class="btn-ghost text-red-500 hover:text-red-700 text-sm">
                         <Trash2 class="h-4 w-4"/>
                     </button>
