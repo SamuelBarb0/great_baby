@@ -19,9 +19,9 @@ class InventarioEnVivo extends Page
 
     protected static ?string $title = 'Saldo de inventario por variante × ubicación';
 
-    protected static string|\UnitEnum|null $navigationGroup = 'Catálogo';
+    protected static string|\UnitEnum|null $navigationGroup = 'Productos';
 
-    protected static ?int $navigationSort = 2;
+    protected static ?int $navigationSort = 4;
 
     protected string $view = 'dropi.pages.inventario-en-vivo';
 

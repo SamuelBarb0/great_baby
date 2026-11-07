@@ -21,9 +21,9 @@ class ReportesDropi extends Page
 
     protected static ?string $title = 'Reportes Dropi';
 
-    protected static string|\UnitEnum|null $navigationGroup = 'Dropi';
+    protected static string|\UnitEnum|null $navigationGroup = 'Dinero';
 
-    protected static ?int $navigationSort = 8;
+    protected static ?int $navigationSort = 5;
 
     protected string $view = 'dropi.pages.reportes-dropi';
 

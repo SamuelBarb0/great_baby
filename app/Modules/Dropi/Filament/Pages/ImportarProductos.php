@@ -26,9 +26,9 @@ class ImportarProductos extends Page implements HasForms
 
     protected static ?string $navigationLabel = 'Importar productos';
 
-    protected static string|\UnitEnum|null $navigationGroup = 'Catálogo';
+    protected static string|\UnitEnum|null $navigationGroup = 'Productos';
 
-    protected static ?int $navigationSort = 4;
+    protected static ?int $navigationSort = 5;
 
     protected static ?string $title = 'Importar productos desde Excel/CSV';
 

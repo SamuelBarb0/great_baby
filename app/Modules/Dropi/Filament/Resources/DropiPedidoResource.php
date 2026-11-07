@@ -38,9 +38,9 @@ class DropiPedidoResource extends Resource
 
     protected static ?string $pluralModelLabel = 'Pedidos Dropi';
 
-    protected static string|\UnitEnum|null $navigationGroup = 'Dropi';
+    protected static string|\UnitEnum|null $navigationGroup = 'Operación';
 
-    protected static ?int $navigationSort = 2;
+    protected static ?int $navigationSort = 4;
 
     protected static ?string $recordTitleAttribute = 'guia';
 

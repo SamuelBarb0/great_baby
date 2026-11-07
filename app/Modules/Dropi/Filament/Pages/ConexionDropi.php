@@ -19,9 +19,9 @@ class ConexionDropi extends Page
 
     protected static ?string $navigationLabel = 'Conexión Dropi';
 
-    protected static string|\UnitEnum|null $navigationGroup = 'Dropi';
+    protected static string|\UnitEnum|null $navigationGroup = 'Configuración';
 
-    protected static ?int $navigationSort = 10;
+    protected static ?int $navigationSort = 1;
 
     protected static ?string $title = 'Conexión con Dropi';
 

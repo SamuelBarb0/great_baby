@@ -23,9 +23,9 @@ class DiscrepanciasWallet extends Page
 
     protected static ?string $title = 'Discrepancias · Wallet ↔ Pedidos';
 
-    protected static string|\UnitEnum|null $navigationGroup = 'Dropi';
+    protected static string|\UnitEnum|null $navigationGroup = 'Dinero';
 
-    protected static ?int $navigationSort = 7;
+    protected static ?int $navigationSort = 4;
 
     protected string $view = 'dropi.pages.discrepancias-wallet';
 

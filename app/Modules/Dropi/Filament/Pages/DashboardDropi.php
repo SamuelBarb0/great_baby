@@ -30,9 +30,9 @@ class DashboardDropi extends Page implements HasForms
 
     protected static ?string $title = 'Dashboard Dropi';
 
-    protected static string|\UnitEnum|null $navigationGroup = 'Dropi';
+    protected static string|\UnitEnum|null $navigationGroup = 'Dinero';
 
-    protected static ?int $navigationSort = 0;
+    protected static ?int $navigationSort = 1;
 
     protected string $view = 'dropi.pages.dashboard-dropi';
 

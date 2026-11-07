@@ -32,9 +32,9 @@ class DropiDevolucionResource extends Resource
 
     protected static ?string $pluralModelLabel = 'Devoluciones Dropi';
 
-    protected static string|\UnitEnum|null $navigationGroup = 'Dropi';
+    protected static string|\UnitEnum|null $navigationGroup = 'Operación';
 
-    protected static ?int $navigationSort = 4;
+    protected static ?int $navigationSort = 5;
 
     protected static ?string $slug = 'dropi-devoluciones';
 

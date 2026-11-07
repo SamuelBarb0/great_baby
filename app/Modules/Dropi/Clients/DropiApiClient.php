@@ -59,6 +59,39 @@ class DropiApiClient extends DropiWebClient
         return $body['objects'];
     }
 
+    /**
+     * Una página del catálogo de productos (POST `products/index`, el mismo que
+     * usa el plugin oficial de WooCommerce para listar productos de Dropi).
+     *
+     * Verificado el 6-nov-2026: `startData` es un DESPLAZAMIENTO (no un número
+     * de página), Dropi corta en 40 por página aunque se pidan más, y `count`
+     * vuelve en 0: se pagina hasta que una página llega incompleta. Con
+     * `warehouse_id` devuelve sólo lo de esa bodega.
+     *
+     * @return array<int, array>
+     */
+    public function productosCrudos(int $desde = 0, int $porPagina = 40, array $filtros = []): array
+    {
+        // Plazo propio, más largo que el de pedidos: el 6-nov Dropi tardó 27 s
+        // en devolver 5 productos. El catálogo se lee en segundo plano, así
+        // que esperar no le cuesta nada a nadie; cortar a los 30 s sí.
+        $resp = $this->integraciones()
+            ->timeout((int) ($this->config['timeout_catalogo'] ?? 120))
+            ->post('products/index', array_filter([
+            'startData' => $desde,
+            'pageSize' => $porPagina,
+            'order_type' => 'desc',
+            'order_by' => 'id',
+            'keywords' => '',
+            'active' => true,
+            'no_count' => true,
+            'integration' => true,
+            'get_stock' => false,
+        ] + $filtros, fn ($v) => $v !== null));
+
+        return $this->cuerpo($resp, 'listar productos')['objects'] ?? [];
+    }
+
     protected function integraciones(): PendingRequest
     {
         $url = (string) ($this->config['url'] ?? '');

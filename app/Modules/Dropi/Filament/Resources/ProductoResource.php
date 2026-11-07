@@ -35,9 +35,9 @@ class ProductoResource extends Resource
 
     protected static ?string $pluralModelLabel = 'Productos';
 
-    protected static string|\UnitEnum|null $navigationGroup = 'Catálogo';
+    protected static string|\UnitEnum|null $navigationGroup = 'Productos';
 
-    protected static ?int $navigationSort = 1;
+    protected static ?int $navigationSort = 6;
 
     /**
      * Fuera del panel: el catálogo se maneja en Vue, en `/app/catalogo/productos`.

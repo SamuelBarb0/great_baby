@@ -27,9 +27,9 @@ class DropiWalletMovimientoResource extends Resource
 
     protected static ?string $pluralModelLabel = 'Movimientos wallet';
 
-    protected static string|\UnitEnum|null $navigationGroup = 'Dropi';
+    protected static string|\UnitEnum|null $navigationGroup = 'Dinero';
 
-    protected static ?int $navigationSort = 5;
+    protected static ?int $navigationSort = 2;
 
     // Fix D1 · matriz Permisos (Contador debe ver wallet para conciliación).
     public static function canViewAny(): bool

@@ -18,9 +18,9 @@ class CruceWalletPedidos extends Page
 
     protected static ?string $title = 'Cruce wallet ↔ pedidos';
 
-    protected static string|\UnitEnum|null $navigationGroup = 'Dropi';
+    protected static string|\UnitEnum|null $navigationGroup = 'Dinero';
 
-    protected static ?int $navigationSort = 7;
+    protected static ?int $navigationSort = 3;
 
     protected string $view = 'dropi.pages.cruce-wallet-pedidos';
 

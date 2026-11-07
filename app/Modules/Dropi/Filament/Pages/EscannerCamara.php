@@ -30,9 +30,9 @@ class EscannerCamara extends Page
 
     protected static ?string $title = 'Escáner de guías por cámara';
 
-    protected static string|\UnitEnum|null $navigationGroup = 'Dropi';
+    protected static string|\UnitEnum|null $navigationGroup = 'Operación';
 
-    protected static ?int $navigationSort = 6;
+    protected static ?int $navigationSort = 3;
 
     protected string $view = 'dropi.pages.escanner-camara';
 

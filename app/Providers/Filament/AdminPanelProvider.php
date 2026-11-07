@@ -7,6 +7,7 @@ use Filament\Http\Middleware\AuthenticateSession;
 use Filament\Http\Middleware\DisableBladeIconComponents;
 use Filament\Http\Middleware\DispatchServingFilamentEvent;
 use App\Modules\Dropi\Filament\Pages\DashboardDropi;
+use Filament\Navigation\NavigationItem;
 use Filament\Pages\Dashboard;
 use Filament\Panel;
 use Filament\PanelProvider;
@@ -24,6 +25,8 @@ use Illuminate\View\Middleware\ShareErrorsFromSession;
 
 class AdminPanelProvider extends PanelProvider
 {
+    private const URL_CREAR_EN_DROPI = 'https://app.dropi.co/dashboard/products/add';
+
     public function panel(Panel $panel): Panel
     {
         return $panel
@@ -54,11 +57,20 @@ class AdminPanelProvider extends PanelProvider
             //  circulación y se borra cuando la clienta confirme.
             // ──────────────────────────────────────────────────────────────
             ->discoverResources(in: app_path('Modules/Dropi/Filament/Resources'), for: 'App\Modules\Dropi\Filament\Resources')
+            // Organizado el 6-nov por lo que la persona va a hacer: despachar,
+            // productos, plata y configuración (antes todo colgaba de «Dropi»).
             ->navigationGroups([
                 'Operación',
-                'Dropi',
-                'Catálogo',
+                'Productos',
+                'Dinero',
+                'Configuración',
             ])
+            // Grupo «Productos»: «Crear producto en Dropi» abre una ventana aparte.
+            ->navigationItems(self::enlacesEcommerce())
+            ->renderHook(
+                PanelsRenderHook::BODY_END,
+                fn (): string => self::scriptVentanaDropi(),
+            )
             ->discoverPages(in: app_path('Modules/Dropi/Filament/Pages'), for: 'App\Modules\Dropi\Filament\Pages')
             ->discoverWidgets(in: app_path('Modules/Dropi/Filament/Widgets'), for: 'App\Modules\Dropi\Filament\Widgets')
             ->pages([
@@ -123,5 +135,47 @@ class AdminPanelProvider extends PanelProvider
                         .'<div style="position:fixed;bottom:16px;right:16px;z-index:99999;background:#0f8fa6;color:#fff;padding:.45rem .9rem;border-radius:999px;font-size:.75rem;font-weight:800;letter-spacing:.03em;box-shadow:0 6px 18px rgba(0,0,0,.35);display:flex;align-items:center;gap:.4rem;">📦 MODO DROPI</div>';
                 },
             );
+    }
+
+    /** @return array<int, NavigationItem> */
+    private static function enlacesEcommerce(): array
+    {
+        return [
+            /*
+             * Dropi no deja embeberse: responde `X-Frame-Options: SAMEORIGIN`
+             * y el navegador muestra el iframe bloqueado (probado el 6-nov).
+             * Lo más cercano es una VENTANA al lado del panel, con la sesión de
+             * Dropi que la persona ya tiene: el script de BODY_END intercepta
+             * este enlace por su URL. Sin JavaScript abre una pestaña.
+             */
+            NavigationItem::make('Crear producto en Dropi')
+                ->url(self::URL_CREAR_EN_DROPI, shouldOpenInNewTab: true)
+                ->icon('heroicon-o-arrow-top-right-on-square')
+                ->group('Productos')
+                ->sort(3)
+                ->visible(fn (): bool => (bool) (\App\Auth\MenuApp::permisos(auth()->user())['dropi'] ?? false)),
+        ];
+    }
+
+    /**
+     * Abre «Crear producto en Dropi» en una ventana a la derecha de la pantalla
+     * en vez de una pestaña: así se ve el panel y Dropi a la vez.
+     */
+    private static function scriptVentanaDropi(): string
+    {
+        $url = json_encode(self::URL_CREAR_EN_DROPI);
+
+        return <<<HTML
+<script>
+document.addEventListener('click', function (e) {
+    var a = e.target.closest ? e.target.closest('a[href=' + JSON.stringify({$url}) + ']') : null;
+    if (!a || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    e.preventDefault();
+    var ancho = Math.min(1200, Math.round(screen.availWidth * 0.6));
+    var w = window.open(a.href, 'gb_dropi_crear', 'popup,width=' + ancho + ',height=' + Math.round(screen.availHeight * 0.9) + ',left=' + (screen.availWidth - ancho) + ',top=0');
+    if (w) { w.focus(); } else { window.open(a.href, '_blank'); }
+}, true);
+</script>
+HTML;
     }
 }
