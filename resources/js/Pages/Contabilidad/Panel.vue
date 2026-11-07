@@ -4,29 +4,40 @@ import { Head, router, Link } from '@inertiajs/vue3';
 import { Calculator, TrendingUp, TrendingDown, AlertTriangle, EyeOff, Eye, ArrowLeft } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import PestanasSeccion from '@/Components/PestanasSeccion.vue';
+import FiltroEjes from '@/Components/FiltroEjes.vue';
 import { pestanasPanel } from '@/composables/usePestanasContables';
 import { useMoney } from '@/composables/useMoney';
 import { pucLabel } from '@/composables/pucLabels';
 import { useBogotaDate } from '@/composables/useBogotaDate';
 
-const props = defineProps({ periodo: Object, kpis: Object, topCuentas: Array, porOrigen: Array });
+const props = defineProps({
+    periodo: Object, kpis: Object, topCuentas: Array, porOrigen: Array,
+    filtros: { type: Object, default: () => ({ linea: 'todas', destino: 'todas' }) },
+    opcionesEjes: { type: Object, default: () => ({ lineas: [], destinos: [] }) },
+});
 const { money } = useMoney();
 
 const desde = ref(props.periodo.desde);
 const hasta = ref(props.periodo.hasta);
 const incluirAnulados = ref(!!props.periodo.incluir_anulados);
+// Línea de negocio y destino fiscal, como en el libro y el balance: el panel
+// del e-commerce es este mismo con «Dropi».
+const linea = ref(props.filtros.linea || 'todas');
+const destino = ref(props.filtros.destino || 'todas');
 // Re-audit M5 R4 UX-M1 · loading state (paridad con ReporteDetalle).
 const cargando = ref(false);
 
 const filtrar = () => router.get('/app/contabilidad/panel', {
     desde: desde.value, hasta: hasta.value,
     incluir_anulados: incluirAnulados.value ? 1 : null,
+    linea: linea.value !== 'todas' ? linea.value : null,
+    destino: destino.value !== 'todas' ? destino.value : null,
 }, {
     preserveScroll: true, preserveState: true, replace: true,
     onStart: () => { cargando.value = true; },
     onFinish: () => { cargando.value = false; },
 });
-watch([desde, hasta, incluirAnulados], filtrar);
+watch([desde, hasta, incluirAnulados, linea, destino], filtrar);
 
 // Re-audit M5 R2 PATRÓN γ · useBogotaDate + agrego Trimestre para paridad
 // con Index (M5 R2 UX-M1: chips inconsistentes entre pantallas).
@@ -76,6 +87,7 @@ const signoBalance = computed(() => {
                 <div class="flex items-center gap-2 flex-wrap">
                     <div><label class="text-xs text-surface-500">Desde</label><input type="date" v-model="desde" class="input"/></div>
                     <div><label class="text-xs text-surface-500">Hasta</label><input type="date" v-model="hasta" class="input"/></div>
+                    <FiltroEjes v-model:linea="linea" v-model:destino="destino" :opciones="opcionesEjes"/>
                     <label class="ml-auto flex items-center gap-2 text-xs font-semibold cursor-pointer select-none"
                            title="La normativa fiscal exige conservar el histórico 5 años. Actívalo si necesitas ver asientos revertidos.">
                         <input type="checkbox" v-model="incluirAnulados" class="rounded border-surface-300"/>

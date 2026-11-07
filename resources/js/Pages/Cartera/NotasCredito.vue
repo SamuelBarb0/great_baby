@@ -9,11 +9,13 @@ import PestanasSeccion from '@/Components/PestanasSeccion.vue';
 import { pestanasNotas } from '@/composables/usePestanasContables';
 import { useMoney } from '@/composables/useMoney';
 import AppConfirmModal from '@/Components/AppConfirmModal.vue';
+import FiltroEjes from '@/Components/FiltroEjes.vue';
 
 const props = defineProps({
     filtros: { type: Object, required: true },
     notas: { type: Object, required: true },
     kpis: { type: Object, required: true },
+    opcionesEjes: { type: Object, default: () => ({ lineas: [], destinos: [] }) },
 });
 
 // La Torre SIIGO enlaza aca con `?destacar=<id>` cuando el documento no tiene
@@ -27,6 +29,9 @@ const modalConfirm = ref(null);
 const { money } = useMoney();
 const q = ref(props.filtros.q);
 const sinSiigo = ref(!!props.filtros.sin_siigo);
+// Línea de negocio y destino de la factura: «Dropi» = las notas del e-commerce.
+const linea = ref(props.filtros.linea || 'todas');
+const destino = ref(props.filtros.destino || 'todas');
 
 let debounce;
 const filtrar = () => {
@@ -35,6 +40,8 @@ const filtrar = () => {
         router.get('/app/cartera/notas-credito', {
             q: q.value || null,
             sin_siigo: sinSiigo.value ? 1 : null,
+            linea: linea.value !== 'todas' ? linea.value : null,
+            destino: destino.value !== 'todas' ? destino.value : null,
         }, { preserveScroll: true, preserveState: true, replace: true });
     }, 300);
 };
@@ -144,6 +151,8 @@ const reenviar = (nc) => {
                     <label class="flex items-center gap-1 text-xs whitespace-nowrap">
                         <input type="checkbox" v-model="sinSiigo" @change="filtrar" class="rounded"/> Solo sin SIIGO
                     </label>
+                    <FiltroEjes v-model:linea="linea" v-model:destino="destino" :opciones="opcionesEjes"
+                                @update:linea="filtrar" @update:destino="filtrar"/>
                 </div>
             </div>
 

@@ -1,5 +1,6 @@
 <script setup>
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
+import FiltroEjes from '@/Components/FiltroEjes.vue';
 import { Head, router, Link, usePage } from '@inertiajs/vue3';
 import { useMoney } from '@/composables/useMoney';
 import { useIntervalFn } from '@vueuse/core';
@@ -23,7 +24,17 @@ const props = defineProps({
     proximosVencer: { type: Array, required: true },
     refreshSeg: { type: Number, default: 30 },
     bucketDias: { type: Object, required: true },
+    filtros: { type: Object, default: () => ({ linea: 'todas', destino: 'todas' }) },
+    opcionesEjes: { type: Object, default: () => ({ lineas: [], destinos: [] }) },
 });
+
+// Línea de negocio y destino: «Dropi» = la cartera del e-commerce, sola.
+const linea = ref(props.filtros.linea || 'todas');
+const destino = ref(props.filtros.destino || 'todas');
+watch([linea, destino], () => router.get('/app/cartera', {
+    linea: linea.value !== 'todas' ? linea.value : null,
+    destino: destino.value !== 'todas' ? destino.value : null,
+}, { preserveScroll: true, preserveState: true, replace: true }));
 
 const sincronizando = ref(false);
 const ultimoSync = ref(new Date());
@@ -76,6 +87,9 @@ const abrirWhatsApp = (telefono, nombre, saldo, dias) => {
                         <Wallet class="h-4 w-4"/> Cartera · Dashboard
                     </h1>
                     <div class="text-sm text-surface-500 mt-1">Semáforo de cobros al día, top morosos y proyección del mes.</div>
+                    <div class="mt-3">
+                        <FiltroEjes v-model:linea="linea" v-model:destino="destino" :opciones="opcionesEjes"/>
+                    </div>
                 </div>
                 <div class="text-xs uppercase tracking-widest flex items-center gap-1.5">
                     <span v-if="sincronizando" class="inline-block h-2 w-2 rounded-full bg-brand-500 animate-pulse"></span>

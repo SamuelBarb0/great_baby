@@ -22,11 +22,13 @@ class CalcularAntiguedadCartera
      *   count: int
      * }
      */
-    public function handle(?int $contactoId = null): array
+    /** @param  \App\Modules\Contabilidad\Support\FiltroEjes|null  $ejes  línea de negocio / destino (p. ej. sólo Dropi) */
+    public function handle(?int $contactoId = null, ?\App\Modules\Contabilidad\Support\FiltroEjes $ejes = null): array
     {
         $facturas = FacturaVenta::query()
             ->whereNotIn('estado', [EstadoFactura::Pagada, EstadoFactura::Anulada])
             ->when($contactoId, fn ($q) => $q->where('contacto_id', $contactoId))
+            ->when($ejes, fn ($q) => $ejes->aplicar($q))
             ->get();
 
         $porTramo = [];

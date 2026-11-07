@@ -45,17 +45,22 @@ class CarteraExtrasController extends Controller implements HasMiddleware
     }
 
     // ---------- REPORTES CARTERA ----------
-    public function reportes(): Response
+    public function reportes(Request $request): Response
     {
+        // Línea de negocio y destino: `?linea=dropi` = la cartera del e-commerce.
+        $ejes = FiltroEjes::deRequest($request);
+        $fac = fn () => $ejes->aplicar(FacturaVenta::query());
+        $pag = fn () => $ejes->aplicarPor(PagoVenta::query(), 'factura');   // el pago lleva los ejes de su factura
+
         $hoy = today('America/Bogota');
         $desde30 = $hoy->copy()->subDays(30);
 
-        $totalCartera = (float) FacturaVenta::whereIn('estado', ['pendiente','abonada','vencida'])
+        $totalCartera = (float) $fac()->whereIn('estado', ['pendiente','abonada','vencida'])
             ->whereNull('deleted_at')->sum('saldo');
 
         // Edad saldos (0-30, 31-60, 61-90, 91-120, 120+)
         $edades = ['0-30' => 0, '31-60' => 0, '61-90' => 0, '91-120' => 0, '120+' => 0];
-        $vencidas = FacturaVenta::whereIn('estado', ['pendiente','abonada','vencida'])
+        $vencidas = $fac()->whereIn('estado', ['pendiente','abonada','vencida'])
             ->whereNull('deleted_at')->get(['saldo', 'fecha_vencimiento']);
         foreach ($vencidas as $f) {
             $dias = $hoy->diffInDays($f->fecha_vencimiento, absolute: false);
@@ -70,6 +75,7 @@ class CarteraExtrasController extends Controller implements HasMiddleware
 
         $topMorosos = DB::table('facturas_venta as f')
             ->join('contactos as c', 'c.id', '=', 'f.contacto_id')
+            ->tap(fn ($q) => $ejes->aplicar($q, 'f'))
             ->whereNull('f.deleted_at')->whereNull('c.deleted_at')
             ->whereNotIn('f.estado', ['pagada','anulada'])
             ->where('f.fecha_vencimiento', '<', $hoy)
@@ -77,15 +83,17 @@ class CarteraExtrasController extends Controller implements HasMiddleware
             ->groupBy('c.id','c.nombre_completo','c.razon_social','c.telefono')
             ->orderByDesc('saldo')->limit(20)->get();
 
-        $consignaciones = PagoVenta::whereBetween('fecha', [$desde30, $hoy])
+        $consignaciones = $pag()->whereBetween('fecha', [$desde30, $hoy])
             ->selectRaw('medio_pago, COUNT(*) as n, SUM(monto_aplicado) as total')
             ->groupBy('medio_pago')->orderByDesc('total')->get();
 
         return Inertia::render('Cartera/Reportes', [
+            'filtros' => $ejes->aParametros(),
+            'opcionesEjes' => FiltroEjes::opciones(),
             'kpis' => [
                 'total_cartera' => $totalCartera,
-                'vencidas_count' => FacturaVenta::where('estado','vencida')->whereNull('deleted_at')->count(),
-                'cobrado_30d' => (float) PagoVenta::whereBetween('fecha', [$desde30, $hoy])->sum('monto_aplicado'),
+                'vencidas_count' => $fac()->where('estado','vencida')->whereNull('deleted_at')->count(),
+                'cobrado_30d' => (float) $pag()->whereBetween('fecha', [$desde30, $hoy])->sum('monto_aplicado'),
             ],
             'edades' => $edades,
             'topMorosos' => $topMorosos->map(fn ($r) => [

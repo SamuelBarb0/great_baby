@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Modules\Cartera\Actions\SiguienteConsecutivoFactura;
 use App\Modules\Cartera\Models\FacturaVenta;
 use App\Modules\Cartera\Models\NotaCredito;
+use App\Modules\Contabilidad\Support\FiltroEjes;
 use App\Modules\Siigo\Jobs\PushNotaCreditoASiigo;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -32,7 +33,11 @@ class NotasCreditoController extends Controller implements HasMiddleware
 
     public function index(Request $r): Response
     {
-        $q = NotaCredito::with(['factura:id,numero,total,contacto_id', 'factura.contacto:id,nombre_completo']);
+        // Una nota no tiene ejes propios: son los de su factura (`?linea=dropi` = las del e-commerce).
+        $ejes = FiltroEjes::deRequest($r);
+        $base = fn () => $ejes->aplicarPor(NotaCredito::query(), 'factura');
+
+        $q = $base()->with(['factura:id,numero,total,contacto_id', 'factura.contacto:id,nombre_completo']);
 
         if ($busca = trim((string) $r->query('q', ''))) {
             $q->where(function ($qq) use ($busca) {
@@ -43,7 +48,8 @@ class NotasCreditoController extends Controller implements HasMiddleware
         if ($r->boolean('sin_siigo')) $q->whereNull('siigo_id');
 
         return Inertia::render('Cartera/NotasCredito', [
-            'filtros' => ['q' => $r->query('q', ''), 'sin_siigo' => $r->boolean('sin_siigo')],
+            'filtros' => ['q' => $r->query('q', ''), 'sin_siigo' => $r->boolean('sin_siigo')] + $ejes->aParametros(),
+            'opcionesEjes' => FiltroEjes::opciones(),
             'notas' => $q->orderByDesc('id')->paginate(30)->through(fn ($n) => [
                 'id' => $n->id,
                 'numero' => $n->numeroCompleto(),
@@ -59,10 +65,10 @@ class NotasCreditoController extends Controller implements HasMiddleware
                 'creada_at' => $n->created_at?->diffForHumans(),
             ]),
             'kpis' => [
-                'total' => NotaCredito::count(),
-                'manuales' => NotaCredito::whereNull('devolucion_dropi_id')->count(),
-                'sin_siigo' => NotaCredito::whereNull('siigo_id')->count(),
-                'monto_mes' => (float) NotaCredito::where('created_at', '>=', now()->startOfMonth())->sum('valor'),
+                'total' => $base()->count(),
+                'manuales' => $base()->whereNull('devolucion_dropi_id')->count(),
+                'sin_siigo' => $base()->whereNull('siigo_id')->count(),
+                'monto_mes' => (float) $base()->where('created_at', '>=', now()->startOfMonth())->sum('valor'),
             ],
         ]);
     }

@@ -1,13 +1,13 @@
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
-import { Link, usePage } from '@inertiajs/vue3';
+import { Link, router, usePage } from '@inertiajs/vue3';
 import { useEventListener } from '@vueuse/core';
 import {
     LayoutDashboard, Package, ShoppingCart, Warehouse, Calculator,
     FileText, Users, Truck, Settings, Bell, Search, LogOut,
     Menu as MenuIcon, X, ChevronDown, Home, BarChart3, MessageSquare,
     Boxes, Camera, Scissors, Wallet, MapPin, AlertTriangle, Radio, Upload,
-    Undo2, ScanLine, Tag, Layers, CreditCard, LayoutGrid, Images, Rocket, ClipboardList,
+    Undo2, ScanLine, Tag, Layers, CreditCard, LayoutGrid, Images, Rocket, ClipboardList, RefreshCw,
 } from 'lucide-vue-next';
 import AvisoPagoVencido from '@/Components/AvisoPagoVencido.vue';
 import CommandPalette from '@/Components/CommandPalette.vue';
@@ -538,7 +538,9 @@ const hrefActivo = computed(() => {
             if (it.external) continue;
             // Una entrada unificada también responde por las rutas de sus
             // pestañas, declaradas en `rutas`.
-            for (const r of [it.href, ...(it.rutas ?? [])]) {
+            // Se compara sin la query: los enlaces del espacio e-commerce
+            // llevan `?linea=dropi` y la URL vigente se recortó arriba.
+            for (const r of [it.href, ...(it.rutas ?? [])].map((x) => x.split('?')[0])) {
                 const coincide = r === '/app' ? url === '/app' : (url === r || url.startsWith(r + '/'));
                 if (coincide && (! mejor || r.length > mejor.largo)) mejor = { href: it.href, largo: r.length };
             }
@@ -574,7 +576,80 @@ const toggleGroup = (key) => {
 const clavesMenu = computed(() => page.props.auth?.menu || []);
 const puedeVer = (clave) => !! clave && clavesMenu.value.includes(clave);
 
-const visibleGroups = computed(() => groups
+/*
+ * Espacio e-commerce · lo pidió quien opera Dropi: «quiero estar sólo en
+ * Dropi y que me salga todo ahí». Con el selector de la barra en
+ * «E-commerce · Dropi» el menú es ESTE, en vez de `groups`.
+ *
+ * Las pantallas ya existían (casi todas en `/app/dropi/*`, sin entrada en el
+ * menú). La contabilidad son las mismas pantallas del ERP con `linea=dropi`,
+ * el eje que el libro y el balance ya filtran: no hay un segundo libro.
+ * El catálogo es compartido; aquí sólo se le da la puerta de entrada.
+ */
+const ecommerceGroups = [
+    {
+        key: 'ec_ventas',
+        label: 'E-commerce',
+        items: [
+            { name: '🛍 Ventas e-commerce', href: '/app/ecommerce/ventas', icon: BarChart3, permiso: 'dropi_admin' },
+            { name: 'Resumen Dropi', href: '/app/dropi', icon: LayoutDashboard, permiso: 'dropi_admin' },
+            { name: 'Reportes Dropi', href: '/app/dropi/reportes', icon: BarChart3, permiso: 'dropi_admin' },
+        ],
+    },
+    {
+        key: 'ec_operacion',
+        label: 'Pedidos y despacho',
+        items: [
+            { name: 'Estación de Empaque', href: '/app/estacion-empaque', icon: Package, permiso: 'estacion_empaque' },
+            { name: 'Vista del alistador', href: '/app/dropi/alistador', icon: Boxes, permiso: 'dropi_operacion' },
+            { name: 'Escáner con cámara', href: '/app/dropi/escaner-camara', icon: Camera, permiso: 'dropi_operacion' },
+            { name: 'Registrar devolución', href: '/app/dropi/devolucion/registrar', icon: Undo2, permiso: 'dropi_operacion' },
+            { name: 'Discrepancias', href: '/app/dropi/discrepancias', icon: AlertTriangle, permiso: 'dropi_admin' },
+            { name: 'Cortes', href: '/app/dropi/cortes', icon: Scissors, permiso: 'dropi_admin' },
+            { name: 'Wallet Dropi', href: '/app/dropi/wallet', icon: Wallet, permiso: 'dropi_admin' },
+        ],
+    },
+    {
+        key: 'ec_productos',
+        label: 'Productos e inventario',
+        items: [
+            { name: '➕ Nuevo producto', href: '/app/catalogo/productos/nuevo', icon: Package, permiso: 'catalogo' },
+            { name: 'Productos', href: '/app/catalogo/productos', icon: Package, permiso: 'catalogo' },
+            // Catálogo propio por la API oficial: lee, compara con el ERP y vincula lo seguro.
+            { name: 'Traer productos de Dropi', href: '/app/dropi/catalogo', icon: RefreshCw, permiso: 'dropi_admin' },
+            { name: 'Importar productos (Excel Dropi)', href: '/app/dropi/productos/importar', icon: Upload, permiso: 'dropi_admin' },
+            { name: 'Inventario en vivo', href: '/app/dropi/inventario-en-vivo', icon: Warehouse, permiso: 'dropi_operacion' },
+            // La misma pantalla del menú general, con la misma clave: aquí sólo
+            // para no salir del espacio a ver qué descontó un empaque.
+            { name: 'Kardex', href: '/app/inventario/kardex', icon: Layers, permiso: 'bodega_operativa' },
+            // Dropi no deja embeberse (X-Frame-Options: SAMEORIGIN): se abre aparte,
+            // con la sesión de Dropi del navegador. Ver Components/AbrirEnDropi.vue.
+            { name: 'Crear producto en Dropi', href: 'https://app.dropi.co/dashboard/products/add', icon: Package, external: true, permiso: 'dropi' },
+            { name: 'Vincular productos con Dropi', href: '/admin', icon: Tag, external: true, permiso: 'dropi' },
+        ],
+    },
+    {
+        key: 'ec_contabilidad',
+        label: 'Contabilidad e-commerce',
+        items: [
+            { name: 'Panel contable', href: '/app/contabilidad/panel?linea=dropi', icon: Calculator, permiso: 'contabilidad' },
+            { name: 'Dashboard cartera', href: '/app/cartera?linea=dropi', icon: BarChart3, permiso: 'cartera' },
+            { name: 'Facturas', href: '/app/facturas?linea=dropi', icon: FileText, permiso: 'cartera' },
+            { name: 'Pagos recibidos', href: '/app/pagos?linea=dropi', icon: Calculator, permiso: 'cartera' },
+            { name: '📒 Libro contable', href: '/app/cartera/movimientos?linea=dropi', icon: Calculator, permiso: 'cartera' },
+            { name: 'Balance general', href: '/app/contabilidad/balance-general?linea=dropi', icon: BarChart3, permiso: 'contabilidad' },
+            { name: 'Estado de resultados', href: '/app/contabilidad/estado-resultados?linea=dropi', icon: BarChart3, permiso: 'contabilidad' },
+            { name: 'Reportes de cartera', href: '/app/cartera/reportes?linea=dropi', icon: BarChart3, permiso: 'cartera' },
+            { name: 'Notas crédito', href: '/app/cartera/notas-credito?linea=dropi', icon: FileText, permiso: 'cartera' },
+        ],
+    },
+];
+
+const espacio = computed(() => page.props.auth?.espacio || null);
+const enEcommerce = computed(() => espacio.value?.actual === 'dropi');
+const cambiarEspacio = (valor) => router.post('/app/espacio', { espacio: valor });
+
+const visibleGroups = computed(() => (enEcommerce.value ? ecommerceGroups : groups)
     .map((g) => ({
         ...g,
         items: g.items.filter((it) => puedeVer(it.permiso)),
@@ -671,6 +746,22 @@ const visibleGroups = computed(() => groups
                     </button>
                     <!-- MEJORAS-A · ⌘K real: buscador global funcional -->
                     <CommandPalette/>
+                    <!--
+                        ¿En qué empresa estoy? Sólo para quien opera Dropi
+                        (App\Support\EspacioTrabajo). En e-commerce el menú
+                        muestra sólo lo de Dropi.
+                    -->
+                    <label v-if="espacio" class="flex items-center gap-1.5 text-sm" title="Cambiar de empresa">
+                        <span class="hidden lg:inline text-xs text-surface-500">Empresa</span>
+                        <select
+                            :value="espacio.actual"
+                            @change="cambiarEspacio($event.target.value)"
+                            :class="['input py-1.5 text-sm font-semibold', enEcommerce ? 'border-brand-500 text-brand-700 dark:text-brand-300' : '']"
+                            aria-label="Empresa en la que estás trabajando"
+                        >
+                            <option v-for="o in espacio.opciones" :key="o.valor" :value="o.valor">{{ o.label }}</option>
+                        </select>
+                    </label>
                 </div>
 
                 <div class="flex items-center gap-2">

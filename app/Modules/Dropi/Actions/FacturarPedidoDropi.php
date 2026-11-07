@@ -116,6 +116,11 @@ class FacturarPedidoDropi
 
             $factura = FacturaVenta::create([
                 'empresa_id' => $empresa->id,
+                // Línea de negocio Dropi: el asiento (1305 contra ingreso e IVA),
+                // el cobro desde la wallet y las notas la heredan de aquí. Sin
+                // esto la columna tomaba su default `great_baby` y cada venta del
+                // e-commerce quedaba en los libros de Great Baby.
+                'linea_negocio' => \App\Modules\Contabilidad\Enums\LineaNegocio::Dropi,
                 'numero' => NumeroFactura::siguiente($empresa),
                 'contacto_id' => self::consumidorFinal()->id,
                 'fecha_emision' => now()->toDateString(),

@@ -93,7 +93,12 @@ class ContabilidadExtrasController extends Controller implements HasMiddleware
             'desde' => ['nullable', 'date'],
             'hasta' => ['nullable', 'date', 'after_or_equal:desde'],
             'incluir_anulados' => ['nullable', 'boolean'],
+            'linea' => ['nullable', 'string', 'max:20'],
+            'destino' => ['nullable', 'string', 'max:20'],
         ]);
+        // Los dos ejes, como el libro y los reportes: así el panel del
+        // e-commerce es este mismo con `linea=dropi`, no una copia.
+        $ejes = FiltroEjes::deRequest($request);
 
         // Re-audit M5 UX-C4 · defaults unificados con Index (`hasta = hoy`).
         // Antes Panel usaba `endOfMonth` y en el mismo período los totales
@@ -113,6 +118,7 @@ class ContabilidadExtrasController extends Controller implements HasMiddleware
         // KPI 1-query.
         $kpiRow = MovimientoContable::query()
             ->when($incluirAnulados, fn ($q) => $q->withTrashed())
+            ->tap(fn ($q) => $ejes->aplicar($q))
             ->whereBetween('fecha', [$desde, $hasta])
             ->selectRaw('COALESCE(SUM(debe),0) d, COALESCE(SUM(haber),0) h, COUNT(*) n')
             ->first();
@@ -121,6 +127,7 @@ class ContabilidadExtrasController extends Controller implements HasMiddleware
 
         $topCuentas = MovimientoContable::query()
             ->when($incluirAnulados, fn ($q) => $q->withTrashed())
+            ->tap(fn ($q) => $ejes->aplicar($q))
             ->whereBetween('fecha', [$desde, $hasta])
             ->selectRaw('cuenta_puc, SUM(debe) as debe, SUM(haber) as haber, COUNT(*) as movs')
             ->groupBy('cuenta_puc')->orderByRaw('SUM(debe) + SUM(haber) DESC')->limit(10)->get();
@@ -136,6 +143,7 @@ class ContabilidadExtrasController extends Controller implements HasMiddleware
         //   `volumen` usa CASE para netear.
         $porOrigen = MovimientoContable::query()
             ->when($incluirAnulados, fn ($q) => $q->withTrashed())
+            ->tap(fn ($q) => $ejes->aplicar($q))
             ->whereBetween('fecha', [$desde, $hasta])
             ->whereNotNull('origen_type')
             ->whereNotNull('origen_id')
@@ -155,6 +163,8 @@ class ContabilidadExtrasController extends Controller implements HasMiddleware
 
         return Inertia::render('Contabilidad/Panel', [
             'periodo' => ['desde' => $desde, 'hasta' => $hasta, 'incluir_anulados' => $incluirAnulados],
+            'filtros' => $ejes->aParametros(),
+            'opcionesEjes' => FiltroEjes::opciones(),
             'kpis' => [
                 'siigo_etiqueta' => $siigo['etiqueta'],
                 'total_debe' => $totalDebe,

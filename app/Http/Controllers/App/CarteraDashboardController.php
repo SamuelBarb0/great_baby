@@ -8,6 +8,7 @@ use App\Modules\Cartera\Enums\EstadoFactura;
 use App\Modules\Cartera\Enums\TramoAntiguedad;
 use App\Modules\Cartera\Models\FacturaVenta;
 use App\Modules\Cartera\Models\PagoVenta;
+use App\Modules\Contabilidad\Support\FiltroEjes;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controllers\HasMiddleware;
 use Illuminate\Routing\Controllers\Middleware;
@@ -28,9 +29,16 @@ class CarteraDashboardController extends Controller implements HasMiddleware
         ];
     }
 
-    public function __invoke(): Response
+    /** Línea de negocio y destino fiscal (`?linea=dropi` = la cartera del e-commerce). */
+    private FiltroEjes $ejes;
+
+    public function __invoke(Request $request): Response
     {
+        $this->ejes = FiltroEjes::deRequest($request);
+
         return Inertia::render('Cartera/Dashboard', [
+            'filtros' => $this->ejes->aParametros(),
+            'opcionesEjes' => FiltroEjes::opciones(),
             'semaforo' => $this->semaforo(),
             'kpis' => $this->kpis(),
             'topMorosos' => $this->topMorosos(),
@@ -48,7 +56,7 @@ class CarteraDashboardController extends Controller implements HasMiddleware
 
     private function semaforo(): array
     {
-        $ant = CalcularAntiguedadCartera::run();
+        $ant = CalcularAntiguedadCartera::run(null, $this->ejes);
         $labels = [];
         $data = [];
         $colors = [];
@@ -78,11 +86,15 @@ class CarteraDashboardController extends Controller implements HasMiddleware
         $hoy = today('America/Bogota');
         $inicioMes = $hoy->copy()->startOfMonth();
 
-        $totalPendiente = FacturaVenta::whereNotIn('estado', [EstadoFactura::Pagada, EstadoFactura::Anulada])->sum('saldo');
-        $vencidasCount = FacturaVenta::whereNotIn('estado', [EstadoFactura::Pagada, EstadoFactura::Anulada])
+        $fac = fn () => $this->ejes->aplicar(FacturaVenta::query());
+        // Un pago no tiene ejes propios: son los de su factura.
+        $pag = fn () => $this->ejes->aplicarPor(PagoVenta::query(), 'factura');
+
+        $totalPendiente = $fac()->whereNotIn('estado', [EstadoFactura::Pagada, EstadoFactura::Anulada])->sum('saldo');
+        $vencidasCount = $fac()->whereNotIn('estado', [EstadoFactura::Pagada, EstadoFactura::Anulada])
             ->where('fecha_vencimiento', '<', $hoy)->count();
-        $cobradoMes = PagoVenta::whereBetween('fecha', [$inicioMes, $hoy->copy()->endOfDay()])->sum('monto_aplicado');
-        $facturadoMes = FacturaVenta::whereBetween('fecha_emision', [$inicioMes, $hoy->copy()->endOfDay()])
+        $cobradoMes = $pag()->whereBetween('fecha', [$inicioMes, $hoy->copy()->endOfDay()])->sum('monto_aplicado');
+        $facturadoMes = $fac()->whereBetween('fecha_emision', [$inicioMes, $hoy->copy()->endOfDay()])
             ->where('estado', '!=', EstadoFactura::Anulada)->sum('total');
 
         return [
@@ -97,6 +109,7 @@ class CarteraDashboardController extends Controller implements HasMiddleware
     {
         return DB::table('facturas_venta as f')
             ->join('contactos as c', 'c.id', '=', 'f.contacto_id')
+            ->tap(fn ($q) => $this->ejes->aplicar($q, 'f'))
             ->whereNull('f.deleted_at') // QA-D Bloque3: respetar soft-deletes (bypaseaba scope Eloquent)
             ->whereNull('c.deleted_at')
             ->whereNotIn('f.estado', [EstadoFactura::Pagada->value, EstadoFactura::Anulada->value])
@@ -121,7 +134,7 @@ class CarteraDashboardController extends Controller implements HasMiddleware
     {
         $desde = today('America/Bogota')->copy()->subDays(29)->startOfDay();
         $hasta = today('America/Bogota')->copy()->endOfDay();
-        $porDia = PagoVenta::whereBetween('fecha', [$desde, $hasta])
+        $porDia = $this->ejes->aplicarPor(PagoVenta::query(), 'factura')->whereBetween('fecha', [$desde, $hasta])
             ->selectRaw('DATE(fecha) as d, SUM(monto_aplicado) as t')
             ->groupBy('d')->pluck('t', 'd');
         $labels = $valores = [];
@@ -137,7 +150,7 @@ class CarteraDashboardController extends Controller implements HasMiddleware
     {
         $desde = today('America/Bogota')->copy()->subDays(29)->startOfDay();
         $hasta = today('America/Bogota')->copy()->endOfDay();
-        $porDia = FacturaVenta::whereBetween('fecha_emision', [$desde, $hasta])
+        $porDia = $this->ejes->aplicar(FacturaVenta::query())->whereBetween('fecha_emision', [$desde, $hasta])
             ->where('estado', '!=', EstadoFactura::Anulada)
             ->selectRaw('DATE(fecha_emision) as d, SUM(total) as t')
             ->groupBy('d')->pluck('t', 'd');
@@ -155,6 +168,7 @@ class CarteraDashboardController extends Controller implements HasMiddleware
         $hoy = today('America/Bogota');
         return DB::table('facturas_venta as f')
             ->join('contactos as c', 'c.id', '=', 'f.contacto_id')
+            ->tap(fn ($q) => $this->ejes->aplicar($q, 'f'))
             ->whereNull('f.deleted_at') // QA-D Bloque3
             ->whereNull('c.deleted_at')
             ->whereNotIn('f.estado', [EstadoFactura::Pagada->value, EstadoFactura::Anulada->value])

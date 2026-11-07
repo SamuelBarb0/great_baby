@@ -73,7 +73,7 @@ class MovimientoContable extends Model implements AuditableContract
                  */
                 $m->linea_negocio = ($origen && isset($origen->linea_negocio) && $origen->linea_negocio)
                     ? $origen->linea_negocio
-                    : LineaNegocio::deOrigen($m->origen_type);
+                    : (self::lineaDeSuFactura($origen) ?? LineaNegocio::deOrigen($m->origen_type));
             }
 
             if ($m->destino_fiscal === null) {
@@ -190,5 +190,25 @@ class MovimientoContable extends Model implements AuditableContract
             }
             return count($lineas);
         });
+    }
+
+    /**
+     * La línea de negocio de la factura a la que pertenece el documento.
+     *
+     * Un recibo de caja, una nota crédito o una nota débito no llevan línea
+     * propia: son de su factura. Deducida del namespace, todo eso caía en Great
+     * Baby aunque la factura fuera de Dropi — el cobro que Dropi hace desde la
+     * wallet (ConciliarWalletDropi) dejaba la wallet en Dropi y el 1305 en Great
+     * Baby, y ninguno de los dos libros cuadraba solo.
+     */
+    private static function lineaDeSuFactura(?Model $origen): ?LineaNegocio
+    {
+        if (! $origen || ! method_exists($origen, 'factura')) {
+            return null;
+        }
+
+        $linea = $origen->factura?->linea_negocio;
+
+        return $linea instanceof LineaNegocio ? $linea : LineaNegocio::tryFrom((string) $linea);
     }
 }
