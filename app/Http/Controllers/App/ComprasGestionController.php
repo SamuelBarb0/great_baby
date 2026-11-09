@@ -266,37 +266,15 @@ class ComprasGestionController extends Controller implements HasMiddleware
             'numero_documento.required' => 'Escriba el número de documento. Si es del exterior, el de su registro o su factura.',
             'email.email' => 'Ese correo no parece válido.',
         ]);
-        $numero = trim($datos['numero_documento']);
-
         // Un documento repetido es el mismo contacto: puede ser ya cliente, y se marca
         // también proveedor. Sólo se devuelve su nombre y documento: quien compra no
         // tiene por qué ver los datos de un cliente.
-        $existente = \App\Models\Contacto::withTrashed()->where('numero_documento', $numero)->first();
-        if ($existente) {
-            if ($existente->trashed() || ! $existente->activo) {
-                throw \Illuminate\Validation\ValidationException::withMessages([
-                    'numero_documento' => 'Ese documento es de un contacto '.($existente->trashed() ? 'eliminado' : 'inactivo')
-                        .'. Pídale a contabilidad que lo recupere.',
-                ]);
-            }
-            if (! $existente->es_proveedor) {
-                $existente->update(['es_proveedor' => true]);
-            }
+        $r = \App\Modules\Compras\Actions\RegistrarProveedor::run($datos);
 
-            return response()->json(['proveedor' => $this->proveedorParaLaOrden($existente), 'ya_existia' => true]);
-        }
-
-        $nuevo = \App\Models\Contacto::create([
-            'tipo_documento' => $datos['tipo_documento'],
-            'numero_documento' => $numero,
-            'nombre_completo' => trim($datos['nombre']),
-            'email' => $datos['email'] ?? null,
-            'telefono' => $datos['telefono'] ?? null,
-            'es_proveedor' => true,
-            'activo' => true,
-        ]);
-
-        return response()->json(['proveedor' => $this->proveedorParaLaOrden($nuevo), 'ya_existia' => false], 201);
+        return response()->json(
+            ['proveedor' => $this->proveedorParaLaOrden($r['contacto']), 'ya_existia' => $r['ya_existia']],
+            $r['ya_existia'] ? 200 : 201,
+        );
     }
 
     /** La misma forma que la lista de proveedores de la orden nueva. */
@@ -484,27 +462,8 @@ class ComprasGestionController extends Controller implements HasMiddleware
             'Las ordenes de compra las arma Compras, bodega o contabilidad.');
 
         $o = OrdenCompra::with('items')->findOrFail($orden);
-
-        // Reutiliza CrearOrdenCompra armando el payload desde la OC original.
-        $payload = [
-            'proveedor_id' => $o->proveedor_id,
-            'bodega_id' => $o->bodega_id,
-            'tipo' => $o->tipo,
-            'moneda' => $o->moneda ?? 'COP',
-            'tasa_cambio' => (float) ($o->tasa_cambio ?? 1),
-            'fecha_esperada' => null,
-            'observaciones' => "Duplicada desde {$o->numero}",
-            'items' => $o->items->map(fn ($i) => [
-                'descripcion' => $i->descripcion,
-                'cantidad' => (float) $i->cantidad,
-                'precio_unit' => (float) $i->precio_unit,
-                'iva_pct' => (float) ($i->iva_pct ?? 0),
-                'descuento_pct' => (float) ($i->descuento_pct ?? 0),
-                'producto_id' => $i->producto_id,
-                'variante_id' => $i->variante_id,
-            ])->all(),
-        ];
-        $nueva = CrearOrdenCompra::run($payload);
+        // Conserva la línea de negocio: una OC de Dropi duplicada sigue siendo de Dropi.
+        $nueva = \App\Modules\Compras\Actions\DuplicarOrdenCompra::run($o);
         return redirect()->route('app.compras.oc.show', $nueva->id)
             ->with('flash', ['type' => 'success', 'message' => "OC {$nueva->numero} duplicada desde {$o->numero}."]);
     }
@@ -531,27 +490,7 @@ class ComprasGestionController extends Controller implements HasMiddleware
     public function ocAnular(Request $r, int $orden): RedirectResponse
     {
         $data = $r->validate(['motivo' => ['required', 'string', 'min:10', 'max:300']]);
-        $o = OrdenCompra::findOrFail($orden);
-        // Re-audit M2 FUNC-C4 · agregado Anulada (idempotencia — evita re-anular).
-        abort_if(in_array($o->estado, [EstadoOrdenCompra::Recibida, EstadoOrdenCompra::Cerrada, EstadoOrdenCompra::Anulada]), 422, 'OC ya recibida/cerrada/anulada.');
-        // Re-audit M2 PATRÓN B (DATOS-C2) · asignación DIRECTA. Antes `$o->update(['estado'=>...])`
-        // era mass-assign silencioso: `estado` no estaba en fillable y Laravel lo DESCARTABA
-        // → la OC quedaba "anulada" solo en observaciones pero seguía viva. Con $guarded=['id']
-        // + asignación directa el estado se persiste correcto.
-        $o->estado = EstadoOrdenCompra::Anulada;
-        $o->anulado_at = now();
-        $o->anulado_por = auth()->id();
-        $o->motivo_anulacion = $data['motivo'];
-        $o->observaciones = trim(($o->observaciones ?? '') . "\n[ANULADA " . now()->toDateString() . " por " . auth()->user()?->name . "] " . $data['motivo']);
-        $o->save();
-        // Re-audit M2 R3 PATRÓN R (SEG-M2) · usa array_key_exists — antes
-        // `config('logging.channels.audit')` returnaba truthy incluso si `[]`.
-        \Illuminate\Support\Facades\Log::channel(
-            array_key_exists('audit', config('logging.channels') ?? []) ? 'audit' : 'stack'
-        )->info('compras.oc.anular', [
-            'user_id' => auth()->id(), 'orden_id' => $o->id, 'numero' => $o->numero,
-            'total' => (float) $o->total, 'motivo' => $data['motivo'],
-        ]);
+        $o = \App\Modules\Compras\Actions\AnularOrdenCompra::run(OrdenCompra::findOrFail($orden), $data['motivo']);
         return back()->with('success', "OC {$o->numero} anulada.");
     }
 
@@ -770,104 +709,10 @@ class ComprasGestionController extends Controller implements HasMiddleware
             'motivo_exceso' => ['nullable', 'string', 'max:300'],
         ]);
 
-        $orden = OrdenCompra::with('items')->findOrFail($data['orden_id']);
-        abort_unless(in_array($orden->estado, [EstadoOrdenCompra::Aprobada, EstadoOrdenCompra::Parcial, EstadoOrdenCompra::Enviada]), 422, 'La OC no está en estado receptable.');
-        abort_if($orden->bodega_id === null, 422, 'La OC no tiene bodega destino asignada.');
-
-        $itemsOc = $orden->items->pluck('id')->all();
-        foreach ($data['items'] as $it) {
-            abort_unless(in_array((int) $it['orden_item_id'], $itemsOc, true), 422, 'Item de recepción no pertenece a esta OC.');
-        }
-
-        // Dedupe: si vienen 2 líneas con mismo orden_item_id + MISMA clasificación
-        // fusionamos qty. Si varían clasificaciones, se mantienen como líneas
-        // separadas (la misma OC puede repartir el mismo SKU entre apto/avería/
-        // cuarentena cuando sólo parte del lote llegó en condiciones).
-        $itemsFusionados = [];
-        foreach ($data['items'] as $it) {
-            $clas = $it['clasificacion'] ?? 'apto';
-            $color = trim((string) ($it['color_nombre'] ?? '')) ?: null;
-            $key = (int) $it['orden_item_id'] . ':' . $clas . ':' . mb_strtolower((string) $color);
-            if (isset($itemsFusionados[$key])) {
-                $itemsFusionados[$key]['cantidad_recibida'] += (float) $it['cantidad_recibida'];
-                $itemsFusionados[$key]['lote'] = $itemsFusionados[$key]['lote'] ?: ($it['lote'] ?? null);
-                // motivos: concatenamos para no perder contexto cuando el usuario
-                // ingresó dos novedades del mismo producto.
-                if (! empty($it['motivo_clasificacion']) && $itemsFusionados[$key]['motivo_clasificacion'] !== $it['motivo_clasificacion']) {
-                    $itemsFusionados[$key]['motivo_clasificacion'] = trim(($itemsFusionados[$key]['motivo_clasificacion'] ?? '').' · '.$it['motivo_clasificacion']);
-                }
-            } else {
-                $itemsFusionados[$key] = [
-                    'orden_item_id' => (int) $it['orden_item_id'],
-                    'cantidad_recibida' => (float) $it['cantidad_recibida'],
-                    'lote' => $it['lote'] ?? null,
-                    'clasificacion' => $clas,
-                    'motivo_clasificacion' => $it['motivo_clasificacion'] ?? null,
-                    'color_nombre' => $color,
-                ];
-            }
-        }
-
-        // El conteo de Don Jorge es la verdad, así que contar de más no se bloquea:
-        // sólo se le pide el motivo, para que quede dicho contra la orden.
-        if ($orden->esImportacion()) {
-            $excesos = app(\App\Modules\Compras\Services\ColoresDeImportacion::class)->excesos($orden, array_values($itemsFusionados));
-            if ($excesos && blank($data['motivo_exceso'] ?? null)) {
-                return back()->withErrors(['recepcion' => 'Se contó más de lo esperado en '.implode(', ', array_keys($excesos)).': escriba el motivo.']);
-            }
-            if ($excesos) {
-                $data['observaciones'] = trim(($data['observaciones'] ?? '')."\nLlegó de más (".implode(', ', array_keys($excesos))."): {$data['motivo_exceso']}");
-            }
-        }
-
+        // La lógica vive en RegistrarRecepcion (7-nov): el panel de Dropi recibe
+        //   con las mismas reglas.
         try {
-        $rc = \Illuminate\Support\Facades\DB::transaction(function () use ($data, $orden, $itemsFusionados) {
-            $rc = RecepcionCompra::create([
-                'numero' => RecepcionCompra::siguienteNumero(),
-                'orden_id' => $orden->id,
-                'bodega_id' => $orden->bodega_id,
-                'estado' => 'borrador',
-                'fecha_recepcion' => now(),
-                'remision_proveedor' => $data['remision_proveedor'] ?? null,
-                'factura_proveedor' => $data['factura_proveedor'] ?? null,
-                'transportista' => $data['transportista'] ?? null,
-                'observaciones' => $data['observaciones'] ?? null,
-                // Clave real del $fillable (antes 'creado_por' se descartaba).
-                'recibido_por' => auth()->id(),
-            ]);
-            foreach ($itemsFusionados as $it) {
-                $ocItem = $orden->items->firstWhere('id', $it['orden_item_id']);
-                $costoUnit = (float) $ocItem->precio_unit;
-                $cantidad = (float) $it['cantidad_recibida'];
-                // Otro color del que se pidió en esta línea no es la variante de la línea.
-                $color = $it['color_nombre'] ?? $ocItem->color_nombre;
-                $mismoColor = mb_strtolower((string) $color) === mb_strtolower((string) $ocItem->color_nombre);
-                $rc->items()->create([
-                    'orden_item_id' => $ocItem->id,
-                    'color_nombre' => $color,
-                    'variante_id' => $mismoColor ? $ocItem->variante_id : null,
-                    // Copiaba sólo la variante. Los productos AGREGADOS —la
-                    // mayor parte del catálogo de Great Baby— no tienen
-                    // variante, así que llegaban acá sin nada con qué
-                    // identificarse y `RecibirMercancia` se saltaba el kardex:
-                    // la recepción quedaba registrada y el stock no subía.
-                    'producto_id' => $ocItem->producto_id,
-                    'cantidad_recibida' => $cantidad,
-                    'costo_unit' => $costoUnit,
-                    'subtotal' => round($costoUnit * $cantidad, 2),
-                    'lote' => $it['lote'] ?? null,
-                    // LOG-J8 · persistir destino + motivo. El Action RecibirMercancia
-                    // lee `clasificacion` para decidir a qué almacén lógico va el
-                    // kardex (apto → stock vendible, el resto → stock no vendible).
-                    'clasificacion' => $it['clasificacion'] ?? 'apto',
-                    'motivo_clasificacion' => $it['motivo_clasificacion'] ?? null,
-                ]);
-            }
-
-            // Confirmación dentro de la MISMA tx externa. Si esto truena,
-            // rollback total incluida la recepción recién creada.
-            return RecibirMercancia::run($rc);
-        });
+            $rc = \App\Modules\Compras\Actions\RegistrarRecepcion::run($data);
         } catch (\InvalidArgumentException $e) {
             // Sin tasa de cambio o recibiendo de más: que lo lea quien está contando.
             return back()->withErrors(['recepcion' => $e->getMessage()]);
@@ -1070,12 +915,7 @@ class ComprasGestionController extends Controller implements HasMiddleware
             'fecha_zarpe' => ['nullable', 'date'],
             'eta' => ['nullable', 'date'],
         ]);
-        // Re-audit M2 PATRÓN C + I · usa siguienteNumero() atómico del modelo
-        // (con lockForUpdate + año en TZ Colombia). Antes: `count()+1` sin lock =
-        // colisión concurrente; `whereYear('created_at')` sin TZ = 31-dic 20:00
-        // Bogotá cruzaba al año siguiente en UTC → salto de secuencia.
-        $numero = Importacion::siguienteNumero();
-        $imp = Importacion::create([...$data, 'numero' => $numero, 'creado_por' => auth()->id()]);
+        $imp = \App\Modules\Compras\Actions\CrearImportacion::run($data);
         return redirect()->route('app.compras.importacion.show', $imp->id)->with('success', "Importación {$imp->numero} creada.");
     }
 
@@ -1104,33 +944,9 @@ class ComprasGestionController extends Controller implements HasMiddleware
             'comprobante' => ['nullable', 'file', 'max:20480', 'mimes:'.ImportacionDocumentosController::MIMES],
         ]);
         unset($data['comprobante']);
-        // El formulario la deja opcional y la columna no: en blanco daba un 500.
-        $data['descripcion'] = ($data['descripcion'] ?? null) ?: \App\Modules\Compras\Enums\ConceptoGastoImportacion::from($data['concepto'])->label();
-        $imp = Importacion::findOrFail($importacion);
-        abort_if(
-            $imp->estado === EstadoImportacion::Liquidada,
-            422,
-            'La importación ya está liquidada. Requiere reversar liquidación (a definir) para agregar gastos.'
+        \App\Modules\Compras\Actions\AgregarGastoImportacion::run(
+            Importacion::findOrFail($importacion), $data, $r->file('comprobante'),
         );
-        // Re-audit M2 R3 PATRÓN R (SEG-B2) · si moneda ≠ COP y no hay TRM
-        // definida, ABORTA — antes se usaba 1 silenciosamente y USD 1200
-        // entraba al asiento como COP 1200 (subvaluación grave del costo).
-        if ($data['moneda'] !== 'COP' && ((float) $imp->tasa_cambio_liquidacion) <= 0) {
-            abort(422, "Falta definir la tasa de cambio de la importación (moneda={$data['moneda']}). Edítala y agrega TRM antes de agregar gastos en moneda extranjera.");
-        }
-        // Un gasto en pesos ya está en pesos: multiplicarlo por la tasa convertía
-        // un flete de 5 millones en 2.600 millones. Y el contenedor sólo conoce la
-        // tasa de su moneda: un gasto en otra no tiene con qué convertirse.
-        if ($data['moneda'] !== 'COP' && $data['moneda'] !== $imp->moneda_origen) {
-            return back()->withErrors(['moneda' => "Este contenedor sólo tiene tasa de {$imp->moneda_origen}: registre el gasto en COP o en {$imp->moneda_origen}."]);
-        }
-        $data['monto_base'] = $data['moneda'] === 'COP'
-            ? (float) $data['monto']
-            : $data['monto'] * (float) $imp->tasa_cambio_liquidacion;
-        $gasto = $imp->gastos()->create($data);
-        if ($r->hasFile('comprobante')) {
-            \App\Modules\Compras\Actions\GuardarDocumentoImportacion::run($imp, $r->file('comprobante'), 'comprobante_gasto', $gasto);
-        }
         return back()->with('success', 'Gasto agregado.');
     }
 

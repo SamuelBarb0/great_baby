@@ -56,7 +56,7 @@ class Reglas
         // que el día que se conectara SIIGO los ingresos enteros de Great Baby
         // entraban como 41350101 ALIMENTACIÓN E HIDRATACIÓN.
         'contable.cta_cxc_default' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '13050501', 'etiqueta' => 'Cuenta CxC por defecto (Clientes)', 'descripcion' => 'PUC 13050501 Clientes nacionales. Era 1305, el grupo, que no admite movimiento.'],
-        'dropi.empresa' => ['grupo' => 'dropi', 'tipo' => 'string', 'valor' => 'ecommerce', 'etiqueta' => 'Razón social que factura lo de Dropi', 'descripcion' => 'Código de EmpresaConfig (canal e-commerce) con el que se factura lo de Dropi.'],
+        'dropi.empresa' => ['grupo' => 'dropi', 'tipo' => 'string', 'valor' => 'great_baby', 'etiqueta' => 'Razón social que factura lo de Dropi', 'descripcion' => 'Código de EmpresaConfig con el que se factura lo de Dropi. Es Great Baby (7-nov: misma empresa, otra resolución; la resolución va en el panel Dropi → Configuración → SIIGO de Dropi).'],
         /*
          * El ingreso NO se decide acá en el caso normal.
          *

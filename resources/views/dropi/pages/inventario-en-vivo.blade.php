@@ -1,7 +1,9 @@
 <x-filament-panels::page>
     @php
         $saldos = $this->getSaldos();
-        $variantes = $this->getVariantes();
+        // Variantes (llave «v-») y productos sin desglose (llave «p-»), con la
+        // misma llave que usan los saldos.
+        $filas = $this->getFilas();
         $ubicaciones = $this->getUbicaciones();
         $categorias = $this->getCategorias();
         $totalGeneral = array_sum(array_map('array_sum', $saldos));
@@ -26,11 +28,18 @@
         </div>
     </div>
 
+    {{-- La columna fija tapa las celdas al desplazarse: necesita fondo sólido,
+         y del tema (antes era negro fijo y en tema claro los nombres no se leían). --}}
+    <style>
+        .inv-fija { background: #fff; }
+        .dark .inv-fija { background: rgb(24, 24, 27); }
+    </style>
+
     <div style="overflow-x:auto;border:1px solid rgba(156,163,175,.2);border-radius:.75rem;">
         <table style="width:100%;border-collapse:collapse;min-width:900px;">
             <thead>
                 <tr style="background:rgba(156,163,175,.08);">
-                    <th style="text-align:left;padding:.75rem;font-size:.75rem;text-transform:uppercase;color:#9ca3af;position:sticky;left:0;background:rgba(15,15,15,.98);z-index:2;">Producto · Variante</th>
+                    <th style="text-align:left;padding:.75rem;font-size:.75rem;text-transform:uppercase;color:#9ca3af;position:sticky;left:0;z-index:2;" class="inv-fija">Producto · Variante</th>
                     @foreach($ubicaciones as $u)
                         <th style="text-align:center;padding:.5rem .375rem;font-size:.65rem;color:#9ca3af;min-width:80px;">
                             <div style="font-weight:700;color:inherit;">{{ $u->codigo }}</div>
@@ -41,15 +50,17 @@
                 </tr>
             </thead>
             <tbody>
-                @forelse($variantes as $v)
+                @forelse($filas as $f)
                     @php
-                        $filaSaldos = $saldos[$v->id] ?? [];
+                        $filaSaldos = $saldos[$f['key']] ?? [];
                         $totalFila = array_sum($filaSaldos);
                     @endphp
-                    <tr style="border-top:1px solid rgba(156,163,175,.1);">
-                        <td style="padding:.75rem;position:sticky;left:0;background:rgba(15,15,15,.98);">
-                            <div style="font-weight:600;">{{ $v->producto->nombre }}</div>
-                            <div style="font-family:ui-monospace,monospace;font-size:.75rem;color:#9ca3af;">{{ $v->codigo_barras }}</div>
+                    <tr wire:key="inv-{{ $f['key'] }}" style="border-top:1px solid rgba(156,163,175,.1);">
+                        <td style="padding:.75rem;position:sticky;left:0;" class="inv-fija">
+                            <div style="font-weight:600;">{{ $f['nombre'] }}</div>
+                            <div style="font-family:ui-monospace,monospace;font-size:.75rem;color:#9ca3af;">
+                                {{ $f['ref'] }} · {{ $f['etiqueta'] }}
+                            </div>
                         </td>
                         @foreach($ubicaciones as $u)
                             @php $s = $filaSaldos[$u->id] ?? 0; @endphp
@@ -66,7 +77,7 @@
                         <td style="text-align:right;padding:.75rem;font-weight:700;color:{{ $totalFila > 0 ? '#f59e0b' : '#4b5563' }};">{{ $totalFila }}</td>
                     </tr>
                 @empty
-                    <tr><td colspan="99" style="text-align:center;padding:2rem;color:#9ca3af;">Sin variantes que coincidan.</td></tr>
+                    <tr><td colspan="99" style="text-align:center;padding:2rem;color:#9ca3af;">Sin productos que coincidan.</td></tr>
                 @endforelse
             </tbody>
         </table>

@@ -8,6 +8,7 @@ use App\Modules\Contabilidad\Enums\DestinoFiscal;
 use App\Modules\Contabilidad\Enums\LineaNegocio;
 use App\Modules\Contabilidad\Models\MovimientoCaja;
 use App\Modules\Gerencia\Models\GastoOperativo;
+use App\Modules\Contabilidad\Support\FiltroEjes;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Http\RedirectResponse;
@@ -30,6 +31,8 @@ class GastosController extends Controller implements HasMiddleware
     {
         $tipo = (string) $request->input('tipo', '');
         $estado = (string) $request->input('estado', '');
+        // `?linea=dropi` · el panel de Dropi abre los gastos ya filtrados.
+        $ejes = FiltroEjes::de($request->input('linea'), null);
         $u = $request->user();
         // Re-audit M5 R2 SEG-B2 · esContable() unificado.
         /*
@@ -51,10 +54,12 @@ class GastosController extends Controller implements HasMiddleware
             ->when(! $esAdmin, fn ($qb) => $qb->where('solicita_id', $u->id))
             ->when($tipo, fn ($qb) => $qb->where('tipo', $tipo))
             ->when($estado, fn ($qb) => $qb->where('estado', $estado))
+            ->tap(fn ($qb) => $ejes->aplicar($qb))
             ->orderByDesc('id')->paginate(30);
 
         $conteos = GastoOperativo::selectRaw('estado, COUNT(*) as total, SUM(monto) as suma')
             ->when(! $esAdmin, fn ($qb) => $qb->where('solicita_id', $u->id))
+            ->tap(fn ($qb) => $ejes->aplicar($qb))
             ->groupBy('estado')->get()->keyBy('estado');
 
         return Inertia::render('Gastos/Index', [
@@ -99,7 +104,8 @@ class GastosController extends Controller implements HasMiddleware
                 ->map(fn ($c) => ['id' => $c->id, 'nombre' => "{$c->codigo} · {$c->nombre}"]),
             'destinos' => DestinoFiscal::opcionesDeCompra(),  // gasto: fiscal o interno, sin reparto
             'lineas' => LineaNegocio::opciones(),
-            'filtros' => ['tipo' => $tipo ?: null, 'estado' => $estado ?: null],
+            'filtros' => ['tipo' => $tipo ?: null, 'estado' => $estado ?: null,
+                'linea' => $ejes->linea === 'todas' ? null : $ejes->linea],
         ]);
     }
 
@@ -116,118 +122,36 @@ class GastosController extends Controller implements HasMiddleware
             'tipo' => ['required', 'in:gasto,reembolso'],
             'notas' => ['nullable', 'string', 'max:500'],
         ]);
-        $numero = 'GO-' . now()->format('ym') . '-' . str_pad((string) (GastoOperativo::whereYear('created_at', now()->year)->count() + 1), 4, '0', STR_PAD_LEFT);
-
-        /*
-         * Un gasto sin factura del proveedor no se puede declarar: no hay con
-         * que soportar el IVA ni el costo ante la DIAN. Se marca interno por
-         * defecto, que es lo conservador, y queda VISIBLE para que el contador
-         * lo cambie si la factura aparece despues.
-         */
-        $sinFactura = trim((string) ($data['factura_ref'] ?? '')) === '';
-
-        GastoOperativo::create([
-            ...$data,
-            'numero' => $numero,
-            'solicita_id' => auth()->id(),
-            'estado' => 'pendiente',
-            'cuenta_puc' => self::cuentaDeCategoria($data['categoria']),
-            'destino_fiscal' => $sinFactura ? DestinoFiscal::Interno : DestinoFiscal::Siigo,
-            'motivo_destino' => $sinFactura ? 'Sin factura del proveedor' : null,
-            'linea_negocio' => LineaNegocio::GreatBaby,
-        ]);
-        return back()->with('success', "Solicitud {$numero} creada.");
+        // Número, cuenta de la categoría y destino fiscal: ver Contabilidad\Actions\Gastos.
+        $g = \App\Modules\Contabilidad\Actions\Gastos::crear($data, $r->user());
+        return back()->with('success', "Solicitud {$g->numero} creada.");
     }
 
     /**
-     * Los tipos de gasto y la cuenta de cada uno.
-     *
-     * Great Baby mando la lista el 2026-11-03: cada concepto con su cuenta
-     * del PUC. Hasta ahora la categoria era una etiqueta suelta y la cuenta
-     * se escribia a mano gasto por gasto, asi que dos papelerias podian ir a
-     * parar a dos cuentas distintas y el informe por cuenta no servia.
-     *
-     * Se lee de las reglas y no de una constante para que el contador pueda
-     * cambiar una cuenta sin que nadie toque codigo.
+     * Los tipos de gasto y la cuenta de cada uno: ver CatalogoGastos (7-nov,
+     * también lo usa el panel de Dropi).
      *
      * @return array<string,array{etiqueta:string,cuenta:string}>
      */
     public static function catalogoGastos(): array
     {
-        $tipos = [
-            'aseo_cafeteria' => 'Aseo y cafetería',
-            'papeleria' => 'Papelería',
-            'arriendo' => 'Arriendo',
-            'envios' => 'Envíos y fletes',
-            'honorarios' => 'Honorarios',
-            'publicidad' => 'Publicidad',
-            'servicio_acueducto' => 'Servicio · acueducto',
-            'servicio_energia' => 'Servicio · energía',
-            'servicio_internet' => 'Servicio · internet',
-            'servicio_celular' => 'Servicio · celular',
-            'servicio_gas' => 'Servicio · gas',
-        ];
-
-        $catalogo = [];
-        foreach ($tipos as $clave => $etiqueta) {
-            $catalogo[$clave] = [
-                'etiqueta' => $etiqueta,
-                'cuenta' => (string) setting('gastos.cta_'.$clave),
-            ];
-        }
-
-        // El cajon de sastre va al final y usa la cuenta de gasto generica.
-        $catalogo['otros'] = [
-            'etiqueta' => 'Otros',
-            'cuenta' => (string) setting('contable.cta_gasto_default'),
-        ];
-
-        return $catalogo;
-    }
-
-    /** La cuenta que le toca a una categoria, o la generica si no la conoce. */
-    private static function cuentaDeCategoria(string $categoria): ?string
-    {
-        $catalogo = self::catalogoGastos();
-
-        return $catalogo[$categoria]['cuenta']
-            ?? ((string) setting('contable.cta_gasto_default') ?: null);
+        return \App\Modules\Contabilidad\Support\CatalogoGastos::todos();
     }
 
     public function aprobar(Request $r, int $gasto): RedirectResponse
     {
-        $u = $r->user();
-        abort_unless($u->esAracely() || $u->hasAnyRole(['Gerente']), 403);
+        abort_unless(\App\Modules\Contabilidad\Actions\Gastos::puedeAprobar($r->user()), 403);
         $g = GastoOperativo::findOrFail($gasto);
-
-        /*
-         * Solo se aprueba lo PENDIENTE. Sin esto, un POST directo o una pestana
-         * vieja devolvia a «aprobado» un gasto ya pagado: la caja ya habia
-         * salido en el libro y la pantalla lo mostraba como pendiente de pagar.
-         * El libro aguantaba (los asientos son idempotentes), pero el estado
-         * mentia.
-         */
-        abort_unless($g->estado === 'pendiente', 422, 'Sólo se puede aprobar un gasto pendiente.');
-
-        $g->update(['estado' => 'aprobado', 'aprueba_id' => $u->id]);
-
-        // La obligacion ya existe aunque no se haya pagado: se causa ahora.
-        // Antes el gasto aprobado no entraba a ningun lado.
-        app(RegistrarAsientoGasto::class)->causar($g->fresh());
-
+        // Sólo lo pendiente, y se causa en el libro: ver Contabilidad\Actions\Gastos.
+        \App\Modules\Contabilidad\Actions\Gastos::aprobar($g, $r->user());
         return back()->with('success', "Gasto {$g->numero} aprobado y causado en el libro.");
     }
 
     public function rechazar(Request $r, int $gasto): RedirectResponse
     {
-        $u = $r->user();
-        abort_unless($u->esAracely() || $u->hasAnyRole(['Gerente']), 403);
+        abort_unless(\App\Modules\Contabilidad\Actions\Gastos::puedeAprobar($r->user()), 403);
         $data = $r->validate(['motivo' => ['required', 'string', 'min:10', 'max:500']]);
-        $g = GastoOperativo::findOrFail($gasto);
-        $g->update([
-            'estado' => 'rechazado', 'aprueba_id' => $u->id,
-            'notas' => trim(($g->notas ?: '') . "\n[RECHAZO] " . $data['motivo']),
-        ]);
+        \App\Modules\Contabilidad\Actions\Gastos::rechazar(GastoOperativo::findOrFail($gasto), $r->user(), $data['motivo']);
         return back()->with('success', 'Gasto rechazado.');
     }
 
@@ -256,29 +180,8 @@ class GastosController extends Controller implements HasMiddleware
             ],
         ], ['caja_id.required' => 'Un gasto en efectivo sale de una caja: decí de cuál.']);
 
-        DB::transaction(function () use ($g, $data, $u) {
-            $g->update([
-                'estado' => 'pagado',
-                'caja_id' => $data['caja_id'] ?? null,
-            ]);
-
-            if (! empty($data['caja_id'])) {
-                MovimientoCaja::create([
-                    'caja_id' => $data['caja_id'],
-                    'fecha' => now('America/Bogota')->toDateString(),
-                    'tipo' => 'gasto',
-                    'descripcion' => "Gasto {$g->numero} · {$g->descripcion}",
-                    // El proveedor es a quien se le entregó la plata; si no
-                    // hay, queda quien lo solicitó, que es quien la recibió.
-                    'entregado_a' => $g->proveedor ?: ($g->solicita?->name ?? 'Sin registrar'),
-                    'valor' => $g->monto,
-                    'user_id' => $u->id,
-                ]);
-            }
-
-            // Cancela el pasivo contra caja o banco segun el medio de pago.
-            app(RegistrarAsientoGasto::class)->pagar($g->fresh());
-        });
+        // El movimiento de caja (si es en efectivo) y el asiento: ver Contabilidad\Actions\Gastos.
+        \App\Modules\Contabilidad\Actions\Gastos::pagar($g, $u, $data['caja_id'] ?? null);
 
         return back()->with('success', "Gasto {$g->numero} pagado y registrado en el libro.");
     }
@@ -302,25 +205,20 @@ class GastosController extends Controller implements HasMiddleware
             'motivo' => ['nullable', 'string', 'max:300'],
         ]);
 
-        $destino = DestinoFiscal::from($data['destino']);
-        $motivo = trim((string) ($data['motivo'] ?? ''));
-
-        if ($destino !== DestinoFiscal::Siigo && $motivo === '') {
-            return back()->withErrors([
-                'motivo' => 'Para que el gasto no se declare hay que escribir por qué.',
-            ]);
-        }
-
         $g = GastoOperativo::findOrFail($gasto);
 
-        $g->update([
-            'cuenta_puc' => $data['cuenta_puc'] ?: null,
-            'destino_fiscal' => $destino,
-            'motivo_destino' => $destino === DestinoFiscal::Siigo ? null : $motivo,
-            'linea_negocio' => LineaNegocio::tryFrom((string) ($data['linea'] ?? '')) ?? $g->linea_negocio,
-        ]);
-
-        app(RegistrarAsientoGasto::class)->rehacer($g->fresh());
+        // Rehace el asiento: ver Contabilidad\Actions\Gastos::reclasificar.
+        try {
+            \App\Modules\Contabilidad\Actions\Gastos::reclasificar(
+                $g,
+                $data['cuenta_puc'] ?? null,
+                DestinoFiscal::from($data['destino']),
+                $data['motivo'] ?? null,
+                LineaNegocio::tryFrom((string) ($data['linea'] ?? '')),
+            );
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return back()->withErrors($e->errors());
+        }
 
         return back()->with('success', "Gasto {$g->numero} reclasificado y asiento rehecho.");
     }

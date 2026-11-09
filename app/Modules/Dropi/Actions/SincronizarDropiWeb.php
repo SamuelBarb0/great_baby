@@ -7,6 +7,7 @@ use App\Modules\Dropi\Enums\EstadoPedidoDropi;
 use App\Modules\Dropi\Models\DropiPedido;
 use App\Modules\Dropi\Services\MapearMovimientoWalletDropi;
 use App\Modules\Dropi\Services\MapearPedidoDropiWeb;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Lorisleiva\Actions\Concerns\AsAction;
@@ -54,10 +55,51 @@ class SincronizarDropiWeb
     /** Días tras la entrega en que se sigue buscando el pago (Dropi paga en ~1, máx. 3). */
     public const DIAS_BUSCANDO_PAGO = 15;
 
+    /** Claves de caché con la última vuelta que habló con Dropi y el último fallo. */
+    public const CACHE_ULTIMA = 'dropi:sync:ultima_ok';
+
+    public const CACHE_ERROR = 'dropi:sync:ultimo_error';
+
     /**
      * @return array{modo:string, vistos:int, cambiados:int, nuevos:int, actualizados:int, errores:int, pagos:int}
      */
     public function handle(string $modo = 'recientes', int $dias = 3, int $maxPaginas = 20, int $maxDetalles = 120): array
+    {
+        try {
+            $r = $this->sincronizar($modo, $dias, $maxPaginas, $maxDetalles);
+        } catch (\Throwable $e) {
+            Cache::forever(self::CACHE_ERROR, ['at' => now()->toIso8601String(), 'msg' => mb_substr($e->getMessage(), 0, 300)]);
+            throw $e;
+        }
+
+        Cache::forever(self::CACHE_ULTIMA, now()->toIso8601String());
+        Cache::forget(self::CACHE_ERROR);
+
+        return $r;
+    }
+
+    /**
+     * Estado del sync para mostrarlo en pantalla: cuándo habló con Dropi por
+     * última vez, el último fallo (si es posterior) y si el cron está activo.
+     *
+     * @return array{ultima: ?\Illuminate\Support\Carbon, error: ?array{at: \Illuminate\Support\Carbon, msg: string}, activo: bool}
+     */
+    public static function estado(): array
+    {
+        $ultima = Cache::get(self::CACHE_ULTIMA);
+        $error = Cache::get(self::CACHE_ERROR);
+
+        return [
+            'ultima' => $ultima ? \Illuminate\Support\Carbon::parse($ultima) : null,
+            'error' => $error ? ['at' => \Illuminate\Support\Carbon::parse($error['at']), 'msg' => (string) $error['msg']] : null,
+            'activo' => (bool) config('dropi.web.sync_activo'),
+        ];
+    }
+
+    /**
+     * @return array{modo:string, vistos:int, cambiados:int, nuevos:int, actualizados:int, errores:int, pagos:int}
+     */
+    protected function sincronizar(string $modo, int $dias, int $maxPaginas, int $maxDetalles): array
     {
         if ($modo === 'pagos') {
             return $this->buscarPagos($maxDetalles);

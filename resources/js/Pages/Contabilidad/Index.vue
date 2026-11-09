@@ -31,6 +31,7 @@ const filtrar = () => {
     router.get('/app/contabilidad', {
         desde: desde.value, hasta: hasta.value,
         incluir_anulados: incluirAnulados.value ? 1 : null,
+        linea: props.filtros.linea !== 'todas' ? props.filtros.linea : null,
     }, {
         preserveScroll: true, preserveState: true, replace: true,
         onStart: () => { cargando.value = true; },

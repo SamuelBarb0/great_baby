@@ -13,7 +13,7 @@ class SiigoConfig extends Model
     protected $fillable = [
         'username', 'access_key', 'partner_id',
         'ambiente', 'activo', 'push_auto',
-        'nit_emisor', 'tipo_documento_id', 'seller_id', 'payment_type_id',
+        'nit_emisor', 'tipo_documento_id', 'tipo_documento_dropi_id', 'seller_id', 'payment_type_id',
         'empresa_id', 'mapa_impuestos',
     ];
 
@@ -33,6 +33,7 @@ class SiigoConfig extends Model
         'activo' => 'bool',
         'push_auto' => 'bool',
         'tipo_documento_id' => 'integer',
+        'tipo_documento_dropi_id' => 'integer',
         'seller_id' => 'integer',
         'payment_type_id' => 'integer',
         'mapa_impuestos' => 'array',

@@ -4,6 +4,7 @@ namespace App\Modules\Compras\Services;
 
 use App\Modules\Cartera\Models\PagoProveedor;
 use App\Modules\Compras\Models\RecepcionCompra;
+use App\Modules\Contabilidad\Support\FiltroEjes;
 use Illuminate\Support\Collection;
 
 /**
@@ -38,12 +39,13 @@ class CuentasPorPagar
      *     valor:float, abonado:float, saldo:float
      * }>
      */
-    public function pendientes(): Collection
+    public function pendientes(?FiltroEjes $ejes = null): Collection
     {
         $recepciones = RecepcionCompra::query()
             ->with(['orden:id,proveedor_id,condicion_credito_id,tipo', 'orden.importaciones:compras_importaciones.id,fecha_zarpe', 'orden.proveedor:id,nombre_completo,numero_documento'])
             ->where('estado', 'confirmada')
             ->whereNotNull('factura_proveedor')
+            ->when($ejes, fn ($q) => $ejes->aplicar($q))
             ->get();
 
         if ($recepciones->isEmpty()) {

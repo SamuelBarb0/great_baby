@@ -21,9 +21,9 @@ class ContabilidadDropi extends Page
 
     protected static ?string $navigationLabel = 'Contabilidad Dropi';
 
-    protected static string|\UnitEnum|null $navigationGroup = 'Dinero';
+    protected static string|\UnitEnum|null $navigationGroup = 'Contabilidad';
 
-    protected static ?int $navigationSort = 6;
+    protected static ?int $navigationSort = 5;
 
     protected static ?string $title = 'Contabilidad Dropi';
 

@@ -4,6 +4,7 @@ namespace App\Http\Controllers\App;
 
 use App\Http\Controllers\Controller;
 use App\Modules\Compras\Services\CuentasPorPagar;
+use App\Modules\Contabilidad\Support\FiltroEjes;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controllers\HasMiddleware;
 use Illuminate\Routing\Controllers\Middleware;
@@ -35,7 +36,10 @@ class CuentasPorPagarController extends Controller implements HasMiddleware
 
     public function index(Request $r, CuentasPorPagar $servicio): Response
     {
-        $filas = $servicio->pendientes();
+        // `?linea=dropi` · el panel de Dropi abre la hoja ya filtrada. Aquí el
+        //   resumen sí cambia: es la deuda de esa línea.
+        $ejes = FiltroEjes::de($r->query('linea'), null);
+        $filas = $servicio->pendientes($ejes);
 
         // Los filtros son los tres con los que se mira la hoja: todo, lo que
         // ya se pasó de fecha, y lo que está por caer.
@@ -67,7 +71,8 @@ class CuentasPorPagarController extends Controller implements HasMiddleware
                     'vencido' => round($g->where('dias_mora', '>', 0)->sum('saldo'), 2),
                 ])
                 ->sortByDesc('saldo')->values(),
-            'filtros' => ['estado' => $filtro, 'q' => $proveedor],
+            'filtros' => ['estado' => $filtro, 'q' => $proveedor,
+                'linea' => $ejes->linea === 'todas' ? null : $ejes->linea],
         ]);
     }
 }

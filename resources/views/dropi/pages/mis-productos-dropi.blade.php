@@ -60,9 +60,16 @@
                                 <span style="font-weight:700;">{{ $rango($p) }}</span>
                                 <span style="font-size:.8rem;{{ $p['stock'] > 0 ? '' : 'color:#dc2626;font-weight:600;' }}">Stock {{ $p['stock'] }}</span>
                             </div>
-                            <div>
+                            <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:.4rem;">
                                 @php [$tx, $co, $bg] = $chipVinculo[$p['vinculo']]; @endphp
-                                <span style="font-size:.7rem;font-weight:600;padding:.15rem .5rem;border-radius:999px;color:{{ $co }};background:{{ $bg }};">{{ $tx }}</span>
+                                <span style="font-size:.7rem;font-weight:600;padding:.15rem .5rem;border-radius:999px;white-space:nowrap;color:{{ $co }};background:{{ $bg }};">{{ $tx }}</span>
+                                {{-- Se abre en la ventana al lado (script de AdminPanelProvider); sin JS, en otra pestaña. --}}
+                                <a href="{{ \App\Modules\Dropi\Filament\Pages\MisProductosDropi::urlEditarEnDropi($p['id']) }}"
+                                   target="_blank" rel="noopener"
+                                   title="Abre este producto en Dropi para editarlo"
+                                   style="font-size:.78rem;font-weight:600;color:#ea580c;border:1px solid #f97316;border-radius:.5rem;padding:.2rem .6rem;white-space:nowrap;text-decoration:none;">
+                                    Editar en Dropi ↗
+                                </a>
                             </div>
                             @if(count($p['variaciones']) > 1 || $p['variaciones'][0]['variacion'])
                                 <button type="button" x-on:click="abierto = ! abierto"

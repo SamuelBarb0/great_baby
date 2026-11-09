@@ -4,6 +4,7 @@ namespace App\Http\Controllers\App;
 
 use App\Http\Controllers\Controller;
 use App\Modules\Cartera\Models\MovimientoContable;
+use App\Modules\Contabilidad\Support\FiltroEjes;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controllers\HasMiddleware;
 use Illuminate\Routing\Controllers\Middleware;
@@ -38,6 +39,9 @@ class ContabilidadController extends Controller implements HasMiddleware
         $desde = $data['desde'] ?? now('America/Bogota')->startOfMonth()->toDateString();
         $hasta = $data['hasta'] ?? now('America/Bogota')->toDateString();
         $incluirAnulados = (bool) ($data['incluir_anulados'] ?? false);
+        // `?linea=dropi` · el panel de Dropi abre el libro ya filtrado. Sólo la
+        // línea: el destino fiscal no se pide desde aquí.
+        $ejes = FiltroEjes::de($request->input('linea'), null);
 
         // Re-audit R4 SEG-M1 · bitácora consulta con anulados (dato sensible DIAN).
         if ($incluirAnulados) {
@@ -48,10 +52,10 @@ class ContabilidadController extends Controller implements HasMiddleware
         }
 
         return Inertia::render('Contabilidad/Index', [
-            'filtros' => ['desde' => $desde, 'hasta' => $hasta, 'incluir_anulados' => $incluirAnulados],
-            'kpis' => $this->kpis($desde, $hasta, $incluirAnulados),
-            'porCuenta' => $this->balanceComprobacion($desde, $hasta, $incluirAnulados),
-            'movimientosRecientes' => $this->movimientosRecientes($desde, $hasta, 50, $incluirAnulados),
+            'filtros' => ['desde' => $desde, 'hasta' => $hasta, 'incluir_anulados' => $incluirAnulados, 'linea' => $ejes->linea],
+            'kpis' => $this->kpis($desde, $hasta, $incluirAnulados, $ejes),
+            'porCuenta' => $this->balanceComprobacion($desde, $hasta, $incluirAnulados, $ejes),
+            'movimientosRecientes' => $this->movimientosRecientes($desde, $hasta, 50, $incluirAnulados, $ejes),
         ]);
     }
 
@@ -63,11 +67,12 @@ class ContabilidadController extends Controller implements HasMiddleware
      *
      * Re-audit M5 DATOS-A3 · 1 sola query para los 3 KPIs (antes 3 full-scans).
      */
-    private function kpis(string $desde, string $hasta, bool $incluirAnulados = false): array
+    private function kpis(string $desde, string $hasta, bool $incluirAnulados = false, ?FiltroEjes $ejes = null): array
     {
         $r = MovimientoContable::query()
             ->when($incluirAnulados, fn ($q) => $q->withTrashed())
             ->whereBetween('fecha', [$desde, $hasta])
+            ->when($ejes, fn ($q) => $ejes->aplicar($q))
             ->selectRaw('COALESCE(SUM(debe),0) d, COALESCE(SUM(haber),0) h, COUNT(*) n')
             ->first();
 
@@ -84,11 +89,12 @@ class ContabilidadController extends Controller implements HasMiddleware
         ];
     }
 
-    private function balanceComprobacion(string $desde, string $hasta, bool $incluirAnulados = false): array
+    private function balanceComprobacion(string $desde, string $hasta, bool $incluirAnulados = false, ?FiltroEjes $ejes = null): array
     {
         $filas = MovimientoContable::query()
             ->when($incluirAnulados, fn ($q) => $q->withTrashed())
             ->whereBetween('fecha', [$desde, $hasta])
+            ->when($ejes, fn ($q) => $ejes->aplicar($q))
             ->selectRaw('cuenta_puc, SUM(debe) as debe, SUM(haber) as haber, SUM(debe - haber) as saldo')
             ->groupBy('cuenta_puc')
             ->orderBy('cuenta_puc')
@@ -109,12 +115,13 @@ class ContabilidadController extends Controller implements HasMiddleware
             ])->all();
     }
 
-    private function movimientosRecientes(string $desde, string $hasta, int $limit = 50, bool $incluirAnulados = false): array
+    private function movimientosRecientes(string $desde, string $hasta, int $limit = 50, bool $incluirAnulados = false, ?FiltroEjes $ejes = null): array
     {
         $filas = MovimientoContable::query()
             ->when($incluirAnulados, fn ($q) => $q->withTrashed())
             ->with(['user:id,name'])
             ->whereBetween('fecha', [$desde, $hasta])
+            ->when($ejes, fn ($q) => $ejes->aplicar($q))
             ->orderByDesc('fecha')->orderByDesc('id')
             ->limit($limit)
             ->get();

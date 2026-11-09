@@ -40,6 +40,9 @@ class CrearOrdenCompra
                 'estado' => EstadoOrdenCompra::Borrador,
                 'creado_por' => auth()->id(),
                 'observaciones' => $data['observaciones'] ?? null,
+                // Sin línea explícita la columna queda en su valor por defecto
+                // (great_baby). El panel de Dropi la manda en `dropi` (7-nov).
+                ...(isset($data['linea_negocio']) ? ['linea_negocio' => $data['linea_negocio']] : []),
                 // Sólo las importaciones se pre-liquidan; nacen con los de la última.
                 'parametros_preliquidacion' => $esImportacion
                     ? PreliquidarOrden::normalizar($data['parametros_preliquidacion'] ?? PreliquidarOrden::parametrosIniciales($modelo, $data['moneda'] ?? 'CNY'))

@@ -7,6 +7,7 @@ use App\Models\NotificacionErp;
 use App\Modules\Cartera\Enums\EstadoFactura;
 use App\Modules\Cartera\Models\FacturaVenta;
 use App\Modules\Contabilidad\Enums\DestinoFiscal;
+use App\Modules\Contabilidad\Enums\LineaNegocio;
 use App\Modules\Siigo\Clients\SiigoClient;
 use App\Modules\Siigo\Exceptions\PagoSinFacturaEnSiigo;
 use App\Modules\Siigo\Models\SiigoConfig;
@@ -29,6 +30,9 @@ use RuntimeException;
  */
 class SiigoEmisionService
 {
+    public const SIN_RESOLUCION_DROPI = 'Falta la «Resolución SIIGO para Dropi» (panel Dropi → Configuración → SIIGO de Dropi): '
+        .'las facturas de Dropi no salen con la resolución de Great Baby.';
+
     public function __construct(
         private readonly SiigoClient $cliente,
         private readonly QrDianService $qr,
@@ -386,9 +390,17 @@ class SiigoEmisionService
         // Si la ubicación no tiene resolución, cae al tipo_documento_id global
         // (comportamiento previo, 100% retrocompatible).
         $documentId = (int) $config->tipo_documento_id;
-        //   Multiempresa · esa resolución vive en la cuenta de Great Baby; en
-        //   otra razón social no existe, así que sólo aplica a la principal.
-        if ($config->esPrincipal() && $factura->ubicacion && $factura->ubicacion->siigo_resolution_id) {
+        if ($config->esPrincipal() && $factura->linea_negocio === LineaNegocio::Dropi) {
+            // Dropi es Great Baby con su propia resolución (7-nov): SIIGO separa
+            // la contabilidad por ella. Sin configurarla NO cae a la de Great
+            // Baby, que es justo lo que había que evitar.
+            $documentId = (int) $config->tipo_documento_dropi_id;
+            if ($documentId <= 0) {
+                throw new RuntimeException(self::SIN_RESOLUCION_DROPI);
+            }
+        } elseif ($config->esPrincipal() && $factura->ubicacion && $factura->ubicacion->siigo_resolution_id) {
+            //   Multiempresa · esa resolución vive en la cuenta de Great Baby; en
+            //   otra razón social no existe, así que sólo aplica a la principal.
             $documentId = (int) $factura->ubicacion->siigo_resolution_id;
         }
 

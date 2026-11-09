@@ -80,7 +80,7 @@ class ProgramacionPagosController extends Controller implements HasMiddleware
      */
     protected function puedeAutorizar(?\App\Models\User $u): bool
     {
-        return (bool) ($u && ($u->esRoot() || $u->hasRole('Gerente')));
+        return \App\Modules\Compras\Actions\AutorizarProgramacionPago::puedeAutorizar($u);
     }
 
     public function guardar(Request $r, CuentasPorPagar $servicio): RedirectResponse
@@ -100,40 +100,12 @@ class ProgramacionPagosController extends Controller implements HasMiddleware
             'items.*.recepcion_id.distinct' => 'La misma factura está dos veces: se sumaría sola.',
         ]);
 
-        // Nadie puede programar más de lo que se debe de esa factura. Pasa
-        // cuando se teclea el valor total en vez del saldo, y el error no se
-        // nota hasta que el proveedor avisa que le pagaron de más.
-        $saldos = $servicio->pendientes()->keyBy('recepcion_id');
-
-        foreach ($data['items'] as $i => $item) {
-            $saldo = (float) ($saldos[$item['recepcion_id']]['saldo'] ?? 0);
-            if ((float) $item['monto'] > $saldo + 0.01) {
-                return back()->withErrors([
-                    "items.{$i}.monto" => 'De esa factura se deben $'.number_format($saldo, 0, ',', '.')
-                        .': no se pueden programar $'.number_format((float) $item['monto'], 0, ',', '.').'.',
-                ])->withInput();
-            }
+        // El tope por saldo y la creación viven en CrearProgramacionPago (7-nov).
+        try {
+            $p = \App\Modules\Compras\Actions\CrearProgramacionPago::run($data, $r->user());
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return back()->withErrors($e->errors())->withInput();
         }
-
-        $p = DB::transaction(function () use ($data, $r) {
-            $p = ProgramacionPago::create([
-                'numero' => ProgramacionPago::siguienteNumero(),
-                'fecha_programada' => $data['fecha_programada'],
-                'monto_autorizado' => $data['monto_autorizado'] ?? null,
-                'notas' => $data['notas'] ?? null,
-                'estado' => 'borrador',
-                'creada_por' => $r->user()?->id,
-            ]);
-
-            foreach ($data['items'] as $item) {
-                $p->items()->create([
-                    'recepcion_id' => $item['recepcion_id'],
-                    'monto' => $item['monto'],
-                ]);
-            }
-
-            return $p;
-        });
 
         return back()->with('flash', ['type' => 'success',
             'message' => "Programación {$p->numero} creada por $"
@@ -149,26 +121,12 @@ class ProgramacionPagosController extends Controller implements HasMiddleware
      */
     public function autorizar(Request $r, ProgramacionPago $programacion): RedirectResponse
     {
-        abort_unless($this->puedeAutorizar($r->user()), 403,
-            'Autorizar el desembolso es de gerencia.');
-
-        if ($programacion->estaAutorizada()) {
-            return back()->with('flash', ['type' => 'error',
-                'message' => "La programación {$programacion->numero} ya estaba autorizada."]);
+        // Gerencia, y quien la armó no la autoriza: ver AutorizarProgramacionPago.
+        try {
+            \App\Modules\Compras\Actions\AutorizarProgramacionPago::run($programacion, $r->user());
+        } catch (\App\Support\PasoNoPermitido $e) {
+            return back()->with('flash', ['type' => 'error', 'message' => $e->getMessage()]);
         }
-
-        // Quien la armó no la autoriza: si fuera el mismo, la firma no diría
-        // nada. Es el mismo control que ya rige los asientos manuales.
-        if ($programacion->creada_por === $r->user()?->id && ! $r->user()?->esRoot()) {
-            return back()->with('flash', ['type' => 'error',
-                'message' => 'Quien arma la programación no la autoriza. Pedile el visto bueno a gerencia.']);
-        }
-
-        $programacion->update([
-            'estado' => 'autorizada',
-            'autorizada_por' => $r->user()?->id,
-            'autorizada_at' => now(),
-        ]);
 
         return back()->with('flash', ['type' => 'success',
             'message' => "Programación {$programacion->numero} autorizada por $"
@@ -181,16 +139,11 @@ class ProgramacionPagosController extends Controller implements HasMiddleware
             'motivo' => ['required', 'string', 'min:10', 'max:500'],
         ]);
 
-        if ($programacion->estado === 'ejecutada') {
-            return back()->with('flash', ['type' => 'error',
-                'message' => 'Esa programación ya se ejecutó: los pagos están hechos.']);
+        try {
+            \App\Modules\Compras\Actions\AnularProgramacionPago::run($programacion, $data['motivo']);
+        } catch (\App\Support\PasoNoPermitido $e) {
+            return back()->with('flash', ['type' => 'error', 'message' => $e->getMessage()]);
         }
-
-        $programacion->update([
-            'estado' => 'anulada',
-            'notas' => trim(($programacion->notas ? $programacion->notas."\n" : '')
-                .'ANULADA: '.$data['motivo']),
-        ]);
 
         return back()->with('flash', ['type' => 'success',
             'message' => "Programación {$programacion->numero} anulada."]);

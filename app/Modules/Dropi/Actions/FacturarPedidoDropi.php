@@ -102,17 +102,23 @@ class FacturarPedidoDropi
 
             $total = round(array_sum(array_column($lineas, 'total')), 2);
             $subtotal = round(array_sum(array_map(fn ($l) => $l['base'] * $l['cantidad'], $lineas)), 2);
-            // Multiempresa · lo de Dropi lo factura la razón social del
-            //   e-commerce, no Great Baby. Mientras no esté configurada y activa
-            //   no se factura: queda la remisión con el motivo, igual que un
-            //   pedido sin catálogo, en vez de salir con el NIT equivocado.
-            $empresa = \App\Models\EmpresaConfig::porCodigo((string) setting('dropi.empresa', 'ecommerce'));
+            // Lo de Dropi lo factura la empresa de la regla `dropi.empresa`:
+            //   Great Baby, con su propia resolución en SIIGO (decidido el 7-nov:
+            //   misma empresa, otra resolución). Si la regla apunta a una razón
+            //   social que no está activa no se factura: queda la remisión con
+            //   el motivo, en vez de salir con el NIT equivocado.
+            $empresa = \App\Models\EmpresaConfig::porCodigo((string) setting('dropi.empresa', 'great_baby'));
             if (! $empresa?->activa) {
                 $this->motivo = 'la empresa del e-commerce no está activa: configurala en Configuración → Empresas';
 
                 return null;
             }
-            $siigoActivo = (bool) (\App\Modules\Siigo\Models\SiigoConfig::deEmpresa($empresa->id)->activo ?? false);
+            $siigo = \App\Modules\Siigo\Models\SiigoConfig::deEmpresa($empresa->id);
+            // En Great Baby lo de Dropi va con su propia resolución (7-nov). Sin
+            // ella la factura queda sólo en el ERP en vez de salir a SIIGO con
+            // la resolución de Great Baby; la emisión tampoco lo dejaría.
+            $siigoActivo = (bool) ($siigo->activo ?? false)
+                && (! $siigo->esPrincipal() || (int) $siigo->tipo_documento_dropi_id > 0);
 
             $factura = FacturaVenta::create([
                 'empresa_id' => $empresa->id,
@@ -121,7 +127,7 @@ class FacturarPedidoDropi
                 // esto la columna tomaba su default `great_baby` y cada venta del
                 // e-commerce quedaba en los libros de Great Baby.
                 'linea_negocio' => \App\Modules\Contabilidad\Enums\LineaNegocio::Dropi,
-                'numero' => NumeroFactura::siguiente($empresa),
+                'numero' => $empresa->es_principal ? NumeroFactura::dropi() : NumeroFactura::siguiente($empresa),
                 'contacto_id' => self::consumidorFinal()->id,
                 'fecha_emision' => now()->toDateString(),
                 'fecha_vencimiento' => now()->toDateString(),

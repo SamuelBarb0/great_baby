@@ -124,59 +124,14 @@ class PagosProveedorController extends Controller implements HasMiddleware
     // que un typo del operador se replique al libro contable del cliente.
     public function confirmar(PagoProveedor $pagoProveedor, Request $r): RedirectResponse
     {
-        if ($pagoProveedor->estado === 'confirmado') {
-            return back()->with('flash', ['type' => 'info', 'message' => "Pago #{$pagoProveedor->id} ya estaba confirmado."]);
-        }
-        if ($pagoProveedor->estado === 'anulado') {
-            return back()->with('flash', ['type' => 'error', 'message' => "Pago #{$pagoProveedor->id} está anulado · no se puede confirmar."]);
-        }
-
-        /*
-         * Cuatro ojos, que es lo que el comentario de arriba prometía y el
-         * código no cumplía.
-         *
-         * La puerta de la clase es `esContable()` y `confirmar` no agregaba
-         * NADA: la misma persona que registraba el pago lo confirmaba un
-         * segundo después. El estado `pendiente` existía, el botón existía, y
-         * el control no, porque revisar lo propio no es revisar. Y lo que se
-         * aprueba acá no es un trámite: al confirmar sale la plata, se escribe
-         * el asiento y el documento viaja a SIIGO.
-         *
-         * No hay excepción para Aracely ni para Gerencia. Un control que la
-         * jefa puede saltarse es un control que se salta siempre, y justo en
-         * el pago que importa. Hoy seis usuarios pasan `esContable()`, así que
-         * siempre hay quien revise.
-         */
-        if ((int) $pagoProveedor->user_id === (int) $r->user()->id) {
-            return back()->with('flash', [
-                'type' => 'error',
-                'message' => "Pago #{$pagoProveedor->id}: vos lo registraste, así que no lo podés confirmar. "
-                    .'Lo tiene que revisar otra persona del equipo contable.',
-            ]);
+        // Cuatro ojos, asiento y SIIGO: ver ConfirmarPagoProveedor (7-nov, también
+        //   lo usa el panel de Dropi).
+        try {
+            \App\Modules\Cartera\Actions\ConfirmarPagoProveedor::run($pagoProveedor, $r->user());
+        } catch (\App\Support\PasoNoPermitido $e) {
+            return back()->with('flash', ['type' => $e->tipo, 'message' => $e->getMessage()]);
         }
 
-        $pagoProveedor->forceFill([
-            'estado' => 'confirmado',
-            'confirmado_at' => now(),
-            'confirmado_por' => $r->user()->id,
-        ])->save();
-
-        /*
-         * Y el ASIENTO, que no existia.
-         *
-         * `RegistrarPagoProveedor` creaba el pago y calculaba las retenciones
-         * sin escribir ni una linea en el libro. La cuenta de proveedores SOLO
-         * CRECIA —la recepcion la acreditaba y el pago nunca la debitaba— y las
-         * retenciones practicadas nunca entraban, que es la base de la
-         * declaracion mensual ante la DIAN.
-         *
-         * Va al CONFIRMAR y no al crear: el pago nace `pendiente` y hasta que
-         * alguien lo revisa la plata no salio.
-         */
-        app(\App\Modules\Cartera\Actions\RegistrarAsientoPagoProveedor::class)
-            ->handle($pagoProveedor->fresh());
-
-        PushPagoProveedorASiigo::dispatchManual($pagoProveedor->id);
         return back()->with('flash', [
             'type' => 'success',
             'message' => "Pago #{$pagoProveedor->id} confirmado y encolado a SIIGO.",
@@ -200,14 +155,12 @@ class PagosProveedorController extends Controller implements HasMiddleware
      */
     public function anular(PagoProveedor $pagoProveedor, Request $r): RedirectResponse
     {
-        if ($pagoProveedor->siigo_voucher_id) {
-            return back()->with('flash', ['type' => 'error', 'message' => "Pago #{$pagoProveedor->id} ya está en SIIGO · usar nota de ajuste allá."]);
-        }
-
-        // Anular dos veces borraría un asiento que ya no está y pisaría el
-        // motivo del primero.
-        if ($pagoProveedor->estado === 'anulado') {
-            return back()->with('flash', ['type' => 'info', 'message' => "Pago #{$pagoProveedor->id} ya estaba anulado."]);
+        // Los dos chequeos van antes de validar, como antes: un pago en SIIGO o
+        //   ya anulado responde su aviso aunque no venga el motivo.
+        try {
+            \App\Modules\Cartera\Actions\AnularPagoProveedor::verificar($pagoProveedor);
+        } catch (\App\Support\PasoNoPermitido $e) {
+            return back()->with('flash', ['type' => $e->tipo, 'message' => $e->getMessage()]);
         }
 
         $data = $r->validate(
@@ -216,21 +169,8 @@ class PagosProveedorController extends Controller implements HasMiddleware
             ['motivo' => 'motivo'],
         );
 
-        $borradas = \Illuminate\Support\Facades\DB::transaction(function () use ($pagoProveedor, $r, $data) {
-            $n = \App\Modules\Cartera\Models\MovimientoContable::query()
-                ->where('origen_type', PagoProveedor::class)
-                ->where('origen_id', $pagoProveedor->id)
-                ->forceDelete();
-
-            $pagoProveedor->forceFill([
-                'estado' => 'anulado',
-                'anulado_at' => now(),
-                'anulado_por' => $r->user()->id,
-                'motivo_anulacion' => $data['motivo'],
-            ])->save();
-
-            return $n;
-        });
+        // Borra las líneas del asiento y deja el rastro en el pago: ver AnularPagoProveedor.
+        $borradas = \App\Modules\Cartera\Actions\AnularPagoProveedor::run($pagoProveedor, $r->user(), $data['motivo']);
 
         return back()->with('flash', [
             'type' => 'success',

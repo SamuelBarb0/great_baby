@@ -177,6 +177,10 @@ it('la nota crédito cuelga de la factura del corte y va al envío real a SIIGO'
 });
 
 it('sin factura no hay nota crédito (y queda dicho por qué)', function () {
+    // Sin factura a propósito: no depender de lo que otro test dejó en la regla.
+    // Antes lo tapaba la razón social «ecommerce» apagada; desde el 7-nov
+    // Dropi factura con Great Baby, que siempre está activa.
+    App\Support\Reglas::set('dropi.facturacion_automatica', false);
     devDespachado('D-7', 1, $this->user->id);
 
     RegistrarDevolucion::run('D-7', DestinoDevolucion::Reingreso, $this->user->id, null, ['v:'.$this->variante->id => 1]);

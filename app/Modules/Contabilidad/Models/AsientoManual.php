@@ -22,6 +22,8 @@ class AsientoManual extends Model implements AuditableContract
         'valor_total' => 'decimal:2',
         'siigo_sync_at' => 'datetime',
         'anulado_at' => 'datetime',
+        // Sus líneas en el libro heredan esta línea de negocio (7-nov).
+        'linea_negocio' => \App\Modules\Contabilidad\Enums\LineaNegocio::class,
     ];
 
     public function lineas(): HasMany

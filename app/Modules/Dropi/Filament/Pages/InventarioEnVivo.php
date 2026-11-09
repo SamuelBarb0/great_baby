@@ -120,27 +120,6 @@ class InventarioEnVivo extends Page
         return $variantes->concat($agregados)->all();
     }
 
-    /**
-     * DEPRECATED wrapper legacy para la vista blade que aún use getVariantes().
-     * Se removerá cuando la vista adopte getFilas().
-     */
-    public function getVariantes()
-    {
-        return ProductoVariante::query()
-            ->with('producto')
-            ->when($this->busqueda !== '', function ($q) {
-                $b = "%{$this->busqueda}%";
-                $q->where(function ($qq) use ($b) {
-                    $qq->where('codigo_barras', 'like', $b)
-                       ->orWhereHas('producto', fn ($p) => $p->where('nombre', 'like', $b)->orWhere('referencia', 'like', $b));
-                });
-            })
-            ->orderBy('producto_id')
-            ->orderBy('codigo_barras')
-            ->limit(200)
-            ->get();
-    }
-
     /** @return \Illuminate\Support\Collection<int, InventarioUbicacion> */
     public function getUbicaciones()
     {

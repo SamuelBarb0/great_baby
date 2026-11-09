@@ -35,4 +35,15 @@ class NumeroFactura
 
         return SiguienteConsecutivoFactura::run($prefijo, 4, $rangoHasta);
     }
+
+    /**
+     * Factura de Dropi cuando la hace Great Baby (7-nov: misma empresa, otra
+     * resolución). Su consecutivo es aparte para no gastar el rango de Great
+     * Baby ni confundirse con sus facturas; el número DIAN lo pone SIIGO con la
+     * resolución de Dropi (queda en `numero_siigo`).
+     */
+    public static function dropi(): string
+    {
+        return SiguienteConsecutivoFactura::run('DRP-'.now()->format('ymd').'-', 4, null);
+    }
 }

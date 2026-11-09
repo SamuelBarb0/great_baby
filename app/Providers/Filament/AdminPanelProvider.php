@@ -7,7 +7,6 @@ use Filament\Http\Middleware\AuthenticateSession;
 use Filament\Http\Middleware\DisableBladeIconComponents;
 use Filament\Http\Middleware\DispatchServingFilamentEvent;
 use App\Modules\Dropi\Filament\Pages\DashboardDropi;
-use Filament\Navigation\NavigationItem;
 use Filament\Pages\Dashboard;
 use Filament\Panel;
 use Filament\PanelProvider;
@@ -25,7 +24,8 @@ use Illuminate\View\Middleware\ShareErrorsFromSession;
 
 class AdminPanelProvider extends PanelProvider
 {
-    private const URL_CREAR_EN_DROPI = 'https://app.dropi.co/dashboard/products/add';
+    /** La lista (carga masiva), crear (`/add`) y editar (`/edit?id=`) cuelgan de aquí. */
+    private const PREFIJO_PRODUCTOS_DROPI = 'https://app.dropi.co/dashboard/products';
 
     public function panel(Panel $panel): Panel
     {
@@ -63,10 +63,14 @@ class AdminPanelProvider extends PanelProvider
                 'Operación',
                 'Productos',
                 'Dinero',
+                'Compras',
+                'Contabilidad',
                 'Configuración',
             ])
-            // Grupo «Productos»: «Crear producto en Dropi» abre una ventana aparte.
-            ->navigationItems(self::enlacesEcommerce())
+            // «Compras» y «Contabilidad» son de la línea Dropi, separadas de las
+            //   otras empresas (7-nov): ver Dropi\Filament\Support\PaginaTablaDropi.
+            // «Crear producto en Dropi» vive como botón dentro de «Mis productos
+            // en Dropi» (7-nov); este script lo abre en una ventana aparte.
             ->renderHook(
                 PanelsRenderHook::BODY_END,
                 fn (): string => self::scriptVentanaDropi(),
@@ -137,38 +141,24 @@ class AdminPanelProvider extends PanelProvider
             );
     }
 
-    /** @return array<int, NavigationItem> */
-    private static function enlacesEcommerce(): array
-    {
-        return [
-            /*
-             * Dropi no deja embeberse: responde `X-Frame-Options: SAMEORIGIN`
-             * y el navegador muestra el iframe bloqueado (probado el 6-nov).
-             * Lo más cercano es una VENTANA al lado del panel, con la sesión de
-             * Dropi que la persona ya tiene: el script de BODY_END intercepta
-             * este enlace por su URL. Sin JavaScript abre una pestaña.
-             */
-            NavigationItem::make('Crear producto en Dropi')
-                ->url(self::URL_CREAR_EN_DROPI, shouldOpenInNewTab: true)
-                ->icon('heroicon-o-arrow-top-right-on-square')
-                ->group('Productos')
-                ->sort(3)
-                ->visible(fn (): bool => (bool) (\App\Auth\MenuApp::permisos(auth()->user())['dropi'] ?? false)),
-        ];
-    }
-
     /**
-     * Abre «Crear producto en Dropi» en una ventana a la derecha de la pantalla
-     * en vez de una pestaña: así se ve el panel y Dropi a la vez.
+     * Abre «Crear producto en Dropi» y los «Editar en Dropi» de «Mis productos
+     * en Dropi» en una ventana a la derecha de la pantalla en vez de una
+     * pestaña: así se ve el panel y Dropi a la vez. Atrapa todo enlace al
+     * formulario de productos de Dropi.
+     *
+     * Dropi no deja embeberse: responde `X-Frame-Options: SAMEORIGIN` y el
+     * navegador muestra el iframe bloqueado (probado el 6-nov). La ventana usa
+     * la sesión de Dropi que la persona ya tiene. Sin JavaScript abre pestaña.
      */
     private static function scriptVentanaDropi(): string
     {
-        $url = json_encode(self::URL_CREAR_EN_DROPI);
+        $prefijo = json_encode(self::PREFIJO_PRODUCTOS_DROPI);
 
         return <<<HTML
 <script>
 document.addEventListener('click', function (e) {
-    var a = e.target.closest ? e.target.closest('a[href=' + JSON.stringify({$url}) + ']') : null;
+    var a = e.target.closest ? e.target.closest('a[href^=' + JSON.stringify({$prefijo}) + ']') : null;
     if (!a || e.ctrlKey || e.metaKey || e.shiftKey) return;
     e.preventDefault();
     var ancho = Math.min(1200, Math.round(screen.availWidth * 0.6));

@@ -2,8 +2,9 @@
 
 /**
  * El e-commerce dentro del panel Dropi (/admin): sólo «Productos de Dropi»
- * (página del panel) y «Crear producto en Dropi» (ventana aparte: Dropi no se
- * deja embeber). Y que «Productos sin vincular» ya no cuente lo vinculado a un
+ * (página del panel) y «Mis productos en Dropi», que lleva dentro «Crear
+ * producto en Dropi» y «Editar en Dropi» (ventana aparte: Dropi no se deja
+ * embeber). Y que «Productos sin vincular» ya no cuente lo vinculado a un
  * producto agregado.
  */
 
@@ -90,8 +91,9 @@ it('el panel Dropi está organizado en Operación, Productos, Dinero y Configura
     $html = $this->actingAs($this->aracely)->get('/admin/productos-de-dropi')->assertOk()
         ->assertSee('Mis productos en Dropi')
         ->assertSee('Vincular con el ERP')
-        ->assertSee('Crear producto en Dropi')
-        ->assertSee('https://app.dropi.co/dashboard/products/add', false)
+        // «Crear producto en Dropi» ya no está en el menú: vive en «Mis productos en Dropi».
+        ->assertDontSee('Crear producto en Dropi')
+        ->assertDontSee('https://app.dropi.co/dashboard/products/add', false)
         // Se abre en ventana al lado, no en pestaña: el script la intercepta.
         ->assertSee('gb_dropi_crear', false)
         ->assertDontSee('Productos sin vincular')
@@ -103,6 +105,15 @@ it('el panel Dropi está organizado en Operación, Productos, Dinero y Configura
     expect($pos('Operación'))->toBeLessThan($pos('Productos'))
         ->and($pos('Productos'))->toBeLessThan($pos('Dinero'))
         ->and($pos('Dinero'))->toBeLessThan($pos('Configuración'));
+
+    $this->actingAs($this->aracely)->get('/admin/mis-productos-dropi')->assertOk()
+        ->assertSee('Crear producto en Dropi')
+        ->assertSee('https://app.dropi.co/dashboard/products/add', false)
+        // La carga masiva es la lista de Dropi: ahí están sus botones de plantilla.
+        ->assertSee('Carga masiva en Dropi')
+        ->assertSee('href="https://app.dropi.co/dashboard/products"', false)
+        // El script abre en ventana todo lo que cuelga de /dashboard/products.
+        ->assertSee('"https:\/\/app.dropi.co\/dashboard\/products"', false);
 
     $this->actingAs($this->aracely)->get('/admin/ventas-ecommerce')->assertNotFound();
 });
@@ -134,6 +145,10 @@ it('Mis productos en Dropi muestra el catálogo sin fotos, con precio, stock y s
         ->assertSee('Bebé')
         ->assertSee('Cascos para niños')
         ->assertDontSee('Sin foto')
+        // Cada tarjeta lleva a su formulario de edición en Dropi, por su ID de Dropi.
+        ->assertSee('Editar en Dropi')
+        ->assertSee('https://app.dropi.co/dashboard/products/edit?id=1', false)
+        ->assertSee('https://app.dropi.co/dashboard/products/edit?id=2', false)
         ->set('filtro', 'sin_stock')
         ->assertSee('Cascos para niños')
         ->assertDontSee('Volante de Juguete con Música')

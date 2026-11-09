@@ -39,9 +39,8 @@ beforeEach(function () {
     }
     Queue::fake();
     Reglas::set('dropi.facturacion_automatica', true);
-    // Multiempresa · lo de Dropi lo factura la razón social del e-commerce.
-    $this->ecommerce = App\Models\EmpresaConfig::porCodigo('ecommerce');
-    $this->ecommerce->update(['nit' => '901999888-1', 'prefijo_dian' => 'ECO', 'activa' => true]);
+    // 7-nov · lo de Dropi lo factura Great Baby con su propia resolución.
+    $this->greatBaby = App\Models\EmpresaConfig::current();
 
     $this->user = App\Models\User::factory()->create();
     $bodega = InventarioUbicacion::create(['codigo' => 'BOD-F', 'nombre' => 'F', 'activa' => true, 'categoria' => 'venta']);
@@ -111,21 +110,34 @@ it('al despachar: remisión 1:1 y factura a consumidor final por el valor de pro
             ->where('cuenta_puc', (string) setting('contable.cta_cxc_default'))->sum('debe'))->toBe(119000.0);
 });
 
-it('con SIIGO activo la factura nace electrónica y se encola', function () {
-    // La cuenta que cuenta es la del e-commerce, no la de Great Baby.
-    App\Modules\Siigo\Models\SiigoConfig::deEmpresa($this->ecommerce->id)->forceFill(['activo' => true])->save();
+it('con SIIGO activo y la resolución de Dropi puesta, factura Great Baby, nace electrónica y se encola', function () {
+    App\Modules\Siigo\Models\SiigoConfig::current()->forceFill(['activo' => true, 'tipo_documento_id' => 100, 'tipo_documento_dropi_id' => 200])->save();
 
     $p = facDespachar(facPedido('F-2'), $this->user->id);
 
     $f = FacturaVenta::find($p->factura_venta_id);
     expect($f->es_electronica)->toBeTrue()
-        ->and($f->empresa_id)->toBe($this->ecommerce->id)
-        ->and($f->numero)->toStartWith('ECO-');
+        ->and($f->empresa_id)->toBe($this->greatBaby->id)
+        ->and($f->linea_negocio)->toBe(App\Modules\Contabilidad\Enums\LineaNegocio::Dropi)
+        // Consecutivo propio: no gasta el rango de Great Baby.
+        ->and($f->numero)->toStartWith('DRP-');
     Queue::assertPushed(ReintentarEmisionDian::class);
 });
 
-it('con la empresa del e-commerce apagada no factura con la de Great Baby', function () {
-    $this->ecommerce->update(['activa' => false]);
+it('sin la resolución de Dropi la factura se queda en el ERP: no sale con la de Great Baby', function () {
+    App\Modules\Siigo\Models\SiigoConfig::current()->forceFill(['activo' => true, 'tipo_documento_id' => 100, 'tipo_documento_dropi_id' => null])->save();
+
+    $p = facDespachar(facPedido('F-8'), $this->user->id);
+
+    $f = FacturaVenta::find($p->factura_venta_id);
+    expect($f)->not->toBeNull()
+        ->and($f->es_electronica)->toBeFalse();
+    Queue::assertNotPushed(ReintentarEmisionDian::class);
+});
+
+it('si la regla apunta a una razón social apagada no factura con la de Great Baby', function () {
+    Reglas::set('dropi.empresa', 'ecommerce');
+    App\Models\EmpresaConfig::porCodigo('ecommerce')->update(['activa' => false]);
     // Aunque el SIIGO de Great Baby esté prendido.
     App\Modules\Siigo\Models\SiigoConfig::current()->forceFill(['activo' => true])->save();
 

@@ -38,12 +38,15 @@ class DropiReestamparLineaCommand extends Command
             $this->warn('MODO REVISIÓN · no se escribe nada. Agregue --aplicar para corregir.');
         }
 
-        $ecommerce = EmpresaConfig::porCodigo((string) setting('dropi.empresa', 'ecommerce'));
+        $ecommerce = EmpresaConfig::porCodigo((string) setting('dropi.empresa', 'great_baby'));
 
-        // Facturas del e-commerce: las que nacen de un pedido Dropi o las de su razón social.
+        // Facturas del e-commerce: las que nacen de un pedido Dropi o las de su
+        // razón social. Desde el 7-nov Dropi factura con Great Baby: «todo lo de
+        // su razón social» sería todo Great Baby, así que entonces sólo cuenta
+        // el origen.
         $facturas = FacturaVenta::query()
             ->where(fn ($q) => $q->where('origen_type', DropiPedido::class)
-                ->when($ecommerce, fn ($w) => $w->orWhere('empresa_id', $ecommerce->id)))
+                ->when($ecommerce && ! $ecommerce->es_principal, fn ($w) => $w->orWhere('empresa_id', $ecommerce->id)))
             ->get();
 
         $documentos = [

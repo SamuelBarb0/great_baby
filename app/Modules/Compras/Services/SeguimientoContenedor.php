@@ -8,7 +8,9 @@ use App\Models\User;
 use App\Modules\Compras\Enums\EstadoImportacion;
 use App\Modules\Compras\Enums\EtapaContenedor;
 use App\Modules\Compras\Models\Importacion;
+use App\Modules\Compras\Models\ImportacionDeclaracion;
 use App\Modules\Compras\Models\ImportacionEtapa;
+use App\Modules\Compras\Models\ImportacionInspeccion;
 use App\Modules\Compras\Models\OrdenCompra;
 use App\Modules\Compras\Models\RecepcionCompra;
 use Illuminate\Support\Carbon;
@@ -51,6 +53,14 @@ class SeguimientoContenedor
         $otro = $orden->belongsToMany(Importacion::class, 'compras_importacion_ordenes', 'orden_id', 'importacion_id')->first();
         if ($otro) {
             throw new InvalidArgumentException("La orden {$orden->numero} ya va en el contenedor {$otro->numero}.");
+        }
+
+        // La liquidación va entera al libro del contenedor: una orden de la otra
+        // línea saldría del 1465 de una empresa y entraría al 1435 de la otra (8-nov).
+        $lineaOrden = $orden->linea_negocio ?? \App\Modules\Contabilidad\Enums\LineaNegocio::GreatBaby;
+        $lineaContenedor = $imp->linea_negocio ?? \App\Modules\Contabilidad\Enums\LineaNegocio::GreatBaby;
+        if ($lineaOrden !== $lineaContenedor) {
+            throw new InvalidArgumentException("La orden {$orden->numero} es de {$lineaOrden->label()} y este contenedor de {$lineaContenedor->label()}.");
         }
 
         // Un contenedor se liquida con una sola tasa: las órdenes comparten moneda.
@@ -424,6 +434,72 @@ class SeguimientoContenedor
         }
 
         return $avisados;
+    }
+
+    /**
+     * Cambia los datos del contenedor (ya validados). Liquidado no se toca, y la
+     * tasa tampoco si ya hay mercancía recibida: lo recibido está en el libro a
+     * esa tasa y cambiarla descuadraría el 1465.
+     */
+    public function actualizarDatos(Importacion $imp, array $datos): void
+    {
+        if (in_array($imp->estado, [EstadoImportacion::Liquidada, EstadoImportacion::Cerrada], true)) {
+            throw new InvalidArgumentException('El contenedor ya está liquidado: sus datos no se pueden cambiar.');
+        }
+
+        $tasa = $datos['tasa_cambio_liquidacion'] ?? null;
+        if ($tasa !== null && $tasa !== ''
+            && (float) $tasa !== (float) $imp->tasa_cambio_liquidacion
+            && RecepcionCompra::where('estado', 'confirmada')->whereIn('orden_id', $imp->ordenes()->pluck('compras_ordenes.id'))->exists()) {
+            throw new InvalidArgumentException('Ya hay mercancía recibida con esta tasa de cambio: no se puede cambiar.');
+        }
+
+        $imp->update($datos);
+    }
+
+    /** Crea o corrige una declaración. «Automática» es que la DIAN da el levante sin más trámite. */
+    public function guardarDeclaracion(Importacion $imp, array $datos, ?ImportacionDeclaracion $declaracion, ?int $userId): ImportacionDeclaracion
+    {
+        if ($declaracion && $declaracion->importacion_id !== $imp->id) {
+            throw new InvalidArgumentException('La declaración no es de este contenedor.');
+        }
+
+        if (($datos['selectividad'] ?? null) === 'automatica' && empty($datos['fecha_levante'])) {
+            $datos['fecha_levante'] = $this->hoy()->toDateString();
+        }
+
+        if ($declaracion) {
+            $declaracion->update($datos);
+
+            return $declaracion;
+        }
+
+        return $imp->declaraciones()->create([...$datos, 'registrado_por' => $userId]);
+    }
+
+    public function quitarDeclaracion(Importacion $imp, ImportacionDeclaracion $declaracion): void
+    {
+        if ($declaracion->importacion_id !== $imp->id) {
+            throw new InvalidArgumentException('La declaración no es de este contenedor.');
+        }
+        $declaracion->delete();
+    }
+
+    /** Registra la novedad y le avisa a todo Compras. */
+    public function registrarInspeccion(Importacion $imp, array $datos, ?int $userId): ImportacionInspeccion
+    {
+        $inspeccion = $imp->inspecciones()->create([...$datos, 'registrado_por' => $userId]);
+        $this->avisarInspeccion($imp, ImportacionInspeccion::TIPOS[$datos['tipo']], $datos['notas'] ?? null);
+
+        return $inspeccion;
+    }
+
+    public function resolverInspeccion(Importacion $imp, ImportacionInspeccion $inspeccion): void
+    {
+        if ($inspeccion->importacion_id !== $imp->id) {
+            throw new InvalidArgumentException('La novedad no es de este contenedor.');
+        }
+        $inspeccion->update(['resuelta_en' => $this->hoy()->toDateString()]);
     }
 
     /** Una inspección le cambia los planes a todos: se avisa apenas se marca. */

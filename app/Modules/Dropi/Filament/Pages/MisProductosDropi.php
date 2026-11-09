@@ -4,6 +4,7 @@ namespace App\Modules\Dropi\Filament\Pages;
 
 use App\Modules\Dropi\Services\CatalogoDropi;
 use BackedEnum;
+use Filament\Actions\Action;
 use Filament\Pages\Page;
 
 /**
@@ -45,6 +46,48 @@ class MisProductosDropi extends Page
         'variables' => 'Con variaciones',
         'sin_vincular' => 'Sin vincular al ERP',
     ];
+
+    /** Formulario de Dropi para crear un producto (la API oficial no crea productos). */
+    public const URL_CREAR_EN_DROPI = 'https://app.dropi.co/dashboard/products/add';
+
+    /**
+     * «Mis productos» de Dropi: ahí están sus botones de carga y actualización
+     * masiva con la plantilla de Excel (son ventanas dentro de esa lista, no
+     * tienen ruta propia; leído del bundle de app.dropi.co el 7-nov).
+     */
+    public const URL_CARGA_MASIVA_EN_DROPI = 'https://app.dropi.co/dashboard/products';
+
+    /**
+     * «Crear producto en Dropi» arriba de la página. Es un enlace: el script de
+     * AdminPanelProvider lo abre en una ventana al lado del panel.
+     */
+    protected function getHeaderActions(): array
+    {
+        return [
+            Action::make('crearEnDropi')
+                ->label('Crear producto en Dropi')
+                ->icon('heroicon-o-arrow-top-right-on-square')
+                ->url(self::URL_CREAR_EN_DROPI, shouldOpenInNewTab: true)
+                ->visible(fn (): bool => (bool) (\App\Auth\MenuApp::permisos(auth()->user())['dropi'] ?? false)),
+            Action::make('cargaMasivaEnDropi')
+                ->label('Carga masiva en Dropi')
+                ->icon('heroicon-o-arrow-up-tray')
+                ->color('gray')
+                ->tooltip('Abre «Mis productos» de Dropi; ahí usa «Carga masiva» con su plantilla de Excel.')
+                ->url(self::URL_CARGA_MASIVA_EN_DROPI, shouldOpenInNewTab: true)
+                ->visible(fn (): bool => (bool) (\App\Auth\MenuApp::permisos(auth()->user())['dropi'] ?? false)),
+        ];
+    }
+
+    /**
+     * Formulario de edición de Dropi para un producto. Es la misma ruta a la que
+     * manda su propia lista de productos (`/dashboard/products/edit?id=`, leído
+     * del bundle de app.dropi.co el 7-nov); la API oficial no edita productos.
+     */
+    public static function urlEditarEnDropi(int $id): string
+    {
+        return 'https://app.dropi.co/dashboard/products/edit?id=' . $id;
+    }
 
     public static function canAccess(): bool
     {

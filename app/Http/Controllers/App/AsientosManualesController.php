@@ -130,58 +130,13 @@ class AsientosManualesController extends Controller implements HasMiddleware
                 .'que no admite movimiento. Hay que usar la auxiliar que cuelga de ella.',
         ]);
 
-        $totalDebe = 0;
-        $totalHaber = 0;
-        foreach ($data['lineas'] as $l) {
-            $d = (float) ($l['debe'] ?? 0);
-            $h = (float) ($l['haber'] ?? 0);
-            if (($d > 0 && $h > 0) || ($d == 0 && $h == 0)) {
-                return back()->with('flash', ['type' => 'error', 'message' => "Cada línea debe tener solo débito O crédito (no ambos, no ninguno)."]);
-            }
-            $totalDebe += $d;
-            $totalHaber += $h;
+        // Cuadre, libro y línea de negocio: ver Contabilidad\Actions\AsientosManuales.
+        try {
+            $asiento = \App\Modules\Contabilidad\Actions\AsientosManuales::crear($data, $r->user());
+        } catch (\App\Support\PasoNoPermitido $e) {
+            return back()->with('flash', ['type' => 'error', 'message' => $e->getMessage()]);
         }
-        if (abs($totalDebe - $totalHaber) >= 0.01) {
-            return back()->with('flash', ['type' => 'error', 'message' => "Débito ($" . number_format($totalDebe, 2) . ") ≠ Crédito ($" . number_format($totalHaber, 2) . "). No cuadra."]);
-        }
-
-        $asiento = DB::transaction(function () use ($r, $data, $totalDebe) {
-            $a = AsientoManual::create([
-                'fecha' => $data['fecha'],
-                'glosa' => $data['glosa'],
-                'valor_total' => $totalDebe,
-                'estado' => 'cuadrado',
-                'user_id' => $r->user()->id,
-            ]);
-            foreach ($data['lineas'] as $i => $l) {
-                $a->lineas()->create([
-                    'cuenta_puc' => $l['cuenta_puc'],
-                    'tercero_documento' => $l['tercero_documento'] ?? null,
-                    'debe' => (float) ($l['debe'] ?? 0),
-                    'haber' => (float) ($l['haber'] ?? 0),
-                    'descripcion' => $l['descripcion'],
-                    'orden' => $i,
-                ]);
-            }
-            // QA-FIX #1 · escribir movimientos_contables planos para que los
-            // reportes contables (mayor, balance, estado resultados) vean
-            // este asiento. Reutiliza el motor con validación de partida doble.
-            $movLineas = [];
-            foreach ($data['lineas'] as $l) {
-                $movLineas[] = [
-                    'fecha' => $data['fecha'],
-                    'cuenta_puc' => $l['cuenta_puc'],
-                    'debe' => (float) ($l['debe'] ?? 0),
-                    'haber' => (float) ($l['haber'] ?? 0),
-                    'descripcion' => $a->glosa . ' · ' . $l['descripcion'],
-                    'origen_type' => AsientoManual::class,
-                    'origen_id' => $a->id,
-                    'user_id' => $r->user()->id,
-                ];
-            }
-            \App\Modules\Cartera\Models\MovimientoContable::registrarAsientoAtomico($movLineas);
-            return $a;
-        });
+        $totalDebe = (float) $asiento->valor_total;
 
         return redirect('/app/contabilidad/asientos-manuales')
             ->with('flash', ['type' => 'success', 'message' => "Asiento #{$asiento->id} guardado · cuadrado por $" . number_format($totalDebe, 2) . ". Apruebe para enviar a SIIGO."]);
@@ -197,48 +152,17 @@ class AsientosManualesController extends Controller implements HasMiddleware
      */
     private function puedeAprobar(?\App\Models\User $u, $asiento): bool
     {
-        if (! $u || $asiento->estado !== 'cuadrado') {
-            return false;
-        }
-
-        if ($asiento->user_id !== $u->id) {
-            return true;
-        }
-
-        // Es el suyo: sólo gerencia, o si la empresa habilitó la autoaprobación.
-        return $u->esRoot() || $u->hasRole('Gerente')
-            || (bool) setting('contabilidad.permitir_auto_aprobar_asiento');
+        return \App\Modules\Contabilidad\Actions\AsientosManuales::puedeAprobar($u, $asiento);
     }
 
     public function aprobar(Request $r, AsientoManual $asientoManual): RedirectResponse
     {
-        if ($asientoManual->estado !== 'cuadrado') {
-            return back()->with('flash', ['type' => 'error', 'message' => "Solo se pueden aprobar asientos cuadrados."]);
+        // Segregación de funciones y envío a SIIGO: ver Contabilidad\Actions\AsientosManuales.
+        try {
+            \App\Modules\Contabilidad\Actions\AsientosManuales::aprobar($asientoManual, $r->user());
+        } catch (\App\Support\PasoNoPermitido $e) {
+            return back()->with('flash', ['type' => 'error', 'message' => $e->getMessage()]);
         }
-        // QA-FIX #3 · Segregación de funciones (SEG-A1) · quien crea NO aprueba,
-        // salvo rol Aracely/Gerencia. Excepción configurable por setting para
-        // operación pequeña donde la contadora hace ambas.
-        $u = $r->user();
-        // A1 FIX #11 · reusar helper en vez de reimplementar hasRole a mano.
-        //   esRoot() = Aracely+Gerencia; agregamos Gerente para preservar el
-        //   comportamiento original (3 roles aprobaban antes).
-        $esGerencia = $u && ($u->esRoot() || $u->hasRole('Gerente'));
-        /*
-         * Mismo default invertido que en las OC: decia `true` contra su propio
-         * comentario, asi que el 403 nunca salia. Y un asiento manual es la
-         * herramienta mas poderosa del modulo —cualquier cuenta, cualquier
-         * monto— y al aprobarlo viaja a SIIGO, que es la contabilidad oficial.
-         */
-        $permitirAuto = (bool) (function_exists('setting') ? setting('contabilidad.permitir_auto_aprobar_asiento', false) : false);
-        if ($asientoManual->user_id === $u->id && ! $esGerencia && ! $permitirAuto) {
-            abort(403, 'Segregación de funciones: quien crea un asiento no puede aprobarlo. '
-                .'Pedile la aprobación a Gerencia, o desactivá «Permitir que quien crea un asiento manual '
-                .'lo apruebe» en Reglas de negocio → Contable.');
-        }
-        $asientoManual->update(['estado' => 'aprobado']);
-        // A2 FIX · B2 CRÍTICO · afterCommit evita job huérfano si una
-        //   transacción externa rollbackea después del update.
-        \DB::afterCommit(fn () => PushAsientoManualASiigo::dispatch($asientoManual->id));
         return back()->with('flash', ['type' => 'success', 'message' => "Asiento #{$asientoManual->id} aprobado · encolado a SIIGO."]);
     }
 
@@ -265,30 +189,11 @@ class AsientosManualesController extends Controller implements HasMiddleware
             'motivo' => ['required', 'string', 'min:10', 'max:500'],
         ], [], ['motivo' => 'motivo']);
 
-        if ($asientoManual->anulado_at) {
-            return back()->with('flash', ['type' => 'error',
-                'message' => "El asiento #{$asientoManual->id} ya estaba anulado."]);
+        try {
+            \App\Modules\Contabilidad\Actions\AsientosManuales::anular($asientoManual, $r->user(), $data['motivo']);
+        } catch (\App\Support\PasoNoPermitido $e) {
+            return back()->with('flash', ['type' => 'error', 'message' => $e->getMessage()]);
         }
-
-        if ($asientoManual->estado === 'sincronizado' || $asientoManual->siigo_journal_id) {
-            return back()->with('flash', ['type' => 'error',
-                'message' => "El asiento #{$asientoManual->id} ya está en SIIGO. "
-                    .'Anularlo sólo acá dejaría los dos libros distintos: hay que registrar un asiento contrario.']);
-        }
-
-        DB::transaction(function () use ($asientoManual, $data, $r) {
-            \App\Modules\Cartera\Models\MovimientoContable::query()
-                ->where('origen_type', AsientoManual::class)
-                ->where('origen_id', $asientoManual->id)
-                ->delete();
-
-            $asientoManual->update([
-                'estado' => 'anulado',
-                'anulado_at' => now(),
-                'anulado_por' => $r->user()?->id,
-                'motivo_anulacion' => $data['motivo'],
-            ]);
-        });
 
         return back()->with('flash', ['type' => 'success',
             'message' => "Asiento #{$asientoManual->id} anulado · sus líneas salieron del balance."]);

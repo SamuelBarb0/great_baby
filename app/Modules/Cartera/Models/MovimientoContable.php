@@ -73,7 +73,7 @@ class MovimientoContable extends Model implements AuditableContract
                  */
                 $m->linea_negocio = ($origen && isset($origen->linea_negocio) && $origen->linea_negocio)
                     ? $origen->linea_negocio
-                    : (self::lineaDeSuFactura($origen) ?? LineaNegocio::deOrigen($m->origen_type));
+                    : (self::lineaDeSuFactura($origen) ?? self::lineaDeSuRecepcion($origen) ?? LineaNegocio::deOrigen($m->origen_type));
             }
 
             if ($m->destino_fiscal === null) {
@@ -201,6 +201,23 @@ class MovimientoContable extends Model implements AuditableContract
      * wallet (ConciliarWalletDropi) dejaba la wallet en Dropi y el 1305 en Great
      * Baby, y ninguno de los dos libros cuadraba solo.
      */
+    /**
+     * Un pago a proveedor no tiene línea propia: es la de la compra que paga
+     * (7-nov). Sin esto, deducido del namespace (Cartera), el pago de una
+     * factura de Dropi caía en Great Baby: la deuda quedaba abierta en el
+     * balance de Dropi y bajaba en el de Great Baby.
+     */
+    private static function lineaDeSuRecepcion(?Model $origen): ?LineaNegocio
+    {
+        if (! $origen || ! method_exists($origen, 'recepcion')) {
+            return null;
+        }
+
+        $linea = $origen->recepcion?->linea_negocio;
+
+        return $linea instanceof LineaNegocio ? $linea : LineaNegocio::tryFrom((string) $linea);
+    }
+
     private static function lineaDeSuFactura(?Model $origen): ?LineaNegocio
     {
         if (! $origen || ! method_exists($origen, 'factura')) {

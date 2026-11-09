@@ -31,6 +31,8 @@ class Importacion extends Model implements AuditableContract
         'fecha_nacionalizacion' => 'date',
         'fecha_liquidacion' => 'date',
         'estado' => EstadoImportacion::class,
+        // De quién es el contenedor: su liquidación va al libro de esa línea.
+        'linea_negocio' => \App\Modules\Contabilidad\Enums\LineaNegocio::class,
         'tasa_cambio_liquidacion' => 'decimal:6',
         'valor_fob' => 'decimal:2',
         'valor_gastos' => 'decimal:2',

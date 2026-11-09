@@ -5,13 +5,11 @@ namespace App\Http\Controllers\App;
 use App\Auth\Permisos;
 use App\Http\Controllers\Controller;
 use App\Modules\Compras\Actions\CrearProductosDeOrden;
-use App\Modules\Compras\Enums\EstadoImportacion;
 use App\Modules\Compras\Enums\EtapaContenedor;
 use App\Modules\Compras\Models\Importacion;
 use App\Modules\Compras\Models\ImportacionDeclaracion;
 use App\Modules\Compras\Models\ImportacionInspeccion;
 use App\Modules\Compras\Models\OrdenCompra;
-use App\Modules\Compras\Models\RecepcionCompra;
 use App\Modules\Compras\Services\SeguimientoContenedor;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -44,18 +42,7 @@ class ImportacionSeguimientoController extends Controller implements HasMiddlewa
 
     public function actualizar(Request $r, Importacion $importacion): RedirectResponse
     {
-        if (in_array($importacion->estado, [EstadoImportacion::Liquidada, EstadoImportacion::Cerrada], true)) {
-            return back()->with('error', 'El contenedor ya está liquidado: sus datos no se pueden cambiar.');
-        }
-
-        // Lo recibido ya está en el libro a esa tasa: cambiarla descuadraría el 1465.
-        if ($r->filled('tasa_cambio_liquidacion')
-            && (float) $r->input('tasa_cambio_liquidacion') !== (float) $importacion->tasa_cambio_liquidacion
-            && RecepcionCompra::where('estado', 'confirmada')->whereIn('orden_id', $importacion->ordenes()->pluck('compras_ordenes.id'))->exists()) {
-            return back()->with('error', 'Ya hay mercancía recibida con esta tasa de cambio: no se puede cambiar.');
-        }
-
-        $importacion->update($r->validate([
+        $data = $r->validate([
             'contenedor' => ['nullable', 'string', 'max:30'],
             'bl_awb' => ['nullable', 'string', 'max:60'],
             'proveedor_pais' => ['nullable', 'string', 'max:60'],
@@ -64,9 +51,13 @@ class ImportacionSeguimientoController extends Controller implements HasMiddlewa
             'incoterm' => ['nullable', 'string', 'max:10'],
             'tasa_cambio_liquidacion' => ['nullable', 'numeric', 'min:0'],
             'eta' => ['nullable', 'date'],
-        ]));
+        ]);
 
-        return back()->with('success', 'Datos del contenedor actualizados.');
+        // Liquidado no se toca y la tasa no cambia con mercancía recibida: lo decide el servicio.
+        return $this->intentar(
+            fn () => $this->seguimiento->actualizarDatos($importacion, $data),
+            'Datos del contenedor actualizados.',
+        );
     }
 
     public function ligarOrden(Request $r, Importacion $importacion): RedirectResponse
@@ -100,6 +91,8 @@ class ImportacionSeguimientoController extends Controller implements HasMiddlewa
                         'incoterm' => 'FOB',
                         'moneda_origen' => $orden->moneda,
                         'tasa_cambio_liquidacion' => $orden->tasa_cambio,
+                        // El contenedor nuevo es de quien es la orden que lo abre.
+                        'linea_negocio' => $orden->linea_negocio ?? \App\Modules\Contabilidad\Enums\LineaNegocio::GreatBaby,
                         'creado_por' => $r->user()?->id,
                     ]);
                 $this->seguimiento->ligarOrden($importacion, $orden);
@@ -173,16 +166,7 @@ class ImportacionSeguimientoController extends Controller implements HasMiddlewa
             'notas' => ['nullable', 'string', 'max:1000'],
         ]);
 
-        // «Automática» es justamente que la DIAN da el levante sin más trámite.
-        if ($data['selectividad'] === 'automatica' && empty($data['fecha_levante'])) {
-            $data['fecha_levante'] = now('America/Bogota')->toDateString();
-        }
-
-        if ($declaracion) {
-            $declaracion->update($data);
-        } else {
-            $importacion->declaraciones()->create([...$data, 'registrado_por' => $r->user()?->id]);
-        }
+        $this->seguimiento->guardarDeclaracion($importacion, $data, $declaracion, $r->user()?->id);
 
         return back()->with('success', 'Declaración guardada.');
     }
@@ -190,7 +174,7 @@ class ImportacionSeguimientoController extends Controller implements HasMiddlewa
     public function quitarDeclaracion(Importacion $importacion, ImportacionDeclaracion $declaracion): RedirectResponse
     {
         abort_if($declaracion->importacion_id !== $importacion->id, 404);
-        $declaracion->delete();
+        $this->seguimiento->quitarDeclaracion($importacion, $declaracion);
 
         return back()->with('success', 'Declaración quitada.');
     }
@@ -203,8 +187,7 @@ class ImportacionSeguimientoController extends Controller implements HasMiddlewa
             'notas' => ['nullable', 'string', 'max:1000'],
         ]);
 
-        $importacion->inspecciones()->create([...$data, 'registrado_por' => $r->user()?->id]);
-        $this->seguimiento->avisarInspeccion($importacion, ImportacionInspeccion::TIPOS[$data['tipo']], $data['notas'] ?? null);
+        $this->seguimiento->registrarInspeccion($importacion, $data, $r->user()?->id);
 
         return back()->with('success', 'Novedad registrada. Compras ya recibió el aviso.');
     }
@@ -212,7 +195,7 @@ class ImportacionSeguimientoController extends Controller implements HasMiddlewa
     public function resolverInspeccion(Importacion $importacion, ImportacionInspeccion $inspeccion): RedirectResponse
     {
         abort_if($inspeccion->importacion_id !== $importacion->id, 404);
-        $inspeccion->update(['resuelta_en' => now('America/Bogota')->toDateString()]);
+        $this->seguimiento->resolverInspeccion($importacion, $inspeccion);
 
         return back()->with('success', 'Novedad resuelta.');
     }
