@@ -1,0 +1,53 @@
+[
+    {
+        "guia": "GUI-100001",
+        "orden_id": "900001",
+        "transportadora": "COORDINADORA",
+        "tienda": "Tienda Mock",
+        "vendedor": {"nombre": "Vendedora Uno", "identificacion": "1010101010"},
+        "cliente": {"nombre": "Ana Pérez", "documento": "52000001", "telefono": "3000000001", "direccion": "Calle 1 # 2-3", "ciudad": "Bogotá", "depto": "Cundinamarca"},
+        "estado": "sin_estado",
+        "valores": {"precio_proveedor_total": 59500, "cliente_final_total": 89900, "ganancia_vendedor": 20000, "flete_transportadora": 10400},
+        "items": [{"sku": "MOCK-SKU-001", "cantidad": 1, "precio_proveedor_unit": 59500}],
+        "creado_at": "2026-03-02T10:00:00-05:00"
+    },
+    {
+        "guia": "GUI-100002",
+        "orden_id": "900002",
+        "transportadora": "INTERRAPIDISIMO",
+        "tienda": "Tienda Mock",
+        "vendedor": {"nombre": "Vendedor Dos", "identificacion": "1020202020"},
+        "cliente": {"nombre": "Luis Gómez", "documento": "80000002", "telefono": "3000000002", "direccion": "Carrera 4 # 5-6", "ciudad": "Medellín", "depto": "Antioquia"},
+        "estado": "pending",
+        "valores": {"precio_proveedor_total": 119000, "cliente_final_total": 159900},
+        "items": [{"sku": "MOCK-SKU-002", "cantidad": 2, "precio_proveedor_unit": 59500}],
+        "creado_at": "2026-03-03T11:30:00-05:00"
+    },
+    {
+        "guia": "GUI-100003",
+        "orden_id": "900003",
+        "transportadora": "SERVIENTREGA",
+        "tienda": "Tienda Mock",
+        "vendedor": {"nombre": "Vendedora Uno", "identificacion": "1010101010"},
+        "cliente": {"nombre": "Marta Ruiz", "ciudad": "Cali", "depto": "Valle del Cauca"},
+        "estado": "pending",
+        "valores": {"precio_proveedor_total": 45000},
+        "items": [
+            {"sku": "MOCK-SKU-003", "cantidad": 1, "precio_proveedor_unit": 25000},
+            {"sku": "MOCK-SKU-004", "cantidad": 1, "precio_proveedor_unit": 20000}
+        ],
+        "creado_at": "2026-03-04T09:15:00-05:00"
+    },
+    {
+        "guia": "GUI-100004",
+        "orden_id": "900004",
+        "transportadora": "COORDINADORA",
+        "tienda": "Tienda Mock",
+        "vendedor": {"nombre": "Vendedor Dos", "identificacion": "1020202020"},
+        "cliente": {"nombre": "Jorge Díaz", "ciudad": "Barranquilla", "depto": "Atlántico"},
+        "estado": "sin_estado",
+        "valores": {"precio_proveedor_total": 32000},
+        "items": [{"sku": "MOCK-SKU-005", "cantidad": 1, "precio_proveedor_unit": 32000}],
+        "creado_at": "2026-03-05T16:45:00-05:00"
+    }
+]

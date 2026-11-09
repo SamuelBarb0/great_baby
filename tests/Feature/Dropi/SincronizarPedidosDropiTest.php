@@ -8,15 +8,24 @@ use App\Modules\Dropi\Models\DropiPedido;
 use Carbon\CarbonImmutable;
 
 beforeEach(function () {
-    // Reforzamos que el driver activo sea el mock aunque .env cambie
+    // Reforzamos que el driver activo sea el mock aunque .env cambie.
+    //
+    // El fixture vive con las pruebas (tests/Fixtures/dropi). Antes se leía de
+    // storage/app/dropi-fixtures, que storage/app/.gitignore ignora entero: el
+    // archivo nunca llegó al repo, el mock devolvía cero pedidos y las cuatro
+    // pruebas fallaban en cualquier máquina menos la de quien las escribió.
     app()->bind(
         DropiClientInterface::class,
-        fn () => new DropiMockClient(storage_path('app/dropi-fixtures')),
+        fn () => new DropiMockClient(base_path('tests/Fixtures/dropi')),
     );
+
+    // Fecha fija y vieja: con «hace un año» el fixture (fechas fijas) se
+    // habría quedado por fuera de la ventana al año de escrito.
+    $this->desde = CarbonImmutable::parse('2020-01-01');
 });
 
 it('sincroniza pedidos desde el fixture', function () {
-    $result = app(SincronizarPedidosDropi::class)->handle(CarbonImmutable::now()->subYear());
+    $result = app(SincronizarPedidosDropi::class)->handle($this->desde);
 
     expect($result['driver'])->toBe('mock')
         ->and($result['procesados'])->toBe(4)
@@ -37,7 +46,7 @@ it('es idempotente: correr dos veces no duplica', function () {
      * verdad cambiara algo nadie lo notaría entre el ruido.
      */
     $action = app(SincronizarPedidosDropi::class);
-    $desde = CarbonImmutable::now()->subYear();
+    $desde = $this->desde;
 
     $primera = $action->handle($desde);
     $segunda = $action->handle($desde);
@@ -61,7 +70,7 @@ it('sí cuenta como actualizado lo que de verdad cambió', function () {
      * un cambio, es una transición bloqueada, y se registra como tal—.
      */
     $action = app(SincronizarPedidosDropi::class);
-    $desde = CarbonImmutable::now()->subYear();
+    $desde = $this->desde;
 
     $action->handle($desde);
 
@@ -75,7 +84,7 @@ it('sí cuenta como actualizado lo que de verdad cambió', function () {
 });
 
 it('marca los pedidos como pendiente_inventario cuando no hay stock', function () {
-    app(SincronizarPedidosDropi::class)->handle(CarbonImmutable::now()->subYear());
+    app(SincronizarPedidosDropi::class)->handle($this->desde);
 
     $pedido = DropiPedido::where('guia', 'GUI-100001')->first();
 
