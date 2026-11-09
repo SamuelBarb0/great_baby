@@ -7,6 +7,12 @@
         $enCamino = $c->enCamino()->orderBy('despachado_at')->limit(100)->get();
         $sinPedido = $c->pagosSinPedido();
         $diferencias = $c->diferencias()->latest('detectada_at')->limit(100)->get();
+        $pagados = $c->pagosDePedidos()->orderByRaw("estado_contable = 'recibo_pendiente' DESC")->orderByDesc('fecha')->limit(100)->get();
+        $numeros = $c->numerosDeFactura($pagados);
+        $estados = \App\Modules\Dropi\Models\DropiWalletMovimiento::estadosContables();
+        $libro = fn ($m) => \App\Modules\Dropi\Filament\Pages\LibroContableDropi::urlDeWallet($m->id);
+        $verLibro = \App\Modules\Dropi\Filament\Pages\LibroContableDropi::canAccess();
+        $wallet = \App\Modules\Dropi\Filament\Resources\DropiWalletMovimientoResource::class;
         $plazo = \App\Modules\Dropi\Services\CruceWalletPedidos::PLAZO_PAGO_DIAS;
         $fmt = fn ($v) => '$' . number_format((float) $v, 0, ',', '.');
         $ver = fn ($p) => \App\Modules\Dropi\Filament\Resources\DropiPedidoResource::getUrl('view', ['record' => $p]);
@@ -18,6 +24,7 @@
             ['Devoluciones en camino', $r['devoluciones'], '#9ca3af', 'No se cobran.'],
             ['Pagos sin pedido en el ERP', $r['sin_pedido'], '#8b5cf6', 'Dropi pagó una orden que el ERP no tiene.'],
             ['Diferencias de precio', $r['diferencias'], '#ef4444', 'Suma pagada distinta de la esperada.'],
+            ['Pagos sin recibo de caja', $r['recibo_pendiente'], '#ef4444', 'Pedido facturado y pagado que no ha llegado a la contabilidad.'],
         ];
         $th = 'text-align:left;padding:.5rem;';
         $td = 'padding:.5rem;';
@@ -123,7 +130,7 @@
         @else
             <table style="width:100%;font-size:.9rem;">
                 <thead><tr style="border-bottom:1px solid rgba(156,163,175,.2);">
-                    <th style="{{ $th }}">Fecha</th><th style="{{ $th }}">Orden Dropi</th><th style="{{ $th }}">Descripción</th><th style="{{ $th }}text-align:right;">Monto</th>
+                    <th style="{{ $th }}">Fecha</th><th style="{{ $th }}">Orden Dropi</th><th style="{{ $th }}">Descripción</th><th style="{{ $th }}">Asiento</th><th style="{{ $th }}text-align:right;">Monto</th>
                 </tr></thead>
                 <tbody>
                 @foreach($sinPedido as $m)
@@ -131,6 +138,14 @@
                         <td style="{{ $td }}color:#9ca3af;">{{ $m->fecha?->format('d/m/Y') }}</td>
                         <td style="{{ $td }}{{ $mono }}">{{ $m->fuente['order_id'] ?? '—' }}</td>
                         <td style="{{ $td }}">{{ \Illuminate\Support\Str::limit($m->fuente['description'] ?? $m->categoria, 80) }}</td>
+                        <td style="{{ $td }}">
+                            @php [$etiqueta, $color] = $estados[$m->estado_contable] ?? ['—', 'gray']; @endphp
+                            @if($verLibro && $m->estado_contable === 'asentado')
+                                <a href="{{ $libro($m) }}" target="_blank"><x-filament::badge :color="$color">{{ $etiqueta }}</x-filament::badge></a>
+                            @else
+                                <x-filament::badge :color="$color">{{ $etiqueta }}</x-filament::badge>
+                            @endif
+                        </td>
                         <td style="{{ $td }}text-align:right;font-weight:600;">{{ $fmt($m->monto) }}</td>
                     </tr>
                 @endforeach
@@ -160,6 +175,59 @@
                         <td style="{{ $td }}text-align:right;">{{ $fmt($s->monto_esperado) }}</td>
                         <td style="{{ $td }}text-align:right;">{{ $fmt($s->monto_recibido) }}</td>
                         <td style="{{ $td }}text-align:right;font-weight:700;color:#ef4444;">{{ $fmt($s->diferencia) }}</td>
+                    </tr>
+                @endforeach
+                </tbody>
+            </table>
+        @endif
+    </x-filament::section>
+
+    <x-filament::section style="margin-top:1rem;" collapsible :collapsed="$r['recibo_pendiente']['n'] === 0">
+        <x-slot name="heading">6 · Pagos de Dropi y su contabilidad ({{ $r['recibo_pendiente']['n'] }} sin recibo de caja)</x-slot>
+        <x-slot name="description">
+            Cada pago de guía con su pedido, su factura y si ya está en el libro. Un pedido facturado se asienta con el recibo de caja de su factura;
+            uno sin factura, con su propio asiento. Primero los que faltan, luego los últimos 100.
+            <a href="{{ $wallet::urlDeEstados(['recibo_pendiente']) }}" style="color:#3b82f6;">Ver los pendientes en la wallet</a>
+        </x-slot>
+        @if($pagados->isEmpty())
+            <div style="color:#9ca3af;">No hay pagos de guía desde el {{ $r['desde']->format('d/m/Y') }}.</div>
+        @else
+            <table style="width:100%;font-size:.9rem;">
+                <thead><tr style="border-bottom:1px solid rgba(156,163,175,.2);">
+                    <th style="{{ $th }}">Fecha</th><th style="{{ $th }}">Orden Dropi</th><th style="{{ $th }}">Factura</th>
+                    <th style="{{ $th }}">Contabilidad</th><th style="{{ $th }}text-align:right;">Pagado</th>
+                </tr></thead>
+                <tbody>
+                @foreach($pagados as $m)
+                    @php
+                        [$etiqueta, $color, $ayuda] = $estados[$m->estado_contable] ?? ['—', 'gray', ''];
+                        $facturaId = $m->pedido?->factura_venta_id;
+                        $destino = match (true) {
+                            $m->estado_contable === 'asentado' && $verLibro => $libro($m),
+                            $facturaId !== null => '/app/facturas/'.$facturaId,
+                            default => null,
+                        };
+                    @endphp
+                    <tr style="border-bottom:1px solid rgba(156,163,175,.1);">
+                        <td style="{{ $td }}color:#9ca3af;">{{ $m->fecha?->format('d/m/Y') }}</td>
+                        <td style="{{ $td }}{{ $mono }}">
+                            @if($m->pedido)<a href="{{ $ver($m->pedido) }}" style="color:#3b82f6;">{{ $m->pedido->dropi_orden_id }}</a>@else — @endif
+                        </td>
+                        <td style="{{ $td }}{{ $mono }}">
+                            @if($facturaId)
+                                <a href="/app/facturas/{{ $facturaId }}" target="_blank" style="color:#3b82f6;">{{ $numeros[$facturaId] ?? '#'.$facturaId }}</a>
+                            @else
+                                <span style="color:#9ca3af;font-weight:400;">sin factura</span>
+                            @endif
+                        </td>
+                        <td style="{{ $td }}" title="{{ $ayuda }}">
+                            @if($destino)
+                                <a href="{{ $destino }}" target="_blank"><x-filament::badge :color="$color">{{ $etiqueta }}</x-filament::badge></a>
+                            @else
+                                <x-filament::badge :color="$color">{{ $etiqueta }}</x-filament::badge>
+                            @endif
+                        </td>
+                        <td style="{{ $td }}text-align:right;font-weight:600;">{{ $fmt($m->monto) }}</td>
                     </tr>
                 @endforeach
                 </tbody>

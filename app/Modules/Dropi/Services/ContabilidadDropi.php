@@ -6,6 +6,9 @@ use App\Modules\Cartera\Actions\CalcularAntiguedadCartera;
 use App\Modules\Cartera\Enums\EstadoFactura;
 use App\Modules\Cartera\Enums\TramoAntiguedad;
 use App\Modules\Cartera\Models\FacturaVenta;
+use App\Modules\Cartera\Models\MovimientoContable;
+use App\Modules\Dropi\Listeners\RegistrarAsientoWalletDropi;
+use App\Modules\Dropi\Models\DropiWalletMovimiento;
 use App\Modules\Cartera\Models\NotaCredito;
 use App\Modules\Cartera\Models\PagoVenta;
 use App\Modules\Contabilidad\Enums\LineaNegocio;
@@ -132,7 +135,38 @@ class ContabilidadDropi
                 'valor' => (float) (clone $notas)->sum('valor'),
             ],
             'ultimos_pagos' => $ultimosPagos,
+            'wallet' => $this->conciliacionWallet($corte),
             'sin_datos' => $saldos->isEmpty() && $saldosMes->isEmpty(),
+        ];
+    }
+
+    /**
+     * La wallet contra su cuenta en el libro (111015), al corte.
+     *
+     * La wallet es la suma de sus movimientos importados; la cuenta es lo que
+     * asentaron esos movimientos y los recibos de caja pagados desde ella. La
+     * cuenta se lee sin filtro de línea: 111015 es sólo la wallet, y un recibo
+     * de una factura vieja sin línea Dropi también la mueve.
+     *
+     * @return array{saldo_wallet:float, saldo_contable:float, diferencia:float, pendientes:array{n:int, monto:float}}
+     */
+    protected function conciliacionWallet(CarbonImmutable $corte): array
+    {
+        $hasta = $corte->toDateString();
+
+        $saldoWallet = (float) DropiWalletMovimiento::where('fecha', '<=', $hasta)->sum('monto');
+        $saldoContable = (float) MovimientoContable::where('cuenta_puc', RegistrarAsientoWalletDropi::CUENTA_WALLET)
+            ->where('fecha', '<=', $hasta)->selectRaw('COALESCE(SUM(debe - haber), 0) AS saldo')->value('saldo');
+
+        $pendientes = DropiWalletMovimiento::where('fecha', '<=', $hasta)->estadoContable([
+            DropiWalletMovimiento::CONTABLE_RECIBO_PENDIENTE, DropiWalletMovimiento::CONTABLE_SIN_ASIENTO,
+        ]);
+
+        return [
+            'saldo_wallet' => round($saldoWallet, 2),
+            'saldo_contable' => round($saldoContable, 2),
+            'diferencia' => round($saldoWallet - $saldoContable, 2),
+            'pendientes' => ['n' => (clone $pendientes)->count(), 'monto' => (float) (clone $pendientes)->sum('monto')],
         ];
     }
 }

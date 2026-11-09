@@ -119,5 +119,30 @@
                 @endforeach
             @endif
         </x-filament::section>
+
+        {{-- 9-nov · la wallet contra su cuenta: el enlace con la wallet y el cruce --}}
+        @php
+            $w = $d['wallet'];
+            $walletRes = \App\Modules\Dropi\Filament\Resources\DropiWalletMovimientoResource::class;
+            $cuadraWallet = abs($w['diferencia']) <= 0.01;
+        @endphp
+        <x-filament::section>
+            <x-slot name="heading">Wallet Dropi vs. cuenta 111015 · al {{ $d['periodo']['corte'] }}</x-slot>
+            <x-slot name="description">Lo que dice la wallet contra lo que dice el libro. Una diferencia se explica casi siempre por los movimientos pendientes.</x-slot>
+            <div style="{{ $fila }}"><span>Saldo de la wallet (movimientos importados)</span><span>{{ $money($w['saldo_wallet']) }}</span></div>
+            <div style="{{ $fila }}"><span>Saldo de la cuenta 111015 en el libro</span><span>{{ $money($w['saldo_contable']) }}</span></div>
+            <div style="{{ $total }}">
+                <span>Diferencia</span>
+                <span style="color:{{ $cuadraWallet ? '#059669' : '#dc2626' }};">{{ $cuadraWallet ? '✓ Cuadra' : $money($w['diferencia']) }}</span>
+            </div>
+            <div style="font-size:.8rem;color:#9ca3af;margin-top:.35rem;">
+                {{ $w['pendientes']['n'] }} movimiento(s) sin llegar al libro ({{ $money($w['pendientes']['monto']) }}):
+                <a href="{{ $walletRes::urlDeEstados(['recibo_pendiente', 'sin_asiento']) }}" style="color:#3b82f6;">verlos en la wallet</a>
+                · <a href="{{ \App\Modules\Dropi\Filament\Pages\CruceWalletPedidos::getUrl() }}" style="color:#3b82f6;">cruce con pedidos</a>
+                @if(\App\Modules\Dropi\Filament\Pages\LibroContableDropi::canAccess())
+                    · <a href="{{ \App\Modules\Dropi\Filament\Pages\LibroContableDropi::urlDeWallet() }}" style="color:#3b82f6;">asientos de la wallet</a>
+                @endif
+            </div>
+        </x-filament::section>
     </div>
 </x-filament-panels::page>
