@@ -116,16 +116,30 @@ it('root pasa siempre, tenga o no las casillas', function () {
     expect(Permisos::puedeAccion($aracely->fresh(), 'cajas', 'eliminar'))->toBeTrue();
 });
 
-it('el catálogo de la pantalla trae las cuatro casillas por sección', function () {
+it('el catálogo trae sólo las casillas que la sección cumple de verdad', function () {
+    /*
+     * Antes traía las cuatro para las 68 secciones: 272 casillas, de las que
+     * el código consultaba 74. Las otras 198 se guardaban, se veían marcadas y
+     * nadie las miraba —las 68 de «eliminar», ni una sola vez—.
+     *
+     * Una casilla que no hace nada hace creer que el candado está puesto, así
+     * que ahora se pinta sólo lo que se cumple. `ACCIONES_QUE_SE_CUMPLEN` es
+     * el contrato.
+     */
     $catalogo = Permisos::catalogo();
 
-    $fila = collect($catalogo)->flatten(1)->firstWhere('seccion', 'cajas');
+    // Cajas SÍ distingue: su controlador pregunta por crear y por editar.
+    $cajas = collect($catalogo)->flatten(1)->firstWhere('seccion', 'cajas');
 
-    expect($fila['acciones'])->toHaveCount(4)
-        ->and(collect($fila['acciones'])->pluck('accion')->all())
-        ->toBe(['ver', 'crear', 'editar', 'eliminar'])
+    expect(collect($cajas['acciones'])->pluck('accion')->all())->toBe(['crear', 'editar'])
         // `permiso` sigue siendo el de ver: lo leen decenas de sitios viejos.
-        ->and($fila['permiso'])->toBe('ver.cajas');
+        ->and($cajas['permiso'])->toBe('ver.cajas');
+
+    // Y una que no distingue no ofrece casillas de más.
+    $bodega = collect($catalogo)->flatten(1)->firstWhere('seccion', 'bodega');
+
+    expect($bodega['acciones'])->toBe([])
+        ->and($bodega['permiso'])->toBe('ver.bodega');
 });
 
 it('los módulos de tesorería son configurables desde la pantalla', function () {
