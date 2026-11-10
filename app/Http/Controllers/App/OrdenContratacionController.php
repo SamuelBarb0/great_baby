@@ -305,7 +305,7 @@ class OrdenContratacionController extends Controller implements HasMiddleware
 
     private function avisarALaJunta(OrdenContratacion $o, Candidato $c): void
     {
-        User::permission(Permisos::permiso('rrhh_orden_contratacion'))->get(['id'])
+        Permisos::usuariosQuePueden('rrhh_orden_contratacion')->get(['id'])
             ->each(fn ($u) => NotificacionErp::crear([
                 'user_id' => $u->id,
                 'tipo' => 'rrhh_orden',
@@ -320,7 +320,7 @@ class OrdenContratacionController extends Controller implements HasMiddleware
 
     private function avisarAGestionHumana(OrdenContratacion $o, string $titulo, string $mensaje, string $color): void
     {
-        $destinos = User::permission(Permisos::permiso('rrhh'))->pluck('id');
+        $destinos = Permisos::usuariosQuePueden('rrhh')->pluck('id');
 
         // Y a quien la pidió, que puede no estar en ese grupo si cambió de rol.
         if ($o->solicitada_por_id && ! $destinos->contains($o->solicitada_por_id)) {

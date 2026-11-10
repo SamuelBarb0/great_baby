@@ -55,7 +55,9 @@ it('prendido, un tipo de la lista sí se encola', function () {
     Reglas::set('notificaciones.correo_activo', true);
     Reglas::limpiarRequestCache();
 
-    avisoDe('pedido_retenido');
+    // El tipo real es `pedido_retenido_cartera`. La lista traía
+    // `pedido_retenido` a secas, que ningún aviso emite.
+    avisoDe('pedido_retenido_cartera');
 
     Queue::assertPushed(EnviarAvisoPorCorreo::class);
 });
@@ -129,4 +131,41 @@ it('un aviso borrado no tumba la cola', function () {
     (new EnviarAvisoPorCorreo($id))->handle();
 
     Mail::assertNothingSent();
+});
+
+it('todo tipo de la lista por defecto es un aviso que el sistema manda de verdad', function () {
+    /*
+     * Un tipo mal escrito no da error: simplemente ese correo no sale NUNCA,
+     * aunque la regla esté prendida y la casilla marcada. Gerencia prende el
+     * aviso, no llega nada, y la conclusión razonable es que el correo está
+     * roto.
+     *
+     * La lista por defecto traía cuatro tipos que ningún aviso usaba
+     * —`pedido_retenido` (el real es `pedido_retenido_cartera`),
+     * `nomina_por_aprobar`, `pago_vencido` y `siigo_fallo`—, o sea la mitad.
+     *
+     * Este test lee el código fuente a propósito: es la única forma de que la
+     * lista no se vuelva a separar de la realidad sin que nadie se entere.
+     */
+    $crudo = \App\Support\Reglas::DEFAULTS['notificaciones.tipos_por_correo']['valor'];
+    $configurados = json_decode((string) $crudo, true) ?: [];
+
+    expect($configurados)->not->toBeEmpty();
+
+    $emitidos = [];
+
+    foreach (\Illuminate\Support\Facades\File::allFiles(app_path()) as $archivo) {
+        if ($archivo->getExtension() !== 'php') {
+            continue;
+        }
+
+        preg_match_all("/'tipo'\s*=>\s*'([a-z_]+)'/", $archivo->getContents(), $m);
+        $emitidos = array_merge($emitidos, $m[1]);
+    }
+
+    $muertos = array_values(array_diff($configurados, array_unique($emitidos)));
+
+    expect($muertos)->toBe([],
+        'Estos tipos están en la lista de correo y ningún aviso del sistema los usa: '
+        .implode(', ', $muertos));
 });

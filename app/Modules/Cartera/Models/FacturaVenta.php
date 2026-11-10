@@ -84,17 +84,46 @@ class FacturaVenta extends Model implements AuditableContract
          */
         static::saving(function (FacturaVenta $f) {
             $deLaEmpresa = self::lineaDeLaEmpresa($f->empresa_id);
-            if ($deLaEmpresa !== null && $f->linea_negocio !== null
-                && $f->linea_negocio !== $deLaEmpresa) {
-                throw new RuntimeException(sprintf(
-                    'Factura %s: la razón social «%s» factura %s, pero la factura dice %s. '
-                    .'Las dos líneas de negocio no se mezclan.',
-                    $f->numero ?? '(nueva)',
-                    \App\Models\EmpresaConfig::porId($f->empresa_id)->nombreCorto(),
-                    $deLaEmpresa->label(),
-                    $f->linea_negocio->label(),
-                ));
+
+            if ($deLaEmpresa === null || $f->linea_negocio === null
+                || $f->linea_negocio === $deLaEmpresa) {
+                return;
             }
+
+            /*
+             * Si NADIE tocó la línea en este guardado, se corrige sola.
+             *
+             * Antes esto reventaba siempre, y `saving` corre en CADA guardado:
+             * aplicar un pago, cambiar el estado, tocar el saldo. Una factura
+             * vieja —de cuando la columna tenía default `great_baby` y nadie
+             * miraba la razón social— quedaba imposible de guardar para
+             * siempre. No se podía ni registrar su pago, y el mensaje hablaba
+             * de líneas de negocio, que no tiene nada que ver con lo que la
+             * persona estaba haciendo.
+             *
+             * Manda la razón social, que es lo que este mismo archivo dice
+             * arriba y lo que hace el hook de `creating`. Corregir la fila
+             * cumple lo que pidió Aracely —que nunca se unan— sin tumbar una
+             * operación que no tiene la culpa.
+             */
+            if (! $f->isDirty('linea_negocio')) {
+                $f->linea_negocio = $deLaEmpresa;
+
+                return;
+            }
+
+            /*
+             * Pero si alguien la está CAMBIANDO a una que no corresponde, eso
+             * sí revienta: es la unión que no puede pasar, hecha a propósito.
+             */
+            throw new RuntimeException(sprintf(
+                'Factura %s: la razón social «%s» factura %s, pero se está guardando como %s. '
+                .'Las dos líneas de negocio no se mezclan.',
+                $f->numero ?? '(nueva)',
+                \App\Models\EmpresaConfig::porId($f->empresa_id)->nombreCorto(),
+                $deLaEmpresa->label(),
+                $f->linea_negocio->label(),
+            ));
         });
 
         static::saving(function (FacturaVenta $f) {

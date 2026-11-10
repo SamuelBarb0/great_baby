@@ -27,9 +27,21 @@ class PagoVenta extends Model implements AuditableContract
      * `where(...)->delete()` no instancia modelos y por tanto no dispara
      * `deleted`: el pago queda borrado y su asiento vivo. Ver PagoVentaBuilder.
      */
+    /**
+     * Verdadero mientras este pago se está borrando de a uno.
+     *
+     * Lo pone `PagoVentaBuilder::borrarDeAUno()` y lo lee el builder que este
+     * modelo construya a continuación. Es lo que corta la recursión: sin esto,
+     * `$pago->forceDelete()` vuelve a entrar al builder, que vuelve a cargar la
+     * fila, que vuelve a llamar al modelo… hasta agotar la memoria.
+     */
+    public bool $borrandoDeAUno = false;
+
     public function newEloquentBuilder($query): PagoVentaBuilder
     {
-        return new PagoVentaBuilder($query);
+        $builder = new PagoVentaBuilder($query);
+
+        return $this->borrandoDeAUno ? $builder->marcarBorradoDirecto() : $builder;
     }
 
     // Re-audit DATOS #10 · $fillable coherente con FacturaVenta/MovimientoContable

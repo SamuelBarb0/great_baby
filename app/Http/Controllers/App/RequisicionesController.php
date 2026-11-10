@@ -286,7 +286,7 @@ class RequisicionesController extends Controller implements HasMiddleware
 
             // Los otros de la terna no se descartan solos: puede que el
             // elegido no acepte la oferta y haya que volver a ellos.
-            foreach (User::permission(Permisos::permiso('rrhh'))->get(['id']) as $u) {
+            foreach (Permisos::usuariosQuePueden('rrhh')->get(['id']) as $u) {
                 NotificacionErp::crear([
                     'user_id' => $u->id,
                     'tipo' => 'rrhh_terna',
@@ -482,9 +482,7 @@ class RequisicionesController extends Controller implements HasMiddleware
     /** Avisa a todo el que pueda resolverla, no a una persona fija. */
     private function avisarAGestionHumana(Requisicion $x): void
     {
-        $permiso = Permisos::permiso('rrhh');
-
-        User::permission($permiso)->get(['id'])->each(fn ($u) => NotificacionErp::crear([
+        Permisos::usuariosQuePueden('rrhh')->get(['id'])->each(fn ($u) => NotificacionErp::crear([
             'user_id' => $u->id,
             'tipo' => 'rrhh_requisicion',
             'titulo' => "Nueva solicitud de personal · {$x->numero}",

@@ -43,7 +43,7 @@ class ConciliarExtracto
         ?string $periodoDesde = null,
         ?string $periodoHasta = null,
     ): array {
-        $dias = $diasTolerancia ?? max(0, (int) setting('contabilidad.dias_match_extracto'));
+        $dias = $diasTolerancia ?? max(0, (int) setting('contable.dias_match_extracto'));
 
         $fechas = array_column($movimientos, 'fecha');
         if (! $fechas) {
@@ -263,7 +263,7 @@ class ConciliarExtracto
      */
     private function cuentaDelConcepto(string $descripcion): ?array
     {
-        $mapa = setting('contabilidad.conceptos_banco');
+        $mapa = setting('contable.conceptos_banco');
         $mapa = is_array($mapa) ? $mapa : (json_decode((string) $mapa, true) ?: []);
 
         $texto = $this->sinTildes(mb_strtoupper($descripcion));

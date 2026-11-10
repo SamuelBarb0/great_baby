@@ -164,7 +164,7 @@ class MiEquipoController extends Controller implements HasMiddleware
         ));
 
         // Gestión Humana es quien cierra: tiene que enterarse de que ya puede.
-        foreach (User::permission(Permisos::permiso('rrhh'))->get(['id']) as $u) {
+        foreach (Permisos::usuariosQuePueden('rrhh')->get(['id']) as $u) {
             NotificacionErp::crear([
                 'user_id' => $u->id,
                 'tipo' => 'rrhh_prueba',

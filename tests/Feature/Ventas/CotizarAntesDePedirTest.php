@@ -475,3 +475,22 @@ it('sin cambio de impuesto el aviso no aparece', function () {
     expect(session('warning'))->toBeNull()
         ->and(session('success'))->toContain('con los precios que se cotizaron');
 });
+
+it('el consecutivo sobrevive al renglón 10.000 del día', function () {
+    /*
+     * `str_pad` rellena pero no recorta: pasado el 9999 el consecutivo crece a
+     * cinco dígitos, y leerlo por «los últimos cuatro» devolvía 0000, así que
+     * el siguiente volvía a ser 0001 contra un `numero` que es único. La
+     * cotización no se creaba, y el mensaje hablaba de una llave duplicada.
+     */
+    $cot = cotizaDe(1);
+    $prefijo = 'COT-'.now()->format('ymd').'-';
+
+    // La del 9999: la siguiente tiene que ser la 10000, no la 0001.
+    $cot->update(['numero' => $prefijo.'9999']);
+
+    expect(cotizaDe(1)->numero)->toBe($prefijo.'10000');
+
+    // Y de ahí para arriba sigue contando.
+    expect(cotizaDe(1)->numero)->toBe($prefijo.'10001');
+});

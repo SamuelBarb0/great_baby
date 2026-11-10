@@ -2,7 +2,7 @@
 
 namespace App\Console\Commands;
 
-use App\Models\NotificacionErp;
+use App\Http\Controllers\App\EmpleadoController;
 use App\Modules\Rrhh\Models\Empleado;
 use Illuminate\Console\Command;
 
@@ -17,8 +17,17 @@ use Illuminate\Console\Command;
  * deja de ser libre y pasa a necesitar justa causa. Es de los pocos plazos del
  * ERP donde no enterarse cuesta plata de verdad.
  *
- * Avisa al jefe que ya opinó —si opinó— y a Gestión Humana siempre, porque la
- * evaluación necesita las dos firmas.
+ * El aviso va a Gestión Humana SIEMPRE —es quien cierra la evaluación— y
+ * además al jefe del área cuando todavía no dio su concepto, que es quien
+ * tiene que dar el primer paso.
+ *
+ * Quién recibe qué vive en `EmpleadoController::avisarPruebasPorVencer()` y no
+ * acá. Había dos caminos haciendo lo mismo —este comando y
+ * `rrhh:avisar-periodos-prueba`, agendados los dos— con tipos de aviso
+ * distintos y destinatarios invertidos: éste mandaba el aviso al jefe cuando
+ * ya había opinado y a TODO EL ERP cuando no, con lo cual Gestión Humana no lo
+ * recibía nunca. Dos implementaciones de la misma regla se separan siempre;
+ * la pregunta no es si, es cuándo.
  */
 class AvisarPruebaPorVencerCommand extends Command
 {
@@ -41,28 +50,17 @@ class AvisarPruebaPorVencerCommand extends Command
 
         foreach ($empleados as $e) {
             $quedan = $e->diasDePrueba();
-            $cuando = $quedan === null ? 'sin fecha'
-                : ($quedan < 0 ? 'YA SE VENCIÓ hace '.abs($quedan).' días'
-                    : ($quedan === 0 ? 'vence HOY' : "vence en {$quedan} días"));
 
-            $this->warn("· {$e->nombre_completo}: {$cuando}");
+            $this->warn('· '.$e->nombre_completo.': '.match (true) {
+                $quedan === null => 'sin fecha',
+                $quedan < 0 => 'YA SE VENCIÓ hace '.abs($quedan).' días',
+                $quedan === 0 => 'vence HOY',
+                default => "vence en {$quedan} días",
+            });
+        }
 
-            if ($seco) {
-                continue;
-            }
-
-            NotificacionErp::crear([
-                // Al jefe que ya opinó; si todavía no opinó nadie, a todos,
-                // que en la práctica es Gestión Humana.
-                'user_id' => $e->prueba_jefe_por_id,
-                'tipo' => 'prueba_por_vencer',
-                'titulo' => "Período de prueba · {$e->nombre_completo}",
-                'mensaje' => "{$cuando}. Pasado el período, terminar el contrato ya no es libre: "
-                    .'necesita justa causa. La evaluación va firmada por el jefe del área y por Gestión Humana.',
-                'color' => $quedan !== null && $quedan < 0 ? 'danger' : 'warning',
-                'icono' => 'heroicon-o-clock',
-                'url' => "/app/rrhh/empleados/{$e->id}",
-            ]);
+        if (! $seco) {
+            EmpleadoController::avisarPruebasPorVencer($dias);
         }
 
         $this->newLine();

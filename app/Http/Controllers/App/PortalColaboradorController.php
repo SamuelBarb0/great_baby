@@ -226,7 +226,7 @@ class PortalColaboradorController extends Controller implements HasMiddleware
 
         if ($reporte->esDeGestionHumana() || $destinos->isEmpty()) {
             $destinos = $destinos->merge(
-                User::permission(Permisos::permiso('rrhh'))->pluck('id')
+                Permisos::usuariosQuePueden('rrhh')->pluck('id')
             );
         }
 

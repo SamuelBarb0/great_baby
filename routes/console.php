@@ -49,8 +49,20 @@ Schedule::command('cartera:cobrar')->dailyAt('09:00')->withoutOverlapping();
  */
 Schedule::command('inventario:recordar-conteo')->weeklyOn(1, '07:00')->withoutOverlapping();
 
-// Todos los días: los períodos de prueba no esperan al lunes.
-Schedule::command('rrhh:avisar-prueba')->dailyAt('07:30')->withoutOverlapping();
+/*
+ * Gestión Humana · recordatorio de períodos de prueba. Lunes temprano.
+ *
+ * Semanal y no diario: el plazo se mide en MESES, y con los días de
+ * anticipación que pone la regla alcanza para avisar dos o tres veces antes de
+ * que venza. Un aviso que sale todos los días se vuelve paisaje, y entonces
+ * deja de avisar.
+ *
+ * Había dos comandos agendados para esto —`rrhh:avisar-prueba` a diario y
+ * `rrhh:avisar-periodos-prueba` los lunes—, con tipos de aviso distintos y
+ * destinatarios invertidos. Queda uno.
+ */
+Schedule::command('rrhh:avisar-prueba')
+    ->weeklyOn(1, '07:30')->timezone('America/Bogota')->withoutOverlapping();
 
 // Después de la cobranza del día: lo que cruzó los 120 sube a Gerencia.
 Schedule::command('cartera:escalar-vencidas')->dailyAt('09:30')->withoutOverlapping();
@@ -117,11 +129,7 @@ Schedule::command('dropi:web-sync pagos --max-detalles=60')->everyThirtyMinutes(
 Schedule::command('dropi:web-wallet-sync')->everyThirtyMinutes()->withoutOverlapping(20)->when($dropiWebSync);
 
 /*
- * Gestión Humana · recordatorio de períodos de prueba.
- *
- * Una vez por semana, los lunes temprano: el plazo se mide en meses, así que
- * avisar a diario sería ruido, pero dejarlo sin aviso es como está hoy —se
- * vence solo y después terminar el contrato ya cuesta indemnización—.
+ * Compras · lo que se atrasa en el camino. Son de main (7-nov).
  */
 Schedule::command('compras:avisar-contenedores-atrasados')
     ->dailyAt('07:00')->timezone('America/Bogota')->withoutOverlapping();
@@ -129,5 +137,14 @@ Schedule::command('compras:avisar-contenedores-atrasados')
 Schedule::command('compras:avisar-pagos-exterior')
     ->dailyAt('07:05')->timezone('America/Bogota')->withoutOverlapping();
 
-Schedule::command('rrhh:avisar-periodos-prueba')
-    ->weeklyOn(1, '07:30')->timezone('America/Bogota')->withoutOverlapping();
+/*
+ * Acá iba `rrhh:avisar-periodos-prueba`, y se quitó.
+ *
+ * Había DOS comandos agendados avisando del mismo período de prueba, con
+ * tipos de aviso distintos y destinatarios invertidos: uno le avisaba al jefe
+ * cuando YA había opinado y a todo el ERP cuando no —con lo cual Gestión
+ * Humana no se enteraba nunca—. Queda uno solo, `rrhh:avisar-prueba`,
+ * agendado más abajo los lunes a las 7:30, con los destinatarios correctos.
+ *
+ * Su clase ya no existe: dejarlo agendado haría fallar el programador entero.
+ */

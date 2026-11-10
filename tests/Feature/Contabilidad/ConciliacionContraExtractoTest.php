@@ -624,3 +624,40 @@ it('un archivo vacío no pasa por bueno', function () {
 
     $r->assertStatus(422);
 });
+
+it('las reglas de la conciliación las puede tocar el Contador', function () {
+    /*
+     * La pantalla de Reglas filtra por el PREFIJO DE LA CLAVE, no por el grupo:
+     * `contable.*` es lo del Contador y `contabilidad.*` son los candados que
+     * sólo abre Gerencia. Estas dos nacieron con el prefijo equivocado y
+     * quedaban invisibles justo para quien concilia, que es quien sabe cuántos
+     * días de holgura da su banco y a qué cuenta va cada concepto.
+     */
+    foreach (['contable.dias_match_extracto', 'contable.conceptos_banco'] as $clave) {
+        expect(Reglas::DEFAULTS)->toHaveKey($clave);
+    }
+
+    // Y que no haya quedado ninguna con el prefijo que las escondía.
+    $escondidas = array_filter(
+        array_keys(Reglas::DEFAULTS),
+        fn ($k) => str_contains($k, 'match_extracto') || str_contains($k, 'conceptos_banco')
+    );
+
+    foreach ($escondidas as $k) {
+        expect($k)->toStartWith('contable.');
+    }
+});
+
+it('la pantalla le pasa a las pestañas el nombre de prop que existe', function () {
+    /*
+     * `PestanasSeccion` declara `pestanas` y la pantalla le pasaba `items`. Vue
+     * no avisa en producción: la barra de pestañas sale vacía y la persona se
+     * queda sin forma de moverse entre las pantallas contables.
+     */
+    foreach (['Contabilidad/ConciliacionBancaria/Index.vue', 'Contabilidad/Cajas.vue'] as $vista) {
+        $html = file_get_contents(resource_path('js/Pages/'.$vista));
+
+        expect($html)->toContain('<PestanasSeccion :pestanas=')
+            ->and($html)->not->toContain('<PestanasSeccion :items=');
+    }
+});

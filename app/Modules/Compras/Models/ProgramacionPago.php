@@ -55,7 +55,15 @@ class ProgramacionPago extends Model implements AuditableContract
         $ultimo = static::withTrashed()->where('numero', 'like', "{$prefijo}%")
             ->lockForUpdate()->orderByDesc('id')->value('numero');
 
-        $sig = $ultimo ? ((int) substr($ultimo, -3)) + 1 : 1;
+        /*
+         * Se lee DESPUÉS del prefijo, no por los últimos TRES.
+         *
+         * Acá el tope era 999 y el consecutivo es por AÑO, no por día: mil
+         * programaciones de pago en doce meses es un número que se alcanza.
+         * Pasado el 999, `substr(-3)` leía «000» y la siguiente volvía a ser
+         * 001 contra un `numero` único.
+         */
+        $sig = $ultimo ? ((int) substr($ultimo, strlen($prefijo))) + 1 : 1;
 
         return $prefijo.str_pad((string) $sig, 3, '0', STR_PAD_LEFT);
     }

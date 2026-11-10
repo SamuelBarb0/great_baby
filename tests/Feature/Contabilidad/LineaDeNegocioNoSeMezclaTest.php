@@ -129,3 +129,43 @@ it('los movimientos del libro heredan la línea de la factura', function () {
 
     expect($m->fresh()->linea_negocio)->toBe(LineaNegocio::Dropi);
 });
+
+it('una factura vieja desalineada se puede volver a guardar: se corrige sola', function () {
+    /*
+     * `saving` corre en CADA guardado —aplicar un pago, cambiar el estado,
+     * tocar el saldo—, así que una factura de cuando la columna tenía default
+     * `great_baby` y nadie miraba la razón social quedaba imposible de guardar
+     * PARA SIEMPRE. Ni su pago se podía registrar, y el error hablaba de
+     * líneas de negocio, que no tiene nada que ver con lo que la persona
+     * estaba haciendo.
+     */
+    $f = facturaLinea(['empresa_id' => $this->ecommerce->id]);
+
+    // Como quedaron las viejas: la razón social dice Dropi, la fila dice otra.
+    \Illuminate\Support\Facades\DB::table('facturas_venta')
+        ->where('id', $f->id)->update(['linea_negocio' => 'great_baby']);
+
+    $vieja = \App\Modules\Cartera\Models\FacturaVenta::find($f->id);
+
+    expect($vieja->linea_negocio->value)->toBe('great_baby');
+
+    // Registrar su pago no tiene por qué saber de líneas de negocio.
+    $vieja->saldo = 0;
+    $vieja->estado = 'pagada';
+    $vieja->save();
+
+    // Manda la razón social, que es lo que dice el hook de `creating`.
+    expect($vieja->fresh()->linea_negocio->value)->toBe('dropi')
+        ->and((string) ($vieja->fresh()->estado->value ?? $vieja->fresh()->estado))->toBe('pagada');
+});
+
+it('cambiarla a mano a la que no corresponde sigue reventando', function () {
+    // El candado que pidió Aracely sigue puesto donde importa: cuando alguien
+    // las está uniendo a propósito.
+    $f = facturaLinea(['empresa_id' => $this->ecommerce->id]);
+
+    expect(function () use ($f) {
+        $f->linea_negocio = LineaNegocio::GreatBaby;
+        $f->save();
+    })->toThrow(RuntimeException::class);
+});

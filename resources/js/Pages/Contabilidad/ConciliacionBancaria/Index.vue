@@ -126,7 +126,7 @@ const conCuenta = computed(() =>
 <template>
     <Head title="Conciliación bancaria · Contabilidad"/>
     <AppLayout>
-        <PestanasSeccion :items="pestanasLibro"/>
+        <PestanasSeccion :pestanas="pestanasLibro"/>
 
         <div class="space-y-4">
             <div>

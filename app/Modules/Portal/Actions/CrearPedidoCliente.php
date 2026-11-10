@@ -247,7 +247,7 @@ class CrearPedidoCliente
         if ($vendedorId && trim((string) $notas) !== '') {
             $quienVende = User::find($vendedorId)?->name ?? 'un vendedor';
 
-            User::permission(Permisos::permiso('contabilidad'))
+            Permisos::usuariosQuePueden('contabilidad')
                 // Quien lo escribió ya sabe lo que escribió. Recibir el propio
                 // aviso es ruido, y el ruido es lo que hace que a la semana
                 // nadie mire la campana.
@@ -497,7 +497,11 @@ class CrearPedidoCliente
         $ultimo = PedidoCliente::where('numero', 'like', $prefijo.'%')
             ->lockForUpdate()
             ->orderByDesc('id')->value('numero');
-        $sig = $ultimo ? ((int) substr($ultimo, -4)) + 1 : 1;
+        // Se lee DESPUÉS del prefijo, no por los últimos cuatro: `str_pad`
+        // rellena pero no recorta, así que pasado el 9999 el consecutivo crece
+        // a cinco dígitos y `substr(-4)` volvía a leer 0001 contra un `numero`
+        // que es único.
+        $sig = $ultimo ? ((int) substr($ultimo, strlen($prefijo))) + 1 : 1;
 
         return $prefijo.str_pad((string) $sig, 4, '0', STR_PAD_LEFT);
     }

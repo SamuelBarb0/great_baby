@@ -60,6 +60,21 @@ final class MenuApp
 
             // ColaJorgeController · esAracely()||esAdminBodega()||esAlistador()||Despachador
             'cola_alistamiento' => $root || $puede('bodega') || $puede('vista_alistador') || $puede('logistica'),
+
+            /*
+             * SeguimientoGuiasController · puede('logistica')
+             *
+             * Faltaba, y por eso la pantalla de seguimiento de guías no la veía
+             * NADIE: el ítem del menú la pide con la clave `logistica` y acá no
+             * se emitía ninguna. Ni siquiera Gerencia, que ve todo lo demás.
+             * La pantalla existía, la ruta respondía, y no había cómo llegar.
+             *
+             * La expresión es la MISMA que la del controlador, que es la razón
+             * de ser de este archivo: cuando las dos se separan, o se ofrece un
+             * enlace que da 403, o se esconde una pantalla que sí se puede
+             * abrir. Esta vez fue lo segundo.
+             */
+            'logistica' => $puede('logistica'),
             /*
              * PedidosB2BController · la puerta ahora deja entrar también a
              * cartera y a facturación, porque ahí se aprueba y se factura.

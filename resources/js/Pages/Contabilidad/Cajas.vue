@@ -93,7 +93,7 @@ const activas = computed(() => props.cajas.filter(c => c.activa).length);
 <template>
     <Head title="Cajas y bancos · Contabilidad"/>
     <AppLayout>
-        <PestanasSeccion :items="pestanasConfigContable"/>
+        <PestanasSeccion :pestanas="pestanasConfigContable"/>
 
         <div class="space-y-4">
             <div>

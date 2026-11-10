@@ -425,6 +425,19 @@ class PedidosB2BController extends Controller implements HasMiddleware
         $msg = $eraRetenido ? 'Pedido LIBERADO por Gerencia. Listo para facturar.'
                             : 'Pedido aprobado. Listo para facturar.';
 
+        /*
+         * Si no se apartó NADA, eso se dice antes que cualquier otra cosa.
+         *
+         * Un pedido sin bodega de origen se aprueba igual pero no reserva, y
+         * la pantalla decía «Pedido aprobado» sin una sola señal: la mercancía
+         * se le seguía ofreciendo a otros pedidos y aparecía vendida dos veces
+         * el día del alistamiento.
+         */
+        if (($reserva['sin_reservar'] ?? null) !== null) {
+            return back()->with('flash', ['type' => 'warning',
+                'message' => $msg.' '.$reserva['sin_reservar']]);
+        }
+
         // Lo que no alcanzó se dice ahora, no el día del alistamiento.
         if ($reserva['faltantes'] !== []) {
             $detalle = collect($reserva['faltantes'])

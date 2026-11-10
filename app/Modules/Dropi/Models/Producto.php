@@ -34,6 +34,10 @@ class Producto extends Model implements AuditableContract, HasMedia
         'copy_comercial', 'specs_json', 'keywords_seo', 'beneficios',
         // C-F1 · Desglose dual de stock
         'desglose_stock', 'stock_directo',
+        // Rack/estante/nivel como lo escribe bodega. NO es una ubicación de
+        // SIIGO: es la posición dentro de la bodega, que el catálogo comercial
+        // traía metida en el nombre del producto.
+        'posicion_bodega',
         // Sprint 4 · G.1 · Campos SIIGO Kardex Referencias
         'linea_id', 'grupo_id', 'subgrupo_id', 'clase_id',
         'posicion_arancelaria', 'arancel_pct', 'unidad_compra_id', 'factor_conversion',

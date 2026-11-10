@@ -7,9 +7,20 @@ import PortalLayout from '@/Layouts/PortalLayout.vue';
 const props = defineProps({
     producto: { type: Object, required: true },
     variantes: { type: Array, required: true },
-    // Cuando está apagado, el catálogo informa cuánto hay pero deja pedir más:
-    // el inventario todavía no es confiable y bloquear por datos malos es peor.
-    bloqueaSinStock: { type: Boolean, default: false },
+    /*
+     * El nombre va en snake_case porque así lo manda el controlador.
+     *
+     * Estaba declarado `bloqueaSinStock` y llega `bloquea_sin_stock`. Vue no
+     * convierte snake_case a camelCase —eso sólo pasa con kebab-case en las
+     * plantillas—, así que el prop se quedaba siempre en su default `false` y
+     * el tope de cantidad NUNCA se activaba, por más que Gerencia prendiera la
+     * regla en pantalla. Un candado que no cierra es peor que no tenerlo:
+     * figura como puesto.
+     *
+     * Cuando está apagado, el catálogo informa cuánto hay pero deja pedir más:
+     * el inventario todavía no es confiable y bloquear por datos malos es peor.
+     */
+    bloquea_sin_stock: { type: Boolean, default: false },
 });
 
 const cantidades = reactive({});
@@ -44,7 +55,7 @@ const money = (n) => new Intl.NumberFormat('es-CO', { style: 'currency', currenc
  * descontando lo que ya está apartado por otros pedidos.
  */
 const topeDe = (disponible) => {
-    if (!props.bloqueaSinStock) return 9999;
+    if (!props.bloquea_sin_stock) return 9999;
     return Number.isFinite(disponible) ? disponible : 0;
 };
 
@@ -207,7 +218,7 @@ const agregarAlCarrito = () => {
                             </button>
                             <input v-model.number="cantidades[v.id]" type="number" min="0" :max="topeDe(v.disponible)"
                                 @input="cantidades[v.id] = Math.min(topeDe(v.disponible), Math.max(0, Number.parseInt($event.target.value, 10) || 0))"
-                                :disabled="bloqueaSinStock && v.disponible === 0"
+                                :disabled="bloquea_sin_stock && v.disponible === 0"
                                 class="input w-16 text-center text-sm disabled:opacity-40"/>
                             <button @click="inc(v)" :disabled="v.precio <= 0" class="btn-ghost p-1.5 disabled:opacity-30">
                                 <Plus class="h-4 w-4"/>

@@ -102,7 +102,7 @@ class Reglas
         'garantias.dias_concepto' => ['grupo' => 'garantias', 'tipo' => 'int', 'valor' => 3, 'etiqueta' => 'Días para dar concepto', 'descripcion' => 'Plazo interno para aprobar o rechazar un reclamo. Es el SLA del área.'],
 
         'notificaciones.correo_activo' => ['grupo' => 'notificaciones', 'tipo' => 'bool', 'valor' => false, 'etiqueta' => 'Mandar avisos por correo', 'descripcion' => 'Prender cuando el servidor tenga SMTP configurado. Apagado, los avisos sólo salen en la campana.'],
-        'notificaciones.tipos_por_correo' => ['grupo' => 'notificaciones', 'tipo' => 'json', 'valor' => '["pedido_retenido","pedido_liberado","conteo_fisico_vencido","prueba_por_vencer","nomina_por_aprobar","pago_vencido","cartera_escalada","siigo_fallo"]', 'etiqueta' => 'Qué avisos van también por correo', 'descripcion' => 'Lista de tipos. Lo que no esté acá sale sólo en la campana.'],
+        'notificaciones.tipos_por_correo' => ['grupo' => 'notificaciones', 'tipo' => 'json', 'valor' => '["pedido_retenido_cartera","pedido_liberado","conteo_fisico_vencido","rrhh_prueba","cartera_escalada"]', 'etiqueta' => 'Qué avisos van también por correo', 'descripcion' => 'Lista de tipos. Lo que no esté acá sale sólo en la campana. Tiene que ser un tipo que el sistema emita de verdad: un nombre que no existe no da error, simplemente no manda el correo nunca.'],
         'notificaciones.correo_copia' => ['grupo' => 'notificaciones', 'tipo' => 'string', 'valor' => '', 'etiqueta' => 'A quién le llegan los avisos generales', 'descripcion' => 'Correos separados por coma. Son los avisos que no tienen un destinatario propio.'],
 
         'portal.bloquear_sin_stock' => ['grupo' => 'catalogo', 'tipo' => 'bool', 'valor' => false, 'etiqueta' => 'El portal no deja pedir más de lo que hay', 'descripcion' => 'Prender SÓLO cuando el inventario del sistema sea confiable. Apagado, el portal muestra la disponibilidad pero deja pedir.'],
@@ -208,7 +208,17 @@ class Reglas
          * viernes puede figurar el lunes. Tres días cubre el fin de semana sin
          * casar un pago de una quincena con el de la otra.
          */
-        'contabilidad.dias_match_extracto' => ['grupo' => 'contable', 'tipo' => 'int', 'valor' => 3, 'etiqueta' => 'Días de holgura para cruzar extracto contra pagos', 'descripcion' => 'Un pago del viernes puede aparecer en el banco el lunes. Con 0 sólo casa el mismo día.'],
+        /*
+         * Van con prefijo `contable.` y no `contabilidad.` a propósito.
+         *
+         * La pantalla de Reglas filtra por el PREFIJO DE LA CLAVE, no por el
+         * grupo: `contable.*` es lo que el Contador puede tocar y
+         * `contabilidad.*` son los candados que sólo abre Gerencia. Con el
+         * prefijo equivocado estas dos quedaban invisibles justo para quien
+         * concilia, que es quien sabe cuántos días de holgura da su banco y a
+         * qué cuenta va cada concepto.
+         */
+        'contable.dias_match_extracto' => ['grupo' => 'contable', 'tipo' => 'int', 'valor' => 3, 'etiqueta' => 'Días de holgura para cruzar extracto contra pagos', 'descripcion' => 'Un pago del viernes puede aparecer en el banco el lunes. Con 0 sólo casa el mismo día.'],
 
         /*
          * Lo que cobra el banco solo y nadie registra: el 4x1000, la cuota de
@@ -218,7 +228,7 @@ class Reglas
          * dejarlos como diferencia sin explicar. El mapa es editable porque
          * cada empresa tiene su propio plan de cuentas.
          */
-        'contabilidad.conceptos_banco' => ['grupo' => 'contable', 'tipo' => 'json', 'valor' => '{"4X1000":"530525","IMPTO GOBIERNO":"530525","CUOTA PLAN":"530520","CUOTA MANEJO":"530520","COMISION":"530520","IVA CUOTA":"530520","COBRO IVA":"530520","ABONO INTERESES":"421005","RETEFUENTE":"135515"}', 'etiqueta' => 'Conceptos del banco → cuenta PUC', 'descripcion' => 'JSON {"TEXTO EN LA DESCRIPCIÓN":"cuenta"}. Se compara en mayúsculas y sin tildes; el primero que coincida manda.'],
+        'contable.conceptos_banco' => ['grupo' => 'contable', 'tipo' => 'json', 'valor' => '{"4X1000":"530525","IMPTO GOBIERNO":"530525","CUOTA PLAN":"530520","CUOTA MANEJO":"530520","COMISION":"530520","IVA CUOTA":"530520","COBRO IVA":"530520","ABONO INTERESES":"421005","RETEFUENTE":"135515"}', 'etiqueta' => 'Conceptos del banco → cuenta PUC', 'descripcion' => 'JSON {"TEXTO EN LA DESCRIPCIÓN":"cuenta"}. Se compara en mayúsculas y sin tildes; el primero que coincida manda.'],
 
         // Contra que cuenta se debita un gasto operativo cuando el contador no
         // le puso una. 5195 «Diversos» es el cajon de sastre del PUC: sirve

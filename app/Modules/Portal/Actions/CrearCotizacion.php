@@ -211,7 +211,16 @@ class CrearCotizacion
             ->lockForUpdate()
             ->orderByDesc('id')->value('numero');
 
-        $sig = $ultimo ? ((int) substr($ultimo, -4)) + 1 : 1;
+        /*
+         * El consecutivo se lee DESPUÉS del prefijo, no por los últimos cuatro.
+         *
+         * `str_pad` rellena pero no recorta: pasado el 9999 el número crece a
+         * cinco dígitos y `substr(-4)` leía «0000», así que el siguiente volvía
+         * a ser 0001 contra un `numero` que es único —y la cotización no se
+         * creaba—. Cuatro dígitos alcanzan de sobra para un día, pero el que
+         * los cuenta no tiene por qué saber cuántos son.
+         */
+        $sig = $ultimo ? ((int) substr($ultimo, strlen($prefijo))) + 1 : 1;
 
         return $prefijo.str_pad((string) $sig, 4, '0', STR_PAD_LEFT);
     }

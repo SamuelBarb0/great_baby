@@ -44,15 +44,32 @@ class ReservarPedido
     public function __construct(private StockService $stock) {}
 
     /**
-     * @return array{reservadas:int,faltantes:array<int,array{sku:string,pedido:int,disponible:int}>}
+     * @return array{reservadas:int,faltantes:array<int,array{sku:string,pedido:int,disponible:int}>,sin_reservar?:string}
      */
     public function handle(PedidoCliente $pedido): array
     {
         $ubicacion = (int) $pedido->ubicacion_origen_id;
         if ($ubicacion <= 0) {
-            // Sin bodega de origen no hay dónde apartar. No es un error del
-            // pedido: hay pedidos viejos sin ubicación y no vale tumbarlos.
-            return ['reservadas' => 0, 'faltantes' => []];
+            /*
+             * Sin bodega de origen no hay dónde apartar, y se DICE.
+             *
+             * No es un error del pedido —hay pedidos viejos sin ubicación y no
+             * vale tumbarlos—, pero devolver cero reservadas y cero faltantes
+             * es indistinguible de «se apartó todo sin problema»: la pantalla
+             * decía «Pedido aprobado» y nadie se enteraba de que la mercancía
+             * seguía ofreciéndose. El día del alistamiento aparecía vendida
+             * dos veces.
+             *
+             * El aviso va acá y no en el controlador porque este método lo
+             * llaman tres sitios distintos, y el motivo es el mismo en los tres.
+             */
+            return [
+                'reservadas' => 0,
+                'faltantes' => [],
+                'sin_reservar' => 'El pedido no tiene bodega de origen, así que no se apartó nada. '
+                    .'La mercancía se le sigue ofreciendo a otros pedidos: asignale una bodega '
+                    .'y volvé a aprobarlo.',
+            ];
         }
 
         return DB::transaction(function () use ($pedido, $ubicacion) {

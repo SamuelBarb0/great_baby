@@ -24,13 +24,36 @@ use Illuminate\Database\Eloquent\Builder;
  */
 class PagoVentaBuilder extends Builder
 {
+    /*
+     * Mientras se borra un pago por el modelo, NO se vuelve a entrar acá.
+     *
+     * `$pago->forceDelete()` termina llamando a `newModelQuery()->forceDelete()`
+     * —o sea, a este mismo método— y eso se muerde la cola: cargaba la fila,
+     * llamaba al modelo, el modelo volvía a entrar, cargaba la fila otra vez…
+     * hasta agotar la memoria de PHP. Reventaba de verdad, y con un llamador
+     * real: borrar físicamente una factura hace `forceDelete()` sobre cada uno
+     * de sus pagos.
+     *
+     * El `delete()` normal no se notaba porque el borrado suave es un UPDATE y
+     * no vuelve a pasar por acá, pero la trampa era la misma y estaba esperando.
+     */
+    private bool $borrandoDeAUno = false;
+
     public function delete()
     {
+        if ($this->borrandoDeAUno) {
+            return parent::delete();
+        }
+
         return $this->borrarDeAUno(fn (PagoVenta $pago) => $pago->delete());
     }
 
     public function forceDelete()
     {
+        if ($this->borrandoDeAUno) {
+            return parent::forceDelete();
+        }
+
         return $this->borrarDeAUno(fn (PagoVenta $pago) => $pago->forceDelete());
     }
 
@@ -40,9 +63,24 @@ class PagoVentaBuilder extends Builder
         $pagos = $this->get();
 
         foreach ($pagos as $pago) {
+            /*
+             * La bandera viaja en el builder que el MODELO va a construir, no
+             * en éste: `newModelQuery()` crea uno nuevo cada vez. Por eso se
+             * marca en el modelo y el builder la lee al nacer.
+             */
+            $pago->borrandoDeAUno = true;
             $borrar($pago);
+            $pago->borrandoDeAUno = false;
         }
 
         return $pagos->count();
+    }
+
+    /** Lo marca el modelo para cortar la recursión. */
+    public function marcarBorradoDirecto(): static
+    {
+        $this->borrandoDeAUno = true;
+
+        return $this;
     }
 }

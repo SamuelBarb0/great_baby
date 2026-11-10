@@ -139,3 +139,38 @@ it('un borrado en masa tampoco puede dejar el asiento huérfano', function () {
 
     expect(lineasVivasDelPago($pago))->toBe(0);
 });
+
+it('el borrado físico en masa no se muerde la cola', function () {
+    /*
+     * `PagoVentaBuilder` reescribe `forceDelete()` para borrar de a uno y
+     * disparar el observer. Pero `$pago->forceDelete()` termina llamando a
+     * `newModelQuery()->forceDelete()` —o sea, al mismo método— y eso se mordía
+     * la cola: cargaba la fila, llamaba al modelo, el modelo volvía a entrar…
+     * hasta agotar la memoria de PHP.
+     *
+     * Y tenía un llamador real: borrar físicamente una factura hace
+     * `forceDelete()` sobre cada uno de sus pagos.
+     */
+    $f = facturaParaBorrarlePagos(500000);
+    $a = pagoParaBorrar($f, 200000);
+    $b = pagoParaBorrar($f, 100000);
+
+    $borrados = PagoVenta::whereIn('id', [$a->id, $b->id])->forceDelete();
+
+    expect($borrados)->toBe(2)
+        ->and(PagoVenta::withTrashed()->whereIn('id', [$a->id, $b->id])->count())->toBe(0);
+});
+
+it('el borrado físico de a uno tampoco, y el asiento se va con él', function () {
+    $f = facturaParaBorrarlePagos(500000);
+    $p = pagoParaBorrar($f, 200000);
+
+    expect(lineasVivasDelPago($p))->toBeGreaterThan(0);
+
+    $p->forceDelete();
+
+    // Lo que importa del builder sigue cumpliéndose: el observer corrió y no
+    // quedó una línea contable apuntando a un pago que ya no existe.
+    expect(PagoVenta::withTrashed()->whereKey($p->id)->exists())->toBeFalse()
+        ->and(lineasVivasDelPago($p))->toBe(0);
+});

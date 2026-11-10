@@ -527,9 +527,23 @@ final class Permisos
             return User::permission($permiso);
         }
 
-        $roles = self::MATRIZ[$seccion] ?? [];
+        /*
+         * Los roles se filtran a los que EXISTEN en la tabla.
+         *
+         * `User::role()` tira `RoleDoesNotExist` igual que `User::permission()`
+         * tira `PermissionDoesNotExist`: el mismo defecto un nivel más abajo.
+         * Una instalación recién montada tiene la matriz escrita en código y
+         * ningún rol creado todavía, así que el ayudante que venía a evitar el
+         * 500 lo reproducía.
+         */
+        $roles = \Spatie\Permission\Models\Role::query()
+            ->whereIn('name', self::MATRIZ[$seccion] ?? [])
+            ->pluck('name')
+            ->all();
 
-        // Sin roles conocidos no se devuelve "todo el mundo": se devuelve nadie.
+        // Sin roles conocidos no se devuelve «todo el mundo»: se devuelve nadie.
+        // Es la diferencia entre no avisarle a alguien y mandarle los datos de
+        // cartera a toda la empresa.
         return $roles ? User::role($roles) : User::whereRaw('1 = 0');
     }
 

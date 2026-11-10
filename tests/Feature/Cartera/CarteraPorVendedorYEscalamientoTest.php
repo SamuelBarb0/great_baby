@@ -25,6 +25,14 @@ use App\Modules\Cartera\Models\FacturaVenta;
 
 beforeEach(function () {
     Illuminate\Support\Facades\Queue::fake();
+    $this->seed(\Database\Seeders\PermisosSeeder::class);
+
+    // Quien recibe el escalamiento. Sin nadie con acceso a cartera no hay a
+    // quien avisarle, y el comando lo dice en vez de mandarlo al vacio.
+    $rolGerencia = \Spatie\Permission\Models\Role::firstOrCreate(['name' => 'GerenciaCartera', 'guard_name' => 'web']);
+    $rolGerencia->givePermissionTo('ver.cartera_dashboard');
+    $this->gerencia = User::factory()->create(['name' => 'Aracely']);
+    $this->gerencia->assignRole($rolGerencia);
 
     $this->cliente = \App\Models\Contacto::create([
         'tipo_documento' => 'NIT', 'numero_documento' => '900888999',
@@ -146,4 +154,36 @@ it('el tramo 120+ es el que manda, no una fecha calculada aparte', function () {
     $f = facturaConMora(125, 100000, $this->vendedor->id);
 
     expect($f->tramo())->toBe(TramoAntiguedad::D120Mas);
+});
+
+
+it('el escalamiento tiene destinatario: no sale a todo el ERP', function () {
+    facturaConMora(130, 500000, $this->vendedor->id);
+
+    $this->artisan('cartera:escalar-vencidas')->assertSuccessful();
+
+    /*
+     * Un aviso sin `user_id` lo ve todo el mundo que abra la campana,
+     * alistadores incluidos, y lo que dice es el nombre del cliente, su saldo
+     * y los días que lleva sin pagar. Además, lo que le aparece a todos no le
+     * pertenece a nadie y nadie lo atiende, que era el problema que este
+     * comando venía a resolver.
+     */
+    $avisos = NotificacionErp::where('tipo', 'cartera_escalada')->get();
+
+    expect($avisos)->toHaveCount(1)
+        ->and($avisos->first()->user_id)->toBe($this->gerencia->id);
+});
+
+it('sin nadie a quien escalarle, falla y NO marca la factura', function () {
+    $this->gerencia->removeRole('GerenciaCartera');
+
+    $f = facturaConMora(130, 500000, $this->vendedor->id);
+
+    // Marcarla sin haber avisado la saca del barrido para siempre: la próxima
+    // corrida ya no la ve. Vale más que falle ruidoso hoy.
+    $this->artisan('cartera:escalar-vencidas')->assertFailed();
+
+    expect($f->fresh()->escalada_gerencia_at)->toBeNull()
+        ->and(NotificacionErp::where('tipo', 'cartera_escalada')->count())->toBe(0);
 });

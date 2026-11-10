@@ -153,3 +153,44 @@ it('la reserva expira sola a los 15 días', function () {
         ->and($r->expira_at->isAfter(now()->addDays(14)))->toBeTrue()
         ->and($r->expira_at->isBefore(now()->addDays(16)))->toBeTrue();
 });
+
+it('la reserva de una variante descuenta en la disponibilidad masiva del portal', function () {
+    /*
+     * El kardex denormaliza `producto_id` en las filas de variante desde
+     * siempre; la reserva lo dejaba en nulo. La disponibilidad masiva suma las
+     * dos tablas con el MISMO filtro por `producto_id`, asi que encontraba el
+     * fisico y no encontraba lo reservado: el portal ofrecia mercancia ya
+     * apartada, y recien al aprobar aparecia que no alcanzaba.
+     */
+    $granular = Producto::sinKardexAutomatico(fn () => Producto::create([
+        'referencia' => 'RES-GRAN', 'nombre' => 'Body reservable',
+        'desglose_stock' => true, 'activo' => true,
+    ]));
+
+    $variante = \App\Modules\Dropi\Models\ProductoVariante::create([
+        'producto_id' => $granular->id, 'color_nombre' => 'Azul',
+        'talla' => '6M', 'combo_key' => 'res-gran-azul-6m',
+    ]);
+
+    \App\Modules\Dropi\Models\InventarioMovimiento::create([
+        'producto_id' => $granular->id,
+        'variante_id' => $variante->id,
+        'ubicacion_id' => $this->bodega->id,
+        'tipo' => 'ajuste_toma_fisica',
+        'cantidad' => 10,
+        'motivo' => 'Saldo inicial de la prueba',
+    ]);
+
+    expect($this->stock->disponibleParaVentaDeProductos([$granular->id]))
+        ->toBe([$granular->id => 10]);
+
+    $pedido = pedidoReserva(4);
+    app(\App\Modules\Inventario\Actions\ReservarStock::class)
+        ->handleSujeto($variante, $this->bodega->id, 4, $pedido);
+
+    expect($this->stock->disponibleParaVentaDeProductos([$granular->id]))
+        ->toBe([$granular->id => 6]);
+
+    // Y la fila guarda el producto, que es lo que hace posible esa suma.
+    expect(ReservaInventario::latest('id')->first()->producto_id)->toBe($granular->id);
+});

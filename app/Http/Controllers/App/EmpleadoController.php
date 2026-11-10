@@ -687,7 +687,7 @@ class EmpleadoController extends Controller implements HasMiddleware
             return 0;
         }
 
-        $gestionHumana = User::permission(Permisos::permiso('rrhh'))->pluck('id');
+        $gestionHumana = Permisos::usuariosQuePueden('rrhh')->pluck('id');
 
         foreach ($porVencer as $e) {
             $faltan = $e->diasDePrueba();
