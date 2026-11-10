@@ -226,8 +226,33 @@ class SiigoClient
         // GETs de descubrimiento (document-types, payment-types, warehouses, accounts…)
         if ($method === 'GET') {
             $fixtures = [
+                /*
+                 * Las resoluciones DE VERDAD de Great Baby.
+                 *
+                 * Son las que autorizó la DIAN el 2026-11-10 (formularios 1876,
+                 * NIT 901.738.354-7), cada una del 1 al 1.000 y con 24 meses de
+                 * vigencia. Están acá y no unos códigos de fantasía porque el
+                 * punto del modo falso es poder recorrer el flujo COMPLETO sin
+                 * cuenta de SIIGO: si los prefijos no son los reales, la prueba
+                 * no dice nada sobre lo que va a pasar en producción.
+                 *
+                 * El sandbox de SIIGO no sirve para esto: es compartido —tiene
+                 * 277 tipos de factura de decenas de empresas ajenas— y una
+                 * resolución está atada a un NIT, que allá no es el de ellos.
+                 *
+                 * FEAR (Arsutex) va inactiva a propósito: la resolución existe
+                 * pero de esa empresa todavía no hay nada en el ERP.
+                 */
                 '/v1/document-types' => [
-                    ['id' => 24446, 'code' => 'FV', 'name' => 'Factura de Venta', 'type' => 'FV'],
+                    ['id' => 900001, 'code' => 'FEGR', 'type' => 'FV', 'active' => true,
+                        'name' => 'Factura electrónica de venta · Great Baby',
+                        'automatic_number' => true, 'consecutive' => 1],
+                    ['id' => 900002, 'code' => 'ECOM', 'type' => 'FV', 'active' => true,
+                        'name' => 'Factura electrónica de venta · Dropi y e-commerce',
+                        'automatic_number' => true, 'consecutive' => 1],
+                    ['id' => 900003, 'code' => 'FEAR', 'type' => 'FV', 'active' => false,
+                        'name' => 'Factura electrónica de venta · Arsutex telas',
+                        'automatic_number' => true, 'consecutive' => 1],
                     ['id' => 27524, 'code' => 'NC', 'name' => 'Nota Crédito', 'type' => 'NC'],
                     ['id' => 27525, 'code' => 'ND', 'name' => 'Nota Débito', 'type' => 'ND'],
                     ['id' => 27600, 'code' => 'FC', 'name' => 'Factura de Compra', 'type' => 'FC'],
@@ -249,9 +274,29 @@ class SiigoClient
                 ],
             ];
             foreach ($fixtures as $prefix => $data) {
-                if (str_starts_with($path, $prefix)) {
-                    return new Response(new \GuzzleHttp\Psr7\Response(200, ['Content-Type' => 'application/json'], json_encode($data)));
+                if (! str_starts_with($path, $prefix)) {
+                    continue;
                 }
+
+                /*
+                 * El filtro `type` se respeta, igual que lo hace SIIGO.
+                 *
+                 * Sin esto, sincronizar los tipos de documento en modo falso
+                 * traía los SEIS para cada tipo pedido: la nota crédito quedaba
+                 * guardada como factura de venta, y después como nota débito, y
+                 * así. El catálogo local terminaba con 42 filas inventadas y la
+                 * prueba decía que todo andaba bien.
+                 */
+                $tipoPedido = $payload['type'] ?? null;
+
+                if ($tipoPedido && is_array($data)) {
+                    $data = array_values(array_filter(
+                        $data,
+                        fn ($d) => ! isset($d['type']) || $d['type'] === $tipoPedido
+                    ));
+                }
+
+                return new Response(new \GuzzleHttp\Psr7\Response(200, ['Content-Type' => 'application/json'], json_encode($data)));
             }
             return new Response(new \GuzzleHttp\Psr7\Response(200, ['Content-Type' => 'application/json'], json_encode([])));
         }
