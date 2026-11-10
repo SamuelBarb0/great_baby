@@ -284,3 +284,30 @@ it('4.6 · un alistador ve el motivo pero no puede facturar', function () {
     expect($a['puede_facturar'])->toBeFalse();
     $this->actingAs($alistador)->postJson('/dropi/escaner/facturar', ['pedido_id' => $p->id, 'guia' => 'E-3'])->assertForbidden();
 });
+
+it('con SIIGO caído la factura NO queda marcada «no viaja» para siempre', function () {
+    /*
+     * Es la otra mitad de la condición, y la que se perdía.
+     *
+     * `es_electronica` dependía de que SIIGO estuviera vivo EN ESE SEGUNDO: con
+     * la integración caída la factura nacía marcada «no viaja» y quedaba así
+     * para siempre, porque nadie la vuelve a evaluar. Es el mismo defecto que
+     * tenían la factura B2B y la manual, corregido el 2026-11-05.
+     *
+     * Lo que SÍ la puede frenar es no tener con qué numerarla —eso es
+     * configuración y lo cubre el test de arriba—, no que el servicio esté
+     * caído mientras se despacha. Si no, una caída de media hora deja un día
+     * entero de facturas que no van a salir nunca.
+     */
+    App\Modules\Siigo\Models\SiigoConfig::current()
+        ->forceFill(['activo' => false, 'tipo_documento_id' => 100, 'tipo_documento_dropi_id' => 200])
+        ->save();
+
+    $p = facDespachar(facPedido('F-CAIDO'), $this->user->id);
+
+    $f = FacturaVenta::find($p->factura_venta_id);
+
+    expect($f)->not->toBeNull()
+        ->and($f->es_electronica)->toBeTrue()
+        ->and($f->destino_fiscal)->toBe(App\Modules\Contabilidad\Enums\DestinoFiscal::Siigo);
+});
