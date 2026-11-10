@@ -355,6 +355,47 @@ final class Permisos
     ];
 
     /**
+     * Qué secciones distinguen de verdad entre crear, editar y eliminar.
+     *
+     * La pantalla de roles pintaba las cuatro casillas para las 68 secciones:
+     * 272 casillas, de las cuales el código consultaba 74. Las otras 198 se
+     * guardaban, se veían marcadas y NADIE las miraba nunca —las 68 de
+     * «eliminar», ni una sola vez—.
+     *
+     * Eso es peor que no tenerlas. Aracely le desmarcaba «eliminar» al
+     * vendedor convencida de que le quitaba ese poder, guardaba, y no pasaba
+     * nada: la casilla quedaba desmarcada en pantalla y el permiso no se
+     * consultaba en ninguna parte. Una casilla que no hace nada hace creer que
+     * el candado está puesto.
+     *
+     * Así que la pantalla muestra sólo lo que se cumple. Esta lista es el
+     * contrato: cuando un controlador empiece a preguntar por una acción, se
+     * agrega acá y la casilla aparece. Mientras no esté, la sección se maneja
+     * con «ver», que es la puerta y sí se respeta en los 150 sitios que la
+     * preguntan.
+     */
+    public const ACCIONES_QUE_SE_CUMPLEN = [
+        'arqueo_caja' => ['crear', 'editar'],
+        'cajas' => ['crear', 'editar'],
+        'contactos' => ['crear', 'editar'],
+        'facturas' => ['crear'],
+        'productos' => ['crear', 'editar'],
+        'programacion_pagos' => ['crear'],
+        'servicio_cliente' => ['editar'],
+    ];
+
+    /*
+     * Lo que NO está acá, y por qué:
+     *
+     *   · `eliminar` no aparece en ninguna sección. Lo destructivo del ERP ya
+     *     está protegido, pero con `esRoot()` —sólo Aracely y Gerencia—, que
+     *     es más duro que cualquier casilla. Poner la casilla haría creer que
+     *     se le puede dar a alguien más, y no se puede.
+     *   · `editar` en facturas: esa pantalla no edita, sólo lista y emite. Una
+     *     factura emitida no se corrige, se anula y se hace de nuevo.
+     */
+
+    /**
      * El nombre del permiso de una sección.
      *
      * Sin segundo argumento devuelve el de VER, que es como lo llaman las
@@ -420,10 +461,16 @@ final class Permisos
             'seccion' => $seccion,
             'permiso' => self::permiso($seccion),
             'etiqueta' => self::etiqueta($seccion),
-            'acciones' => collect(self::ACCIONES)
-                ->map(fn ($texto, $accion) => [
+            /*
+             * Sólo las acciones que esta sección cumple de verdad.
+             *
+             * `ver` no va en la lista porque no es una acción más: es la
+             * puerta, y se pinta aparte con el permiso base de la fila.
+             */
+            'acciones' => collect(self::ACCIONES_QUE_SE_CUMPLEN[$seccion] ?? [])
+                ->map(fn (string $accion) => [
                     'accion' => $accion,
-                    'texto' => $texto,
+                    'texto' => self::ACCIONES[$accion] ?? ucfirst($accion),
                     'permiso' => self::permiso($seccion, $accion),
                 ])->values()->all(),
         ];

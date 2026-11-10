@@ -315,6 +315,23 @@ class FacturasController extends Controller implements HasMiddleware
      */
     public function guardarManual(Request $r): RedirectResponse
     {
+
+        /*
+         * La casilla de la pantalla de roles, cumplida.
+         *
+         * Hasta ahora «facturas» se manejaba sólo con «ver»: quien podía mirar
+         * podía también emitir facturas a mano. Marcar o desmarcar «Crear» y «Editar» en
+         * /app/roles no cambiaba nada, y eso hace creer que el candado está
+         * puesto cuando no lo está.
+         *
+         * Se distingue por si la fila ya existe, que es lo que diferencia
+         * crear de editar. Gerencia pasa siempre.
+         */
+        abort_unless(
+            \App\Auth\Permisos::puedeAccion($r->user(), 'facturas', 'crear'),
+            403,
+            'No tenés permiso para emitir facturas.'
+        );
         $data = $r->validate([
             'contacto_id' => ['required', 'integer', 'exists:contactos,id'],
             'fecha_emision' => ['nullable', 'date'],

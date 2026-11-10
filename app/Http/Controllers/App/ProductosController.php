@@ -189,6 +189,25 @@ class ProductosController extends Controller implements HasMiddleware
 
     public function guardar(Request $r, ?Producto $producto = null): RedirectResponse
     {
+
+        /*
+         * La casilla de la pantalla de roles, cumplida.
+         *
+         * Hasta ahora «productos» se manejaba sólo con «ver»: quien podía mirar
+         * podía también crear y editar productos. Marcar o desmarcar «Crear» y «Editar» en
+         * /app/roles no cambiaba nada, y eso hace creer que el candado está
+         * puesto cuando no lo está.
+         *
+         * Se distingue por si la fila ya existe, que es lo que diferencia
+         * crear de editar. Gerencia pasa siempre.
+         */
+        abort_unless(
+            \App\Auth\Permisos::puedeAccion($r->user(), 'productos', $producto?->exists ? 'editar' : 'crear'),
+            403,
+            $producto?->exists
+                ? 'No tenés permiso para editar productos.'
+                : 'No tenés permiso para crear productos.'
+        );
         // La referencia debe ser única · incluye soft-deleted para evitar que un
         // producto borrado bloquee silenciosamente la creación de otro con el
         // mismo código. Permite edit sin colisión consigo mismo.
