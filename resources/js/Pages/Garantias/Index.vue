@@ -58,14 +58,42 @@ const buscar = () => {
 
 const filtrarEstado = (e) => router.get('/app/garantias', { estado: e || null, q: props.filtros.q }, { preserveState: true });
 
+
+
+/*
+ * Faltaba «En revisión», que es un estado de verdad.
+ *
+ * Un ticket que bodega ya está mirando no aparecía en ningún filtro: ni en
+ * «Abiertos», porque ya no lo está, ni en los demás. Con «Todos» se veía, pero
+ * no había forma de pedir justo esos, que son los que alguien tiene en la mano.
+ */
 const tabs = [
     { key: '', label: 'Todos' },
     { key: 'abierto', label: 'Abiertos' },
+    { key: 'en_revision', label: 'En revisión' },
     { key: 'aprobada', label: 'Aprobadas' },
     { key: 'en_reposicion', label: 'En reposición' },
     { key: 'rechazada', label: 'Rechazadas' },
     { key: 'cerrada', label: 'Cerradas' },
 ];
+
+/*
+ * El estado de UNA fila, en singular.
+ *
+ * La celda pintaba `t.estado` tal cual y salía «EN_REPOSICION», con guion
+ * bajo. Y los nombres de las pestañas tampoco sirven acá: están en plural
+ * porque cuentan un montón, y «ABIERTOS» sobre un solo ticket se lee raro.
+ */
+const NOMBRE_ESTADO = {
+    abierto: 'Abierto',
+    en_revision: 'En revisión',
+    aprobada: 'Aprobada',
+    en_reposicion: 'En reposición',
+    rechazada: 'Rechazada',
+    cerrada: 'Cerrada',
+};
+
+const nombreDelEstado = (clave) => NOMBRE_ESTADO[clave] ?? String(clave ?? '').replace(/_/g, ' ');
 
 const badge = (e) => ({
     abierto: 'bg-blue-100 text-blue-800',
@@ -238,7 +266,7 @@ const badge = (e) => ({
                             <td class="p-3 text-right font-bold">{{ t.cantidad }}</td>
                             <td class="p-3 text-xs">{{ t.creado }}</td>
                             <td class="p-3 text-center">
-                                <span :class="['inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase', badge(t.estado)]">{{ t.estado }}</span>
+                                <span :class="['inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase', badge(t.estado)]">{{ nombreDelEstado(t.estado) }}</span>
                             </td>
                         </tr>
                     </tbody>
