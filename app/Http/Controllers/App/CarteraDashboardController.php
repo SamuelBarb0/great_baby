@@ -40,6 +40,18 @@ class CarteraDashboardController extends Controller implements HasMiddleware
             'filtros' => $this->ejes->aParametros(),
             'opcionesEjes' => FiltroEjes::opciones(),
             'semaforo' => $this->semaforo(),
+            /*
+             * La misma cartera, abierta por vendedor.
+             *
+             * El contrato pide el semáforo «por tramos Y POR VENDEDOR», y lo
+             * segundo no estaba: no había forma de responder quién vende bien
+             * pero cobra mal, que es la pregunta que importa cuando la cartera
+             * se empieza a envejecer.
+             */
+            'porVendedor' => CalcularAntiguedadCartera::make()->porVendedor(),
+            'tramos' => array_map(fn ($t) => [
+                'valor' => $t->value, 'label' => $t->label(), 'color' => $t->colorHex(),
+            ], TramoAntiguedad::cases()),
             'kpis' => $this->kpis(),
             'topMorosos' => $this->topMorosos(),
             'cobradoMes' => $this->cobradoMes(),

@@ -31,6 +31,103 @@ class Reglas
 
         // ============ DROPI ============
         'dropi.dias_retorno_mercancia' => ['grupo' => 'dropi', 'tipo' => 'int', 'valor' => 20, 'etiqueta' => 'Días máx. mercancía en tránsito antes de sospechosa', 'descripcion' => 'Al superar: alertar Aracely y marcar sospechoso'],
+
+        /*
+         * Los plazos con los que se juzga una guía.
+         *
+         * Hasta el 2026-11-06 el canal Dropi tenía su alerta de mercancía en
+         * tránsito y la venta B2B no tenía nada: el pedido moría en
+         * «despachado» y nadie sabía si había llegado.
+         *
+         * Son dos plazos y no uno porque «tardía» y «no entregada» son cosas
+         * distintas: la primera se le pregunta a la transportadora, la segunda
+         * se le reclama.
+         */
+        /*
+         * Cada cuánto hay que contar una bodega.
+         *
+         * El contrato pide inventario semestral. El módulo de conteos estaba
+         * completo —cuenta, compara, exige cuatro ojos y hace el asiento— pero
+         * no tenía cadencia: dependía de que alguien se acordara, y nadie
+         * llevaba la cuenta de cuándo fue la última de cada bodega.
+         */
+        /*
+         * ¿El portal rechaza un pedido que se pasa del stock?
+         *
+         * Nace APAGADO a propósito. El inventario de Great Baby todavía no es
+         * confiable —faltan los saldos iniciales de la migración— y prender
+         * esto antes de tiempo bloquearía pedidos reales por datos malos, que
+         * es peor que el problema que resuelve.
+         *
+         * Apagado, el portal igual MUESTRA la disponibilidad: el cliente ve
+         * que quedan 3 y decide. Prendido, no lo deja pasar de ahí.
+         *
+         * Nunca aplica al vendedor en la calle: él puede comprometer algo que
+         * está por llegar.
+         */
+        /*
+         * El correo de los avisos.
+         *
+         * Hasta el 2026-11-06 el ERP sólo avisaba dentro de la aplicación:
+         * quien no entraba ese día no se enteraba de un pedido retenido, de
+         * una guía sin entregar ni de una nómina esperando aprobación. El
+         * contrato pide avisos en la app, por correo y por WhatsApp.
+         *
+         * Nace APAGADO porque el servidor todavía manda el correo al log
+         * (`MAIL_MAILER=log`). Se prende el día que haya SMTP de verdad.
+         *
+         * Y la lista de tipos es explícita a propósito: mandar por correo TODO
+         * lo que pasa por la campana es la forma más rápida de que la gente lo
+         * mande a spam y deje de leer también lo importante.
+         */
+        /*
+         * Hasta cuándo se recibe una garantía.
+         *
+         * No bloquea: una garantía fuera de plazo la puede aceptar Gerencia
+         * por relación comercial, y esa es una decisión de negocio, no del
+         * sistema. Lo que sí hace es decirlo en pantalla, para que quien la
+         * recibe sepa lo que está aceptando.
+         */
+        /*
+         * Con cuánta anticipación se avisa de un período de prueba.
+         *
+         * La pantalla ya mostraba los días que quedaban, pero mostrar no es
+         * avisar: había que entrar y mirar. Y vencerse solo cuesta: pasado el
+         * período, terminar el contrato deja de ser libre y pasa a necesitar
+         * justa causa.
+         */
+        'rrhh.dias_aviso_prueba' => ['grupo' => 'rrhh', 'tipo' => 'int', 'valor' => 15, 'etiqueta' => 'Días de anticipación del aviso de período de prueba', 'descripcion' => 'Con cuántos días de anticipación avisa por la campana al jefe y a Gestión Humana.'],
+
+        'garantias.dias_plazo' => ['grupo' => 'garantias', 'tipo' => 'int', 'valor' => 30, 'etiqueta' => 'Días de garantía desde la factura', 'descripcion' => 'Pasados estos días la pantalla avisa, pero deja crear el ticket igual. 0 = sin plazo.'],
+        'garantias.dias_concepto' => ['grupo' => 'garantias', 'tipo' => 'int', 'valor' => 3, 'etiqueta' => 'Días para dar concepto', 'descripcion' => 'Plazo interno para aprobar o rechazar un reclamo. Es el SLA del área.'],
+
+        'notificaciones.correo_activo' => ['grupo' => 'notificaciones', 'tipo' => 'bool', 'valor' => false, 'etiqueta' => 'Mandar avisos por correo', 'descripcion' => 'Prender cuando el servidor tenga SMTP configurado. Apagado, los avisos sólo salen en la campana.'],
+        'notificaciones.tipos_por_correo' => ['grupo' => 'notificaciones', 'tipo' => 'json', 'valor' => '["pedido_retenido","pedido_liberado","conteo_fisico_vencido","prueba_por_vencer","nomina_por_aprobar","pago_vencido","cartera_escalada","siigo_fallo"]', 'etiqueta' => 'Qué avisos van también por correo', 'descripcion' => 'Lista de tipos. Lo que no esté acá sale sólo en la campana.'],
+        'notificaciones.correo_copia' => ['grupo' => 'notificaciones', 'tipo' => 'string', 'valor' => '', 'etiqueta' => 'A quién le llegan los avisos generales', 'descripcion' => 'Correos separados por coma. Son los avisos que no tienen un destinatario propio.'],
+
+        'portal.bloquear_sin_stock' => ['grupo' => 'catalogo', 'tipo' => 'bool', 'valor' => false, 'etiqueta' => 'El portal no deja pedir más de lo que hay', 'descripcion' => 'Prender SÓLO cuando el inventario del sistema sea confiable. Apagado, el portal muestra la disponibilidad pero deja pedir.'],
+
+        /*
+         * Cuánto vale una cotización antes de vencerse.
+         *
+         * Un precio sin fecha es una promesa indefinida, y con el dólar y los
+         * fletes como están eso se vuelve plata perdida. Quince días alcanza
+         * para que el cliente consulte y vuelva, sin comprometer un precio por
+         * un mes entero.
+         */
+        'ventas.dias_vigencia_cotizacion' => ['grupo' => 'catalogo', 'tipo' => 'int', 'valor' => 15, 'etiqueta' => 'Días que vale una cotización', 'descripcion' => 'Pasada la fecha hay que hacer una nueva con los precios de hoy. Se puede cambiar cotización por cotización.'],
+
+        /*
+         * Con cuánta anticipación avisar de una cotización aceptada que está
+         * por vencerse sin convertirse. Es plata que el cliente YA dijo que sí
+         * y que se pierde por no haberla pasado a pedido.
+         */
+        'ventas.dias_aviso_cotizacion' => ['grupo' => 'catalogo', 'tipo' => 'int', 'valor' => 3, 'etiqueta' => 'Días de aviso antes de que venza una cotización aceptada', 'descripcion' => 'Avisa al vendedor para que la convierta en pedido antes de que haya que recotizar.'],
+
+        'inventario.meses_entre_conteos' => ['grupo' => 'logistica', 'tipo' => 'int', 'valor' => 6, 'etiqueta' => 'Meses entre tomas físicas', 'descripcion' => 'Pasados estos meses sin una toma cerrada, la bodega sale avisada por la campana.'],
+        'logistica.dias_transito' => ['grupo' => 'logistica', 'tipo' => 'int', 'valor' => 5, 'etiqueta' => 'Días normales de entrega', 'descripcion' => 'Pasados estos días sin entregar, la guía se marca TARDÍA.'],
+        'logistica.dias_sin_entregar' => ['grupo' => 'logistica', 'tipo' => 'int', 'valor' => 15, 'etiqueta' => 'Días para dar una guía por no entregada', 'descripcion' => 'Pasados estos días la guía se marca NO ENTREGADA: hay que reclamarle a la transportadora.'],
+        'logistica.rastreo_urls' => ['grupo' => 'logistica', 'tipo' => 'json', 'valor' => '{"SERVIENTREGA":"https://www.servientrega.com/wps/portal/rastreo-envio?guia={guia}","INTERRAPIDISIMO":"https://www.interrapidisimo.com/sigue-tu-envio/?guia={guia}","COORDINADORA":"https://www.coordinadora.com/portafolio-de-servicios/rastreo-de-guia/?guia={guia}","ENVIA":"https://envia.co/rastreo?guia={guia}"}', 'etiqueta' => 'Enlaces de rastreo por transportadora', 'descripcion' => 'JSON {"TRANSPORTADORA":"url con {guia}"}. El nombre se compara sin tildes ni mayúsculas.'],
         'dropi.dias_tolerancia_devolucion' => ['grupo' => 'dropi', 'tipo' => 'int', 'valor' => 7, 'etiqueta' => 'Días tolerancia devolución física post-marca', 'descripcion' => 'Si Dropi marca devuelto pero no llega en N días → mercancía fantasma'],
         'dropi.dias_espera_cobro' => ['grupo' => 'dropi', 'tipo' => 'int', 'valor' => 40, 'etiqueta' => 'Días máx. entregado sin cobro antes de discrepancia', 'descripcion' => 'Un pedido entregado y sin movimiento wallet tras N días aparece en Discrepancias'],
         'dropi.facturacion_automatica' => ['grupo' => 'dropi', 'tipo' => 'bool', 'valor' => '0', 'etiqueta' => 'Facturar cada pedido Dropi al despacharlo', 'descripcion' => 'Remisión 1:1 + factura a consumidor final por el valor de proveedor, y a SIIGO si está activo. Apagada: no se factura nada'],
@@ -103,6 +200,25 @@ class Reglas
         'compras.ubicacion_ecommerce' => ['grupo' => 'contable', 'tipo' => 'int', 'valor' => 0, 'etiqueta' => 'Ubicación de e-commerce para las importaciones', 'descripcion' => 'Id de la ubicación a la que se traslada lo que llega marcado para e-commerce. 0 = sin configurar.'],
         'compras.permitir_auto_aprobar' => ['grupo' => 'contable', 'tipo' => 'bool', 'valor' => false, 'etiqueta' => 'Permitir que quien crea una OC la apruebe', 'descripcion' => 'NO (recomendado) exige que la apruebe otra persona. Gerencia siempre puede.'],
         'contabilidad.permitir_auto_aprobar_asiento' => ['grupo' => 'contable', 'tipo' => 'bool', 'valor' => false, 'etiqueta' => 'Permitir que quien crea un asiento manual lo apruebe', 'descripcion' => 'NO (recomendado). El asiento aprobado viaja a SIIGO, que es la contabilidad oficial.'],
+
+        /*
+         * Conciliación contra el extracto del banco.
+         *
+         * El banco registra el mismo día o al siguiente, pero un pago del
+         * viernes puede figurar el lunes. Tres días cubre el fin de semana sin
+         * casar un pago de una quincena con el de la otra.
+         */
+        'contabilidad.dias_match_extracto' => ['grupo' => 'contable', 'tipo' => 'int', 'valor' => 3, 'etiqueta' => 'Días de holgura para cruzar extracto contra pagos', 'descripcion' => 'Un pago del viernes puede aparecer en el banco el lunes. Con 0 sólo casa el mismo día.'],
+
+        /*
+         * Lo que cobra el banco solo y nadie registra: el 4x1000, la cuota de
+         * manejo, su IVA, los intereses de ahorros. Aparecen decenas de veces
+         * al mes y no son errores de nadie —son gastos que igual hay que
+         * asentar—, así que la conciliación les sugiere cuenta en vez de
+         * dejarlos como diferencia sin explicar. El mapa es editable porque
+         * cada empresa tiene su propio plan de cuentas.
+         */
+        'contabilidad.conceptos_banco' => ['grupo' => 'contable', 'tipo' => 'json', 'valor' => '{"4X1000":"530525","IMPTO GOBIERNO":"530525","CUOTA PLAN":"530520","CUOTA MANEJO":"530520","COMISION":"530520","IVA CUOTA":"530520","COBRO IVA":"530520","ABONO INTERESES":"421005","RETEFUENTE":"135515"}', 'etiqueta' => 'Conceptos del banco → cuenta PUC', 'descripcion' => 'JSON {"TEXTO EN LA DESCRIPCIÓN":"cuenta"}. Se compara en mayúsculas y sin tildes; el primero que coincida manda.'],
 
         // Contra que cuenta se debita un gasto operativo cuando el contador no
         // le puso una. 5195 «Diversos» es el cajon de sastre del PUC: sirve

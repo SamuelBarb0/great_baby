@@ -506,6 +506,33 @@ final class Permisos
      * está bien: la respuesta sólo cambia cuando corre el seeder, y eso pasa
      * en un despliegue, que reinicia los workers de todos modos.
      */
+    /**
+     * Los usuarios que pueden entrar a una seccion, como consulta.
+     *
+     * `User::permission('ver.x')` revienta con 500 si ese permiso no esta en
+     * la tabla —Spatie tira PermissionDoesNotExist—, y ese es justo el estado
+     * que el resto de la autorizacion si tolera: `puede()` se cae a los roles
+     * de la MATRIZ cuando no hay permisos sembrados. Una instalacion recien
+     * montada, o produccion antes de que corra el sembrador, quedaba con
+     * pantallas enteras caidas.
+     *
+     * Devuelve una consulta y no una coleccion para poder seguir encadenando
+     * (`->orderBy()`, `->pluck('id')`) como se venia haciendo.
+     */
+    public static function usuariosQuePueden(string $seccion): \Illuminate\Database\Eloquent\Builder
+    {
+        $permiso = self::permiso($seccion);
+
+        if (self::permisosSembrados() && \Spatie\Permission\Models\Permission::where('name', $permiso)->exists()) {
+            return User::permission($permiso);
+        }
+
+        $roles = self::MATRIZ[$seccion] ?? [];
+
+        // Sin roles conocidos no se devuelve "todo el mundo": se devuelve nadie.
+        return $roles ? User::role($roles) : User::whereRaw('1 = 0');
+    }
+
     private static function permisosSembrados(): bool
     {
         $llave = 'permisos.sembrados';

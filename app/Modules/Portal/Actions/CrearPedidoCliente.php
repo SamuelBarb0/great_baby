@@ -37,20 +37,113 @@ class CrearPedidoCliente
     /**
      * @param  list<array{variante_id?:int|null, producto_id?:int|null, cantidad:int}>  $items
      */
-    public function ejecutar(Contacto $cliente, array $items, ?string $notas = null, ?int $vendedorId = null, ?int $empresaId = null): PedidoCliente
+    /**
+     * Que nadie pida más de lo que hay para vender.
+     *
+     * @param  array<int,array<string,mixed>>  $items
+     */
+    private function validarDisponibilidad(array $items): void
     {
+        $stock = app(\App\Modules\Inventario\Services\StockService::class);
+        $faltan = [];
+
+        foreach ($items as $it) {
+            $cantidad = (int) ($it['cantidad'] ?? 0);
+            if ($cantidad <= 0) {
+                continue;
+            }
+
+            $sujeto = ! empty($it['variante_id'])
+                ? \App\Modules\Dropi\Models\ProductoVariante::find($it['variante_id'])
+                : (! empty($it['producto_id'])
+                    ? \App\Modules\Dropi\Models\Producto::find($it['producto_id'])
+                    : null);
+
+            if (! $sujeto) {
+                continue;
+            }
+
+            /*
+             * Un producto granular se pide por variante, no por producto: el
+             * servicio revienta a propósito si le preguntan por el agregado de
+             * algo que lleva desglose. Un POST armado a mano podría llegar
+             * así, y vale más dejarlo pasar que devolver un error 500 que no
+             * le dice nada a nadie.
+             */
+            if ($sujeto instanceof \App\Modules\Dropi\Models\Producto && $sujeto->desglose_stock) {
+                continue;
+            }
+
+            $hay = $stock->disponibleParaVenta($sujeto);
+            if ($cantidad > $hay) {
+                $nombre = $sujeto->codigo_barras ?? $sujeto->referencia ?? ('#'.$sujeto->getKey());
+                $faltan[] = $hay === 0
+                    ? "{$nombre} está agotado"
+                    : "{$nombre}: pediste {$cantidad} y quedan {$hay}";
+            }
+        }
+
+        abort_if($faltan !== [], 422,
+            'No alcanzamos a cubrir el pedido. '.implode(' · ', $faltan)
+            .'. Ajustá las cantidades y volvé a enviarlo.');
+    }
+
+    /**
+     * @param  array<string,float>  $preciosPactados  Precio por «variante-{id}» o «producto-{id}»
+     *                                                que pisa al de la lista. Lo usa la conversión
+     *                                                de una cotización, y nada más.
+     */
+    public function ejecutar(
+        Contacto $cliente,
+        array $items,
+        ?string $notas = null,
+        ?int $vendedorId = null,
+        ?int $empresaId = null,
+        array $preciosPactados = [],
+    ): PedidoCliente {
         $listaId = (int) ($cliente->lista_precios_id ?? 0);
         abort_if(! $listaId, 422, 'El cliente no tiene lista de precios asignada.');
 
         [$precios, $variantes, $productosAgg] = $this->resolverPrecios($items, $listaId);
+
+        /*
+         * El tope de verdad vive acá, no en el navegador.
+         *
+         * La pantalla ya no deja subir el contador más allá de lo que hay,
+         * pero eso es comodidad: un POST armado a mano se la salta. Este es el
+         * candado, y cubre los dos caminos —el carrito del portal y el pedido
+         * que levanta el vendedor en la calle— porque los dos pasan por acá.
+         *
+         * Se rechaza el pedido entero en vez de recortar las líneas: mandarle
+         * al cliente una confirmación con menos cantidad de la que pidió, sin
+         * avisarle, es peor que decirle que no alcanza.
+         *
+         * SÓLO para el cliente que se autogestiona. El vendedor en la calle
+         * sigue pudiendo levantar un pedido de algo que está por llegar: él
+         * conoce al cliente, sabe qué le prometió y cuándo, y ese pedido lo
+         * resuelve después logística con la cola de novedades. Quitarle esa
+         * posibilidad sería cambiarle el oficio, no arreglarle un defecto.
+         */
+        if ($vendedorId === null && setting('portal.bloquear_sin_stock')) {
+            $this->validarDisponibilidad($items);
+        }
+        /*
+         * El semáforo mide contra el pedido que se va a crear, no contra otro.
+         *
+         * Sin los pactados acá, la compuerta de cartera evaluaba el cupo con
+         * los precios de la LISTA DE HOY mientras el pedido se creaba con los
+         * cotizados: con un descuento negociado retenía de más, y con la lista
+         * subida después de cotizar, también. Dos números distintos para el
+         * mismo pedido, y el que se le mostraba al vendedor era el que no era.
+         */
         [$retenido, $motivos] = $this->evaluarCartera(
             $cliente,
-            $this->totalEstimado($items, $precios, $variantes, $productosAgg, $listaId)
+            $this->totalEstimado($items, $precios, $variantes, $productosAgg, $listaId, $preciosPactados)
         );
 
         $pedido = DB::transaction(function () use (
             $cliente, $items, $notas, $vendedorId, $listaId, $empresaId,
-            $precios, $variantes, $productosAgg, $retenido, $motivos
+            $precios, $variantes, $productosAgg, $retenido, $motivos, $preciosPactados
         ) {
             // LOG-J4 · ruteo automático · si hay regla para la ciudad del
             // cliente, el pedido nace apuntando a esa bodega origen y la Cola
@@ -74,8 +167,33 @@ class CrearPedidoCliente
             $lineasValidas = 0;
 
             foreach ($items as $it) {
-                $linea = $this->resolverLinea($it, $precios, $variantes, $productosAgg, $listaId);
-                if (! $linea) continue;
+                $linea = $this->resolverLinea($it, $precios, $variantes, $productosAgg, $listaId, $preciosPactados);
+
+                if (! $linea) {
+                    /*
+                     * Una línea cotizada no se cae en silencio.
+                     *
+                     * El precio ya no puede ser la causa —el pactado entra en
+                     * `resolverLinea` y pisa al de la lista—, así que si llega
+                     * acá es que el producto o la variante ya no existen. Y un
+                     * pedido con menos renglones de los que el cliente aceptó,
+                     * marcando la cotización como convertida y sin decirle a
+                     * nadie, es peor que no convertirla: el vendedor cree que
+                     * despachó lo prometido.
+                     *
+                     * Es el mismo criterio que la compuerta de stock de arriba:
+                     * se rechaza el pedido entero en vez de recortarlo.
+                     */
+                    if ($preciosPactados !== []) {
+                        throw ValidationException::withMessages([
+                            'items' => $this->nombreDeLinea($it).' ya no está disponible en el catálogo: '
+                                .'lo desactivaron o lo borraron después de cotizar. Hay que recotizar sin '
+                                .'ese producto, o volver a activarlo.',
+                        ]);
+                    }
+
+                    continue;
+                }
 
                 $cantidad = (int) $it['cantidad'];
                 $lineaSub = round($linea['precio'] * $cantidad, 2);
@@ -241,11 +359,11 @@ class CrearPedidoCliente
      * excedía el cupo. Además se comparaba sin IVA contra una cartera que sí
      * lo trae, y una línea sin precio se contaba aunque después se descarte.
      */
-    private function totalEstimado(array $items, array $precios, $variantes, $productosAgg, int $listaId): float
+    private function totalEstimado(array $items, array $precios, $variantes, $productosAgg, int $listaId, array $preciosPactados = []): float
     {
         $total = 0.0;
         foreach ($items as $it) {
-            $linea = $this->resolverLinea($it, $precios, $variantes, $productosAgg, $listaId);
+            $linea = $this->resolverLinea($it, $precios, $variantes, $productosAgg, $listaId, $preciosPactados);
             if (! $linea) continue;
 
             $lineaSub = round($linea['precio'] * (int) $it['cantidad'], 2);
@@ -253,6 +371,44 @@ class CrearPedidoCliente
         }
 
         return round($total, 2);
+    }
+
+    /**
+     * La misma llave con la que la cotización guarda sus precios pactados.
+     *
+     * Vive acá y en `CotizacionItem::claveDeLinea()`. Si alguna vez cambia el
+     * formato, tienen que cambiar las dos o la conversión deja de encontrar el
+     * precio y vuelve a tomar el de la lista sin avisar.
+     */
+    private function claveDeLinea(array $it): string
+    {
+        return ! empty($it['variante_id'])
+            ? 'variante-'.$it['variante_id']
+            : 'producto-'.($it['producto_id'] ?? 0);
+    }
+
+    /**
+     * Cómo llamar a un producto que ya no se pudo resolver.
+     *
+     * Vale una consulta extra: es un camino de error, y «variante-412» no le
+     * dice a nadie qué hay que recotizar. Se lee sin filtros de activo ni de
+     * borrado, justo porque lo que pasó es que dejó de estar.
+     */
+    private function nombreDeLinea(array $it): string
+    {
+        if (! empty($it['variante_id'])) {
+            // ProductoVariante no usa borrado suave; Producto sí, y es
+            // justamente el que puede haber desaparecido.
+            $v = ProductoVariante::query()->find($it['variante_id']);
+            $nombre = $v ? Producto::withTrashed()->find($v->producto_id)?->nombre : null;
+
+            return $v
+                ? trim(($nombre ?? 'Un producto').' '.($v->color_nombre ?? '').' '.($v->talla ?? ''))
+                : 'Un producto de la cotización';
+        }
+
+        return Producto::withTrashed()->find($it['producto_id'] ?? 0)?->nombre
+            ?? 'Un producto de la cotización';
     }
 
     /**
@@ -264,11 +420,31 @@ class CrearPedidoCliente
      *
      * @return array{variante_id:?int, producto_id:?int, sku:string, desc:string, precio:float, ivaPct:float}|null
      */
-    private function resolverLinea(array $it, array $precios, $variantes, $productosAgg, int $listaId): ?array
+    private function resolverLinea(array $it, array $precios, $variantes, $productosAgg, int $listaId, array $preciosPactados = []): ?array
     {
+        /*
+         * El precio pactado manda sobre el de la lista, y se decide ACÁ.
+         *
+         * Es lo que hace que una cotización signifique algo: el cliente aceptó
+         * UN precio con una fecha de vigencia, y si al convertirla se
+         * recalculara contra la lista de hoy, cotizar no serviría de nada.
+         *
+         * Antes esto se aplicaba DESPUÉS de llamar a este método, y ahí estaba
+         * el problema: un producto al que le quitaron el precio de la lista
+         * después de cotizar se descartaba acá adentro —precio 0— y nunca
+         * llegaba a que se le aplicara el pactado. El pedido nacía sin ese
+         * renglón, en silencio, y la cotización quedaba marcada «convertida».
+         * Sacar un producto de la lista es una decisión de catálogo; no anula
+         * un precio que ya se le prometió a un cliente.
+         *
+         * Sólo entra por acá la conversión de una cotización: el portal y el
+         * vendedor mandan el arreglo vacío y siguen tomando el de la lista.
+         */
+        $pactado = (float) ($preciosPactados[$this->claveDeLinea($it)] ?? 0);
+
         if (! empty($it['variante_id'])) {
             $var = $variantes[$it['variante_id']] ?? null;
-            $precio = (float) ($precios[$it['variante_id']] ?? 0);
+            $precio = $pactado > 0 ? $pactado : (float) ($precios[$it['variante_id']] ?? 0);
             if (! $var || $precio <= 0) return null;
 
             return [
@@ -296,7 +472,7 @@ class CrearPedidoCliente
         // Si no tiene precio en esta lista la línea se sigue descartando, pero
         // a propósito: no se cae al `precio_proveedor` porque ese es el COSTO
         // y le vendería al cliente B2B a precio de compra.
-        $precio = (float) (PrecioProducto::query()
+        $precio = $pactado > 0 ? $pactado : (float) (PrecioProducto::query()
             ->where('producto_id', $p->id)
             ->where('lista_id', $listaId)
             ->vigentes()

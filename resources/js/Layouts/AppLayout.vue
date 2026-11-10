@@ -8,6 +8,7 @@ import {
     Menu as MenuIcon, X, ChevronDown, Home, BarChart3, MessageSquare,
     Boxes, Camera, Scissors, Wallet, MapPin, AlertTriangle, Radio, Upload,
     Undo2, ScanLine, Tag, Layers, CreditCard, LayoutGrid, Images, Rocket, ClipboardList, RefreshCw,
+    Target,
 } from 'lucide-vue-next';
 import AvisoPagoVencido from '@/Components/AvisoPagoVencido.vue';
 import CommandPalette from '@/Components/CommandPalette.vue';
@@ -171,6 +172,21 @@ const groups = [
             { name: '👥 Ventas por Cliente', href: '/app/vendedor/ventas-por-cliente', icon: Users, permiso: 'vendedor' },
             { name: '💳 Contado / Crédito', href: '/app/vendedor/contado-credito', icon: Calculator, permiso: 'vendedor' },
             { name: '📋 Seguimiento', href: '/app/vendedor/seguimiento', icon: FileText, permiso: 'vendedor' },
+            /*
+             * Cotizaciones. El ERP sólo sabía levantar pedidos, y un cliente
+             * B2B casi nunca compra en la primera conversación: pide precios,
+             * compara y vuelve a la semana. Ese paso se hacía por WhatsApp y
+             * se transcribía a mano al pedido.
+             */
+            { name: '📄 Cotizaciones', href: '/app/cotizaciones', icon: FileText, permiso: 'vendedor' },
+            /*
+             * Metas. Va en lo comercial porque es de lo que se habla acá, pero
+             * se muestra con el acceso de configuración: ponerlas es de
+             * Gerencia —una meta que se pone uno mismo no es una meta— y el
+             * controlador exige lo mismo. Si se pintara con `vendedor`, los
+             * ocho la verían en el menú y les daría 403 al entrar.
+             */
+            { name: '🎯 Metas del equipo', href: '/app/vendedor/metas', icon: Target, permiso: 'configuracion' },
         ],
     },
     {
@@ -180,6 +196,10 @@ const groups = [
         items: [
             { name: '📦 Cola de alistamiento', href: '/app/logistica/cola-jorge', icon: Package, permiso: 'cola_alistamiento' },
             { name: 'Pedidos B2B', href: '/app/pedidos-b2b', icon: Package, badge: 'pedidosB2BPend', permiso: 'pedidos_b2b' },
+            // Dónde está lo que ya salió. Hasta hoy el pedido moría en
+            // «despachado» y el primero en enterarse de un retraso era el
+            // cliente llamando a reclamar.
+            { name: '🚚 Seguimiento de guías', href: '/app/logistica/guias', icon: Truck, permiso: 'logistica' },
         ],
     },
     {
@@ -354,6 +374,13 @@ const groups = [
             { name: 'Productos (ficha SIIGO)', href: '/app/catalogo/productos', icon: Package, permiso: 'catalogo' },
             // Sprint 4 · G.2 · CRUD Línea/Grupo/Subgrupo/Clase.
             { name: 'Jerarquía SIIGO', href: '/app/catalogo/jerarquia-siigo', icon: Tag, permiso: 'catalogo' },
+            /*
+             * Listas de precios. Existían sin pantalla: el precio sólo se podía
+             * cargar producto por producto desde su ficha, así que las cuatro
+             * listas de Great Baby llevaban meses vacías —y una lista vacía deja
+             * al vendedor sin clientes en su panel.
+             */
+            { name: '🏷 Listas de precios', href: '/app/catalogo/listas-precios', icon: Tag, permiso: 'vendedor' },
         ],
     },
     {
@@ -375,8 +402,18 @@ const groups = [
         items: [
             {
                 name: '📒 Libro contable', href: '/app/cartera/movimientos',
-                rutas: ['/app/contabilidad/asientos-manuales'],
+                rutas: ['/app/contabilidad/asientos-manuales', '/app/contabilidad/conciliacion-bancaria'],
                 icon: Calculator, permiso: 'cartera',
+            },
+            {
+                /*
+                 * Conciliación bancaria. La tabla existía desde septiembre sin
+                 * una ruta que la nombrara, así que no había por dónde llegarle.
+                 * Entra con nombre propio en el menú y no sólo como pestaña del
+                 * libro, porque es trabajo mensual con fecha de corte.
+                 */
+                name: '🏦 Conciliación bancaria', href: '/app/contabilidad/conciliacion-bancaria',
+                icon: Calculator, permiso: 'contabilidad',
             },
             {
                 // Los cuatro informes juntos. Balance general y Estado de

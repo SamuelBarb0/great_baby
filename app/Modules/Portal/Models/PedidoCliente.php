@@ -37,6 +37,7 @@ class PedidoCliente extends Model implements AuditableContract
         'motivo_retencion',
         // LOG-J7 · columnas de despacho con huella.
         'despachado_at', 'despachado_por_id', 'guia_transportadora', 'transportadora',
+        'entregado_at', 'entregado_por_id', 'entrega_nota',
         // LOG-J5 · Cola Jorge · huella de alistamiento.
         'alistador_id', 'alistado_asignado_at', 'alistado_inicio_at', 'alistado_fin_at', 'alistado_notas',
         // LOG-J5-fix · novedad del alistamiento (faltante/avería/revisión).
@@ -58,6 +59,7 @@ class PedidoCliente extends Model implements AuditableContract
         'alistado_fin_at' => 'datetime',
         'alistado_con_novedad' => 'boolean',
         'novedad_resuelta_at' => 'datetime',
+        'entregado_at' => 'datetime',
     ];
 
     public function despachadoPor(): BelongsTo { return $this->belongsTo(User::class, 'despachado_por_id'); }
@@ -86,4 +88,81 @@ class PedidoCliente extends Model implements AuditableContract
 
     public function facturadoPor(): BelongsTo { return $this->belongsTo(User::class, 'facturado_por_id'); }
     public function factura(): BelongsTo { return $this->belongsTo(FacturaVenta::class, 'factura_id'); }
+
+    // ─────────────────────────────────────────────────────────
+    // SEGUIMIENTO DE LA GUÍA
+    // ─────────────────────────────────────────────────────────
+
+    /**
+     * En qué va la guía, con los plazos que configure logística.
+     *
+     * Se calcula, no se guarda: guardarlo obligaría a recalcularlo todas las
+     * noches, y el día que cambien el plazo lo viejo quedaría mintiendo.
+     */
+    public function estadoGuia(): \App\Modules\Portal\Enums\EstadoGuia
+    {
+        $E = \App\Modules\Portal\Enums\EstadoGuia::class;
+
+        if ($this->entregado_at) {
+            return $E::Entregada;
+        }
+        if (! $this->despachado_at) {
+            return $E::Pendiente;
+        }
+
+        $dias = $this->diasEnTransito();
+
+        if ($dias > (int) setting('logistica.dias_sin_entregar')) {
+            return $E::NoEntregada;
+        }
+        if ($dias > (int) setting('logistica.dias_transito')) {
+            return $E::Tardia;
+        }
+
+        return $E::ATiempo;
+    }
+
+    /** Días enteros desde que salió de bodega. Null si no ha salido. */
+    public function diasEnTransito(): ?int
+    {
+        if (! $this->despachado_at) {
+            return null;
+        }
+
+        return (int) $this->despachado_at->startOfDay()
+            ->diffInDays(($this->entregado_at ?? now())->startOfDay());
+    }
+
+    /**
+     * El enlace para rastrear la guía en la página de la transportadora.
+     *
+     * Sale de la regla `logistica.rastreo_urls`, para que agregar una
+     * transportadora nueva no sea tocar código. El nombre se compara sin
+     * tildes, sin espacios y sin mayúsculas: en los pedidos viene escrito de
+     * todas las formas posibles.
+     */
+    public function urlDeRastreo(): ?string
+    {
+        if (! $this->guia_transportadora || ! $this->transportadora) {
+            return null;
+        }
+
+        // La regla es de tipo `json`, así que `setting()` ya la devuelve como
+        // arreglo. Se contempla el texto por si alguien la guardó a mano.
+        $crudo = setting('logistica.rastreo_urls');
+        $urls = is_array($crudo) ? $crudo : (json_decode((string) $crudo, true) ?: []);
+        $normalizar = fn (string $t) => strtoupper(preg_replace('/[^a-zA-Z0-9]/', '',
+            iconv('UTF-8', 'ASCII//TRANSLIT', $t) ?: $t));
+
+        $buscado = $normalizar($this->transportadora);
+        foreach ($urls as $nombre => $url) {
+            if ($normalizar((string) $nombre) === $buscado) {
+                return str_replace('{guia}', rawurlencode($this->guia_transportadora), (string) $url);
+            }
+        }
+
+        return null;
+    }
+
+    public function entregadoPor(): BelongsTo { return $this->belongsTo(User::class, 'entregado_por_id'); }
 }

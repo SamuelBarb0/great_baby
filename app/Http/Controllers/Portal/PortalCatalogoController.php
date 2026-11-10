@@ -39,6 +39,21 @@ class PortalCatalogoController extends Controller implements HasMiddleware
             ->paginate(24)
             ->withQueryString();
 
+        /*
+         * Cuánto hay de verdad, para los productos de esta página.
+         *
+         * El catálogo del portal no mostraba stock de ninguna clase: el
+         * cliente pedía lo que quisiera, en la cantidad que quisiera, y el
+         * problema aparecía el día del alistamiento. El contrato lo pide como
+         * «disponibilidad en tiempo real y tope de pedido por producto».
+         *
+         * Se calcula en bloque —dos consultas para los 24 productos— y sólo
+         * sobre las bodegas de venta: la avería y la cuarentena existen en el
+         * inventario pero no se venden.
+         */
+        $disponible = app(\App\Modules\Inventario\Services\StockService::class)
+            ->disponibleParaVentaDeProductos($productos->getCollection()->pluck('id')->all());
+
         // Precios por variante para las variantes visibles en esta página.
         $varianteIds = $productos->getCollection()->pluck('variantes.*.id')->flatten()->all();
         $precios = $listaId
@@ -51,7 +66,7 @@ class PortalCatalogoController extends Controller implements HasMiddleware
                 ->all()
             : [];
 
-        $data = $productos->getCollection()->map(function ($p) use ($precios) {
+        $data = $productos->getCollection()->map(function ($p) use ($precios, $disponible) {
             $preciosVar = collect($p->variantes)
                 ->map(fn ($v) => (float) ($precios[$v->id] ?? 0))
                 ->filter(fn ($x) => $x > 0);
@@ -85,6 +100,9 @@ class PortalCatalogoController extends Controller implements HasMiddleware
                 // C-F6 · flag para el front — pinta badge "Colores surtidos" si es agregado.
                 'es_agregado' => ! (bool) $p->desglose_stock,
                 'variacion_texto' => ! $p->desglose_stock ? (string) ($p->descripcion ?? '') : null,
+                // Lo que se puede pedir hoy. 0 = agotado, y el front no deja
+                // agregarlo al carrito.
+                'disponible' => (int) ($disponible[$p->id] ?? 0),
             ];
         })->values();
 
@@ -143,6 +161,8 @@ class PortalCatalogoController extends Controller implements HasMiddleware
             $precioProductoAgregado = $precioProductoAgregado !== null ? (float) $precioProductoAgregado : null;
         }
 
+        $stock = app(\App\Modules\Inventario\Services\StockService::class);
+
         return Inertia::render('Portal/Catalogo/Show', [
             'producto' => [
                 'id' => $p->id,
@@ -156,7 +176,13 @@ class PortalCatalogoController extends Controller implements HasMiddleware
                     ? '⚠️ Este producto se envía surtido según disponibilidad. Los colores/variaciones son referenciales. Si necesitas un color específico, contacta a ventas antes de ordenar.'
                     : null,
                 'precio_agregado' => $precioProductoAgregado,
+                // Para el agregado, lo que hay; para el granular el front
+                // suma lo de sus variantes.
+                'disponible' => ! $p->desglose_stock ? $stock->disponibleParaVenta($p) : null,
             ],
+            // Si el bloqueo está apagado, la pantalla informa pero deja pedir:
+            // sería incoherente que el contador tope y el servidor no.
+            'bloquea_sin_stock' => (bool) setting('portal.bloquear_sin_stock'),
             'variantes' => $p->variantes->map(fn ($v) => [
                 'id' => $v->id,
                 'color' => $v->color_nombre,
@@ -164,6 +190,7 @@ class PortalCatalogoController extends Controller implements HasMiddleware
                 'talla' => $v->talla,
                 'codigo_barras' => $v->codigo_barras,
                 'precio' => (float) ($precios[$v->id] ?? 0),
+                'disponible' => $stock->disponibleParaVenta($v),
             ])->values(),
         ]);
     }

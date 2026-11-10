@@ -41,6 +41,20 @@ Schedule::command('dropi:alertas')->everyThirtyMinutes()->withoutOverlapping();
 // §7 TO-BE Cartera — barrido diario de cobranza WhatsApp a las 9:00.
 Schedule::command('cartera:cobrar')->dailyAt('09:00')->withoutOverlapping();
 
+/*
+ * Lunes a primera hora: qué bodegas llevan demasiado sin contarse.
+ *
+ * Semanal y no diario a propósito. Un aviso que sale todos los días se vuelve
+ * paisaje, y contar una bodega no es algo que se resuelva el mismo día.
+ */
+Schedule::command('inventario:recordar-conteo')->weeklyOn(1, '07:00')->withoutOverlapping();
+
+// Todos los días: los períodos de prueba no esperan al lunes.
+Schedule::command('rrhh:avisar-prueba')->dailyAt('07:30')->withoutOverlapping();
+
+// Después de la cobranza del día: lo que cruzó los 120 sube a Gerencia.
+Schedule::command('cartera:escalar-vencidas')->dailyAt('09:30')->withoutOverlapping();
+
 // SIIGO — sync incremental de productos (B3-M6 · escalonado al minuto :02 de
 // cada cuarto de hora para no colisionar con inventario/empaque; usa cursor
 // updated_start ISO-8601 desde el último sync exitoso).

@@ -115,6 +115,40 @@ const confirmar = () => {
         onFinish: () => procesando.value = false,
     });
 };
+
+/*
+ * El mismo carrito, otro destino.
+ *
+ * Un cliente B2B casi nunca compra en la primera conversación: pide precios,
+ * compara y vuelve a la semana. Eso se hacía por WhatsApp y se transcribía a
+ * mano. Cotizar desde acá —con el mismo carrito y los mismos precios— evita
+ * una segunda pantalla de catálogo que se iría separando de ésta.
+ *
+ * A diferencia del pedido, la cotización no compromete inventario y vence.
+ */
+const vigenteHasta = ref('');
+
+const cotizar = () => {
+    err.value = null;
+    if (!carritoLista.value.length) {
+        err.value = 'Agregá al menos un producto.';
+        return;
+    }
+    procesando.value = true;
+    router.post(`/app/vendedor/cotizacion-nueva/${props.cliente.id}`, {
+        items: carritoLista.value.map((it) => ({
+            variante_id: it.variante_id,
+            producto_id: it.producto_id,
+            cantidad: it.cantidad,
+        })),
+        notas: notas.value || null,
+        vigente_hasta: vigenteHasta.value || null,
+        empresa_id: empresaId.value,
+    }, {
+        onError: (e) => { err.value = Object.values(e)[0] || 'No se pudo cotizar.'; },
+        onFinish: () => procesando.value = false,
+    });
+};
 </script>
 
 <template>
@@ -250,6 +284,29 @@ const confirmar = () => {
                         <Send class="h-4 w-4"/>
                         {{ procesando ? 'Enviando…' : `Enviar pedido para ${cliente.nombre}` }}
                     </button>
+
+                    <!--
+                        El otro destino del mismo carrito: cotizar.
+
+                        Va debajo y más discreto porque el pedido sigue siendo
+                        lo normal; cotizar es para cuando el cliente todavía
+                        está decidiendo. No compromete inventario y vence.
+                    -->
+                    <div class="pt-2 border-t border-surface-200 dark:border-surface-800 space-y-2">
+                        <label class="block text-xs text-surface-500">
+                            Vigencia de la cotización (opcional)
+                            <input v-model="vigenteHasta" type="date"
+                                   class="mt-1 w-full px-3 py-2 rounded-lg border border-surface-200 dark:border-surface-800 bg-transparent text-sm"/>
+                        </label>
+                        <button @click="cotizar" :disabled="procesando || !carritoLista.length"
+                                class="w-full py-2 text-sm rounded-lg border border-brand-600 text-brand-600 font-medium disabled:opacity-50">
+                            {{ procesando ? 'Guardando…' : 'Guardar como cotización' }}
+                        </button>
+                        <p class="text-[11px] text-surface-500">
+                            No reserva mercancía. Al convertirla en pedido se respetan estos precios
+                            aunque la lista haya cambiado.
+                        </p>
+                    </div>
                 </div>
             </div>
         </div>

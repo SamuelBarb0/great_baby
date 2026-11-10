@@ -6,6 +6,7 @@ use App\Models\Contacto;
 use App\Models\User;
 use App\Modules\Cartera\Enums\EstadoFactura;
 use App\Modules\Cartera\Enums\TramoAntiguedad;
+use App\Modules\Contabilidad\Enums\LineaNegocio;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -47,6 +48,55 @@ class FacturaVenta extends Model implements AuditableContract
      */
     protected static function booted(): void
     {
+        /*
+         * La línea de negocio se decide al nacer la factura.
+         *
+         * Nadie la escribía. Ni el pedido B2B, ni la facturación de Dropi, ni
+         * la manual cuando no se elige: la columna tiene `great_baby` por
+         * defecto y ahí se quedaba. Resultado medido el 2026-11-06: 34
+         * facturas y 247 movimientos contables, TODOS en `great_baby`, cero en
+         * `dropi`. El eje que existe justamente para que los dos negocios no se
+         * mezclen no tenía un solo registro del otro lado.
+         *
+         * Lo peor es que el libro contable sí sabe deducirla —
+         * `MovimientoContable` usa `LineaNegocio::deOrigen()` cuando el
+         * documento no la trae— pero el default de la columna hace que la
+         * factura SÍ la traiga, con el valor equivocado, y eso le gana a la
+         * deducción. El default tapaba el camino correcto.
+         *
+         * Manda la razón social: si la factura sale por la empresa con la que
+         * se factura Dropi, es de Dropi. Si no, se deduce del documento que la
+         * originó, que es lo que ya hacía el libro.
+         */
+        static::creating(function (FacturaVenta $f) {
+            if ($f->linea_negocio === null) {
+                $f->linea_negocio = self::lineaQueLeCorresponde($f);
+            }
+        });
+
+        /*
+         * Y que no se puedan cruzar.
+         *
+         * Aracely lo pidió con todas las letras: «que nunca se me vayan a unir,
+         * siempre las necesito aparte». Una factura de la razón social de Dropi
+         * marcada como Great Baby es exactamente esa unión, y en el balance no
+         * se ve: sale sumada y ya. Mejor que reviente acá.
+         */
+        static::saving(function (FacturaVenta $f) {
+            $deLaEmpresa = self::lineaDeLaEmpresa($f->empresa_id);
+            if ($deLaEmpresa !== null && $f->linea_negocio !== null
+                && $f->linea_negocio !== $deLaEmpresa) {
+                throw new RuntimeException(sprintf(
+                    'Factura %s: la razón social «%s» factura %s, pero la factura dice %s. '
+                    .'Las dos líneas de negocio no se mezclan.',
+                    $f->numero ?? '(nueva)',
+                    \App\Models\EmpresaConfig::porId($f->empresa_id)->nombreCorto(),
+                    $deLaEmpresa->label(),
+                    $f->linea_negocio->label(),
+                ));
+            }
+        });
+
         static::saving(function (FacturaVenta $f) {
             // Invariante partida doble.
             $subtotal = (float) $f->subtotal;
@@ -119,6 +169,37 @@ class FacturaVenta extends Model implements AuditableContract
      * Re-audit R3-B · lockForUpdate sobre la factura en tx previene race entre
      * dos jobs concurrentes que ambos chequean exists()=false y ambos insertan.
      */
+    /**
+     * La línea que le toca a una factura: primero la razón social, si no el origen.
+     */
+    private static function lineaQueLeCorresponde(FacturaVenta $f): LineaNegocio
+    {
+        return self::lineaDeLaEmpresa($f->empresa_id)
+            ?? LineaNegocio::deOrigen($f->origen_type);
+    }
+
+    /**
+     * La línea de negocio que impone una razón social, si impone alguna.
+     *
+     * Cuál es la empresa de Dropi sale de la regla `dropi.empresa`, que es
+     * donde ya estaba escrito —y no de un código fijo acá—, porque el día que
+     * cambien de razón social para el canal, esto tiene que seguirlos.
+     *
+     * Devuelve null para las demás empresas: Great Baby y Arsutex facturan lo
+     * suyo, y ahí la línea la decide el documento que originó la factura.
+     */
+    private static function lineaDeLaEmpresa(?int $empresaId): ?LineaNegocio
+    {
+        $codigoDropi = trim((string) setting('dropi.empresa'));
+        if ($codigoDropi === '') {
+            return null;
+        }
+
+        $empresa = \App\Models\EmpresaConfig::porId($empresaId);
+
+        return $empresa->codigo === $codigoDropi ? LineaNegocio::Dropi : null;
+    }
+
     public function ensureAsiento(): bool
     {
         if ((float) $this->total <= 0) return false;
@@ -159,7 +240,7 @@ class FacturaVenta extends Model implements AuditableContract
         'estado' => EstadoFactura::class,
         // F1 · los dos ejes. Sin el cast vuelven como string y cualquier
         // `->label()` revienta con «Call to a member function label() on string».
-        'linea_negocio' => \App\Modules\Contabilidad\Enums\LineaNegocio::class,
+        'linea_negocio' => LineaNegocio::class,
         'destino_fiscal' => \App\Modules\Contabilidad\Enums\DestinoFiscal::class,
         'monto_fiscal' => 'decimal:2',
         'fecha_emision' => 'date',

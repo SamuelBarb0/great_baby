@@ -177,6 +177,20 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     // podian vender.
     Route::put('/catalogo/productos/{producto}/precios', [\App\Http\Controllers\App\ProductosController::class, 'guardarPrecios'])->name('app.catalogo.productos.precios');
     Route::delete('/catalogo/productos/{producto}', [\App\Http\Controllers\App\ProductosController::class, 'eliminar'])->name('app.catalogo.productos.eliminar');
+
+    /*
+     * Listas de precios de a lista entera.
+     *
+     * El precio sólo se podia cargar producto por producto, entrando a la ficha
+     * de cada uno. Con ochenta variantes son ochenta pantallas, asi que no lo
+     * hizo nadie: el 2026-11-07, en produccion, las cuatro listas de Great Baby
+     * figuraban «sin precios cargados» — y sin precios el vendedor abre su
+     * panel, busca un cliente y no le aparece nada.
+     */
+    Route::get('/catalogo/listas-precios', [\App\Http\Controllers\App\ListasPreciosController::class, 'index'])->name('app.catalogo.listas-precios');
+    Route::get('/catalogo/listas-precios/{lista}', [\App\Http\Controllers\App\ListasPreciosController::class, 'show'])->name('app.catalogo.listas-precios.show');
+    Route::put('/catalogo/listas-precios/{lista}', [\App\Http\Controllers\App\ListasPreciosController::class, 'guardar'])->middleware('throttle:30,1');
+    Route::post('/catalogo/listas-precios/{lista}/previsualizar', [\App\Http\Controllers\App\ListasPreciosController::class, 'previsualizar'])->middleware('throttle:60,1');
     // FASE C · CRUD robusto
     Route::post('/catalogo/productos/{producto}/clonar', [\App\Http\Controllers\App\ProductosController::class, 'clonar'])->middleware('throttle:10,1')->name('app.catalogo.productos.clonar');
     // FASE F3.A17 · bulk-edit throttle: 10/min · opera sobre lote de hasta 1000
@@ -246,6 +260,20 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     Route::post('/compras/programacion-pagos/{programacion}/anular', [\App\Http\Controllers\App\ProgramacionPagosController::class, 'anular'])->middleware('throttle:20,1');
 
     // Cajas y bancos · dónde está la plata y quién responde por ella.
+    /*
+     * Conciliacion bancaria contra el extracto.
+     *
+     * `conciliaciones_bancarias` existia desde septiembre y NINGUN controlador
+     * la nombraba: no habia ruta por donde llegarle. Y aun enganchada habria
+     * servido a medias, porque guardaba un saldo escrito a mano y la resta
+     * contra el sistema —eso dice cuanto sobra, no CUAL movimiento sobra.
+     */
+    Route::get('/contabilidad/conciliacion-bancaria', [\App\Http\Controllers\App\ConciliacionBancariaController::class, 'index'])->name('app.contabilidad.conciliacion-bancaria');
+    Route::post('/contabilidad/conciliacion-bancaria/previsualizar', [\App\Http\Controllers\App\ConciliacionBancariaController::class, 'previsualizar'])->middleware('throttle:30,1');
+    Route::post('/contabilidad/conciliacion-bancaria', [\App\Http\Controllers\App\ConciliacionBancariaController::class, 'guardar'])->middleware('throttle:20,1');
+    Route::get('/contabilidad/conciliacion-bancaria/{conciliacion}', [\App\Http\Controllers\App\ConciliacionBancariaController::class, 'show'])->name('app.contabilidad.conciliacion-bancaria.show');
+    Route::post('/contabilidad/conciliacion-bancaria/{conciliacion}/lineas/{linea}', [\App\Http\Controllers\App\ConciliacionBancariaController::class, 'marcarLinea'])->middleware('throttle:60,1');
+
     Route::get('/contabilidad/cajas', [\App\Http\Controllers\App\CajasController::class, 'index'])->name('app.contabilidad.cajas');
     Route::post('/contabilidad/cajas', [\App\Http\Controllers\App\CajasController::class, 'guardar'])->middleware('throttle:20,1');
     Route::post('/contabilidad/cajas/{caja}/activa', [\App\Http\Controllers\App\CajasController::class, 'alternar'])->middleware('throttle:30,1');
@@ -731,11 +759,27 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     // M7 · Garantías
     Route::get('/garantias', [\App\Http\Controllers\App\GarantiasController::class, 'index'])->name('app.garantias.index');
     Route::get('/garantias/nueva', [\App\Http\Controllers\App\GarantiasController::class, 'form'])->name('app.garantias.nueva');
+    /*
+     * El buscador del formulario. Va ANTES de `/garantias/{ticket}`, que no
+     * tiene restricción numérica y se comería la palabra.
+     *
+     * No reusa `/app/inventario/buscar-variantes`: ese está cerrado a
+     * Aracely, alistador y admin de bodega, y quien atiende garantías
+     * —ServicioCliente— recibía 403.
+     */
+    Route::get('/garantias/buscar-producto', [\App\Http\Controllers\App\GarantiasController::class, 'buscarProducto'])->middleware('throttle:60,1')->name('app.garantias.buscar-producto');
     Route::post('/garantias', [\App\Http\Controllers\App\GarantiasController::class, 'crear'])->name('app.garantias.crear');
-    Route::get('/garantias/{ticket}', [\App\Http\Controllers\App\GarantiasController::class, 'show'])->name('app.garantias.show');
+    Route::get('/garantias/{ticket}', [\App\Http\Controllers\App\GarantiasController::class, 'show'])->where('ticket', '[0-9]+')->name('app.garantias.show');
     Route::post('/garantias/{ticket}/decidir', [\App\Http\Controllers\App\GarantiasController::class, 'decidir'])->name('app.garantias.decidir');
     Route::post('/garantias/{ticket}/reposicion', [\App\Http\Controllers\App\GarantiasController::class, 'iniciarReposicion'])->name('app.garantias.reposicion');
     Route::post('/garantias/{ticket}/cerrar', [\App\Http\Controllers\App\GarantiasController::class, 'cerrar'])->name('app.garantias.cerrar');
+    /*
+     * El costo va aparte del cierre a proposito: el flete llega facturado
+     * semanas despues, y exigirlo para cerrar solo lograria que cierren con
+     * ceros. El ticket guardaba `valor_reposicion` —lo que paga el CLIENTE, que
+     * en garantia es cero— y nada de lo que le cuesta a la empresa.
+     */
+    Route::post('/garantias/{ticket}/costo', [\App\Http\Controllers\App\GarantiasController::class, 'cargarCosto'])->middleware('throttle:30,1')->name('app.garantias.costo');
 
     // Pedidos B2B (recibidos del portal)
     Route::get('/pedidos-b2b', [\App\Http\Controllers\App\PedidosB2BController::class, 'index'])->name('app.pedidos-b2b.index');
@@ -748,6 +792,9 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     Route::post('/pedidos-b2b/{pedido}/despachar', [\App\Http\Controllers\App\PedidosB2BController::class, 'despachar'])->middleware('throttle:30,1')->name('app.pedidos-b2b.despachar');
 
     // LOG-J5 · Cola Don Jorge · reemplaza el Excel manual de alistamiento.
+    // Seguimiento de guías · dónde está lo que ya salió de bodega.
+    Route::get('/logistica/guias', [\App\Http\Controllers\App\SeguimientoGuiasController::class, 'index'])->name('app.guias.index');
+    Route::post('/logistica/guias/{pedido}/entregar', [\App\Http\Controllers\App\SeguimientoGuiasController::class, 'entregar'])->middleware('throttle:60,1')->name('app.guias.entregar');
     Route::get('/logistica/cola-jorge', [\App\Http\Controllers\App\ColaJorgeController::class, 'index'])->name('app.cola-jorge.index');
     Route::post('/logistica/cola-jorge/{pedido}/asignar', [\App\Http\Controllers\App\ColaJorgeController::class, 'asignar'])->middleware('throttle:60,1')->name('app.cola-jorge.asignar');
     Route::post('/logistica/cola-jorge/{pedido}/iniciar', [\App\Http\Controllers\App\ColaJorgeController::class, 'iniciar'])->middleware('throttle:60,1')->name('app.cola-jorge.iniciar');
@@ -762,7 +809,35 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     Route::get('/vendedor/ventas-por-cliente', [\App\Http\Controllers\App\VendedorPedidoController::class, 'ventasPorCliente'])->name('app.vendedor.ventas-por-cliente');
     Route::get('/vendedor/contado-credito', [\App\Http\Controllers\App\VendedorPedidoController::class, 'contadoCredito'])->name('app.vendedor.contado-credito');
     Route::get('/vendedor/seguimiento', [\App\Http\Controllers\App\VendedorPedidoController::class, 'seguimiento'])->name('app.vendedor.seguimiento');
+    /*
+     * Cotizaciones. El ERP solo sabia levantar pedidos, y un cliente B2B casi
+     * nunca compra en la primera conversacion: pide precios, compara y vuelve a
+     * la semana. Ese paso se hacia por WhatsApp y se transcribia a mano.
+     *
+     * La cotizacion se ARMA en la pantalla del vendedor (misma ruta de pedido
+     * nuevo, otro boton): el carrito y los precios son los mismos, lo unico que
+     * cambia es a donde va.
+     */
+    /*
+     * Metas del equipo comercial. El panel del vendedor mostraba lo vendido y
+     * nada contra que compararlo: «$4.120.000 este mes» no dice si va bien o
+     * mal, y el vendedor se enteraba en la reunion de fin de mes.
+     *
+     * Van ANTES de `/vendedor/{...}` no haria falta, pero quedan juntas con lo
+     * comercial a proposito. Ponerlas es de Gerencia; verlas, de cada quien.
+     */
+    Route::get('/vendedor/metas', [\App\Http\Controllers\App\MetasVendedorController::class, 'index'])->name('app.vendedor.metas');
+    Route::post('/vendedor/metas', [\App\Http\Controllers\App\MetasVendedorController::class, 'guardar'])->middleware('throttle:30,1');
+    Route::post('/vendedor/metas/copiar', [\App\Http\Controllers\App\MetasVendedorController::class, 'copiarDelMesAnterior'])->middleware('throttle:20,1');
+
+    Route::get('/cotizaciones', [\App\Http\Controllers\App\CotizacionesController::class, 'index'])->name('app.cotizaciones.index');
+    Route::get('/cotizaciones/{cotizacion}', [\App\Http\Controllers\App\CotizacionesController::class, 'show'])->name('app.cotizaciones.show');
+    Route::post('/cotizaciones/{cotizacion}/enviar', [\App\Http\Controllers\App\CotizacionesController::class, 'enviar'])->middleware('throttle:30,1');
+    Route::post('/cotizaciones/{cotizacion}/responder', [\App\Http\Controllers\App\CotizacionesController::class, 'responder'])->middleware('throttle:30,1');
+    Route::post('/cotizaciones/{cotizacion}/convertir', [\App\Http\Controllers\App\CotizacionesController::class, 'convertir'])->middleware('throttle:20,1');
+
     Route::get('/vendedor/pedido-nuevo/{contactoId}', [\App\Http\Controllers\App\VendedorPedidoController::class, 'nuevo'])->name('app.vendedor.nuevo');
+    Route::post('/vendedor/cotizacion-nueva/{contactoId}', [\App\Http\Controllers\App\CotizacionesController::class, 'crear'])->middleware('throttle:30,1')->name('app.vendedor.cotizar');
     Route::post('/vendedor/pedido-nuevo/{contactoId}', [\App\Http\Controllers\App\VendedorPedidoController::class, 'confirmar'])->middleware('throttle:30,1')->name('app.vendedor.confirmar');
 
     // CRM

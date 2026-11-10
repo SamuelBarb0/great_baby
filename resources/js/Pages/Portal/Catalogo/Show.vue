@@ -7,6 +7,9 @@ import PortalLayout from '@/Layouts/PortalLayout.vue';
 const props = defineProps({
     producto: { type: Object, required: true },
     variantes: { type: Array, required: true },
+    // Cuando está apagado, el catálogo informa cuánto hay pero deja pedir más:
+    // el inventario todavía no es confiable y bloquear por datos malos es peor.
+    bloqueaSinStock: { type: Boolean, default: false },
 });
 
 const cantidades = reactive({});
@@ -20,7 +23,9 @@ const cantidadAgregada = ref(0);
 //   `cantidad: null` en sessionStorage. Cuadramos siempre a entero >=0.
 const setCantidadAgregada = (val) => {
     const n = Number.parseInt(val, 10);
-    cantidadAgregada.value = Number.isFinite(n) && n > 0 ? Math.min(n, 9999) : 0;
+    // El tope ya no es 9999 sino lo que de verdad hay en las bodegas de venta.
+    const tope = topeDe(props.producto.disponible);
+    cantidadAgregada.value = Number.isFinite(n) && n > 0 ? Math.min(n, tope) : 0;
 };
 
 // Fix R4 CRÍTICO re-audit · sólo permite comprar agregado si hay precio real.
@@ -30,7 +35,23 @@ const puedeComprarAgregado = computed(() =>
 
 const money = (n) => new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n || 0);
 
-const inc = (v) => { if (v.precio > 0) cantidades[v.id] = (cantidades[v.id] || 0) + 1; };
+/*
+ * El «+» no pasa de lo que hay.
+ *
+ * Es el «tope de pedido por producto» del contrato. Antes el cliente podía
+ * pedir 500 de algo de lo que quedaban 3, y nadie se enteraba hasta el
+ * alistamiento. El tope sale del disponible real de las bodegas de venta,
+ * descontando lo que ya está apartado por otros pedidos.
+ */
+const topeDe = (disponible) => {
+    if (!props.bloqueaSinStock) return 9999;
+    return Number.isFinite(disponible) ? disponible : 0;
+};
+
+const inc = (v) => {
+    if (v.precio <= 0) return;
+    cantidades[v.id] = Math.min(topeDe(v.disponible), (cantidades[v.id] || 0) + 1);
+};
 const dec = (v) => { cantidades[v.id] = Math.max(0, (cantidades[v.id] || 0) - 1); };
 
 const totalItems = computed(() => {
@@ -171,13 +192,23 @@ const agregarAlCarrito = () => {
                         <div class="text-right w-28">
                             <div v-if="v.precio > 0" class="font-bold">{{ money(v.precio) }}</div>
                             <div v-else class="text-xs text-amber-600">Sin precio</div>
+                            <!-- Lo que hay de esta variante, ya descontado lo apartado. -->
+                            <div class="text-[11px] font-semibold" :class="[
+                                v.disponible === 0 ? 'text-red-600'
+                                : v.disponible <= 10 ? 'text-amber-600' : 'text-surface-500',
+                            ]">
+                                <template v-if="v.disponible === 0">Agotado</template>
+                                <template v-else>{{ v.disponible }} disp.</template>
+                            </div>
                         </div>
                         <div class="flex items-center gap-2">
                             <button @click="dec(v)" :disabled="!cantidades[v.id]" class="btn-ghost p-1.5 disabled:opacity-30">
                                 <Minus class="h-4 w-4"/>
                             </button>
-                            <input v-model.number="cantidades[v.id]" type="number" min="0" max="9999"
-                                class="input w-16 text-center text-sm"/>
+                            <input v-model.number="cantidades[v.id]" type="number" min="0" :max="topeDe(v.disponible)"
+                                @input="cantidades[v.id] = Math.min(topeDe(v.disponible), Math.max(0, Number.parseInt($event.target.value, 10) || 0))"
+                                :disabled="bloqueaSinStock && v.disponible === 0"
+                                class="input w-16 text-center text-sm disabled:opacity-40"/>
                             <button @click="inc(v)" :disabled="v.precio <= 0" class="btn-ghost p-1.5 disabled:opacity-30">
                                 <Plus class="h-4 w-4"/>
                             </button>

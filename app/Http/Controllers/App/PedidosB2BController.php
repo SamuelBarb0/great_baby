@@ -394,6 +394,20 @@ class PedidosB2BController extends Controller implements HasMiddleware
             ]);
         });
 
+        /*
+         * Aprobar aparta la mercancía.
+         *
+         * Hasta hoy no se apartaba nada: dos vendedores podían prometer la
+         * misma caja y el segundo se enteraba el día del alistamiento. La
+         * maquinaria de reservas existía completa y no la llamaba nadie.
+         *
+         * Va FUERA de la transacción de arriba a propósito: si el stock no
+         * alcanza, el pedido igual queda aprobado —ya pasó el filtro de
+         * cartera, que es otra decisión— y lo que falta se avisa.
+         */
+        $reserva = app(\App\Modules\Inventario\Actions\ReservarPedido::class)
+            ->handle(PedidoCliente::with('items')->findOrFail($pedido));
+
         // LOG-J3 · Notificación: avisar que un retenido fue liberado por Gerencia.
         //   El vendedor/cliente ve la bell y entiende que ya puede imprimir
         //   factura o esperar la llamada del alistador.
@@ -408,9 +422,21 @@ class PedidosB2BController extends Controller implements HasMiddleware
             ]);
         }
 
-        return back()->with('success',
-            $eraRetenido ? 'Pedido LIBERADO por Gerencia. Listo para facturar.'
-                         : 'Pedido aprobado. Listo para facturar.');
+        $msg = $eraRetenido ? 'Pedido LIBERADO por Gerencia. Listo para facturar.'
+                            : 'Pedido aprobado. Listo para facturar.';
+
+        // Lo que no alcanzó se dice ahora, no el día del alistamiento.
+        if ($reserva['faltantes'] !== []) {
+            $detalle = collect($reserva['faltantes'])
+                ->map(fn ($f) => "{$f['sku']} (pide {$f['pedido']}, hay {$f['disponible']})")
+                ->take(4)->implode(' · ');
+            $mas = count($reserva['faltantes']) > 4 ? ' y más' : '';
+
+            return back()->with('flash', ['type' => 'warning',
+                'message' => $msg." Ojo: no alcanzó el stock de {$detalle}{$mas}. Se apartó lo que había."]);
+        }
+
+        return back()->with('success', $msg);
     }
 
     public function rechazar(Request $r, int $pedido): RedirectResponse
@@ -435,6 +461,10 @@ class PedidosB2BController extends Controller implements HasMiddleware
                 'motivo_rechazo' => $data['motivo'],
             ]);
         });
+
+        // Lo que se había apartado vuelve a estar disponible: un pedido
+        // rechazado no le puede seguir quitando mercancía a los demás.
+        app(\App\Modules\Inventario\Actions\ReservarPedido::class)->liberar($pre);
 
         // LOG-J3 · Si venía retenido, el motivo que ve el cliente/vendedor
         //   es la decisión de Gerencia, no la razón de cartera (que ya quedó
@@ -761,6 +791,16 @@ class PedidosB2BController extends Controller implements HasMiddleware
         //   para que la factura B2B viaje a /v1/invoices sin bloquear al usuario.
         //   `ReintentarEmisionDian` ya maneja lock, backoff 1-5-30min-3h,
         //   notificación en la bell y "ya estaba emitida" (idempotente).
+        /*
+         * Facturado: se suelta lo apartado.
+         *
+         * A partir de acá manda la factura, y el despacho descuenta el stock
+         * de verdad. Si la reserva siguiera viva, la misma mercancía quedaria
+         * contada dos veces y el disponible saldria mas bajo de lo que es.
+         */
+        app(\App\Modules\Inventario\Actions\ReservarPedido::class)
+            ->liberar(PedidoCliente::findOrFail($pedido));
+
         if ($factura->es_electronica) {
             // Las decisiones del Facturador (send_dian/send_mail) viajan en las
             // columnas de la factura · el SiigoEmisionService las lee al armar

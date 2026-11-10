@@ -17,6 +17,9 @@ const props = defineProps({
     clientes: Array,
     q: { type: String, default: null },
     es_super: Boolean,
+    // Contra qué se mide este vendedor este mes. Nulo para quien ve el panel
+    // de todo el equipo: una meta individual ahí no significa nada.
+    meta: { type: Object, default: null },
 });
 
 const money = (n) => new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n || 0);
@@ -134,6 +137,72 @@ const sparklinePath = computed(() => {
                         </div>
                     </Link>
                 </div>
+            </div>
+
+            <!--
+                La meta del mes.
+
+                Va ARRIBA de los KPI porque es lo que les da sentido: sin ella,
+                «$4.120.000 este mes» no dice si se va bien o mal, y el vendedor
+                se entera en la reunión de fin de mes, cuando ya no hay margen.
+
+                El número que importa no es el porcentaje sino el RITMO: ir al
+                60% el día 12 y el día 28 son dos situaciones distintas.
+            -->
+            <div v-if="meta" class="card p-4">
+                <div v-if="! meta.tiene_meta" class="text-sm text-surface-500 flex items-center gap-2">
+                    <Target class="h-4 w-4"/>
+                    Este mes no tenés meta definida. Las pone Gerencia.
+                </div>
+                <template v-else>
+                    <div class="flex flex-wrap items-end justify-between gap-4 mb-3">
+                        <div>
+                            <div class="text-xs uppercase font-semibold text-surface-500 flex items-center gap-1">
+                                <Target class="h-3.5 w-3.5"/> Meta del mes
+                            </div>
+                            <div class="text-2xl font-black tabular-nums">
+                                {{ money(meta.vendido) }}
+                                <span class="text-base font-normal text-surface-500">de {{ money(meta.meta) }}</span>
+                            </div>
+                        </div>
+                        <div class="text-right">
+                            <div class="text-3xl font-black tabular-nums"
+                                 :class="meta.va_en_ritmo ? 'text-emerald-600' : 'text-amber-600'">
+                                {{ meta.cumplimiento }}%
+                            </div>
+                            <div class="text-[11px]" :class="meta.va_en_ritmo ? 'text-emerald-600' : 'text-amber-600'">
+                                {{ meta.va_en_ritmo ? 'vas en ritmo' : 'vas por debajo del ritmo' }}
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- La barra, con la marca de por dónde debería ir el mes. -->
+                    <div class="relative h-3 rounded bg-surface-200 dark:bg-surface-800 overflow-hidden">
+                        <div class="h-full rounded transition-all"
+                             :class="meta.va_en_ritmo ? 'bg-emerald-500' : 'bg-amber-500'"
+                             :style="{ width: Math.min(meta.cumplimiento, 100) + '%' }"></div>
+                    </div>
+                    <div class="relative h-4">
+                        <div class="absolute top-0 -translate-x-1/2 text-[10px] text-surface-500 whitespace-nowrap"
+                             :style="{ left: Math.min(meta.avance_del_mes, 100) + '%' }">
+                            ▲ {{ meta.avance_del_mes }}% del mes
+                        </div>
+                    </div>
+
+                    <div v-if="meta.falta > 0" class="text-sm mt-2">
+                        Faltan <strong>{{ money(meta.falta) }}</strong>
+                        <template v-if="meta.ritmo_necesario">
+                            · quedan {{ meta.dias_restantes }} días hábiles, o sea
+                            <strong>{{ money(meta.ritmo_necesario) }} por día</strong>.
+                        </template>
+                        <template v-else>
+                            y el mes ya terminó.
+                        </template>
+                    </div>
+                    <div v-else class="text-sm mt-2 text-emerald-600 font-medium">
+                        Meta cumplida. 🎉
+                    </div>
+                </template>
             </div>
 
             <!-- KPIs grandes con comparativa -->

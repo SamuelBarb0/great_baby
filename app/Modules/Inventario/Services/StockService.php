@@ -165,6 +165,110 @@ class StockService
              - $this->saldoReservadoSujeto($sujeto, $ubicacionId);
     }
 
+    // ─────────────────────────────────────────────────────────
+    // LO QUE SE LE PUEDE PROMETER A UN CLIENTE
+    // ─────────────────────────────────────────────────────────
+
+    /**
+     * Las bodegas desde las que sí se vende.
+     *
+     * Pasar `null` como ubicación a los métodos de arriba suma TODAS, y entre
+     * ellas están avería, cuarentena y revisión: mercancía que existe en el
+     * inventario y que nadie puede comprar. Prometerla sería mentirle al
+     * cliente en la cara.
+     *
+     * @return array<int,int>
+     */
+    public function ubicacionesDeVenta(): array
+    {
+        return \App\Modules\Dropi\Models\InventarioUbicacion::query()
+            ->where('disponible_para_venta', true)
+            ->where('activa', true)
+            ->pluck('id')->all();
+    }
+
+    /**
+     * Cuánto se le puede ofrecer a un cliente de un producto o una variante.
+     *
+     * Físico menos reservado, sumando sólo las bodegas de venta. Nunca
+     * negativo: si el inventario quedó en rojo por un descuadre, el cliente no
+     * tiene por qué ver un número negativo — para él es cero.
+     */
+    public function disponibleParaVenta(Producto|ProductoVariante $sujeto): int
+    {
+        $total = 0;
+        foreach ($this->ubicacionesDeVenta() as $ubicacionId) {
+            $total += $this->saldoDisponibleSujeto($sujeto, $ubicacionId);
+        }
+
+        return max(0, $total);
+    }
+
+    /**
+     * Lo mismo para una lista de productos, en dos consultas.
+     *
+     * El catálogo del portal pinta veinte productos por página; preguntar uno
+     * por uno serían cuarenta consultas por pantalla.
+     *
+     * @param  array<int,int>  $productoIds
+     * @return array<int,int> producto_id => disponible para vender
+     */
+    public function disponibleParaVentaDeProductos(array $productoIds): array
+    {
+        if ($productoIds === []) {
+            return [];
+        }
+
+        $bodegas = $this->ubicacionesDeVenta();
+        if ($bodegas === []) {
+            return array_fill_keys($productoIds, 0);
+        }
+
+        /*
+         * Cada producto se cuenta por su propio modo.
+         *
+         * Un producto granular lleva el stock en sus variantes; uno agregado,
+         * en el producto. Sumar las dos cosas da un número que no coincide con
+         * ninguna de las dos pantallas: la tarjeta del catálogo prometía 20 de
+         * un producto cuyas tres variantes decían «Agotado», porque en los
+         * datos había movimientos sueltos a nivel de producto. Se cuenta sólo
+         * el lado que corresponde, igual que `saldoFisicoProducto`.
+         */
+        $granular = Producto::whereIn('id', $productoIds)
+            ->where('desglose_stock', true)->pluck('id')->all();
+
+        $suma = function (string $modelo, array $ids, bool $conVariante) use ($bodegas) {
+            if ($ids === []) {
+                return collect();
+            }
+            $q = $modelo::query()
+                ->whereIn('producto_id', $ids)
+                ->whereIn('ubicacion_id', $bodegas);
+            $conVariante ? $q->whereNotNull('variante_id') : $q->whereNull('variante_id');
+            if ($modelo === ReservaInventario::class) {
+                $q->where('activa', true)
+                    ->where(fn ($w) => $w->whereNull('expira_at')->orWhere('expira_at', '>', now()));
+            }
+
+            return $q->selectRaw('producto_id, SUM(cantidad) total')
+                ->groupBy('producto_id')->pluck('total', 'producto_id');
+        };
+
+        $agregados = array_values(array_diff($productoIds, $granular));
+
+        $fisico = $suma(InventarioMovimiento::class, $granular, true)
+            ->union($suma(InventarioMovimiento::class, $agregados, false));
+        $reservado = $suma(ReservaInventario::class, $granular, true)
+            ->union($suma(ReservaInventario::class, $agregados, false));
+
+        $out = [];
+        foreach ($productoIds as $id) {
+            $out[$id] = max(0, (int) ($fisico[$id] ?? 0) - (int) ($reservado[$id] ?? 0));
+        }
+
+        return $out;
+    }
+
     /**
      * Guardarraíl · llamar API agregada sobre un producto con desglose=true es un bug de uso:
      * el caller debería iterar sus variantes. Fallamos rápido y ruidoso.

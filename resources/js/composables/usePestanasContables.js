@@ -26,6 +26,13 @@ export const pestanasConfigContable = [
 export const pestanasLibro = [
     { label: 'Movimientos', href: '/app/cartera/movimientos' },
     { label: 'Asientos manuales', href: '/app/contabilidad/asientos-manuales' },
+    /*
+     * La conciliación bancaria va en el libro y no en configuración: no es un
+     * parámetro, es el trabajo de cuadrar el banco contra lo asentado. Ojo que
+     * NO es la misma que «↔ Conciliación» de las pestañas de SIIGO: aquella
+     * cruza el ERP contra SIIGO, ésta cruza el ERP contra el extracto.
+     */
+    { label: '🏦 Conciliación bancaria', href: '/app/contabilidad/conciliacion-bancaria' },
 ];
 
 /* Los informes contables, los cuatro juntos. */

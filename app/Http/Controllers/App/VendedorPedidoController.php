@@ -133,6 +133,18 @@ class VendedorPedidoController extends Controller implements HasMiddleware
                 'inicio' => $ini->format('Y-m-d'),
                 'fin' => $fin->format('Y-m-d'),
             ],
+            /*
+             * Contra qué se mide.
+             *
+             * El panel mostraba lo vendido y nada más, así que «$4.120.000 este
+             * mes» no decía si iba bien o mal: el vendedor se enteraba en la
+             * reunión de fin de mes, cuando ya no se puede hacer nada.
+             *
+             * La meta es SIEMPRE del mes corriente, aunque el panel esté
+             * mirando otro período: una meta mensual comparada contra un
+             * trimestre o contra un año daría un cumplimiento sin sentido.
+             */
+            'meta' => $esSuper ? null : \App\Modules\Crm\Actions\CumplimientoDeMeta::run((int) $vendedorId),
             'resumen' => $comparativa['actual'],
             'anterior' => $comparativa['anterior'],
             'variacion' => $comparativa['variacion'],
