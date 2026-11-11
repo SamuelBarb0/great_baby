@@ -241,6 +241,20 @@ function facAracely(): App\Models\User
 }
 
 it('4.6 · despachar escaneando la guía devuelve la factura que salió', function () {
+    /*
+     * La resolución propia de Dropi hay que armarla.
+     *
+     * Desde el 7-nov una factura de Dropi sólo viaja si hay con qué numerarla:
+     * misma razón social que Great Baby, otra resolución DIAN. Este caso
+     * describe la operación normal —la resolución configurada—, y antes se
+     * apoyaba en que esa compuerta no existía.
+     *
+     * No va en el `beforeEach` a propósito: el caso de más abajo comprueba
+     * justamente qué pasa cuando NO está, y ponerla arriba lo borraría.
+     */
+    App\Modules\Siigo\Models\SiigoConfig::current()
+        ->forceFill(['tipo_documento_dropi_id' => 200])->save();
+
     $p = facPedido('E-1');
     $p->transicionar(EstadoPedidoDropi::Alistando, 'manual', $this->user->id);
     $p->transicionar(EstadoPedidoDropi::Empacado, 'manual', $this->user->id);

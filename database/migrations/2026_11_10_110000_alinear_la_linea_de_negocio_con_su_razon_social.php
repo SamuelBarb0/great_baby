@@ -43,11 +43,36 @@ return new class extends Migration
             return;
         }
 
-        $empresaDropi = DB::table('empresa_config')->where('codigo', $codigoDropi)->value('id');
+        $empresa = DB::table('empresa_config')->where('codigo', $codigoDropi)->first();
 
-        if (! $empresaDropi) {
+        if (! $empresa) {
             return;
         }
+
+        /*
+         * Si la razón social de Dropi ES la principal, acá no hay nada que
+         * realinear — y realinear sería destruir.
+         *
+         * Esta migración se escribió cuando `dropi.empresa` valía `ecommerce`:
+         * una razón social DEDICADA al canal, con la que no se factura otra
+         * cosa. Bajo ese supuesto, «toda factura de esa empresa es de Dropi»
+         * era cierto.
+         *
+         * El 7-nov eso dejó de ser cierto: la regla pasó a apuntar a
+         * `great_baby` —misma empresa, otra resolución DIAN—, que es con la
+         * que se factura TODO. Con ese valor, el UPDATE de abajo marca como
+         * Dropi hasta la última venta B2B del portal, y `down()` no revierte
+         * nada. En esta máquina se salvó de casualidad, por el orden en que
+         * corrieron los lotes; en producción corre con la regla ya cambiada.
+         *
+         * Mismo criterio que usa `DropiReestamparLineaCommand`: una razón
+         * social que factura las dos líneas no distingue ninguna.
+         */
+        if ((int) ($empresa->es_principal ?? 0) === 1) {
+            return;
+        }
+
+        $empresaDropi = $empresa->id;
 
         // La factura que sale por la razón social de Dropi es de Dropi, diga
         // lo que diga la columna.

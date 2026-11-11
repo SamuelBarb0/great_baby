@@ -42,6 +42,18 @@ beforeEach(function () {
         ['razon_social' => 'E-COMMERCE SAS', 'es_principal' => false, 'activa' => true,
          'nit' => '901222333', 'prefijo_dian' => 'ECO']
     );
+    /*
+     * La premisa de este archivo, dicha en voz alta.
+     *
+     * Antes se apoyaba en el valor por defecto de `dropi.empresa`, que valía
+     * `ecommerce`. El 7-nov el negocio lo cambió a `great_baby` —misma empresa,
+     * otra resolución DIAN— y estos casos se cayeron sin que nadie los hubiera
+     * tocado. Lo que acá se comprueba es qué pasa cuando Dropi SÍ tiene razón
+     * social propia; eso hay que declararlo, no heredarlo.
+     *
+     * El caso contrario —Dropi facturando con la principal— está al final.
+     */
+    \App\Support\Reglas::set('dropi.empresa', 'ecommerce');
     \App\Support\Reglas::limpiarRequestCache();
 });
 
@@ -168,4 +180,40 @@ it('cambiarla a mano a la que no corresponde sigue reventando', function () {
         $f->linea_negocio = LineaNegocio::GreatBaby;
         $f->save();
     })->toThrow(RuntimeException::class);
+});
+
+it('cuando Dropi factura con la razón social principal, manda el origen', function () {
+    /*
+     * Lo que decidió el negocio el 7-nov: Dropi dejó de tener razón social
+     * propia y factura con la de Great Baby, con otra resolución DIAN.
+     *
+     * Una razón social que factura las DOS líneas no distingue ninguna, así
+     * que la línea tiene que salir del documento que originó la factura —el
+     * mismo criterio que ya usa el libro contable y el comando de reestampado.
+     *
+     * Sin esto, deducir de la razón social le decía a TODA factura de Great
+     * Baby que tenía que ser Dropi, y reventaba con un mensaje que se
+     * contradecía solo: «la razón social Great Baby factura Dropi, pero se
+     * está guardando como Great Baby».
+     */
+    \App\Support\Reglas::set('dropi.empresa', 'great_baby');
+
+    // Sin origen y sin que nadie elija: Great Baby, no Dropi.
+    expect(facturaLinea(['empresa_id' => $this->granBaby->id])->fresh()->linea_negocio)
+        ->toBe(LineaNegocio::GreatBaby);
+
+    // Y marcarla Great Baby a mano se guarda: ya no hay nada que mezclar.
+    $aMano = facturaLinea([
+        'empresa_id' => $this->granBaby->id,
+        'linea_negocio' => LineaNegocio::GreatBaby,
+    ]);
+
+    expect($aMano->fresh()->linea_negocio)->toBe(LineaNegocio::GreatBaby);
+
+    // Pero lo que nace de un pedido Dropi sigue siendo Dropi: manda el origen.
+    expect(facturaLinea([
+        'empresa_id' => $this->granBaby->id,
+        'origen_type' => DropiPedido::class,
+        'origen_id' => 1,
+    ])->fresh()->linea_negocio)->toBe(LineaNegocio::Dropi);
 });

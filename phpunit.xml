@@ -43,6 +43,15 @@
              mueren con "Credenciales SIIGO no configuradas". En `fake` el cliente
              responde simulado y el flujo se ejercita igual. -->
         <env name="SIIGO_DRIVER" value="fake"/>
+        <!-- Y tampoco heredar del .env si el push automático está encendido.
+             Esta máquina trae FEATURE_SIIGO_PUSH_AUTO=true, así que toda la
+             suite Feature corría con el push prendido: una prueba que dice
+             "con el push apagado no manda nada" fallaba por el entorno y no
+             por el código, y en otra máquina pasaba. El default de las pruebas
+             lo fija el arnés, no el .env de cada quien. Lo que necesite el
+             push prendido lo enciende en su propio escenario, que es lo que ya
+             hacen los tests de Siigo. -->
+        <env name="FEATURE_SIIGO_PUSH_AUTO" value="false" force="true"/>
         <!-- Nunca heredar el driver ni el token de Dropi del .env local: con
              DROPI_DRIVER=api los tests del driver web hablaban con Dropi real. -->
         <env name="DROPI_DRIVER" value="mock"/>

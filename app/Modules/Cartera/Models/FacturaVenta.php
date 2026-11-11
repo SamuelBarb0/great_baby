@@ -216,6 +216,26 @@ class FacturaVenta extends Model implements AuditableContract
      *
      * Devuelve null para las demás empresas: Great Baby y Arsutex facturan lo
      * suyo, y ahí la línea la decide el documento que originó la factura.
+     *
+     * Y devuelve null TAMBIÉN cuando la empresa de Dropi es la principal.
+     *
+     * Esto se escribió dando por hecho que cada línea de negocio tenía su
+     * razón social: `dropi.empresa` valía `ecommerce`, una empresa dedicada al
+     * canal, y entonces «sale por esa razón social» equivalía a «es de Dropi».
+     *
+     * El 7-nov la regla pasó a `great_baby`: misma empresa, otra resolución
+     * DIAN. Una razón social que factura las DOS líneas no distingue ninguna,
+     * y seguir deduciendo de ahí le decía a toda factura de Great Baby que
+     * tenía que ser Dropi. La guarda de `saving` reventaba con un mensaje que
+     * se contradecía solo, y el libro quedaba al revés.
+     *
+     * La prueba es la misma que usa `DropiReestamparLineaCommand`: «desde el
+     * 7-nov Dropi factura con Great Baby, así que entonces sólo cuenta el
+     * origen». Acá eso es devolver null y dejar que decida `deOrigen()`.
+     *
+     * El candado que pidió Aracely no se pierde: lo que nace de un pedido
+     * Dropi sigue siendo Dropi, y si algún día vuelven a una razón social
+     * propia —`ecommerce`, `arsutex`— esto vuelve a imponerla solo.
      */
     private static function lineaDeLaEmpresa(?int $empresaId): ?LineaNegocio
     {
@@ -225,6 +245,10 @@ class FacturaVenta extends Model implements AuditableContract
         }
 
         $empresa = \App\Models\EmpresaConfig::porId($empresaId);
+
+        if ($empresa->es_principal) {
+            return null;
+        }
 
         return $empresa->codigo === $codigoDropi ? LineaNegocio::Dropi : null;
     }

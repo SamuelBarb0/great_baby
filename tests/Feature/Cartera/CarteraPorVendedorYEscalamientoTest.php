@@ -64,7 +64,16 @@ it('la antigüedad se puede pedir de un solo vendedor', function () {
     facturaConMora(10, 100000, $this->vendedor->id);
     facturaConMora(10, 500000, $this->otro->id);
 
-    $suyo = CalcularAntiguedadCartera::run(null, $this->vendedor->id);
+    /*
+     * El vendedor va en el TERCER parámetro, con nombre.
+     *
+     * Al unir con main el segundo pasó a ser el filtro de ejes —línea de
+     * negocio y destino fiscal, que main agregó el 7-nov—, así que pasarlo por
+     * posición le metía un entero donde espera un FiltroEjes. Se nombra para
+     * que la próxima vez que alguien agregue un parámetro en el medio esto no
+     * se entere.
+     */
+    $suyo = CalcularAntiguedadCartera::run(vendedorId: $this->vendedor->id);
 
     expect($suyo['total'])->toBe(100000.0)
         ->and($suyo['count'])->toBe(1);
