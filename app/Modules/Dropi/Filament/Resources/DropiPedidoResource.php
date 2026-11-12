@@ -91,7 +91,10 @@ class DropiPedidoResource extends Resource
 
     public static function canEdit($record): bool
     {
-        return auth()->user()?->esAracely() ?? false;
+        // La casilla «Editar» de Pedidos Dropi manda (gerencia, Operador Dropi
+        //   y cualquier perfil creado en Roles). Antes era Aracely por nombre
+        //   de rol y la casilla quedaba sin efecto.
+        return \App\Auth\Permisos::puedeAccion(auth()->user(), 'dropi_pedidos', 'editar');
     }
 
     public static function canDelete($record): bool

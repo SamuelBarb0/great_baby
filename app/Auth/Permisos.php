@@ -378,6 +378,8 @@ final class Permisos
         'arqueo_caja' => ['crear', 'editar'],
         'cajas' => ['crear', 'editar'],
         'contactos' => ['crear', 'editar'],
+        'dropi_devoluciones' => ['crear', 'editar'],
+        'dropi_pedidos' => ['editar'],
         'facturas' => ['crear'],
         'productos' => ['crear', 'editar'],
         'programacion_pagos' => ['crear'],
