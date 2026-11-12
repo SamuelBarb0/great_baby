@@ -22,6 +22,9 @@ use App\Models\User;
 use App\Modules\Cartera\Actions\CalcularAntiguedadCartera;
 use App\Modules\Cartera\Enums\TramoAntiguedad;
 use App\Modules\Cartera\Models\FacturaVenta;
+use App\Modules\Contabilidad\Enums\LineaNegocio;
+use App\Modules\Contabilidad\Support\FiltroEjes;
+use App\Modules\Dropi\Models\DropiPedido;
 
 beforeEach(function () {
     Illuminate\Support\Facades\Queue::fake();
@@ -195,4 +198,49 @@ it('sin nadie a quien escalarle, falla y NO marca la factura', function () {
 
     expect($f->fresh()->escalada_gerencia_at)->toBeNull()
         ->and(NotificacionErp::where('tipo', 'cartera_escalada')->count())->toBe(0);
+});
+
+it('la cartera por vendedor respeta el filtro de línea de negocio', function () {
+    /*
+     * El mismo tablero respondía dos cosas distintas a la misma pregunta.
+     *
+     * En producción, con «Línea de negocio: Dropi» elegido, los KPIs, el
+     * semáforo y top morosos daban $0 —no hay nada de Dropi— y esta tabla
+     * seguía mostrando la cartera entera. `porVendedor()` se escribió antes
+     * de que existiera `FiltroEjes` y, al unir con main, quedó siendo el
+     * único bloque del tablero que no lo miraba.
+     */
+    $greatBaby = facturaConMora(10, 100000, $this->vendedor->id);
+
+    $dropi = FacturaVenta::create([
+        'numero' => 'FV-EJES-DROPI',
+        'contacto_id' => $this->cliente->id,
+        'vendedor_id' => $this->vendedor->id,
+        // La línea sale del origen, no de la razón social: lo que nace de un
+        // pedido Dropi es Dropi.
+        'origen_type' => DropiPedido::class,
+        'origen_id' => 1,
+        'fecha_emision' => now()->subDays(40)->toDateString(),
+        'fecha_vencimiento' => now()->subDays(10)->toDateString(),
+        'estado' => 'pendiente', 'tipo' => 'credito',
+        'subtotal' => 700000, 'descuento' => 0, 'impuestos' => 0,
+        'total' => 700000, 'saldo' => 700000,
+    ]);
+
+    // La premisa: una de cada línea.
+    expect($dropi->fresh()->linea_negocio)->toBe(LineaNegocio::Dropi)
+        ->and($greatBaby->fresh()->linea_negocio)->toBe(LineaNegocio::GreatBaby);
+
+    $suma = fn (array $filas) => collect($filas)->sum('total');
+
+    // Sin filtro, las dos.
+    expect($suma(CalcularAntiguedadCartera::make()->porVendedor()))->toBe(800000.0);
+
+    // Con el filtro puesto, cada bloque tiene que decir lo mismo que el resto
+    // de la pantalla: sólo lo de esa línea.
+    expect($suma(CalcularAntiguedadCartera::make()->porVendedor(FiltroEjes::de('dropi', null))))
+        ->toBe(700000.0);
+
+    expect($suma(CalcularAntiguedadCartera::make()->porVendedor(FiltroEjes::de('great_baby', null))))
+        ->toBe(100000.0);
 });

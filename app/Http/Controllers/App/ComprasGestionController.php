@@ -499,6 +499,28 @@ class ComprasGestionController extends Controller implements HasMiddleware
     {
         $rc = RecepcionCompra::with(['orden.items', 'items'])->findOrFail($recepcion);
         $contenedor = $rc->orden ? $this->contenedorDe($rc->orden) : null;
+
+        /*
+         * Si el envío a SIIGO murió, esta pantalla tiene que decirlo.
+         *
+         * Antes era binaria: o había `siigo_id` y decía «Sincronizada», o
+         * decía «Pendiente de SIIGO · se enviará automáticamente». Un job que
+         * agotó sus reintentos caía en el segundo caso, así que una recepción
+         * MUERTA se veía idéntica a una recién creada y la persona esperaba
+         * algo que ya no iba a pasar. El error estaba escrito, y bien escrito
+         * —«El producto X todavía no está en SIIGO: sincronizalo antes de
+         * facturarlo»—, pero en el log de SIIGO, que no es donde se está
+         * mirando. Se busca sólo cuando no hay `siigo_id`: con documento
+         * arriba, lo viejo ya no importa.
+         */
+        $fallosSiigo = $rc->siigo_id ? collect() : \App\Modules\Siigo\Models\SiigoSyncLog::query()
+            ->where('recurso', 'compras')
+            ->where('estado', 'fallido')
+            ->where('detalle->recepcion_id', $rc->id)
+            ->latest('id')
+            ->get(['id', 'mensaje', 'created_at']);
+
+        $ultimoFallo = $fallosSiigo->first();
         return Inertia::render('Compras/Recepcion/Show', [
             'paso' => $rc->orden ? app(\App\Modules\Compras\Services\PasoDeCompra::class)->deOrden($rc->orden, auth()->user()) : null,
             'contenedor' => $contenedor ? ['id' => $contenedor->id, 'nombre' => $contenedor->contenedor ?: $contenedor->numero] : null,
@@ -517,6 +539,13 @@ class ComprasGestionController extends Controller implements HasMiddleware
                 'siigo_id' => $rc->siigo_id,
                 'siigo_number' => $rc->siigo_number,
                 'siigo_sync_hace' => $rc->siigo_sync_at?->diffForHumans(),
+                // El motivo en limpio: se le quita el prefijo técnico
+                // «[job-failed] recepcion=N · », que no le dice nada a nadie.
+                'siigo_fallo' => $ultimoFallo ? [
+                    'motivo' => trim(preg_replace('/^\[[^\]]*\]\s*recepcion=\d+\s*·?\s*/u', '', (string) $ultimoFallo->mensaje)),
+                    'hace' => $ultimoFallo->created_at?->diffForHumans(),
+                    'intentos' => $fallosSiigo->count(),
+                ] : null,
                 'items' => $rc->items->map(fn ($i) => [
                     'id' => $i->id,
                     'cantidad_recibida' => (float) $i->cantidad_recibida,

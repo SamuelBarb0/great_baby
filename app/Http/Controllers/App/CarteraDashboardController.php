@@ -48,7 +48,7 @@ class CarteraDashboardController extends Controller implements HasMiddleware
              * pero cobra mal, que es la pregunta que importa cuando la cartera
              * se empieza a envejecer.
              */
-            'porVendedor' => CalcularAntiguedadCartera::make()->porVendedor(),
+            'porVendedor' => CalcularAntiguedadCartera::make()->porVendedor($this->ejes),
             'tramos' => array_map(fn ($t) => [
                 'valor' => $t->value, 'label' => $t->label(), 'color' => $t->colorHex(),
             ], TramoAntiguedad::cases()),

@@ -981,16 +981,62 @@ class ProductosController extends Controller implements HasMiddleware
          */
         $veElPrecio = \App\Auth\Permisos::puede($r->user(), 'productos') || $r->user()?->esContable();
 
-        return response()->json(
-            $productos->map(fn ($p) => [
-                'id' => $p->id,
-                'referencia' => $p->referencia,
-                'nombre' => $p->nombre,
-                'precio' => $veElPrecio && isset($precios[$p->id]) ? (float) $precios[$p->id] : null,
-                'iva_pct' => isset($ivas[$p->impuesto_id]) ? (float) $ivas[$p->impuesto_id] : null,
-                'en_siigo' => (bool) $p->siigo_id,
-            ])->all()
-        );
+        $filas = $productos->map(fn ($p) => [
+            'id' => $p->id,
+            'variante_id' => null,
+            'referencia' => $p->referencia,
+            'nombre' => $p->nombre,
+            'precio' => $veElPrecio && isset($precios[$p->id]) ? (float) $precios[$p->id] : null,
+            'iva_pct' => isset($ivas[$p->impuesto_id]) ? (float) $ivas[$p->impuesto_id] : null,
+            'en_siigo' => (bool) $p->siigo_id,
+        ]);
+
+        /*
+         * Las variantes, sólo para quien las pide (`?variantes=1`).
+         *
+         * Hasta ahora esto devolvía únicamente productos padre, y la orden de
+         * compra es su cliente: se compraba el padre, la recepción heredaba
+         * `variante_id = null` y la mercancía entraba como stock AGREGADO. Para
+         * un producto que se vende por talla y color eso es mercancía
+         * invendible: `Producto::stockEn()` bifurca por `desglose_stock` y, si
+         * es granular, suma sólo variantes — nunca mira el saldo agregado. Se
+         * compraban 18 unidades y el vendedor seguía viendo «sin stock».
+         *
+         * Va detrás de una bandera porque los otros dos que llaman acá —la
+         * factura manual y el detalle de producto— esperan la lista de padres.
+         * Que la factura manual también debería vender por variante es cierto,
+         * pero es otra decisión y otro cambio.
+         *
+         * `id` sigue siendo SIEMPRE el producto padre: así la línea guarda el
+         * par (producto_id, variante_id) que `RegistrarRecepcion` necesita para
+         * mover el kardex donde el motor de stock sí va a contarlo.
+         */
+        if ($r->boolean('variantes') && $productos->isNotEmpty()) {
+            $variantes = \App\Modules\Dropi\Models\ProductoVariante::query()
+                ->whereIn('producto_id', $productos->pluck('id'))
+                ->orderBy('producto_id')->orderBy('id')
+                ->limit(60)
+                ->get();
+
+            $porId = $productos->keyBy('id');
+
+            $filas = $filas->concat($variantes->map(function ($v) use ($porId, $precios, $ivas, $veElPrecio) {
+                $p = $porId[$v->producto_id] ?? null;
+                $detalle = trim(($v->color_nombre ?? '').' '.($v->talla ?? ''));
+
+                return [
+                    'id' => $v->producto_id,
+                    'variante_id' => $v->id,
+                    'referencia' => $v->codigo_barras ?: $p?->referencia,
+                    'nombre' => trim(($p?->nombre ?? '').($detalle !== '' ? ' · '.$detalle : '')),
+                    'precio' => $veElPrecio && isset($precios[$v->producto_id]) ? (float) $precios[$v->producto_id] : null,
+                    'iva_pct' => isset($ivas[$p?->impuesto_id]) ? (float) $ivas[$p?->impuesto_id] : null,
+                    'en_siigo' => (bool) $p?->siigo_id,
+                ];
+            }));
+        }
+
+        return response()->json($filas->values()->all());
     }
 
     /** Grupos filtrados por línea (dropdown en cascada). */

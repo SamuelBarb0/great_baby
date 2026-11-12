@@ -258,3 +258,55 @@ it('un código que no existe sigue diciendo que no existe', function () {
         ->assertOk()
         ->assertInertia(fn ($x) => $x->where('variante', null));
 });
+
+it('la orden de compra puede pedir una talla y un color concretos', function () {
+    /*
+     * El defecto: el buscador de la OC sólo devolvía productos padre.
+     *
+     * Se compraba el padre, la recepción heredaba `variante_id = null` y la
+     * mercancía entraba como stock AGREGADO. Para un producto granular eso es
+     * mercancía invendible: `Producto::stockEn()` bifurca por `desglose_stock`
+     * y, si es granular, suma sólo variantes — nunca mira el saldo agregado.
+     * Comprobado en producción: 18 unidades recibidas y las cuatro variantes
+     * seguían diciendo «sin stock» en el carrito del vendedor.
+     *
+     * La bandera `variantes=1` es opcional a propósito: la factura manual y el
+     * detalle de producto llaman al mismo endpoint y esperan la lista de padres.
+     */
+    $p = Producto::create([
+        'referencia' => 'AND2512-79/154', 'nombre' => 'Body león manga larga',
+        'activo' => true, 'desglose_stock' => true,
+    ]);
+    ProductoVariante::create([
+        'producto_id' => $p->id, 'codigo_barras' => 'AND2512-79/154-02LEO-12M',
+        'color_nombre' => 'azul', 'talla' => '12M',
+    ]);
+    ProductoVariante::create([
+        'producto_id' => $p->id, 'codigo_barras' => 'AND2512-79/154-05LEO-6M',
+        'color_nombre' => 'rosa', 'talla' => '6M',
+    ]);
+
+    // Sin la bandera, la forma de siempre: sólo el padre.
+    $sinBandera = $this->actingAs($this->bodeguero)
+        ->getJson('/app/catalogo/productos-buscar?q=body')->json();
+
+    expect($sinBandera)->toHaveCount(1)
+        ->and($sinBandera[0]['variante_id'])->toBeNull();
+
+    // Con la bandera: el padre y sus dos presentaciones.
+    $conBandera = $this->actingAs($this->bodeguero)
+        ->getJson('/app/catalogo/productos-buscar?q=body&variantes=1')->json();
+
+    expect($conBandera)->toHaveCount(3);
+
+    $variantes = collect($conBandera)->whereNotNull('variante_id')->values();
+
+    expect($variantes)->toHaveCount(2)
+        // El `id` sigue siendo el PADRE: es el par (producto, variante) que
+        // `RegistrarRecepcion` necesita para mover el kardex donde el motor de
+        // stock sí lo va a contar.
+        ->and($variantes[0]['id'])->toBe($p->id)
+        ->and($variantes->pluck('nombre')->all())
+            ->toContain('Body león manga larga · azul 12M')
+            ->toContain('Body león manga larga · rosa 6M');
+});

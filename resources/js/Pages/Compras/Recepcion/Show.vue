@@ -2,7 +2,7 @@
 import { reactive } from 'vue';
 import { ref } from 'vue';
 import { Head, Link, router } from '@inertiajs/vue3';
-import { ArrowLeft, Truck, Cloud, CloudOff, RefreshCw } from 'lucide-vue-next';
+import { ArrowLeft, Truck, Cloud, CloudOff, RefreshCw, AlertTriangle } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import { useMoney } from '@/composables/useMoney';
 import { fechaCorta } from '@/composables/useFecha';
@@ -98,6 +98,28 @@ const pasarAColor = (it) => {
                                     <span class="font-mono">{{ recepcion.siigo_number || recepcion.siigo_id }}</span>
                                     <span v-if="recepcion.siigo_sync_hace"> · {{ recepcion.siigo_sync_hace }}</span>
                                 </div>
+                            </div>
+                        </template>
+                        <!--
+                            Falló de verdad: el job agotó sus reintentos.
+                            Esto antes se veía igual que «Pendiente», así que
+                            una recepción muerta parecía estar en camino y la
+                            persona esperaba para siempre. El motivo ya estaba
+                            escrito en el log de SIIGO; lo que faltaba era
+                            decirlo donde se está mirando.
+                        -->
+                        <template v-else-if="recepcion.siigo_fallo">
+                            <AlertTriangle class="h-5 w-5 text-red-600 shrink-0"/>
+                            <div>
+                                <div class="font-semibold text-red-700">
+                                    No pudo subir a SIIGO
+                                    <span v-if="recepcion.siigo_fallo.intentos > 1"
+                                          class="font-normal text-xs text-surface-500">
+                                        · {{ recepcion.siigo_fallo.intentos }} intentos
+                                    </span>
+                                </div>
+                                <div class="text-xs text-surface-600">{{ recepcion.siigo_fallo.motivo }}</div>
+                                <div class="text-[11px] text-surface-400">{{ recepcion.siigo_fallo.hace }}</div>
                             </div>
                         </template>
                         <template v-else>

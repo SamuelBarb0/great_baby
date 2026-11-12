@@ -79,12 +79,22 @@ class CalcularAntiguedadCartera
      * la pregunta que no se podía responder. Los sin vendedor asignado salen
      * aparte en vez de repartirse: esconderlos haría cuadrar el total mintiendo.
      *
+     * Y recorta por los mismos ejes que `handle()`.
+     *
+     * Este método se escribió antes de que existiera `FiltroEjes`, y al unir
+     * con main quedó siendo el único bloque del tablero que no lo miraba: con
+     * «Línea de negocio: Dropi» elegido, los KPIs, el semáforo y top morosos
+     * daban $0 y esta tabla seguía mostrando la cartera entera. Dos números
+     * distintos para la misma pregunta en la misma pantalla.
+     *
+     * @param  \App\Modules\Contabilidad\Support\FiltroEjes|null  $ejes  línea de negocio / destino
      * @return array<int,array{vendedor_id:?int,vendedor:string,por_tramo:array<string,array{count:int,monto:float}>,total:float,vencido:float}>
      */
-    public function porVendedor(): array
+    public function porVendedor(?\App\Modules\Contabilidad\Support\FiltroEjes $ejes = null): array
     {
         $facturas = FacturaVenta::query()
             ->whereNotIn('estado', [EstadoFactura::Pagada, EstadoFactura::Anulada])
+            ->when($ejes, fn ($q) => $ejes->aplicar($q))
             ->with('vendedor:id,name')
             ->get();
 

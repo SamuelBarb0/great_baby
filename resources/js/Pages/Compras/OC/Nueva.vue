@@ -223,7 +223,11 @@ const buscarProducto = async () => {
     const q = busquedaProducto.value.trim();
     if (q.length < 2) { sugerencias.value = []; return; }
     try {
-        const r = await fetch(`/app/catalogo/productos-buscar?q=${encodeURIComponent(q)}`,
+        // `variantes=1`: una orden de compra tiene que poder pedir la talla y el
+        // color concretos. Sin eso se compraba el producto padre y la mercancía
+        // entraba como stock agregado, que para un producto granular es stock
+        // que el vendedor nunca ve.
+        const r = await fetch(`/app/catalogo/productos-buscar?q=${encodeURIComponent(q)}&variantes=1`,
             { headers: { Accept: 'application/json' } });
         sugerencias.value = r.ok ? await r.json() : [];
     } catch { sugerencias.value = []; }
@@ -232,7 +236,15 @@ const buscarProducto = async () => {
 const agregarProducto = (p) => {
     // Si la primera línea está vacía la reusamos, para no dejar una fila muerta.
     const vacia = form.items.findIndex(i => !(i.descripcion || '').trim());
-    const linea = { ...lineaNueva(), producto_id: p.id, descripcion: `${p.referencia} · ${p.nombre}` };
+    // `p.id` es SIEMPRE el producto padre y `p.variante_id` la presentación
+    // elegida, o null si se pidió «todas». El par viaja junto hasta la
+    // recepción, que es quien mueve el kardex.
+    const linea = {
+        ...lineaNueva(),
+        producto_id: p.id,
+        variante_id: p.variante_id ?? null,
+        descripcion: `${p.referencia} · ${p.nombre}`,
+    };
     if (vacia >= 0) form.items.splice(vacia, 1, linea);
     else form.items.push(linea);
     busquedaProducto.value = '';
@@ -442,9 +454,12 @@ const guardar = () => {
                            placeholder="Escribí la referencia o el nombre y elegilo de la lista…"/>
                     <ul v-if="sugerencias.length"
                         class="absolute z-30 left-0 right-0 mt-1 bg-white dark:bg-surface-900 border border-surface-300 dark:border-surface-700 rounded shadow-lg max-h-56 overflow-y-auto">
-                        <li v-for="p in sugerencias" :key="p.id" @click="agregarProducto(p)"
+                        <li v-for="p in sugerencias" :key="`${p.id}-${p.variante_id ?? 'all'}`"
+                            @click="agregarProducto(p)"
                             class="px-3 py-2 text-sm hover:bg-brand-50 dark:hover:bg-brand-950/30 cursor-pointer">
                             <span class="font-mono text-xs">{{ p.referencia }}</span> · {{ p.nombre }}
+                            <span v-if="!p.variante_id"
+                                  class="ml-1 text-[10px] text-surface-500">· todas las presentaciones</span>
                         </li>
                     </ul>
                     <p class="text-[11px] text-surface-500 mt-1">
