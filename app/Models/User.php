@@ -183,6 +183,13 @@ class User extends Authenticatable implements FilamentUser
             // Compras (y quien sólo tenga órdenes o contenedores) arranca por sus
             //   órdenes. Va después de bodega: Jorge también ve contenedores.
             $this->tieneAcceso('compras_oc') || $this->tieneAcceso('compras_importacion') => '/app/compras',
+            // Dropi se opera en /admin (el panel quedó siendo sólo Dropi). Un
+            //   perfil creado desde la pantalla de Roles, como «Operador
+            //   Dropi», no aparecía en ninguna rama de arriba y caía en el
+            //   `default` — «Cosas del día», que pide perfil de bodega — así
+            //   que su primer pantallazo después del login era un 403. La
+            //   casilla que lo habilita es la misma que abre el panel.
+            \App\Auth\Permisos::puedeAccederPanel($this) => '/admin',
             default                    => '/app/cosas-del-dia',
         };
     }

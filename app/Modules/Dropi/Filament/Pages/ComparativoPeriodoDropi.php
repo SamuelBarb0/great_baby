@@ -34,7 +34,7 @@ class ComparativoPeriodoDropi extends Page
     {
         $u = auth()->user();
         if (! $u) return false;
-        return $u->esAracely() || $u->hasAnyRole(['Gerente', 'Contador']);
+        return \App\Auth\Permisos::puede($u, 'dropi_reportes');
     }
 
     /**

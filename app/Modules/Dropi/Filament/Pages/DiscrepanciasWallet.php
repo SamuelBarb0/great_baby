@@ -31,7 +31,10 @@ class DiscrepanciasWallet extends Page
 
     public static function canAccess(): bool
     {
-        return auth()->user()?->esAracely() ?? false;
+        // Matriz de permisos: la casilla «Discrepancias Dropi» de la pantalla
+        //   de Roles. Antes era esAracely() y un rol nuevo no podía entrar
+        //   aunque tuviera la casilla marcada.
+        return \App\Auth\Permisos::puede(auth()->user(), 'dropi_discrepancias');
     }
 
     public function getPedidosSinCobro()

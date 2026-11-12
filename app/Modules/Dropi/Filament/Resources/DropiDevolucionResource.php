@@ -41,8 +41,9 @@ class DropiDevolucionResource extends Resource
     // §24 — Alistador registra, Aracely/SAC ven, Alistador puede leer también
     public static function canViewAny(): bool
     {
-        $u = auth()->user();
-        return $u ? ($u->esAracely() || $u->esAlistador() || $u->esSac()) : false;
+        // La casilla «Devoluciones Dropi» manda (gerencia, alistador, SAC y
+        //   perfiles como «Operador Dropi»); antes era una lista de roles.
+        return \App\Auth\Permisos::puede(auth()->user(), 'dropi_devoluciones');
     }
 
     // Re-audit DR-γ (SEG-C3) · SAC/Alistador NO deben editar destino_inventario:

@@ -31,7 +31,9 @@ class ReportesDropi extends Page
     {
         $u = auth()->user();
         if (! $u) return false;
-        return $u->esAracely() || $u->hasAnyRole(['Gerente', 'Contador']);
+        // La casilla «Reportes Dropi» de la pantalla de Roles, no el nombre
+        //   del rol: así un perfil como «Operador Dropi» sí puede entrar.
+        return \App\Auth\Permisos::puede($u, 'dropi_reportes');
     }
 
     public function getBloques(): array
