@@ -22,7 +22,9 @@ final class Gastos
 {
     public static function puedeAprobar(?User $u): bool
     {
-        return (bool) ($u && ($u->esAracely() || $u->hasAnyRole(['Gerente'])));
+        // Aprobar un gasto lo vuelve costo. La casilla propia permite dárselo
+        //   al operador sin abrirle la firma a todo el que ve contabilidad.
+        return \App\Auth\Permisos::puede($u, 'contabilidad_aprobar_gastos');
     }
 
     /**

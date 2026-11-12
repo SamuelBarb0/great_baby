@@ -2,6 +2,7 @@
 
 namespace App\Modules\Dropi\Filament\Pages;
 
+use App\Auth\Permisos;
 use App\Modules\Dropi\Exceptions\DropiSesionNoDisponible;
 use App\Modules\Dropi\Models\DropiWebSesion;
 use App\Modules\Dropi\Services\DropiWebAuth;
@@ -37,7 +38,20 @@ class ConexionDropi extends Page
 
     public static function canAccess(): bool
     {
-        return auth()->user()?->esAracely() ?? false;
+        // Antes era `esAracely()`: un rol creado en Roles con la casilla
+        //   marcada nunca podía entrar. La casilla manda.
+        return Permisos::puede(auth()->user(), 'dropi_conexion');
+    }
+
+    /** Ver el estado es una cosa; cambiar la cuenta o el token es otra. */
+    public function getPuedeEditarProperty(): bool
+    {
+        return Permisos::puedeAccion(auth()->user(), 'dropi_conexion', 'editar');
+    }
+
+    protected function exigirEdicion(): void
+    {
+        abort_unless($this->puedeEditar, 403, 'Cambiar la conexión con Dropi necesita permiso de edición.');
     }
 
     public function mount(): void
@@ -53,6 +67,8 @@ class ConexionDropi extends Page
 
     public function guardarCuenta(): void
     {
+        $this->exigirEdicion();
+
         $this->validate([
             'cuentaEmail' => ['required', 'email'],
             'cuentaPassword' => ['nullable', 'string', 'max:255'],
@@ -76,6 +92,8 @@ class ConexionDropi extends Page
 
     public function usarCuentaDelEnv(): void
     {
+        $this->exigirEdicion();
+
         $auth = app(DropiWebAuth::class);
         $auth->usarCuentaDelEnv();
         $this->cuentaPassword = '';
@@ -94,11 +112,15 @@ class ConexionDropi extends Page
 
     public function conectar(): void
     {
+        $this->exigirEdicion();
+
         $this->ejecutar(fn (DropiWebAuth $auth) => $auth->iniciar(auth()->id()));
     }
 
     public function confirmarCodigo(): void
     {
+        $this->exigirEdicion();
+
         if (trim($this->codigo) === '') {
             Notification::make()->title('Escribe el código primero.')->warning()->send();
             return;
@@ -109,6 +131,8 @@ class ConexionDropi extends Page
 
     public function guardarToken(): void
     {
+        $this->exigirEdicion();
+
         if (trim($this->tokenManual) === '') {
             Notification::make()->title('Pega el token primero.')->warning()->send();
             return;
@@ -119,6 +143,8 @@ class ConexionDropi extends Page
 
     public function desconectar(): void
     {
+        $this->exigirEdicion();
+
         app(DropiWebAuth::class)->desconectar();
         Notification::make()->title('Sesión con Dropi cerrada.')->success()->send();
     }
