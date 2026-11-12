@@ -15,6 +15,7 @@ use App\Models\User;
 use App\Modules\Contabilidad\Actions\Gastos;
 use App\Modules\Dropi\Filament\Pages\CambiosFinancierosDropi;
 use App\Modules\Dropi\Filament\Pages\ConexionDropi;
+use App\Modules\Dropi\Filament\Pages\ImportarPedidos;
 use App\Modules\Dropi\Filament\Pages\SiigoDropi;
 use Spatie\Permission\Models\Role;
 
@@ -29,6 +30,8 @@ beforeEach(function () {
         'ver.cuentas_por_pagar', 'ver.programacion_pagos', 'ver.pagos',
         'ver.compras_oc', 'ver.compras_recepcion', 'ver.compras_importacion', 'ver.compras_reportes',
         'ver.contabilidad_aprobar_gastos', 'ver.dropi_conexion', 'editar.dropi_conexion',
+        'ver.dropi_siigo', 'editar.dropi_siigo',
+        'ver.dropi_importar_pedidos', 'editar.dropi_importar_pedidos',
     ]);
 
     $this->operador = User::factory()->create();
@@ -39,12 +42,30 @@ it('aterriza en el panel de Dropi aunque tenga casillas de compras', function ()
     expect($this->operador->rutaInicial())->toBe('/admin');
 });
 
-it('entra a Conexión Dropi y puede cambiarla, pero no a SIIGO', function () {
+it('entra a Conexión Dropi y puede cambiarla', function () {
     $this->actingAs($this->operador);
 
     expect(ConexionDropi::canAccess())->toBeTrue()
-        ->and(Permisos::puedeAccion($this->operador, 'dropi_conexion', 'editar'))->toBeTrue()
-        ->and(SiigoDropi::canAccess())->toBeFalse();
+        ->and(Permisos::puedeAccion($this->operador, 'dropi_conexion', 'editar'))->toBeTrue();
+});
+
+it('completa Configuración: SIIGO de Dropi e Importar pedidos', function () {
+    $this->actingAs($this->operador);
+
+    expect(SiigoDropi::canAccess())->toBeTrue()
+        ->and(ImportarPedidos::canAccess())->toBeTrue()
+        ->and(Permisos::puedeAccion($this->operador, 'dropi_siigo', 'editar'))->toBeTrue()
+        ->and(Permisos::puedeAccion($this->operador, 'dropi_importar_pedidos', 'editar'))->toBeTrue();
+});
+
+it('un rol con solo ver no puede guardar la resolución de Dropi', function () {
+    $this->actingAs($this->operador);
+    expect(Permisos::puedeAccion($this->operador, 'dropi_siigo', 'editar'))->toBeTrue();
+
+    $soloMira = User::factory()->create();
+    $soloMira->givePermissionTo('ver.dropi_siigo');
+
+    expect(Permisos::puedeAccion($soloMira, 'dropi_siigo', 'editar'))->toBeFalse();
 });
 
 it('ve la auditoría financiera porque llega desde Reportes Dropi', function () {

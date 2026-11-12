@@ -50,6 +50,12 @@ final class Permisos
         //   (sólo root) porque ahí viven las credenciales: se abre marcando la
         //   casilla, no escribiendo el nombre del rol en el código.
         'dropi_conexion'   => [],
+        // Las otras dos pantallas de «Configuración» del panel: la resolución
+        //   DIAN con que Dropi sale a SIIGO y la importación manual del Excel
+        //   de órdenes. Nacen vacías (sólo root) por la misma razón que
+        //   Conexión: son ajustes, no operación diaria.
+        'dropi_siigo'      => [],
+        'dropi_importar_pedidos' => [],
 
         // CARTERA
         'facturas'         => ['Gerente', 'Contador', 'Vendedor'],
@@ -257,7 +263,7 @@ final class Permisos
      */
     public const GRUPOS = [
         'Operación' => ['torre_control', 'estacion_empaque', 'vista_alistador', 'escanner_camara', 'inventario_vivo'],
-        'Dropi' => ['dropi_dashboard', 'dropi_pedidos', 'dropi_cortes', 'dropi_wallet', 'dropi_devoluciones', 'dropi_discrepancias', 'dropi_reportes', 'dropi_conexion'],
+        'Dropi' => ['dropi_dashboard', 'dropi_pedidos', 'dropi_cortes', 'dropi_wallet', 'dropi_devoluciones', 'dropi_discrepancias', 'dropi_reportes', 'dropi_conexion', 'dropi_siigo', 'dropi_importar_pedidos'],
         'Cartera y CRM' => ['facturas', 'pagos', 'contactos', 'cartera_dashboard', 'condiciones_credito', 'cobranzas', 'excepciones_credito', 'crm', 'comisiones', 'comisiones_config', 'metodos_pago'],
         'Contabilidad' => ['contabilidad', 'libro_diario', 'reportes_contables', 'contabilidad_aprobar_gastos', 'reglas_contables'],
         'Tesorería y caja' => ['cajas', 'arqueo_caja', 'flujo_caja', 'cuentas_por_pagar', 'programacion_pagos'],
@@ -283,6 +289,8 @@ final class Permisos
         'dropi_discrepancias' => 'Discrepancias Dropi',
         'dropi_reportes' => 'Reportes Dropi',
         'dropi_conexion' => 'Conexión con Dropi (cuenta y sesión)',
+        'dropi_siigo' => 'SIIGO de Dropi (resolución DIAN)',
+        'dropi_importar_pedidos' => 'Importar pedidos de Dropi (Excel)',
         'facturas' => 'Facturas de venta',
         'pagos' => 'Pagos recibidos',
         'contactos' => 'Clientes y proveedores',
@@ -391,6 +399,8 @@ final class Permisos
         'contactos' => ['crear', 'editar'],
         'dropi_devoluciones' => ['crear', 'editar'],
         'dropi_conexion' => ['editar'],
+        'dropi_siigo' => ['editar'],
+        'dropi_importar_pedidos' => ['editar'],
         'dropi_pedidos' => ['editar'],
         'facturas' => ['crear'],
         'productos' => ['crear', 'editar'],
@@ -672,6 +682,7 @@ final class Permisos
         'dropi_dashboard', 'dropi_pedidos', 'dropi_cortes', 'dropi_wallet',
         'dropi_devoluciones', 'dropi_discrepancias', 'dropi_reportes',
         'dropi_conexion',
+        'dropi_siigo', 'dropi_importar_pedidos',
         'vista_alistador', 'servicio_cliente',
     ];
 
