@@ -8,7 +8,9 @@ use App\Models\NotificacionErp;
 use App\Modules\Rrhh\Enums\EtapaCandidato;
 use App\Modules\Rrhh\Enums\ValoracionCandidato;
 use App\Modules\Rrhh\Models\Candidato;
+use App\Modules\Rrhh\Models\EntrevistaCandidato;
 use App\Modules\Rrhh\Models\OrdenContratacion;
+use App\Modules\Rrhh\Models\PreguntaEntrevista;
 use App\Modules\Rrhh\Models\Vacante;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -16,6 +18,7 @@ use Illuminate\Routing\Controllers\HasMiddleware;
 use Illuminate\Routing\Controllers\Middleware;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\Rule;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
@@ -34,15 +37,31 @@ class SeleccionController extends Controller implements HasMiddleware
 {
     public static function middleware(): array
     {
-        return [new Middleware(function (Request $r, \Closure $next) {
-            abort_unless(Permisos::puede($r->user(), 'rrhh_seleccion'), 403);
+        return [
+            /*
+             * Casi todo acá es de Gestión Humana, que es quien entrevista.
+             *
+             * Las dos excepciones son las preguntas: son del JEFE DEL ÁREA, y
+             * él no tiene `rrhh_seleccion` ni debería —no le corresponde ver
+             * las hojas de vida ni los conceptos psicológicos de nadie—. Si la
+             * puerta de la clase se le cierra, el permiso del método nunca
+             * llega a correr y queda pidiéndole a Gestión Humana que teclee
+             * las preguntas que él escribió aparte, que es justo lo que este
+             * cambio vino a quitar.
+             *
+             * `autorizarPreguntas()` hace la revisión fina: Gestión Humana, o
+             * quien pidió ESE personal. Nadie más.
+             */
+            (new Middleware(function (Request $r, \Closure $next) {
+                abort_unless(Permisos::puede($r->user(), 'rrhh_seleccion'), 403);
 
-            return $next($r);
-        })];
+                return $next($r);
+            }))->except(['agregarPregunta', 'alternarPregunta']),
+        ];
     }
 
     /** El tablero de una vacante: en qué columna va cada candidato. */
-    public function tablero(int $vacante)
+    public function tablero(Request $r, int $vacante)
     {
         $v = Vacante::with('requisicion:id,numero,solicitante_id')->findOrFail($vacante);
 
@@ -116,6 +135,20 @@ class SeleccionController extends Controller implements HasMiddleware
             // Para que la pantalla muestre la banda mientras se califica,
             // con los mismos textos que el impreso.
             'bandas' => \App\Modules\Rrhh\Enums\BandaValoracion::catalogo(),
+            /*
+             * Las preguntas del jefe, aparte de las del formato a propósito.
+             *
+             * En la pantalla y en el impreso se ven separadas: nadie
+             * confunde lo que el formato sugiere preguntar con lo que
+             * preguntó quien pidió el personal.
+             */
+            'preguntas_extra' => [
+                'saber_hacer' => PreguntaEntrevista::paraEntrevistar($v->id, EntrevistaCandidato::SABER_HACER),
+                'psicologica' => PreguntaEntrevista::paraEntrevistar($v->id, EntrevistaCandidato::PSICOLOGICA),
+            ],
+            // Gestión Humana, o el jefe que pidió el personal.
+            'puede_preguntas' => Permisos::puede($r->user(), 'rrhh_seleccion')
+                || $v->requisicion?->solicitante_id === $r->user()->id,
         ]);
     }
 
@@ -353,6 +386,75 @@ class SeleccionController extends Controller implements HasMiddleware
             $c->cv_path,
             'HV-'.str($c->nombre)->slug().'.'.pathinfo($c->cv_path, PATHINFO_EXTENSION),
             ['Content-Disposition' => 'inline'],
+        );
+    }
+
+    /**
+     * El jefe del área agrega una pregunta a la entrevista de su vacante.
+     *
+     * Las quince del formato son EJEMPLOS de lo que se puede preguntar; quien
+     * sabe qué hay que preguntarle a alguien para este cargo es quien pidió el
+     * personal. Por eso puede agregarlas él, y no sólo Gestión Humana.
+     */
+    public function agregarPregunta(Request $r, int $vacante): RedirectResponse
+    {
+        $v = Vacante::with('requisicion')->findOrFail($vacante);
+        $this->autorizarPreguntas($r, $v);
+
+        $data = $r->validate([
+            'tipo' => ['required', Rule::in([
+                EntrevistaCandidato::SABER_HACER,
+                EntrevistaCandidato::PSICOLOGICA,
+            ])],
+            'pregunta' => ['required', 'string', 'max:400'],
+        ], [], ['pregunta' => 'pregunta']);
+
+        PreguntaEntrevista::create([
+            'vacante_id' => $v->id,
+            'tipo' => $data['tipo'],
+            'pregunta' => trim($data['pregunta']),
+            // Al final de las que ya hay, no mezclada entre ellas.
+            'orden' => (int) PreguntaEntrevista::where('vacante_id', $v->id)
+                ->where('tipo', $data['tipo'])->max('orden') + 1,
+            'creada_por_id' => $r->user()->id,
+        ]);
+
+        return back()->with('success', 'Pregunta agregada. Va a aparecer en las entrevistas de esta vacante.');
+    }
+
+    /**
+     * Deja de preguntarla, sin borrarla.
+     *
+     * Borrarla dejaría una respuesta sin enunciado en una entrevista que
+     * alguien ya firmó. Desactivada sale de las nuevas y se queda en las
+     * viejas, que es lo que pidió el área.
+     */
+    public function alternarPregunta(Request $r, int $pregunta): RedirectResponse
+    {
+        $p = PreguntaEntrevista::with('vacante.requisicion')->findOrFail($pregunta);
+        $this->autorizarPreguntas($r, $p->vacante);
+
+        $p->activa = ! $p->activa;
+        $p->save();
+
+        return back()->with('success', $p->activa
+            ? 'La pregunta vuelve a hacerse.'
+            : 'Ya no se va a preguntar. Las entrevistas que la respondieron la conservan.');
+    }
+
+    /**
+     * Quién manda sobre las preguntas de una vacante.
+     *
+     * Gestión Humana, porque es quien entrevista, y el jefe que pidió el
+     * personal, porque las preguntas son suyas.
+     */
+    private function autorizarPreguntas(Request $r, Vacante $v): void
+    {
+        abort_unless(
+            Permisos::puede($r->user(), 'rrhh_seleccion')
+                || $v->requisicion?->solicitante_id === $r->user()->id,
+            403,
+            'Las preguntas las maneja Gestión Humana o quien pidió el personal.'
         );
     }
 

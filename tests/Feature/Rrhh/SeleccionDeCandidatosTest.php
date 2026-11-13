@@ -18,6 +18,8 @@ use App\Models\User;
 use App\Modules\Rrhh\Enums\EstadoRequisicion;
 use App\Modules\Rrhh\Enums\EtapaCandidato;
 use App\Modules\Rrhh\Models\Candidato;
+use App\Modules\Rrhh\Models\EntrevistaCandidato;
+use App\Modules\Rrhh\Models\PreguntaEntrevista;
 use App\Modules\Rrhh\Models\Requisicion;
 use App\Modules\Rrhh\Models\Vacante;
 use Illuminate\Http\UploadedFile;
@@ -353,4 +355,106 @@ it('sin decir qué salió no se registra, aunque se adjunte el certificado', fun
         ->assertSessionHasErrors('resultado');
 
     expect($c->fresh()->antecedentes_revisados)->toBeFalse();
+});
+
+// ── Las preguntas que agrega el jefe del área ────────────────────────────────
+
+it('el jefe que pidió el personal agrega sus propias preguntas', function () {
+    /*
+     * Las quince del formato son EJEMPLOS de lo que se puede preguntar. Quien
+     * sabe qué hay que preguntarle a alguien para este cargo es quien pidió el
+     * personal: a un alistador se le pregunta otra cosa que a un contador.
+     */
+    $this->actingAs($this->lider)
+        ->post("/app/rrhh/vacantes/{$this->vacante->id}/preguntas", [
+            'tipo' => EntrevistaCandidato::SABER_HACER,
+            'pregunta' => '¿Ha trabajado con lector de código de barras?',
+        ])
+        ->assertRedirect()
+        ->assertSessionHasNoErrors();
+
+    $p = PreguntaEntrevista::firstOrFail();
+
+    expect($p->vacante_id)->toBe($this->vacante->id)
+        ->and($p->activa)->toBeTrue()
+        ->and($p->creada_por_id)->toBe($this->lider->id)
+        // La clave sale del id: no choca con las del formato —g1, a1, e10— y
+        // sigue resolviendo aunque después se desactive.
+        ->and($p->clave())->toBe('x'.$p->id);
+});
+
+it('Gestión Humana también puede, porque es quien entrevista', function () {
+    $this->actingAs($this->elena)
+        ->post("/app/rrhh/vacantes/{$this->vacante->id}/preguntas", [
+            'tipo' => EntrevistaCandidato::SABER_HACER,
+            'pregunta' => '¿Puede trabajar turnos rotativos?',
+        ])->assertSessionHasNoErrors();
+
+    expect(PreguntaEntrevista::count())->toBe(1);
+});
+
+it('el jefe de otra área no mete preguntas en una vacante ajena', function () {
+    $otro = User::factory()->create(['name' => 'Jefe de otra área']);
+    $otro->assignRole(Role::firstOrCreate(['name' => 'LiderArea', 'guard_name' => 'web']));
+
+    $this->actingAs($otro)
+        ->post("/app/rrhh/vacantes/{$this->vacante->id}/preguntas", [
+            'tipo' => EntrevistaCandidato::SABER_HACER,
+            'pregunta' => 'Una que no le corresponde',
+        ])->assertForbidden();
+
+    expect(PreguntaEntrevista::count())->toBe(0);
+});
+
+it('dejar de preguntarla no la borra: la entrevista que la respondió la conserva', function () {
+    /*
+     * Borrarla dejaría una respuesta sin enunciado en una entrevista que
+     * alguien ya firmó. Por eso se desactiva: sale de las nuevas y se queda
+     * en las viejas.
+     */
+    $this->actingAs($this->lider)
+        ->post("/app/rrhh/vacantes/{$this->vacante->id}/preguntas", [
+            'tipo' => EntrevistaCandidato::SABER_HACER,
+            'pregunta' => '¿Tiene moto?',
+        ]);
+
+    $p = PreguntaEntrevista::firstOrFail();
+    $c = candidato();
+
+    // Se entrevista contestándola.
+    $this->actingAs($this->elena)
+        ->post("/app/rrhh/candidatos/{$c->id}/entrevista", [
+            'tipo' => EntrevistaCandidato::SABER_HACER,
+            'fecha' => '2026-11-13',
+            'entrevistador_nombre' => 'Elena',
+            'respuestas' => [$p->clave() => 'Sí, y licencia vigente.'],
+        ])->assertSessionHasNoErrors();
+
+    // Y después se deja de preguntar.
+    $this->actingAs($this->lider)
+        ->post("/app/rrhh/preguntas/{$p->id}/alternar")
+        ->assertRedirect();
+
+    expect(PreguntaEntrevista::count())->toBe(1)
+        ->and($p->fresh()->activa)->toBeFalse();
+
+    // Ya no se le hace a quien entre ahora…
+    expect(PreguntaEntrevista::paraEntrevistar($this->vacante->id, EntrevistaCandidato::SABER_HACER))
+        ->toBeEmpty();
+
+    // …pero la respuesta sigue ahí, con su enunciado.
+    $e = EntrevistaCandidato::where('candidato_id', $c->id)->firstOrFail();
+
+    expect($e->respuesta($p->clave()))->toBe('Sí, y licencia vigente.')
+        ->and(PreguntaEntrevista::paraMostrar(
+            $this->vacante->id, EntrevistaCandidato::SABER_HACER, (array) $e->respuestas
+        ))->toHaveCount(1);
+});
+
+it('no se agregan preguntas a la entrevista del ser: ésa es de criterios, no de preguntas', function () {
+    $this->actingAs($this->lider)
+        ->post("/app/rrhh/vacantes/{$this->vacante->id}/preguntas", [
+            'tipo' => EntrevistaCandidato::SER,
+            'pregunta' => 'Una pregunta',
+        ])->assertSessionHasErrors('tipo');
 });

@@ -136,9 +136,23 @@ class EntrevistaCandidatoController extends Controller implements HasMiddleware
             default => 'rrhh.pdf.entrevista-psicologica',
         };
 
+        /*
+         * Las preguntas del jefe también van impresas.
+         *
+         * `paraMostrar` incluye las desactivadas que tengan respuesta: si se
+         * preguntó, va en la hoja. Lo contrario sería entregar una entrevista
+         * firmada a la que le faltan preguntas que sí se hicieron.
+         */
+        $extra = \App\Modules\Rrhh\Models\PreguntaEntrevista::paraMostrar(
+            (int) $e->candidato->vacante_id,
+            (string) $e->tipo,
+            (array) ($e->respuestas ?? []),
+        );
+
         return Pdf::loadView($vista, [
             'e' => $e,
             'c' => $e->candidato,
+            'extra' => $extra,
             'empresa' => \App\Models\EmpresaConfig::current(),
             'generadoPor' => $r->user()->name,
         ])->setPaper('letter')

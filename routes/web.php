@@ -584,6 +584,16 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     Route::post('/rrhh/candidatos/{candidato}/antecedentes', [\App\Http\Controllers\App\SeleccionController::class, 'antecedentes'])->name('app.rrhh.candidato.antecedentes');
     Route::post('/rrhh/candidatos/{candidato}/valorar', [\App\Http\Controllers\App\SeleccionController::class, 'valorar'])->name('app.rrhh.candidato.valorar');
     Route::get('/rrhh/candidatos/{candidato}/hoja-de-vida', [\App\Http\Controllers\App\SeleccionController::class, 'verHojaDeVida'])->name('app.rrhh.candidato.hv');
+
+    /*
+     * Las preguntas que agrega el jefe del área a SU vacante.
+     *
+     * Las del formato son ejemplos de lo que se puede preguntar; éstas
+     * las pone quien sabe qué hay que preguntarle a alguien para este
+     * cargo. No se borran: se desactivan.
+     */
+    Route::post('/rrhh/vacantes/{vacante}/preguntas', [\App\Http\Controllers\App\SeleccionController::class, 'agregarPregunta'])->name('app.rrhh.vacante.pregunta');
+    Route::post('/rrhh/preguntas/{pregunta}/alternar', [\App\Http\Controllers\App\SeleccionController::class, 'alternarPregunta'])->name('app.rrhh.pregunta.alternar');
     // El certificado de antecedentes, por controlador y no por URL pública:
     // lleva el nombre y el documento de alguien que todavía no trabaja acá.
     Route::get('/rrhh/candidatos/{candidato}/antecedentes/soporte', [\App\Http\Controllers\App\SeleccionController::class, 'verAntecedentes'])->name('app.rrhh.candidato.antecedentes.soporte');

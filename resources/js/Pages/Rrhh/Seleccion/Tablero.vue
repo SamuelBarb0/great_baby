@@ -42,6 +42,11 @@ const props = defineProps({
     // Los tres cortes, con sus textos. Vienen del enum para que la pantalla
     // y el impreso digan exactamente lo mismo.
     bandas: { type: Array, default: () => [] },
+    // Las que agregó el jefe del área a ESTA vacante, por tipo de
+    // entrevista. Las del formato siguen viniendo en `cuestionarios`:
+    // son cosas distintas y se ven distintas.
+    preguntas_extra: { type: Object, default: () => ({}) },
+    puede_preguntas: { type: Boolean, default: false },
     cuestionarios: { type: Object, default: () => ({}) },
 });
 
@@ -180,6 +185,29 @@ const bandaSer = computed(() => {
     const valor = p >= 3.5 ? 'recomendable' : (p > 2.5 ? 'aceptable_con_seguimiento' : 'riesgo');
     return props.bandas.find((b) => b.valor === valor) ?? null;
 });
+
+/*
+ * Las preguntas del jefe del área.
+ *
+ * Las quince del formato son ejemplos de lo que se puede preguntar; quien
+ * sabe qué hay que preguntarle a alguien para ESTE cargo es quien pidió el
+ * personal. Se agregan acá mismo, mientras se entrevista.
+ *
+ * No se borran: se desactivan. Borrar una que ya se respondió dejaría una
+ * respuesta sin enunciado en una entrevista que alguien firmó.
+ */
+const extrasDelTipo = computed(() => props.preguntas_extra?.[tipoEntrevista.value] ?? []);
+const preguntaNueva = ref('');
+
+const agregarPregunta = () => {
+    const texto = preguntaNueva.value.trim();
+    if (!texto || procesando.value) return;
+    accion(`/app/rrhh/vacantes/${props.vacante.id}/preguntas`,
+        { tipo: tipoEntrevista.value, pregunta: texto },
+        { onSuccess: () => { preguntaNueva.value = ''; } });
+};
+
+const alternarPregunta = (p) => accion(`/app/rrhh/preguntas/${p.id}/alternar`, {});
 
 const abrirEntrevista = (c, tipo) => {
     errores.value = {};
@@ -733,8 +761,59 @@ const badge = (color) => ({
                         </div>
                     </div>
 
+                    <!--
+                        Las preguntas del jefe del área.
+
+                        Van DESPUÉS de las del formato y rotuladas, para que
+                        nadie confunda lo que el formato sugiere preguntar con
+                        lo que preguntó quien pidió el personal.
+                    -->
+                    <div v-if="extrasDelTipo.length || puede_preguntas" class="pt-2 border-t">
+                        <h4 class="text-xs font-bold uppercase text-surface-500">
+                            Preguntas del jefe del área
+                        </h4>
+                        <p class="text-[11px] text-surface-400 mb-1">
+                            Las de arriba son las que sugiere Gestión Humana. Acá van las que
+                            agregó quien pidió el personal, para este cargo.
+                        </p>
+
+                        <div v-for="p in extrasDelTipo" :key="p.id" class="mt-2">
+                            <div class="flex items-start justify-between gap-2">
+                                <span class="text-xs">{{ p.pregunta }}</span>
+                                <button v-if="puede_preguntas" type="button" @click="alternarPregunta(p)"
+                                    class="text-[10px] text-surface-400 hover:text-rose-600 shrink-0"
+                                    title="Dejar de preguntarla. No se borra: las entrevistas que ya la respondieron la conservan.">
+                                    no preguntar más
+                                </button>
+                            </div>
+                            <textarea v-model="entrevista.respuestas[p.clave]" rows="2"
+                                class="input w-full mt-1 text-sm"></textarea>
+                        </div>
+
+                        <p v-if="!extrasDelTipo.length" class="text-[11px] text-surface-400 mt-1">
+                            Todavía no hay. Las que agregues quedan para todas las entrevistas de esta vacante.
+                        </p>
+
+                        <div v-if="puede_preguntas" class="flex gap-2 mt-3">
+                            <input v-model="preguntaNueva" class="input flex-1 text-sm"
+                                placeholder="Escribí otra pregunta para este cargo…"
+                                @keyup.enter="agregarPregunta" />
+                            <button type="button" @click="agregarPregunta"
+                                :disabled="procesando || !preguntaNueva.trim()"
+                                class="btn-secondary text-xs shrink-0">
+                                Agregar
+                            </button>
+                        </div>
+                    </div>
+
+                    <!--
+                        La evaluación la pone el JEFE DEL ÁREA, no se le pregunta
+                        al postulante: es lo que él concluye de lo que vio.
+                    -->
                     <div class="pt-2 border-t">
-                        <h4 class="text-xs font-bold uppercase text-surface-500">Evaluación de la entrevista</h4>
+                        <h4 class="text-xs font-bold uppercase text-surface-500">
+                            Evaluación · la pone el jefe del área
+                        </h4>
                         <p class="text-[11px] text-surface-400 mb-1">
                             De 1 a 5, donde 1 es la menor puntuación y 5 la más alta.
                         </p>
@@ -815,6 +894,52 @@ const badge = (color) => ({
 
                 <!-- Psicológica: tres tablas que crecen y los bloques abiertos -->
                 <template v-else>
+                    <!--
+                        Las preguntas del jefe del área.
+
+                        Van DESPUÉS de las del formato y rotuladas, para que
+                        nadie confunda lo que el formato sugiere preguntar con
+                        lo que preguntó quien pidió el personal.
+                    -->
+                    <div v-if="extrasDelTipo.length || puede_preguntas" class="pt-2 border-t">
+                        <h4 class="text-xs font-bold uppercase text-surface-500">
+                            Preguntas del jefe del área
+                        </h4>
+                        <p class="text-[11px] text-surface-400 mb-1">
+                            Las de arriba son las que sugiere Gestión Humana. Acá van las que
+                            agregó quien pidió el personal, para este cargo.
+                        </p>
+
+                        <div v-for="p in extrasDelTipo" :key="p.id" class="mt-2">
+                            <div class="flex items-start justify-between gap-2">
+                                <span class="text-xs">{{ p.pregunta }}</span>
+                                <button v-if="puede_preguntas" type="button" @click="alternarPregunta(p)"
+                                    class="text-[10px] text-surface-400 hover:text-rose-600 shrink-0"
+                                    title="Dejar de preguntarla. No se borra: las entrevistas que ya la respondieron la conservan.">
+                                    no preguntar más
+                                </button>
+                            </div>
+                            <textarea v-model="entrevista.respuestas[p.clave]" rows="2"
+                                class="input w-full mt-1 text-sm"></textarea>
+                        </div>
+
+                        <p v-if="!extrasDelTipo.length" class="text-[11px] text-surface-400 mt-1">
+                            Todavía no hay. Las que agregues quedan para todas las entrevistas de esta vacante.
+                        </p>
+
+                        <div v-if="puede_preguntas" class="flex gap-2 mt-3">
+                            <input v-model="preguntaNueva" class="input flex-1 text-sm"
+                                placeholder="Escribí otra pregunta para este cargo…"
+                                @keyup.enter="agregarPregunta" />
+                            <button type="button" @click="agregarPregunta"
+                                :disabled="procesando || !preguntaNueva.trim()"
+                                class="btn-secondary text-xs shrink-0">
+                                Agregar
+                            </button>
+                        </div>
+                    </div>
+
+
                     <div v-for="(b, clave) in cuestionarios.psicologica" :key="clave" class="pt-2 border-t">
                         <h4 class="text-xs font-bold uppercase text-surface-500">{{ b.titulo }}</h4>
 

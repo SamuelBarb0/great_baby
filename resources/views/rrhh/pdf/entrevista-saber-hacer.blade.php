@@ -77,6 +77,25 @@
         @endforeach
     @endforeach
 
+
+    @if (!empty($extra))
+        <h2>Preguntas del jefe del área</h2>
+        <div class="nota">
+            Las de arriba son las que sugiere Gestión Humana. Éstas las agregó quien pidió el personal,
+            para este cargo.
+        </div>
+        @foreach ($extra as $p)
+            <div class="preg">{{ $loop->iteration }}. {{ $p['pregunta'] }}</div>
+            <div class="rta">
+                @if ($e->respuesta($p['clave']))
+                    {{ $e->respuesta($p['clave']) }}
+                @else
+                    <span class="vacia">Sin respuesta registrada.</span>
+                @endif
+            </div>
+        @endforeach
+    @endif
+
     <h2>Evaluación de la entrevista</h2>
     <div class="nota">
         Califique de uno a cinco, donde uno es la menor puntuación y cinco la más alta,
