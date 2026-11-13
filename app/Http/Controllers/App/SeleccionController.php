@@ -241,21 +241,71 @@ class SeleccionController extends Controller implements HasMiddleware
         return back()->with('success', "{$c->nombre} quedó descartado.");
     }
 
-    /** Deja escrito que se revisaron los antecedentes judiciales y qué salió. */
+    /**
+     * Deja escrito que se revisaron los antecedentes judiciales y qué salió.
+     *
+     * Y guarda el certificado, que antes se quedaba en el correo de quien lo
+     * consultó. Cuando seis meses después alguien pregunta con qué se contrató
+     * a esta persona, la respuesta era la palabra de alguien.
+     *
+     * El archivo es opcional a propósito: hay consultas que se hacen en
+     * pantalla y no dejan PDF, y obligarlo llevaría a adjuntar cualquier cosa
+     * con tal de poder seguir. Lo que no es opcional es decir qué salió.
+     */
     public function antecedentes(Request $r, int $candidato): RedirectResponse
     {
         $data = $r->validate([
             'resultado' => ['required', 'string', 'max:300'],
-        ], [], ['resultado' => 'resultado de la consulta']);
+            // Igual que la hoja de vida: al disco PRIVADO, nunca al público.
+            // Un certificado judicial es dato sensible — ver `verAntecedentes`.
+            'soporte' => ['nullable', 'file', 'mimes:pdf,jpg,jpeg,png', 'max:8192'],
+        ], [], [
+            'resultado' => 'resultado de la consulta',
+            'soporte' => 'certificado',
+        ]);
 
         $c = Candidato::findOrFail($candidato);
-        $c->update([
+
+        $cambios = [
             'antecedentes_revisados' => true,
             'antecedentes_resultado' => $data['resultado'],
-        ]);
-        $c->anotar('antecedentes', "Antecedentes revisados: {$data['resultado']}");
+        ];
+
+        if ($r->hasFile('soporte')) {
+            $cambios['antecedentes_archivo_path'] = $r->file('soporte')
+                ->store("rrhh/antecedentes/{$c->vacante_id}");
+        }
+
+        $c->update($cambios);
+
+        $c->anotar('antecedentes', "Antecedentes revisados: {$data['resultado']}"
+            .($r->hasFile('soporte') ? ' · con certificado adjunto' : ''));
 
         return back()->with('success', 'Antecedentes registrados. Ya se puede citar a entrevista.');
+    }
+
+    /**
+     * El certificado de antecedentes, servido sólo a quien puede verlo.
+     *
+     * No va por URL pública como las fotos de producto: lleva el nombre y el
+     * documento de alguien que todavía no trabaja acá, y puede decir que tiene
+     * un proceso. El permiso lo revisa el middleware de la clase.
+     */
+    public function verAntecedentes(int $candidato): StreamedResponse
+    {
+        $c = Candidato::findOrFail($candidato);
+
+        abort_unless(
+            $c->antecedentes_archivo_path && Storage::exists($c->antecedentes_archivo_path),
+            404,
+            'Este candidato no tiene certificado de antecedentes cargado.'
+        );
+
+        return Storage::response(
+            $c->antecedentes_archivo_path,
+            'ANTECEDENTES-'.str($c->nombre)->slug().'.'.pathinfo($c->antecedentes_archivo_path, PATHINFO_EXTENSION),
+            ['Content-Disposition' => 'inline'],
+        );
     }
 
     /** El dictamen de Gestión Humana sobre el candidato. */
@@ -379,6 +429,7 @@ class SeleccionController extends Controller implements HasMiddleware
             'valoracion_observacion' => $c->valoracion_observacion,
             'antecedentes_revisados' => (bool) $c->antecedentes_revisados,
             'antecedentes_resultado' => $c->antecedentes_resultado,
+            'tiene_soporte_antecedentes' => (bool) $c->antecedentes_archivo_path,
             'motivo_descarte' => $c->motivo_descarte,
             'elegido' => (bool) $c->elegido_at,
             'desde' => $c->created_at?->format('Y-m-d'),

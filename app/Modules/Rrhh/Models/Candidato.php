@@ -32,7 +32,8 @@ class Candidato extends Model
         'vacante_id', 'nombre', 'documento', 'email', 'telefono', 'cv_path',
         'fuente', 'etapa', 'calificacion', 'notas', 'valoracion',
         'valoracion_observacion', 'antecedentes_revisados',
-        'antecedentes_resultado', 'motivo_descarte', 'elegido_at', 'elegido_por_id',
+        'antecedentes_resultado', 'antecedentes_archivo_path',
+        'motivo_descarte', 'elegido_at', 'elegido_por_id',
     ];
 
     protected $casts = [

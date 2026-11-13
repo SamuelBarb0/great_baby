@@ -584,6 +584,9 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     Route::post('/rrhh/candidatos/{candidato}/antecedentes', [\App\Http\Controllers\App\SeleccionController::class, 'antecedentes'])->name('app.rrhh.candidato.antecedentes');
     Route::post('/rrhh/candidatos/{candidato}/valorar', [\App\Http\Controllers\App\SeleccionController::class, 'valorar'])->name('app.rrhh.candidato.valorar');
     Route::get('/rrhh/candidatos/{candidato}/hoja-de-vida', [\App\Http\Controllers\App\SeleccionController::class, 'verHojaDeVida'])->name('app.rrhh.candidato.hv');
+    // El certificado de antecedentes, por controlador y no por URL pública:
+    // lleva el nombre y el documento de alguien que todavía no trabaja acá.
+    Route::get('/rrhh/candidatos/{candidato}/antecedentes/soporte', [\App\Http\Controllers\App\SeleccionController::class, 'verAntecedentes'])->name('app.rrhh.candidato.antecedentes.soporte');
     Route::get('/rrhh/empleados', [\App\Http\Controllers\App\RrhhController::class, 'empleadosIndex'])->name('app.rrhh.empleados');
     Route::post('/rrhh/empleados', [\App\Http\Controllers\App\RrhhController::class, 'empleadoCrear'])->name('app.rrhh.empleado.crear');
 

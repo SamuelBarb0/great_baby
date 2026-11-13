@@ -283,3 +283,74 @@ it('la hoja de vida sólo la sirve quien puede verla', function () {
     $this->actingAs($this->elena)->get("/app/rrhh/candidatos/{$c->id}/hoja-de-vida")->assertOk();
     $this->actingAs($this->lider)->get("/app/rrhh/candidatos/{$c->id}/hoja-de-vida")->assertStatus(403);
 });
+
+it('guarda el certificado de antecedentes y lo sirve sólo por controlador', function () {
+    /*
+     * Antes quedaba escrito QUE se revisaron y QUÉ salió, y el PDF se quedaba
+     * en el correo de quien lo consultó. Seis meses después, cuando preguntan
+     * con qué se contrató a esta persona, la respuesta era la palabra de
+     * alguien.
+     *
+     * Va al disco privado, igual que la hoja de vida: un certificado judicial
+     * lleva el nombre y el documento de alguien que todavía no trabaja acá, y
+     * puede decir que tiene un proceso abierto.
+     */
+    Storage::fake();
+    $c = candidato();
+
+    $this->actingAs($this->elena)
+        ->post("/app/rrhh/candidatos/{$c->id}/antecedentes", [
+            'resultado' => 'Sin antecedentes judiciales',
+            'soporte' => UploadedFile::fake()->create('certificado.pdf', 120, 'application/pdf'),
+        ])
+        ->assertRedirect()
+        ->assertSessionHasNoErrors();
+
+    $ruta = $c->fresh()->antecedentes_archivo_path;
+
+    expect($ruta)->not->toBeNull();
+    Storage::assertExists($ruta);
+
+    // Y se abre por el controlador, que es quien revisa el permiso.
+    $this->actingAs($this->elena)
+        ->get("/app/rrhh/candidatos/{$c->id}/antecedentes/soporte")
+        ->assertOk();
+
+    // La bitácora deja constancia de que hubo soporte, no sólo del resultado.
+    expect($c->bitacora()->where('evento', 'antecedentes')->first()->resumen)
+        ->toContain('certificado');
+});
+
+it('el certificado es opcional: hay consultas que no dejan PDF', function () {
+    /*
+     * Obligarlo llevaría a adjuntar cualquier cosa con tal de poder seguir.
+     * Lo que no es opcional es decir qué salió.
+     */
+    Storage::fake();
+    $c = candidato();
+
+    $this->actingAs($this->elena)
+        ->post("/app/rrhh/candidatos/{$c->id}/antecedentes", ['resultado' => 'Sin antecedentes'])
+        ->assertSessionHasNoErrors();
+
+    expect($c->fresh()->antecedentes_revisados)->toBeTrue()
+        ->and($c->fresh()->antecedentes_archivo_path)->toBeNull();
+
+    // Y pedir el soporte que no existe responde 404, no una página en blanco.
+    $this->actingAs($this->elena)
+        ->get("/app/rrhh/candidatos/{$c->id}/antecedentes/soporte")
+        ->assertNotFound();
+});
+
+it('sin decir qué salió no se registra, aunque se adjunte el certificado', function () {
+    Storage::fake();
+    $c = candidato();
+
+    $this->actingAs($this->elena)
+        ->post("/app/rrhh/candidatos/{$c->id}/antecedentes", [
+            'soporte' => UploadedFile::fake()->create('certificado.pdf', 120, 'application/pdf'),
+        ])
+        ->assertSessionHasErrors('resultado');
+
+    expect($c->fresh()->antecedentes_revisados)->toBeFalse();
+});

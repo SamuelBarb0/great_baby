@@ -92,10 +92,31 @@ const mover = (c, etapa) => {
 
 const modalAntecedentes = ref(null);
 const resultadoAnt = ref('');
+
+/*
+ * El certificado, opcional.
+ *
+ * Antes se guardaba QUE se revisaron y QUÉ salió, y el PDF se quedaba en el
+ * correo de quien lo consultó. Seis meses después, cuando alguien pregunta con
+ * qué se contrató a esta persona, la respuesta era la palabra de alguien.
+ *
+ * Opcional a propósito: hay consultas que se hacen en pantalla y no dejan PDF,
+ * y obligarlo llevaría a adjuntar cualquier cosa con tal de poder seguir.
+ */
+const soporteAnt = ref(null);
+const tomarSoporte = (e) => { soporteAnt.value = e.target.files?.[0] ?? null; };
+
+const limpiarAntecedentes = () => {
+    modalAntecedentes.value = null;
+    resultadoAnt.value = '';
+    soporteAnt.value = null;
+};
+
 const guardarAntecedentes = () => accion(
     `/app/rrhh/candidatos/${modalAntecedentes.value.id}/antecedentes`,
-    { resultado: resultadoAnt.value },
-    { onSuccess: () => { modalAntecedentes.value = null; resultadoAnt.value = ''; } },
+    // Con archivo va como FormData; Inertia lo arma solo si hay un File.
+    { resultado: resultadoAnt.value, soporte: soporteAnt.value },
+    { onSuccess: limpiarAntecedentes },
 );
 
 const modalValoracion = ref(null);
@@ -391,6 +412,11 @@ const badge = (color) => ({
                             </button>
                             <div v-else class="flex items-center gap-1 text-[11px] text-emerald-700" :title="c.antecedentes_resultado">
                                 <ShieldCheck class="h-3.5 w-3.5" /> Antecedentes revisados
+                                <a v-if="c.tiene_soporte_antecedentes" target="_blank"
+                                    :href="`/app/rrhh/candidatos/${c.id}/antecedentes/soporte`"
+                                    class="underline hover:no-underline" title="Ver el certificado">
+                                    · ver certificado
+                                </a>
                             </div>
 
                             <!-- Entrevistas · el total; el detalle se abre aparte -->
@@ -617,8 +643,20 @@ const badge = (color) => ({
                 <input v-model="resultadoAnt" class="input w-full" autofocus
                     placeholder="Sin antecedentes / Registra proceso por..." />
                 <p v-if="errores.resultado" class="text-xs text-rose-600 mt-1">{{ errores.resultado }}</p>
+
+                <label class="block text-xs uppercase text-surface-500 mt-4">
+                    Certificado <span class="normal-case text-surface-400">(opcional)</span>
+                </label>
+                <input type="file" accept=".pdf,.jpg,.jpeg,.png" @change="tomarSoporte"
+                    class="input w-full mt-1 text-xs" />
+                <p class="text-[11px] text-surface-400 mt-1">
+                    PDF o imagen, hasta 8 MB. Se guarda en el disco privado: no queda en una
+                    dirección que se pueda compartir.
+                </p>
+                <p v-if="errores.soporte" class="text-xs text-rose-600 mt-1">{{ errores.soporte }}</p>
+
                 <div class="flex justify-end gap-2 mt-4">
-                    <button @click="modalAntecedentes = null" class="btn-secondary">Cancelar</button>
+                    <button @click="limpiarAntecedentes" class="btn-secondary">Cancelar</button>
                     <button @click="guardarAntecedentes" :disabled="procesando || !resultadoAnt" class="btn-primary">
                         Guardar
                     </button>
