@@ -16,6 +16,7 @@
 use App\Models\NotificacionErp;
 use App\Models\User;
 use App\Modules\Rrhh\Enums\EstadoRequisicion;
+use App\Modules\Rrhh\Enums\TipoContrato;
 use App\Modules\Rrhh\Models\Requisicion;
 use App\Modules\Rrhh\Models\Vacante;
 use Spatie\Permission\Models\Role;
@@ -261,4 +262,56 @@ it('los roles nuevos no entran al sistema directo a un 403', function () {
         expect($u->rutaInicial())->toBe('/app/rrhh/requisiciones');
         $this->actingAs($u)->get($u->rutaInicial())->assertOk();
     }
+});
+
+it('abre la vacante con cualquiera de los cinco tipos de contrato', function () {
+    /*
+     * El defecto: tres de los cinco reventaban con un 500 mudo.
+     *
+     * El formulario de requisición ofrecía los tipos escritos a mano en el Vue
+     * —indefinido, fijo, obra_labor, aprendiz, prestacion— y la columna de
+     * `rrhh_vacantes` es un ENUM con OTROS cinco: indefinido, obra_labor,
+     * prestacion_servicios, aprendizaje, temporal. Sólo dos coincidían.
+     * `abrirVacante()` copiaba el valor tal cual, MySQL rechazaba el enum y el
+     * servidor respondía 500 — y la pantalla cerraba el modal sin decir nada,
+     * así que la requisición quedaba aprobada para siempre sin poder abrirse.
+     *
+     * Comprobado en producción el 13-nov con «Término fijo», que es el
+     * contrato más común del país; aprendiz SENA, que es cuota legal, fallaba
+     * igual.
+     */
+    foreach (TipoContrato::cases() as $tipo) {
+        $x = solicitudEnviada($this->lider, ['tipo_contrato' => $tipo->value]);
+
+        $this->actingAs($this->elena)->post("/app/rrhh/requisiciones/{$x->id}/aprobar")
+            ->assertRedirect();
+
+        $this->actingAs($this->elena)->post("/app/rrhh/requisiciones/{$x->id}/vacante")
+            ->assertRedirect()
+            ->assertSessionHasNoErrors();
+
+        $v = Vacante::where('requisicion_id', $x->id)->first();
+
+        expect($v)->not->toBeNull("«{$tipo->label()}» no abrió vacante")
+            // Y queda rotulada con el contrato que de verdad se pidió, no con
+            // uno parecido: mapear «término fijo» a «temporal» habría escrito
+            // mal el contrato de la persona en su propia ficha.
+            ->and($v->tipo_contrato)->toBe($tipo->paraVacante());
+    }
+});
+
+it('no deja guardar una solicitud con un tipo de contrato inventado', function () {
+    /*
+     * La columna es `string(60)` y se validaba como «texto de hasta 60», así
+     * que cualquier cosa entraba. El valor malo no se notaba al guardar sino
+     * meses después, al abrir la vacante.
+     */
+    $this->actingAs($this->lider)
+        ->post('/app/rrhh/requisiciones', [
+            'cargo' => 'Auxiliar de bodega',
+            'area' => 'Logística',
+            'numero_vacantes' => 1,
+            'tipo_contrato' => 'contrato_que_no_existe',
+        ])
+        ->assertSessionHasErrors('tipo_contrato');
 });

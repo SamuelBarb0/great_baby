@@ -17,6 +17,10 @@ const props = defineProps({
     esGestionHumana: { type: Boolean, default: false },
     kpis: { type: Object, default: () => ({}) },
     estados: { type: Array, default: () => [] },
+    // Del enum TipoContrato. Antes estaban escritos a mano aca abajo y tres de
+    // los cinco no existian en la tabla de vacantes: la requisicion se guardaba
+    // bien y reventaba meses despues, al abrir la vacante, con un 500 mudo.
+    tipos_contrato: { type: Array, default: () => [] },
 });
 
 const modal = ref(false);
@@ -311,11 +315,9 @@ const hayFilas = computed(() => props.requisiciones.data.length > 0);
                         <div>
                             <label class="text-xs font-semibold">Tipo de contrato</label>
                             <select v-model="form.tipo_contrato" class="input w-full">
-                                <option value="indefinido">Indefinido</option>
-                                <option value="fijo">Término fijo</option>
-                                <option value="obra_labor">Obra o labor</option>
-                                <option value="aprendiz">Aprendiz SENA</option>
-                                <option value="prestacion">Prestación de servicios</option>
+                                <option v-for="t in tipos_contrato" :key="t.valor" :value="t.valor">
+                                    {{ t.label }}
+                                </option>
                             </select>
                         </div>
                     </div>

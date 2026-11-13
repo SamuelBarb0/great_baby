@@ -8,6 +8,7 @@ use App\Models\NotificacionErp;
 use App\Models\User;
 use App\Modules\Rrhh\Enums\EstadoRequisicion;
 use App\Modules\Rrhh\Enums\EtapaCandidato;
+use App\Modules\Rrhh\Enums\TipoContrato;
 use App\Modules\Rrhh\Models\Candidato;
 use App\Modules\Rrhh\Models\Requisicion;
 use App\Modules\Rrhh\Models\Vacante;
@@ -16,6 +17,7 @@ use Illuminate\Http\Request;
 use Illuminate\Routing\Controllers\HasMiddleware;
 use Illuminate\Routing\Controllers\Middleware;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -62,6 +64,10 @@ class RequisicionesController extends Controller implements HasMiddleware
             'requisiciones' => $q->paginate(25)->through(fn ($x) => $this->fila($x)),
             'esGestionHumana' => $gh,
             'kpis' => $this->kpis($r, $gh),
+            // Los tipos de contrato salen del enum y no escritos a mano en el
+            // Vue: tenerlos en dos lados fue justo lo que dejó al formulario
+            // ofreciendo tres que la tabla de vacantes no acepta.
+            'tipos_contrato' => TipoContrato::catalogo(),
             'estados' => collect(EstadoRequisicion::cases())
                 ->map(fn ($e) => ['valor' => $e->value, 'label' => $e->label()])->values(),
         ]);
@@ -238,7 +244,9 @@ class RequisicionesController extends Controller implements HasMiddleware
                 'requisitos' => $x->competencias,
                 'salario_min' => $x->salario_min,
                 'salario_max' => $x->salario_max,
-                'tipo_contrato' => $x->tipo_contrato,
+                // Traducido: la tabla de vacantes escribe dos de los cinco
+                // distinto. Ver `TipoContrato::paraVacante()`.
+                'tipo_contrato' => TipoContrato::desdeGuardado($x->tipo_contrato)?->paraVacante() ?? 'indefinido',
                 'modalidad' => 'presencial',
                 'estado' => 'abierta',
                 'fecha_apertura' => now()->toDateString(),
@@ -429,7 +437,15 @@ class RequisicionesController extends Controller implements HasMiddleware
             // Un rango al revés es un error de tipeo que después confunde al
             // publicar la vacante.
             'salario_max' => ['nullable', 'numeric', 'min:0', 'gte:salario_min'],
-            'tipo_contrato' => ['nullable', 'string', 'max:60'],
+            /*
+             * Contra el enum, no «texto de hasta 60».
+             *
+             * Validarlo como string dejaba entrar cualquier cosa, y la
+             * tabla de vacantes SÍ es un enum estricto: el valor malo no
+             * se notaba al guardar la requisición sino meses después, al
+             * abrir la vacante, con un 500 que la pantalla se tragaba.
+             */
+            'tipo_contrato' => ['nullable', Rule::in(array_column(TipoContrato::cases(), 'value'))],
             'fecha_requerida' => ['nullable', 'date'],
             'observaciones' => ['nullable', 'string', 'max:2000'],
         ], [], ['salario_max' => 'salario máximo']);
