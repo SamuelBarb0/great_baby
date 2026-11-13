@@ -6,6 +6,7 @@ use App\Modules\Dropi\Enums\DestinoDevolucion;
 use App\Modules\Dropi\Filament\Resources\DropiDevolucionResource\Pages;
 use App\Modules\Dropi\Models\DropiDevolucion;
 use BackedEnum;
+use Filament\Actions\EditAction;
 use Filament\Actions\ViewAction;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
@@ -41,21 +42,26 @@ class DropiDevolucionResource extends Resource
     // §24 — Alistador registra, Aracely/SAC ven, Alistador puede leer también
     public static function canViewAny(): bool
     {
-        $u = auth()->user();
-        return $u ? ($u->esAracely() || $u->esAlistador() || $u->esSac()) : false;
+        // La casilla «Devoluciones Dropi» manda (gerencia, alistador, SAC y
+        //   perfiles como «Operador Dropi»); antes era una lista de roles.
+        return \App\Auth\Permisos::puede(auth()->user(), 'dropi_devoluciones');
     }
 
     // Re-audit DR-γ (SEG-C3) · SAC/Alistador NO deben editar destino_inventario:
-    //   reingreso vs averia_baja mueve el kardex real. Sólo Aracely edita.
+    //   reingreso vs averia_baja mueve el kardex real. Sólo root (Aracely y
+    //   Gerencia) cambia el destino; el resto sólo puede corregir las notas.
     public static function canCreate(): bool
     {
-        $u = auth()->user();
-        return $u && ($u->esAracely() || $u->esAlistador());
+        // La casilla «Crear» de Devoluciones Dropi manda: registrar una
+        //   devolución es la única forma de crear una.
+        return \App\Auth\Permisos::puedeAccion(auth()->user(), 'dropi_devoluciones', 'crear');
     }
 
     public static function canEdit($record): bool
     {
-        return auth()->user()?->esAracely() ?? false;
+        // La casilla «Editar» manda. El destino de inventario queda además
+        //   bloqueado en el formulario para quien no sea root (SEG-C3).
+        return \App\Auth\Permisos::puedeAccion(auth()->user(), 'dropi_devoluciones', 'editar');
     }
 
     public static function canDelete($record): bool
@@ -77,7 +83,11 @@ class DropiDevolucionResource extends Resource
                 ->disabled(),
             Select::make('destino_inventario')
                 ->options(collect(DestinoDevolucion::cases())->mapWithKeys(fn ($d) => [$d->value => $d->label()]))
-                ->required(),
+                ->required()
+                // Cambiarlo mueve kardex (SEG-C3): sólo root lo toca. Los
+                //   demás ven el valor pero no lo reenvían al guardar.
+                ->disabled(fn () => ! auth()->user()?->esRoot())
+                ->dehydrated(fn () => (bool) auth()->user()?->esRoot()),
             Textarea::make('notas')->columnSpanFull(),
         ]);
     }
@@ -112,6 +122,7 @@ class DropiDevolucionResource extends Resource
             ])
             ->recordActions([
                 ViewAction::make(),
+                EditAction::make(),
             ])
             ->toolbarActions([
                 \Filament\Actions\BulkActionGroup::make([
@@ -130,6 +141,7 @@ class DropiDevolucionResource extends Resource
         return [
             'index' => Pages\ListDropiDevoluciones::route('/'),
             'registrar' => Pages\RegistrarDevolucion::route('/registrar'),
+            'edit' => Pages\EditDropiDevolucion::route('/{record}/edit'),
         ];
     }
 }

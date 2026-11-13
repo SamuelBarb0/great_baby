@@ -2,6 +2,7 @@
 
 namespace App\Modules\Dropi\Filament\Pages;
 
+use App\Auth\Permisos;
 use App\Modules\Siigo\Models\SiigoConfig;
 use App\Modules\Siigo\Models\SiigoDocumentType;
 use BackedEnum;
@@ -39,7 +40,15 @@ class SiigoDropi extends Page
 
     public static function canAccess(): bool
     {
-        return auth()->user()?->esAracely() ?? false;
+        // Antes era `esAracely()`: los ajustes de Dropi quedaban fuera del
+        //   alcance de la pantalla de Roles.
+        return Permisos::puede(auth()->user(), 'dropi_siigo');
+    }
+
+    /** Ver con qué resolución sale Dropi es una cosa; cambiarla es otra. */
+    public function getPuedeEditarProperty(): bool
+    {
+        return Permisos::puedeAccion(auth()->user(), 'dropi_siigo', 'editar');
     }
 
     public function mount(): void
@@ -63,6 +72,8 @@ class SiigoDropi extends Page
 
     public function guardar(): void
     {
+        abort_unless($this->puedeEditar, 403, 'Cambiar la resolución de Dropi necesita permiso de edición.');
+
         $this->validate(
             ['resolucion' => ['nullable', 'integer', 'min:1']],
             [],

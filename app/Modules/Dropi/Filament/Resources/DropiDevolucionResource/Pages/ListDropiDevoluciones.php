@@ -17,7 +17,8 @@ class ListDropiDevoluciones extends ListRecords
                 ->label('Registrar devolución')
                 ->icon('heroicon-o-plus')
                 ->color('primary')
-                ->url(fn () => DropiDevolucionResource::getUrl('registrar')),
+                ->url(fn () => DropiDevolucionResource::getUrl('registrar'))
+                ->visible(fn () => DropiDevolucionResource::canCreate()),
         ];
     }
 }

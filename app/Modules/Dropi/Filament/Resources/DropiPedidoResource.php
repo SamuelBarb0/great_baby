@@ -75,7 +75,10 @@ class DropiPedidoResource extends Resource
     public static function canViewAny(): bool
     {
         $u = auth()->user();
-        return $u && ($u->esAracely() || $u->esAlistador());
+        // Matriz de permisos («Pedidos Dropi»): gerencia, alistador y los
+        //   perfiles creados en la pantalla de Roles, como «Operador Dropi».
+        //   Antes se preguntaba por el NOMBRE del rol y la casilla no servía.
+        return \App\Auth\Permisos::puede($u, 'dropi_pedidos');
     }
 
     public static function canCreate(): bool
@@ -88,7 +91,10 @@ class DropiPedidoResource extends Resource
 
     public static function canEdit($record): bool
     {
-        return auth()->user()?->esAracely() ?? false;
+        // La casilla «Editar» de Pedidos Dropi manda (gerencia, Operador Dropi
+        //   y cualquier perfil creado en Roles). Antes era Aracely por nombre
+        //   de rol y la casilla quedaba sin efecto.
+        return \App\Auth\Permisos::puedeAccion(auth()->user(), 'dropi_pedidos', 'editar');
     }
 
     public static function canDelete($record): bool

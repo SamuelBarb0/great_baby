@@ -57,7 +57,10 @@ class CambiosFinancierosDropi extends Page
     {
         $u = auth()->user();
         if (! $u) return false;
-        return $u->esAracely() || $u->hasAnyRole(['Gerente', 'Contador']);
+        // Se llega desde «Reportes Dropi»: quien ve ese tablero puede ver la
+        //   auditoría de wallet, sanciones y remisiones. Antes era una lista de
+        //   nombres de rol y un rol nuevo recibía 403 en el enlace.
+        return \App\Auth\Permisos::puede($u, 'dropi_reportes');
     }
 
     public function updated(string $propiedad): void

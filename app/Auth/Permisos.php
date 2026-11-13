@@ -46,6 +46,16 @@ final class Permisos
         'dropi_devoluciones' => ['Gerente', 'Alistador', 'ServicioCliente'],
         'dropi_discrepancias' => ['Gerente', 'Contador'],
         'dropi_reportes'   => ['Gerente', 'Contador'],
+        // La cuenta y la sesión con que el ERP entra a Dropi. Nace vacía
+        //   (sólo root) porque ahí viven las credenciales: se abre marcando la
+        //   casilla, no escribiendo el nombre del rol en el código.
+        'dropi_conexion'   => [],
+        // Las otras dos pantallas de «Configuración» del panel: la resolución
+        //   DIAN con que Dropi sale a SIIGO y la importación manual del Excel
+        //   de órdenes. Nacen vacías (sólo root) por la misma razón que
+        //   Conexión: son ajustes, no operación diaria.
+        'dropi_siigo'      => [],
+        'dropi_importar_pedidos' => [],
 
         // CARTERA
         'facturas'         => ['Gerente', 'Contador', 'Vendedor'],
@@ -82,6 +92,11 @@ final class Permisos
         'cuentas_por_pagar' => ['Gerente', 'Contador'],
         'programacion_pagos' => ['Gerente', 'Contador'],
         'reportes_contables' => ['Gerente', 'Contador'],
+        // Aprobar un gasto lo vuelve costo: es la firma que separa a quien
+        //   pide el gasto de quien lo autoriza. Casilla propia (como
+        //   `rrhh_nomina_aprobar`) para poder dársela a un operador sin
+        //   abrirle esa firma a todo el que ve contabilidad.
+        'contabilidad_aprobar_gastos' => [],
         /*
          * Las reglas CONTABLES, y solo esas.
          *
@@ -248,9 +263,9 @@ final class Permisos
      */
     public const GRUPOS = [
         'Operación' => ['torre_control', 'estacion_empaque', 'vista_alistador', 'escanner_camara', 'inventario_vivo'],
-        'Dropi' => ['dropi_dashboard', 'dropi_pedidos', 'dropi_cortes', 'dropi_wallet', 'dropi_devoluciones', 'dropi_discrepancias', 'dropi_reportes'],
+        'Dropi' => ['dropi_dashboard', 'dropi_pedidos', 'dropi_cortes', 'dropi_wallet', 'dropi_devoluciones', 'dropi_discrepancias', 'dropi_reportes', 'dropi_conexion', 'dropi_siigo', 'dropi_importar_pedidos'],
         'Cartera y CRM' => ['facturas', 'pagos', 'contactos', 'cartera_dashboard', 'condiciones_credito', 'cobranzas', 'excepciones_credito', 'crm', 'comisiones', 'comisiones_config', 'metodos_pago'],
-        'Contabilidad' => ['contabilidad', 'libro_diario', 'reportes_contables', 'reglas_contables'],
+        'Contabilidad' => ['contabilidad', 'libro_diario', 'reportes_contables', 'contabilidad_aprobar_gastos', 'reglas_contables'],
         'Tesorería y caja' => ['cajas', 'arqueo_caja', 'flujo_caja', 'cuentas_por_pagar', 'programacion_pagos'],
         'Compras' => ['compras_oc', 'compras_recepcion', 'compras_importacion', 'compras_pagos_exterior', 'compras_reportes'],
         'Inventario' => ['traslados', 'tomas_fisicas', 'alertas_stock', 'kardex', 'stock_bodegas'],
@@ -273,6 +288,9 @@ final class Permisos
         'dropi_devoluciones' => 'Devoluciones Dropi',
         'dropi_discrepancias' => 'Discrepancias Dropi',
         'dropi_reportes' => 'Reportes Dropi',
+        'dropi_conexion' => 'Conexión con Dropi (cuenta y sesión)',
+        'dropi_siigo' => 'SIIGO de Dropi (resolución DIAN)',
+        'dropi_importar_pedidos' => 'Importar pedidos de Dropi (Excel)',
         'facturas' => 'Facturas de venta',
         'pagos' => 'Pagos recibidos',
         'contactos' => 'Clientes y proveedores',
@@ -292,6 +310,7 @@ final class Permisos
         'cuentas_por_pagar' => 'Cuentas por pagar',
         'programacion_pagos' => 'Programación de pagos',
         'reportes_contables' => 'Reportes contables',
+        'contabilidad_aprobar_gastos' => 'Aprobar gastos operativos',
         'compras_oc' => 'Órdenes de compra',
         'compras_recepcion' => 'Recepción de mercancía',
         'compras_importacion' => 'Importaciones',
@@ -378,6 +397,11 @@ final class Permisos
         'arqueo_caja' => ['crear', 'editar'],
         'cajas' => ['crear', 'editar'],
         'contactos' => ['crear', 'editar'],
+        'dropi_devoluciones' => ['crear', 'editar'],
+        'dropi_conexion' => ['editar'],
+        'dropi_siigo' => ['editar'],
+        'dropi_importar_pedidos' => ['editar'],
+        'dropi_pedidos' => ['editar'],
         'facturas' => ['crear'],
         'productos' => ['crear', 'editar'],
         'programacion_pagos' => ['crear'],
@@ -657,6 +681,8 @@ final class Permisos
     public const SECCIONES_PANEL = [
         'dropi_dashboard', 'dropi_pedidos', 'dropi_cortes', 'dropi_wallet',
         'dropi_devoluciones', 'dropi_discrepancias', 'dropi_reportes',
+        'dropi_conexion',
+        'dropi_siigo', 'dropi_importar_pedidos',
         'vista_alistador', 'servicio_cliente',
     ];
 

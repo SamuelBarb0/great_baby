@@ -1,4 +1,5 @@
 <x-filament-panels::page>
+    @if($this->puedeEditar)
     <form wire:submit="procesar">
         <x-filament::section>
             <x-slot name="heading">Importar pedidos de Dropi</x-slot>
@@ -51,4 +52,7 @@
             @endforeach
         </div>
     </form>
+    @else
+    <p style="font-size:.9rem;color:#9ca3af;">Tu permiso sobre esta pantalla es de solo lectura.</p>
+    @endif
 </x-filament-panels::page>

@@ -43,6 +43,13 @@ class RegistrarDevolucion extends Page implements HasForms
         $this->form->fill();
     }
 
+    public static function canAccess(array $parameters = []): bool
+    {
+        // Registrar es crear: la casilla «Crear» de Devoluciones Dropi manda,
+        //   igual que el botón que lleva a esta pantalla.
+        return DropiDevolucionResource::canCreate();
+    }
+
     public function form(Schema $schema): Schema
     {
         return $schema->components([

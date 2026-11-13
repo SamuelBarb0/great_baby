@@ -45,6 +45,7 @@
             @if($cfg->tipo_documento_id)(ID {{ $cfg->tipo_documento_id }})@endif.
         </x-slot>
 
+        @if($this->puedeEditar)
         <form wire:submit="guardar" style="display:flex;flex-wrap:wrap;gap:.75rem;align-items:flex-start;">
             <div style="flex:1;min-width:16rem;max-width:32rem;">
                 @if($resoluciones->isNotEmpty())
@@ -72,5 +73,8 @@
             </div>
             <x-filament::button type="submit">Guardar</x-filament::button>
         </form>
+        @else
+        <p style="font-size:.9rem;color:#9ca3af;">Tu permiso sobre esta pantalla es de solo lectura.</p>
+        @endif
     </x-filament::section>
 </x-filament-panels::page>
