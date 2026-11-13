@@ -15,7 +15,7 @@ import { useBogotaDate } from '@/composables/useBogotaDate';
 import { Head, Link, router } from '@inertiajs/vue3';
 import {
     ArrowLeft, Plus, FileText, ShieldCheck, ShieldAlert, X, Star, Users, Download, Printer, Brain,
-    MessageSquare, Trash2,
+    MessageSquare, Trash2, Heart,
 } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
 
@@ -39,6 +39,9 @@ const props = defineProps({
     terna_llena: { type: Boolean, default: false },
     instrumentos: { type: Array, default: () => [] },
     conceptos: { type: Array, default: () => [] },
+    // Los tres cortes, con sus textos. Vienen del enum para que la pantalla
+    // y el impreso digan exactamente lo mismo.
+    bandas: { type: Array, default: () => [] },
     cuestionarios: { type: Object, default: () => ({}) },
 });
 
@@ -125,6 +128,36 @@ const totalEntrevista = computed(() => {
     const notas = Object.values(entrevista.calificaciones)
         .map(Number).filter((n) => n >= 1 && n <= 5);
     return notas.length ? notas.reduce((a, b) => a + b, 0) : null;
+});
+
+/*
+ * El promedio y la banda de la entrevista del ser, mientras se califica.
+ *
+ * Exige los SEIS criterios, igual que el servidor: con el promedio sobre lo
+ * contestado, un solo criterio en 5 daría 5,00 y «Recomendable» — media hoja
+ * en blanco respaldando una contratación. Mientras falte uno, la pantalla
+ * dice cuántos faltan en vez de mostrar un número que miente.
+ */
+const criteriosSer = computed(() => Object.keys(props.cuestionarios?.ser ?? {}));
+
+const faltanCriterios = computed(() => criteriosSer.value.filter((k) => {
+    const n = Number(entrevista.calificaciones[k]);
+    return !(n >= 1 && n <= 5);
+}).length);
+
+const promedioSer = computed(() => {
+    if (!criteriosSer.value.length || faltanCriterios.value > 0) return null;
+    const suma = criteriosSer.value.reduce((a, k) => a + Number(entrevista.calificaciones[k]), 0);
+    return Math.round((suma / criteriosSer.value.length) * 100) / 100;
+});
+
+// Los mismos cortes que `BandaValoracion::dePromedio()`. Los extremos caen
+// del lado más exigente: 2,50 es Riesgo y 3,50 es Recomendable.
+const bandaSer = computed(() => {
+    const p = promedioSer.value;
+    if (p === null) return null;
+    const valor = p >= 3.5 ? 'recomendable' : (p > 2.5 ? 'aceptable_con_seguimiento' : 'riesgo');
+    return props.bandas.find((b) => b.valor === valor) ?? null;
 });
 
 const abrirEntrevista = (c, tipo) => {
@@ -417,6 +450,10 @@ const badge = (color) => ({
                                     class="btn-secondary px-2 py-1" title="Entrevista psicológica">
                                     <Users class="h-3.5 w-3.5" />
                                 </button>
+                                <button @click="abrirEntrevista(c, 'ser')"
+                                    class="btn-secondary px-2 py-1" title="Entrevista del ser">
+                                    <Heart class="h-3.5 w-3.5" />
+                                </button>
                                 <button @click="abrirPrueba(c)" class="btn-secondary px-2 py-1"
                                     title="Registrar una prueba psicotécnica">
                                     <Brain class="h-3.5 w-3.5" />
@@ -621,7 +658,9 @@ const badge = (color) => ({
             class="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
             <div class="card p-6 max-w-3xl w-full max-h-[90vh] overflow-y-auto space-y-3">
                 <h3 class="text-lg font-bold">
-                    {{ esSaberHacer ? 'Entrevista de saber hacer' : 'Entrevista psicológica' }}
+                    {{ { saber_hacer: 'Entrevista de saber hacer',
+                         psicologica: 'Entrevista psicológica',
+                         ser: 'Entrevista del ser' }[tipoEntrevista] }}
                     · {{ modalEntrevista.nombre }}
                 </h3>
 
@@ -675,6 +714,63 @@ const badge = (color) => ({
                         </div>
                         <div class="text-right text-sm font-bold mt-2">
                             Total: {{ totalEntrevista !== null ? totalEntrevista + ' de 30' : '—' }}
+                        </div>
+                    </div>
+                </template>
+
+                <!--
+                    La del ser: seis criterios, su promedio y la banda.
+
+                    A diferencia del saber hacer, acá el área SÍ definió qué
+                    significa el puntaje, así que la pantalla lo dice mientras
+                    se califica en vez de dejar un número suelto.
+                -->
+                <template v-else-if="tipoEntrevista === 'ser'">
+                    <div class="pt-2 border-t">
+                        <h4 class="text-xs font-bold uppercase text-surface-500">Criterios</h4>
+                        <p class="text-[11px] text-surface-400 mb-1">
+                            De 1 a 5, donde 1 es la menor puntuación y 5 la más alta,
+                            de acuerdo con lo observado durante la entrevista.
+                        </p>
+
+                        <div v-for="(texto, k) in cuestionarios.ser" :key="k"
+                            class="flex items-center justify-between gap-3 py-1 border-b last:border-0">
+                            <span class="text-xs">{{ texto }}</span>
+                            <div class="flex gap-1 shrink-0">
+                                <button v-for="n in 5" :key="n" type="button"
+                                    @click="entrevista.calificaciones[k] = n"
+                                    :class="['h-7 w-7 rounded text-xs font-bold',
+                                        Number(entrevista.calificaciones[k]) === n
+                                            ? 'bg-brand-600 text-white'
+                                            : 'bg-surface-200 dark:bg-surface-700']">{{ n }}</button>
+                            </div>
+                        </div>
+
+                        <!-- Mientras falte un criterio no se muestra promedio: ver `promedioSer`. -->
+                        <div v-if="faltanCriterios > 0"
+                            class="mt-3 rounded border border-amber-300 bg-amber-50 dark:bg-amber-950/20 p-2 text-xs text-amber-800 dark:text-amber-300">
+                            Falta{{ faltanCriterios === 1 ? '' : 'n' }} {{ faltanCriterios }}
+                            criterio{{ faltanCriterios === 1 ? '' : 's' }} por calificar.
+                            El resultado sale con los seis.
+                        </div>
+
+                        <div v-else class="mt-3 rounded border p-3"
+                            :class="{
+                                'border-rose-300 bg-rose-50 dark:bg-rose-950/20': bandaSer?.color === 'danger',
+                                'border-amber-300 bg-amber-50 dark:bg-amber-950/20': bandaSer?.color === 'warning',
+                                'border-emerald-300 bg-emerald-50 dark:bg-emerald-950/20': bandaSer?.color === 'success',
+                            }">
+                            <div class="flex items-baseline justify-between gap-3">
+                                <span class="text-sm font-bold">{{ bandaSer?.label }}</span>
+                                <span class="text-xs">
+                                    Total {{ totalEntrevista }} de 30 · promedio
+                                    <strong>{{ promedioSer?.toFixed(2).replace('.', ',') }}</strong>
+                                </span>
+                            </div>
+                            <p class="text-[11px] mt-1">{{ bandaSer?.significa }}</p>
+                            <p class="text-[11px] text-surface-500 mt-1">
+                                Sugiere, no decide: la valoración final la firma quien entrevista.
+                            </p>
                         </div>
                     </div>
                 </template>

@@ -105,10 +105,17 @@ class SeleccionController extends Controller implements HasMiddleware
             'cuestionarios' => [
                 'saber_hacer' => \App\Modules\Rrhh\Models\EntrevistaCandidato::SABER_HACER_BLOQUES,
                 'items' => \App\Modules\Rrhh\Models\EntrevistaCandidato::SABER_HACER_ITEMS,
+                // Los seis de la entrevista del ser. Van por separado de
+                // `items` porque preguntan otra cosa: aquéllos si la
+                // persona SIRVE para el cargo, éstos CÓMO ES.
+                'ser' => \App\Modules\Rrhh\Models\EntrevistaCandidato::SER_ITEMS,
                 'psicologica' => \App\Modules\Rrhh\Models\EntrevistaCandidato::PSICOLOGICA_BLOQUES,
                 'niveles' => \App\Modules\Rrhh\Models\EntrevistaCandidato::NIVELES_EDUCATIVOS,
             ],
             'conceptos' => \App\Modules\Rrhh\Enums\ConceptoPsicotecnico::catalogo(),
+            // Para que la pantalla muestre la banda mientras se califica,
+            // con los mismos textos que el impreso.
+            'bandas' => \App\Modules\Rrhh\Enums\BandaValoracion::catalogo(),
         ]);
     }
 

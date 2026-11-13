@@ -368,3 +368,58 @@ it('la banda es sólo de la entrevista del ser', function () {
         ->and($e->totalCalculado())->toBe(30)
         ->and($e->promedioCalculado())->toBe(5.0);
 });
+
+it('la entrevista del ser se guarda por su ruta y deja la banda escrita', function () {
+    /*
+     * De punta a punta: el tipo entra por la misma ruta que las otras dos
+     * —ya estaba en TIPOS, así que la validación lo acepta sin tocar nada— y
+     * la bitácora queda diciendo la banda, que es la palabra con la que el
+     * área decide. El total solo, «24/30», no le dice nada a quien lee la
+     * ficha seis meses después.
+     */
+    $c = unAspirante();
+
+    test()->actingAs(test()->elena)
+        ->post("/app/rrhh/candidatos/{$c->id}/entrevista", [
+            'tipo' => EntrevistaCandidato::SER,
+            'fecha' => '2026-11-13',
+            'entrevistador_nombre' => 'Elena Gestión Humana',
+            'calificaciones' => [
+                'estabilidad' => 4, 'honestidad' => 5, 'trabajo_equipo' => 4,
+                'responsabilidad' => 4, 'presion' => 3, 'adaptabilidad' => 3,
+            ],
+        ])
+        ->assertRedirect()
+        ->assertSessionHasNoErrors();
+
+    $e = EntrevistaCandidato::where('candidato_id', $c->id)
+        ->where('tipo', EntrevistaCandidato::SER)->firstOrFail();
+
+    expect($e->totalCalculado())->toBe(23)
+        ->and($e->promedioCalculado())->toBe(3.83)
+        ->and($e->banda())->toBe(BandaValoracion::Recomendable);
+
+    // Y queda escrito en la bitácora del candidato, no sólo en la entrevista.
+    expect($c->bitacora()->get()->pluck('resumen')->implode(' | '))
+        ->toContain('Recomendable');
+});
+
+it('las tres entrevistas conviven sobre la misma persona', function () {
+    /*
+     * La del ser es un tipo más en la misma tabla, con su `unique` por
+     * (candidato, tipo). Si se vuelve a hacer se corrige la que hay; lo que
+     * no puede es pisar a las otras dos.
+     */
+    $c = unAspirante();
+
+    foreach ([EntrevistaCandidato::SABER_HACER, EntrevistaCandidato::PSICOLOGICA, EntrevistaCandidato::SER] as $tipo) {
+        test()->actingAs(test()->elena)
+            ->post("/app/rrhh/candidatos/{$c->id}/entrevista", [
+                'tipo' => $tipo,
+                'fecha' => '2026-11-13',
+                'entrevistador_nombre' => 'Elena',
+            ])->assertRedirect();
+    }
+
+    expect(EntrevistaCandidato::where('candidato_id', $c->id)->count())->toBe(3);
+});
