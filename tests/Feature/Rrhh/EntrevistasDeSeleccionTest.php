@@ -15,6 +15,7 @@
 
 use App\Auth\Permisos;
 use App\Models\User;
+use App\Modules\Rrhh\Enums\BandaValoracion;
 use App\Modules\Rrhh\Models\Candidato;
 use App\Modules\Rrhh\Models\EntrevistaCandidato;
 use App\Modules\Rrhh\Models\Vacante;
@@ -298,4 +299,72 @@ it('el impreso de la psicológica lleva el código del formato y el aviso de ley
         ->toContain('Cierre de la bodega')
         // Lleva datos de la familia de alguien que ni siquiera trabaja acá.
         ->toContain('Ley 1581 de 2012');
+});
+
+// ── La entrevista del ser ────────────────────────────────────────────────────
+
+it('los tres cortes de la banda caen del lado que pidió el área', function () {
+    /*
+     * Los extremos son del lado más exigente, tal como los dictó el área:
+     * un 2,50 clavado es Riesgo y un 3,50 clavado es Recomendable.
+     */
+    expect(BandaValoracion::dePromedio(1.00))->toBe(BandaValoracion::Riesgo)
+        ->and(BandaValoracion::dePromedio(2.50))->toBe(BandaValoracion::Riesgo)
+        ->and(BandaValoracion::dePromedio(2.51))->toBe(BandaValoracion::AceptableConSeguimiento)
+        ->and(BandaValoracion::dePromedio(3.49))->toBe(BandaValoracion::AceptableConSeguimiento)
+        ->and(BandaValoracion::dePromedio(3.50))->toBe(BandaValoracion::Recomendable)
+        ->and(BandaValoracion::dePromedio(5.00))->toBe(BandaValoracion::Recomendable);
+});
+
+it('media entrevista no da banda', function () {
+    /*
+     * El defecto que casi se me va: el promedio se calcula sobre lo
+     * contestado, así que UN criterio en 5 daba 5,00 y «Recomendable». Media
+     * hoja en blanco respaldando una contratación.
+     *
+     * Sin los seis, no hay resultado.
+     */
+    $c = unAspirante();
+
+    $e = EntrevistaCandidato::create([
+        'candidato_id' => $c->id,
+        'tipo' => EntrevistaCandidato::SER,
+        'fecha' => now()->toDateString(),
+        'entrevistador_nombre' => 'Elena',
+        'calificaciones' => ['estabilidad' => 5],
+    ]);
+
+    expect($e->banda())->toBeNull();
+
+    // Con los seis sí, y con el promedio que corresponde.
+    $e->calificaciones = [
+        'estabilidad' => 5, 'honestidad' => 4, 'trabajo_equipo' => 4,
+        'responsabilidad' => 4, 'presion' => 3, 'adaptabilidad' => 3,
+    ];
+    $e->save();
+
+    expect($e->fresh()->promedioCalculado())->toBe(3.83)
+        ->and($e->fresh()->banda())->toBe(BandaValoracion::Recomendable);
+});
+
+it('la banda es sólo de la entrevista del ser', function () {
+    /*
+     * El saber hacer no tiene umbral y no se le inventa uno: su formato nunca
+     * dijo qué puntaje descarta a nadie.
+     */
+    $c = unAspirante();
+
+    $e = EntrevistaCandidato::create([
+        'candidato_id' => $c->id,
+        'tipo' => EntrevistaCandidato::SABER_HACER,
+        'fecha' => now()->toDateString(),
+        'entrevistador_nombre' => 'Elena',
+        'calificaciones' => ['estudios' => 5, 'estabilidad' => 5, 'potencial' => 5,
+                             'ajuste' => 5, 'salario' => 5, 'interes' => 5],
+    ]);
+
+    expect($e->banda())->toBeNull()
+        // pero el total y el promedio sí se calculan
+        ->and($e->totalCalculado())->toBe(30)
+        ->and($e->promedioCalculado())->toBe(5.0);
 });

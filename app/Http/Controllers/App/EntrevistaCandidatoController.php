@@ -97,8 +97,17 @@ class EntrevistaCandidatoController extends Controller implements HasMiddleware
         $entrevista->total = $entrevista->totalCalculado();
         $entrevista->save();
 
+        /*
+         * La bitácora dice el total, y en la del ser también la banda.
+         *
+         * El total solo —«24/30»— no le dice nada a quien lee la ficha seis
+         * meses después. La banda sí: es la palabra con la que el área decide.
+         */
+        $banda = $entrevista->banda();
+
         $c->anotar('entrevista', $entrevista->tipoLabel().' registrada por '.$r->user()->name
-            .($entrevista->total ? " · total {$entrevista->total}/30" : ''));
+            .($entrevista->total ? " · total {$entrevista->total}/30" : '')
+            .($banda ? " · promedio {$entrevista->promedioCalculado()} · {$banda->label()}" : ''));
 
         $faltan = $entrevista->sinContestar();
 
@@ -112,9 +121,20 @@ class EntrevistaCandidatoController extends Controller implements HasMiddleware
     {
         $e = EntrevistaCandidato::with('candidato.vacante')->findOrFail($entrevista);
 
-        $vista = $e->tipo === EntrevistaCandidato::SABER_HACER
-            ? 'rrhh.pdf.entrevista-saber-hacer'
-            : 'rrhh.pdf.entrevista-psicologica';
+        /*
+         * Tres tipos, tres formatos.
+         *
+         * Era binario —saber hacer, y si no, la psicológica—, así que al
+         * agregar la entrevista del ser su impreso salía con el formato
+         * equivocado: el de otra entrevista, con el nombre del candidato
+         * encima. Con `match`, un tipo nuevo sin vista se nota acá y no en la
+         * cara de quien imprime.
+         */
+        $vista = match ($e->tipo) {
+            EntrevistaCandidato::SABER_HACER => 'rrhh.pdf.entrevista-saber-hacer',
+            EntrevistaCandidato::SER => 'rrhh.pdf.entrevista-ser',
+            default => 'rrhh.pdf.entrevista-psicologica',
+        };
 
         return Pdf::loadView($vista, [
             'e' => $e,

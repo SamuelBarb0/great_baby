@@ -31,9 +31,12 @@ class EntrevistaCandidato extends Model
 
     public const PSICOLOGICA = 'psicologica';
 
+    public const SER = 'ser';
+
     public const TIPOS = [
         self::SABER_HACER => 'Entrevista de saber hacer',
         self::PSICOLOGICA => 'Entrevista psicológica',
+        self::SER => 'Entrevista del ser',
     ];
 
     /**
@@ -98,6 +101,31 @@ class EntrevistaCandidato extends Model
         'ajuste' => 'La experiencia laboral se ajusta a las necesidades del cargo.',
         'salario' => 'La aspiración salarial es acorde con el salario que ofrece la compañía.',
         'interes' => 'Revela alto interés por el cargo y por pertenecer a la organización.',
+    ];
+
+    /**
+     * Los seis criterios de la entrevista del ser, de 1 a 5.
+     *
+     * No se parecen a los de «saber hacer» y no deberían: aquellos preguntan
+     * si la persona SIRVE para el cargo —estudios, experiencia, aspiración
+     * salarial— y éstos preguntan CÓMO ES. Son dos entrevistas distintas
+     * porque responden dos preguntas distintas, y por eso viven como tipos
+     * separados en la misma tabla.
+     *
+     * A diferencia del saber hacer, acá el área SÍ definió qué significa cada
+     * puntaje: el promedio cae en una banda —ver `BandaValoracion`— y esa
+     * banda sugiere la valoración final. El saber hacer sigue sin umbral,
+     * porque su formato sigue sin traerlo.
+     *
+     * @var array<string, string>
+     */
+    public const SER_ITEMS = [
+        'estabilidad' => 'Estabilidad emocional: se sostiene cuando las cosas no salen.',
+        'honestidad' => 'Honestidad: dice lo que pasó, también cuando le cuesta.',
+        'trabajo_equipo' => 'Trabajo en equipo: suma al grupo en vez de competir con él.',
+        'responsabilidad' => 'Responsabilidad: lo que se compromete a hacer, lo hace.',
+        'presion' => 'Manejo de presión: bajo exigencia sigue pensando, no sólo reaccionando.',
+        'adaptabilidad' => 'Adaptabilidad: cambia de plan sin que el cambio lo desarme.',
     ];
 
     /**
@@ -228,15 +256,77 @@ class EntrevistaCandidato extends Model
         return $notas === [] ? null : array_sum($notas);
     }
 
+    /**
+     * El promedio de los ítems calificados, con dos decimales.
+     *
+     * Redondeado, que es lo que hace el área en papel: sin redondear, un
+     * 3,4999 por coma flotante quedaría en una banda mientras la hoja dice
+     * 3,50 y la otra.
+     */
+    public function promedioCalculado(): ?float
+    {
+        $notas = array_filter(
+            array_map('intval', (array) ($this->calificaciones ?? [])),
+            fn (int $n) => $n >= 1 && $n <= 5,
+        );
+
+        return $notas === [] ? null : round(array_sum($notas) / count($notas), 2);
+    }
+
+    /**
+     * En qué banda cae · SÓLO para la entrevista del ser.
+     *
+     * El saber hacer devuelve null a propósito. Su formato nunca dijo qué
+     * puntaje descarta a nadie, y ponerle una banda prestada de otra
+     * entrevista sería inventarle una política al área con números que no son
+     * suyos. Cuando el área defina la del saber hacer, se agrega acá.
+     */
+    public function banda(): ?\App\Modules\Rrhh\Enums\BandaValoracion
+    {
+        if ($this->tipo !== self::SER) {
+            return null;
+        }
+
+        /*
+         * Sin los SEIS criterios no hay banda.
+         *
+         * El promedio se calcula sobre lo contestado, así que una entrevista
+         * con un solo criterio en 5 daría 5,00 y «Recomendable»: media hoja
+         * en blanco respaldando una contratación. Mientras falte uno, no hay
+         * resultado, y la pantalla puede decir cuántos faltan en vez de
+         * mostrar un número que miente.
+         */
+        $notas = (array) ($this->calificaciones ?? []);
+
+        foreach (array_keys(self::SER_ITEMS) as $campo) {
+            $nota = (int) ($notas[$campo] ?? 0);
+            if ($nota < 1 || $nota > 5) {
+                return null;
+            }
+        }
+
+        $promedio = $this->promedioCalculado();
+
+        return $promedio === null ? null : \App\Modules\Rrhh\Enums\BandaValoracion::dePromedio($promedio);
+    }
+
     /** El resumen que ve el jefe en el tablero: el total y nada más. */
     public function paraElTablero(): array
     {
+        $banda = $this->banda();
+
         return [
             'tipo' => $this->tipo,
             'tipo_label' => $this->tipoLabel(),
             'fecha' => $this->fecha?->toDateString(),
             'entrevistador' => $this->entrevistador_nombre,
             'total' => $this->totalCalculado(),
+            'promedio' => $this->promedioCalculado(),
+            // Null salvo en la entrevista del ser: ver `banda()`.
+            'banda' => $banda?->value,
+            'banda_label' => $banda?->label(),
+            'banda_color' => $banda?->color(),
+            'banda_significa' => $banda?->queSignifica(),
             'sin_contestar' => $this->sinContestar(),
         ];
     }
