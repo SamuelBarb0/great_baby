@@ -27,9 +27,18 @@ const modalConfirm = ref(null);
 const modal = ref(false);
 useEscClose(modal);
 
+/*
+ * La alerta es de una variante O de un producto agregado, nunca de los dos.
+ *
+ * `producto_id` faltaba. El backend lo acepta desde INV-A5 —«soporta producto
+ * agregado (producto_id) además de variante»— y el buscador los devuelve
+ * primero, pero el formulario sólo guardaba la variante: elegir un agregado
+ * dejaba el botón gris, sin mensaje.
+ */
 const form = reactive({
     id: null,
     variante_id: null,
+    producto_id: null,
     variante_label: '',
     ubicacion_id: null,
     stock_minimo: 0,
@@ -55,7 +64,11 @@ const buscar = () => {
     }, 200);
 };
 const seleccionarVariante = (v) => {
-    form.variante_id = v.id;
+    // El buscador devuelve uno de los dos: `id` para la variante,
+    // `producto_id` para el agregado. El otro viene null, que es lo que el
+    // servidor exige (XOR).
+    form.variante_id = v.id ?? null;
+    form.producto_id = v.producto_id ?? null;
     form.variante_label = v.label;
     busqueda.value = v.label;
     resultados.value = [];
@@ -63,7 +76,7 @@ const seleccionarVariante = (v) => {
 
 const abrirCrear = () => {
     Object.assign(form, {
-        id: null, variante_id: null, variante_label: '', ubicacion_id: null,
+        id: null, variante_id: null, producto_id: null, variante_label: '', ubicacion_id: null,
         stock_minimo: 0, punto_reorden: null, cantidad_reorden: null,
         notificar_email: true, notificar_whatsapp: false, activa: true,
     });
@@ -73,7 +86,8 @@ const abrirCrear = () => {
 };
 const abrirEditar = (a) => {
     Object.assign(form, {
-        id: a.id, variante_id: a.variante_id, variante_label: `${a.producto} · ${a.sku}`,
+        id: a.id, variante_id: a.variante_id, producto_id: a.producto_id ?? null,
+        variante_label: `${a.producto} · ${a.sku}`,
         ubicacion_id: a.ubicacion_id, stock_minimo: a.minimo,
         punto_reorden: a.reorden || null, cantidad_reorden: a.cantidad_reorden || null,
         notificar_email: a.notificar_email, notificar_whatsapp: a.notificar_whatsapp, activa: a.activa,
@@ -158,7 +172,19 @@ const eliminar = (a) => {
                         <tr v-if="!alertas.data.length"><td colspan="8" class="p-6 text-center text-surface-500">Sin alertas configuradas. Crea una para recibir aviso cuando un SKU baje del mínimo.</td></tr>
                         <tr v-for="a in alertas.data" :key="a.id" class="hover:bg-surface-50">
                             <td class="p-3 font-mono text-xs">{{ a.sku }}</td>
-                            <td class="p-3">{{ a.producto }}</td>
+                            <td class="p-3">
+                                {{ a.producto }}
+                                <!--
+                                    Igual que lo rotula el panel de Filament: una
+                                    alerta de producto agregado vale para todas
+                                    sus presentaciones, y hay que poder saberlo
+                                    sin abrirla.
+                                -->
+                                <span v-if="a.es_agregado"
+                                    class="ml-1 px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-800 text-[10px] font-bold">
+                                    agregado
+                                </span>
+                            </td>
                             <td class="p-3 text-xs">{{ a.ubicacion }}</td>
                             <td class="p-3 text-right font-bold text-red-600">{{ a.minimo }}</td>
                             <td class="p-3 text-right font-bold text-amber-600">{{ a.reorden || '—' }}</td>
@@ -236,7 +262,7 @@ const eliminar = (a) => {
                 </div>
                 <div class="flex justify-end gap-2 mt-4">
                     <button @click="modal = false" class="btn-ghost min-h-11">Cancelar</button>
-                    <button @click="guardar" :disabled="procesando || !form.variante_id" class="btn-primary min-h-11">
+                    <button @click="guardar" :disabled="procesando || !(form.variante_id || form.producto_id)" class="btn-primary min-h-11">
                         {{ procesando ? 'Guardando…' : (form.id ? 'Actualizar' : 'Crear') }}
                     </button>
                 </div>

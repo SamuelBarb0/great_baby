@@ -1000,7 +1000,12 @@ class InventarioGestionController extends Controller implements HasMiddleware
     // ---------- ALERTAS STOCK ----------
     public function alertasIndex(Request $r): Response
     {
-        $configs = AlertaStockConfig::with(['variante.producto:id,nombre', 'ubicacion:id,codigo,nombre'])
+        // `producto` también: la alerta puede ser de un agregado, y sin la
+        // relación cargada serían dos consultas por fila de la tabla.
+        $configs = AlertaStockConfig::with([
+            'variante.producto:id,nombre', 'producto:id,nombre,referencia',
+            'ubicacion:id,codigo,nombre',
+        ])
             ->orderByDesc('id')->paginate(30);
         $ubicaciones = InventarioUbicacion::where('activa', true)->orderBy('codigo')->get(['id','codigo','nombre']);
         return Inertia::render('Inventario/Alertas/Index', [
@@ -1010,9 +1015,20 @@ class InventarioGestionController extends Controller implements HasMiddleware
             'can_importar_alertas' => (bool) $r->user()?->esAracely(),
             'alertas' => $configs->through(fn ($a) => [
                 'id' => $a->id,
+                /*
+                 * La alerta puede ser de una variante O de un producto
+                 * agregado, y hasta acá todo se resolvía SÓLO por la variante:
+                 * una alerta de agregado —las que entran por el Excel masivo,
+                 * que sí las acepta— salía con el nombre y el SKU en blanco, y
+                 * sin `producto_id` no se podía ni editar.
+                 */
                 'variante_id' => $a->variante_id,
-                'producto' => $a->variante?->producto?->nombre,
-                'sku' => $a->variante?->codigo_barras,
+                'producto_id' => $a->producto_id,
+                'producto' => $a->variante?->producto?->nombre ?? $a->producto?->nombre,
+                'sku' => $a->variante?->codigo_barras ?? $a->producto?->referencia,
+                // Para que la tabla pueda decir «todas las presentaciones» en
+                // vez de dejar la columna vacía.
+                'es_agregado' => $a->esAgregada(),
                 'ubicacion_id' => $a->ubicacion_id,
                 'ubicacion' => $a->ubicacion ? ($a->ubicacion->codigo . ' · ' . $a->ubicacion->nombre) : '— Global —',
                 'minimo' => (int) $a->stock_minimo,

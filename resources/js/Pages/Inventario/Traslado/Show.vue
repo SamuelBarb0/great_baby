@@ -44,7 +44,19 @@ const puedeAnular = computed(() => ['borrador', 'en_transito', 'recibido'].inclu
 const busqueda = ref('');
 const resultados = ref([]);
 const buscando = ref(false);
-const nuevoItem = reactive({ variante_id: null, sku: '', producto: '', detalle: '', cantidad: null, notas: '' });
+/*
+ * El ítem lleva variante_id O producto_id, nunca los dos.
+ *
+ * `producto_id` faltaba, y por eso un producto en modo AGREGADO —sin
+ * variantes— aparecía en el buscador, se podía clickear… y el botón
+ * «Agregar» se quedaba gris para siempre, sin un solo mensaje.
+ *
+ * El backend lo aceptaba desde INV-A7 («productos en modo agregado no se
+ * podían trasladar desde el UI, aunque los Actions ya los soportaban»): se
+ * arreglaron el guardado, el buscador y la vista, y se quedó sin arreglar
+ * este formulario.
+ */
+const nuevoItem = reactive({ variante_id: null, producto_id: null, sku: '', producto: '', detalle: '', cantidad: null, notas: '' });
 
 let debTimer;
 const buscar = () => {
@@ -60,7 +72,11 @@ const buscar = () => {
 };
 
 const seleccionarVariante = (v) => {
-    nuevoItem.variante_id = v.id;
+    // El buscador devuelve uno de los dos: `id` para una variante,
+    // `producto_id` para el agregado («todas las presentaciones»). El otro
+    // viene null, que es justo lo que el servidor exige.
+    nuevoItem.variante_id = v.id ?? null;
+    nuevoItem.producto_id = v.producto_id ?? null;
     nuevoItem.sku = v.sku;
     nuevoItem.producto = v.producto;
     nuevoItem.detalle = v.detalle;
@@ -70,10 +86,12 @@ const seleccionarVariante = (v) => {
 
 const procesandoItem = ref(false);
 const guardarItem = () => {
-    if (procesandoItem.value || !nuevoItem.variante_id || !nuevoItem.cantidad) return;
+    const elegido = nuevoItem.variante_id || nuevoItem.producto_id;
+    if (procesandoItem.value || !elegido || !nuevoItem.cantidad) return;
     procesandoItem.value = true;
     router.post(`/app/inventario/traslados/${props.traslado.id}/items`, {
         variante_id: nuevoItem.variante_id,
+        producto_id: nuevoItem.producto_id,
         cantidad: nuevoItem.cantidad,
         notas: nuevoItem.notas || null,
     }, {
@@ -327,12 +345,12 @@ const anular = () => {
                         <input v-model="nuevoItem.notas" class="input w-full" placeholder="Opcional" />
                     </div>
                     <div class="flex items-end">
-                        <button @click="guardarItem" :disabled="procesandoItem || !nuevoItem.variante_id || !nuevoItem.cantidad" class="btn-primary min-h-11">
+                        <button @click="guardarItem" :disabled="procesandoItem || !(nuevoItem.variante_id || nuevoItem.producto_id) || !nuevoItem.cantidad" class="btn-primary min-h-11">
                             <Plus class="h-4 w-4" /> Agregar
                         </button>
                     </div>
                 </div>
-                <p v-if="nuevoItem.variante_id" class="text-xs text-emerald-700 mt-2">
+                <p v-if="nuevoItem.variante_id || nuevoItem.producto_id" class="text-xs text-emerald-700 mt-2">
                     Seleccionado: <b>{{ nuevoItem.producto }}</b> · {{ nuevoItem.detalle }} · <span class="font-mono">{{ nuevoItem.sku }}</span>
                 </p>
             </div>
