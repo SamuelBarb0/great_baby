@@ -199,6 +199,17 @@ const bandaSer = computed(() => {
 const extrasDelTipo = computed(() => props.preguntas_extra?.[tipoEntrevista.value] ?? []);
 const preguntaNueva = ref('');
 
+/*
+ * La miga de pan de cada candidato.
+ *
+ * Plegada por defecto: en una columna con seis tarjetas, desplegarlas todas
+ * convierte el tablero en una lista ilegible. Pero está a un clic, que es lo
+ * que hacía falta cuando alguien pregunta tres meses después por qué se
+ * contrató a esta persona y no a la otra.
+ */
+const migaAbierta = ref({});
+const alternarMiga = (id) => { migaAbierta.value[id] = !migaAbierta.value[id]; };
+
 const agregarPregunta = () => {
     const texto = preguntaNueva.value.trim();
     if (!texto || procesando.value) return;
@@ -452,7 +463,21 @@ const badge = (color) => ({
                                 <div v-for="x in c.entrevistas" :key="x.id"
                                     class="flex items-center gap-1 flex-wrap text-[11px]">
                                     <span class="text-surface-500">{{ x.tipo_label }}</span>
-                                    <span v-if="x.total"
+                                    <!--
+                                        En la del ser manda la banda: «23/30» no
+                                        le dice nada a nadie, «Recomendable» sí.
+                                    -->
+                                    <span v-if="x.banda_label"
+                                        class="px-1.5 py-0.5 rounded text-[10px] font-bold"
+                                        :class="{
+                                            'bg-rose-500/15 text-rose-800': x.banda_color === 'danger',
+                                            'bg-amber-500/15 text-amber-800': x.banda_color === 'warning',
+                                            'bg-emerald-500/15 text-emerald-800': x.banda_color === 'success',
+                                        }"
+                                        :title="x.banda_significa">
+                                        {{ x.banda_label }} · {{ x.promedio?.toFixed(2).replace('.', ',') }}
+                                    </span>
+                                    <span v-else-if="x.total"
                                         class="px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-800 text-[10px] font-bold">
                                         {{ x.total }}/30
                                     </span>
@@ -488,6 +513,33 @@ const badge = (color) => ({
                                         · falta {{ p.falta.join(' y ') }}
                                     </span>
                                 </div>
+                            </div>
+
+                            <!--
+                                La miga de pan: todo lo que le pasó a esta
+                                persona, quién lo hizo y cuándo.
+
+                                Plegada por defecto porque una columna con seis
+                                tarjetas abiertas es ilegible; a un clic porque
+                                es lo que hace falta cuando alguien pregunta
+                                tres meses después por qué se contrató a ésta y
+                                no a la otra.
+                            -->
+                            <div v-if="c.bitacora?.length" class="pt-1">
+                                <button type="button" @click="alternarMiga(c.id)"
+                                    class="text-[11px] text-surface-500 hover:text-brand-600">
+                                    {{ migaAbierta[c.id] ? '▾' : '▸' }}
+                                    {{ c.bitacora.length }}
+                                    {{ c.bitacora.length === 1 ? 'movimiento' : 'movimientos' }}
+                                </button>
+
+                                <ol v-if="migaAbierta[c.id]"
+                                    class="mt-1 border-l border-surface-300 dark:border-surface-600 pl-2 space-y-1.5">
+                                    <li v-for="(b, i) in c.bitacora" :key="i" class="text-[11px] leading-snug">
+                                        <div class="text-surface-700 dark:text-surface-300">{{ b.resumen }}</div>
+                                        <div class="text-surface-400">{{ b.usuario }} · {{ b.cuando }}</div>
+                                    </li>
+                                </ol>
                             </div>
 
                             <div class="flex gap-1">

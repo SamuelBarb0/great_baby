@@ -458,3 +458,40 @@ it('no se agregan preguntas a la entrevista del ser: ésa es de criterios, no de
             'pregunta' => 'Una pregunta',
         ])->assertSessionHasErrors('tipo');
 });
+
+it('el tablero muestra toda la miga de pan del candidato, con quién y cuándo', function () {
+    /*
+     * La bitácora se escribía desde el primer día —cada paso la anota sola,
+     * por el trait— pero sólo se veía en la requisición. En el tablero, que
+     * es donde pasa el proceso, la tarjeta mostraba el estado y no cómo se
+     * llegó a él.
+     *
+     * Es justo lo que hace falta cuando alguien pregunta tres meses después
+     * por qué se contrató a esta persona y no a la otra.
+     */
+    $c = candidato();
+
+    $this->actingAs($this->elena)
+        ->post("/app/rrhh/candidatos/{$c->id}/antecedentes", ['resultado' => 'Sin antecedentes']);
+    $this->actingAs($this->elena)
+        ->post("/app/rrhh/candidatos/{$c->id}/mover", ['etapa' => 'preseleccionado']);
+
+    $this->actingAs($this->elena)
+        ->get("/app/rrhh/vacantes/{$this->vacante->id}")
+        ->assertInertia(function ($p) {
+            $cand = collect($p->toArray()['props']['candidatos'])->firstWhere('nombre', 'Ana Pérez');
+            $miga = collect($cand['bitacora']);
+
+            expect($miga->count())->toBeGreaterThanOrEqual(2);
+
+            // Cada renglón dice QUÉ pasó, QUIÉN lo hizo y CUÁNDO.
+            $miga->each(function ($b) {
+                expect($b['resumen'])->not->toBeEmpty()
+                    ->and($b['usuario'])->not->toBeEmpty()
+                    ->and($b['cuando'])->not->toBeEmpty();
+            });
+
+            expect($miga->pluck('usuario'))->toContain('Elena')
+                ->and($miga->pluck('resumen')->implode(' | '))->toContain('Sin antecedentes');
+        });
+});

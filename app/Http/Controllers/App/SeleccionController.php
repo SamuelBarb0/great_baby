@@ -65,7 +65,9 @@ class SeleccionController extends Controller implements HasMiddleware
     {
         $v = Vacante::with('requisicion:id,numero,solicitante_id')->findOrFail($vacante);
 
-        $candidatos = Candidato::with(['pruebasPsicotecnicas', 'entrevistas'])
+        // La bitácora viaja con su autor en la misma consulta: sin esto
+        // serían dos más por cada candidato del tablero.
+        $candidatos = Candidato::with(['pruebasPsicotecnicas', 'entrevistas', 'bitacora.usuario:id,name'])
             ->where('vacante_id', $v->id)
             ->orderByDesc('id')->get();
 
@@ -535,6 +537,24 @@ class SeleccionController extends Controller implements HasMiddleware
             'motivo_descarte' => $c->motivo_descarte,
             'elegido' => (bool) $c->elegido_at,
             'desde' => $c->created_at?->format('Y-m-d'),
+            /*
+             * Toda la miga de pan del candidato.
+             *
+             * La bitácora se escribía desde el primer día —cada paso la
+             * anota sola, por el trait— pero sólo se veía en la
+             * requisición. En el tablero, que es donde pasa el proceso,
+             * la tarjeta mostraba el estado y no cómo se llegó a él:
+             * quién lo movió, cuándo, y qué escribió al hacerlo.
+             *
+             * Es justo lo que hace falta cuando alguien pregunta tres
+             * meses después por qué se contrató a esta persona y no a
+             * la otra.
+             */
+            'bitacora' => $c->bitacora->map(fn ($b) => [
+                'resumen' => $b->resumen,
+                'usuario' => $b->usuario?->name ?? 'Sistema',
+                'cuando' => $b->created_at?->format('Y-m-d H:i'),
+            ])->values(),
             /*
              * Fase C · Las psicotécnicas.
              *
