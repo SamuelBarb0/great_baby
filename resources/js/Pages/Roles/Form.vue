@@ -58,6 +58,23 @@ const alternar = (p, fila = null) => {
 /** Cuántas acciones tiene marcadas una sección, para el resumen de la fila. */
 const accionesDe = (fila) => fila.acciones.filter(a => tiene(a.permiso)).length;
 
+/*
+ * Las columnas después de «Ver».
+ *
+ * Desde que cada fila trae sólo las acciones que su pantalla cumple (y el ver
+ * aparte), pintar las cuatro del encabezado corría las casillas a la columna
+ * equivocada: el «Editar» de Pedidos quedaba debajo de «Ver». Acá van sólo
+ * las acciones que alguna pantalla ofrece —«Eliminar» no la ofrece ninguna:
+ * borrar es de Aracely y Gerencia— y cada fila busca la suya por nombre.
+ */
+const columnas = computed(() => {
+    const ofrecidas = new Set(Object.values(props.catalogo).flat()
+        .flatMap(i => i.acciones.map(a => a.accion)));
+    return props.acciones.filter(a => a.accion !== 'ver' && ofrecidas.has(a.accion));
+});
+
+const accionDeFila = (fila, accion) => fila.acciones.find(a => a.accion === accion) ?? null;
+
 const grupoCompleto = (items) => items.every(i => tiene(i.permiso));
 
 const alternarGrupo = (items) => {
@@ -143,8 +160,8 @@ const guardar = () => {
                     <h3 class="font-semibold">¿Qué puede ver y hacer?</h3>
                     <p class="text-xs text-surface-500 mt-0.5">
                         {{ seccionesMarcadas }} sección(es) marcada(s).
-                        <strong>Ver</strong> abre la pantalla; las otras tres dicen qué puede hacer adentro.
-                        Sin <strong>Ver</strong>, las demás no sirven.
+                        <strong>Ver</strong> abre la pantalla; las otras columnas dicen qué más puede hacer adentro.
+                        Un guion significa que esa pantalla no tiene esa acción: con <strong>Ver</strong> ya la usa entera.
                     </p>
                 </div>
 
@@ -161,7 +178,8 @@ const guardar = () => {
                             <thead>
                                 <tr class="text-[10px] uppercase text-surface-400">
                                     <th class="text-left font-semibold pb-1">Sección</th>
-                                    <th v-for="a in acciones" :key="a.accion" class="w-16 pb-1 font-semibold">
+                                    <th class="w-16 pb-1 font-semibold">Ver</th>
+                                    <th v-for="a in columnas" :key="a.accion" class="w-16 pb-1 font-semibold">
                                         {{ a.texto }}
                                     </th>
                                 </tr>
@@ -171,19 +189,27 @@ const guardar = () => {
                                     :class="tiene(i.permiso) ? '' : 'opacity-60'">
                                     <td class="py-1.5 pr-2">
                                         {{ i.etiqueta }}
-                                        <span v-if="tiene(i.permiso) && accionesDe(i) === 0"
+                                        <span v-if="tiene(i.permiso) && i.acciones.length && accionesDe(i) === 0"
                                               class="ml-1 text-[10px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-700">
                                             sólo lectura
                                         </span>
                                     </td>
-                                    <td v-for="a in i.acciones" :key="a.permiso" class="text-center py-1.5">
+                                    <td class="text-center py-1.5">
                                         <input type="checkbox"
-                                               :checked="tiene(a.permiso)"
-                                               :disabled="a.accion !== 'ver' && ! tiene(i.permiso)"
-                                               :title="a.accion !== 'ver' && ! tiene(i.permiso)
-                                                   ? 'Primero hay que marcar Ver' : a.texto"
-                                               @change="alternar(a.permiso, i)"
+                                               :checked="tiene(i.permiso)"
+                                               :title="'Ver: abre ' + i.etiqueta"
+                                               @change="alternar(i.permiso, i)"
+                                               class="h-4 w-4 rounded"/>
+                                    </td>
+                                    <td v-for="c in columnas" :key="c.accion" class="text-center py-1.5">
+                                        <input v-if="accionDeFila(i, c.accion)" type="checkbox"
+                                               :checked="tiene(accionDeFila(i, c.accion).permiso)"
+                                               :disabled="! tiene(i.permiso)"
+                                               :title="! tiene(i.permiso) ? 'Primero hay que marcar Ver' : c.texto"
+                                               @change="alternar(accionDeFila(i, c.accion).permiso, i)"
                                                class="h-4 w-4 rounded disabled:opacity-30"/>
+                                        <span v-else class="text-surface-300"
+                                              title="Esta pantalla no tiene esta acción: con Ver ya la usa entera.">—</span>
                                     </td>
                                 </tr>
                             </tbody>

@@ -66,6 +66,52 @@ it('aterriza en el panel de Dropi aunque tenga casillas de compras', function ()
     expect($this->operador->rutaInicial())->toBe('/admin');
 });
 
+it('entra por su panel aunque sea colaborador y tenga Operación marcada', function () {
+    // Así queda un operador que llega por Gestión Humana (colaborador) y al
+    //   que le marcaron «Operación» completa (Vista del alistador incluida).
+    $this->rol->givePermissionTo(['ver.portal_colaborador', 'ver.vista_alistador']);
+
+    expect($this->operador->fresh()->rutaInicial())->toBe('/admin');
+});
+
+it('el alistador de verdad sigue entrando a su cola de bodega', function () {
+    Role::firstOrCreate(['name' => 'Alistador', 'guard_name' => 'web']);
+    $this->seed(\Database\Seeders\PermisosSeeder::class);
+
+    $alistador = User::factory()->create();
+    $alistador->assignRole('Alistador');
+
+    expect($alistador->rutaInicial())->toBe('/app/logistica/cola-jorge');
+});
+
+it('al entrar arranca en Modo DROPI si su pantalla es el panel', function () {
+    $this->post('/app/login', ['email' => $this->operador->email, 'password' => 'password'])
+        ->assertRedirect('/admin');
+    expect(session('gb_canal'))->toBe('dropi');
+
+    auth()->logout();
+
+    Role::firstOrCreate(['name' => 'Alistador', 'guard_name' => 'web']);
+    $this->seed(\Database\Seeders\PermisosSeeder::class);
+    $alistador = User::factory()->create();
+    $alistador->assignRole('Alistador');
+
+    $this->post('/app/login', ['email' => $alistador->email, 'password' => 'password'])
+        ->assertRedirect('/app/logistica/cola-jorge');
+    expect(session('gb_canal'))->toBe('empresa');
+});
+
+it('desde el login de Inertia el panel se abre como página, no encima del login', function () {
+    // El formulario manda `X-Inertia`. Un redirect común a /admin (que no es
+    //   Inertia) el navegador lo dibujaba en una ventana gris sobre el login;
+    //   la respuesta tiene que ser «visita completa» (409 + X-Inertia-Location).
+    $r = $this->withHeaders(['X-Inertia' => 'true', 'X-Requested-With' => 'XMLHttpRequest'])
+        ->post('/app/login', ['email' => $this->operador->email, 'password' => 'password']);
+
+    $r->assertStatus(409);
+    expect($r->headers->get('X-Inertia-Location'))->toEndWith('/admin');
+});
+
 it('entra a Conexión Dropi y puede cambiarla', function () {
     $this->actingAs($this->operador);
 
