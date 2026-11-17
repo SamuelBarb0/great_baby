@@ -2,6 +2,7 @@
 
 namespace App\Modules\Dropi\Filament\Pages;
 
+use App\Auth\Permisos;
 use App\Modules\Dropi\Services\CatalogoDropi;
 use BackedEnum;
 use Filament\Actions\Action;
@@ -91,7 +92,9 @@ class MisProductosDropi extends Page
 
     public static function canAccess(): bool
     {
-        return auth()->user()?->esAracely() ?? false;
+        // Antes era `esAracely()`: un rol de Dropi creado en Roles no podía
+        //   ver su propio catálogo. La casilla manda.
+        return Permisos::puede(auth()->user(), 'dropi_mis_productos');
     }
 
     public function updatedBuscar(): void

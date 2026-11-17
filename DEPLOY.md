@@ -43,7 +43,7 @@ php artisan db:seed --class=RolesYPermisosSeeder --force   # roles Aracely/Alist
 ```
 
 **Cargar catálogo real y contactos:** Aracely los importa desde el panel:
-- `/admin` → Productos → Importar Excel (plantilla en `/dropi/plantilla/productos`)
+- `/app/dropi/productos/importar` → Importar Excel (plantilla en `/dropi/plantilla/productos`). En `/admin` ya no está: ahí «Carga masiva en Dropi» abre la carga de productos de Dropi.
 - `/admin` → Contactos → Importar Excel (plantilla en `/cartera/plantilla/contactos`)
 - `/admin` → Listas de precios → Cargar precios por variante
 

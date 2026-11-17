@@ -56,6 +56,19 @@ final class Permisos
         //   Conexión: son ajustes, no operación diaria.
         'dropi_siigo'      => [],
         'dropi_importar_pedidos' => [],
+        // Las dos pantallas de «Productos» del panel que sólo abría root: el
+        //   catálogo propio tal como está en Dropi y el cruce de sus llaves con
+        //   el ERP. Nacen vacías (sólo root) para que desplegar no le abra
+        //   nada a nadie; se dan marcando la casilla.
+        'dropi_mis_productos' => [],
+        'dropi_vincular_productos' => [],
+        // Dos cosas de adentro de las pantallas que eran de root por nombre:
+        //   el menú «Dropi» de la fila de un pedido (consulta y CAMBIA en
+        //   Dropi de verdad: estatus y etiquetas) y el destino de inventario
+        //   de una devolución (mueve kardex, SEG-C3). Nacen vacías: desplegar
+        //   no le abre nada a nadie, se dan marcando la casilla.
+        'dropi_cambiar_en_dropi' => [],
+        'dropi_devoluciones_destino' => [],
 
         // CARTERA
         'facturas'         => ['Gerente', 'Contador', 'Vendedor'],
@@ -263,7 +276,14 @@ final class Permisos
      */
     public const GRUPOS = [
         'Operación' => ['torre_control', 'estacion_empaque', 'vista_alistador', 'escanner_camara', 'inventario_vivo'],
-        'Dropi' => ['dropi_dashboard', 'dropi_pedidos', 'dropi_cortes', 'dropi_wallet', 'dropi_devoluciones', 'dropi_discrepancias', 'dropi_reportes', 'dropi_conexion', 'dropi_siigo', 'dropi_importar_pedidos'],
+        // Dropi va partido como el menú de su panel: catorce filas seguidas
+        //   bajo un solo «Dropi» no se entendían, y así cada bloque se ve
+        //   donde la persona lo va a encontrar. Sólo cambia cómo se agrupan
+        //   en la pantalla de Roles, no quién puede qué.
+        'Dropi · Operación' => ['dropi_pedidos', 'dropi_cambiar_en_dropi', 'dropi_cortes', 'dropi_devoluciones', 'dropi_devoluciones_destino'],
+        'Dropi · Productos' => ['dropi_mis_productos', 'dropi_vincular_productos'],
+        'Dropi · Dinero' => ['dropi_dashboard', 'dropi_wallet', 'dropi_discrepancias', 'dropi_reportes'],
+        'Dropi · Configuración' => ['dropi_conexion', 'dropi_siigo', 'dropi_importar_pedidos'],
         'Cartera y CRM' => ['facturas', 'pagos', 'contactos', 'cartera_dashboard', 'condiciones_credito', 'cobranzas', 'excepciones_credito', 'crm', 'comisiones', 'comisiones_config', 'metodos_pago'],
         'Contabilidad' => ['contabilidad', 'libro_diario', 'reportes_contables', 'contabilidad_aprobar_gastos', 'reglas_contables'],
         'Tesorería y caja' => ['cajas', 'arqueo_caja', 'flujo_caja', 'cuentas_por_pagar', 'programacion_pagos'],
@@ -281,16 +301,22 @@ final class Permisos
         'vista_alistador' => 'Vista del alistador',
         'escanner_camara' => 'Escáner con cámara',
         'inventario_vivo' => 'Inventario en vivo',
-        'dropi_dashboard' => 'Panel Dropi',
+        // Los nombres de Dropi son los mismos del menú de su panel, para que
+        //   quien marca la casilla reconozca la pantalla que está abriendo.
+        'dropi_dashboard' => 'Dashboard (tablero de dinero)',
         'dropi_pedidos' => 'Pedidos Dropi',
         'dropi_cortes' => 'Cortes Dropi',
-        'dropi_wallet' => 'Billetera Dropi',
-        'dropi_devoluciones' => 'Devoluciones Dropi',
-        'dropi_discrepancias' => 'Discrepancias Dropi',
-        'dropi_reportes' => 'Reportes Dropi',
-        'dropi_conexion' => 'Conexión con Dropi (cuenta y sesión)',
+        'dropi_wallet' => 'Wallet Dropi (movimientos)',
+        'dropi_devoluciones' => 'Devoluciones',
+        'dropi_discrepancias' => 'Discrepancias wallet',
+        'dropi_reportes' => 'Reportes',
+        'dropi_conexion' => 'Conexión Dropi (cuenta y sesión)',
         'dropi_siigo' => 'SIIGO de Dropi (resolución DIAN)',
-        'dropi_importar_pedidos' => 'Importar pedidos de Dropi (Excel)',
+        'dropi_importar_pedidos' => 'Importar pedidos (Excel)',
+        'dropi_mis_productos' => 'Mis productos en Dropi (y Carga masiva)',
+        'dropi_vincular_productos' => 'Vincular con el ERP',
+        'dropi_cambiar_en_dropi' => '↳ Botón «Dropi» del pedido: estatus y etiquetas',
+        'dropi_devoluciones_destino' => '↳ Cambiar el destino de inventario',
         'facturas' => 'Facturas de venta',
         'pagos' => 'Pagos recibidos',
         'contactos' => 'Clientes y proveedores',
@@ -402,6 +428,7 @@ final class Permisos
         'dropi_siigo' => ['editar'],
         'dropi_importar_pedidos' => ['editar'],
         'dropi_pedidos' => ['editar'],
+        'dropi_vincular_productos' => ['editar'],
         'facturas' => ['crear'],
         'productos' => ['crear', 'editar'],
         'programacion_pagos' => ['crear'],
@@ -695,6 +722,7 @@ final class Permisos
         'dropi_devoluciones', 'dropi_discrepancias', 'dropi_reportes',
         'dropi_conexion',
         'dropi_siigo', 'dropi_importar_pedidos',
+        'dropi_mis_productos', 'dropi_vincular_productos',
         'vista_alistador', 'servicio_cliente',
     ];
 

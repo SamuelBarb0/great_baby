@@ -2,6 +2,7 @@
 
 namespace App\Modules\Dropi\Filament\Pages;
 
+use App\Auth\Permisos;
 use App\Modules\Dropi\Actions\ConfirmarEmpaqueYSiguiente;
 use App\Modules\Dropi\Actions\ProcesarEscaneoEmpaque;
 use App\Modules\Dropi\Enums\EstadoPedidoDropi;
@@ -35,11 +36,9 @@ class EstacionEmpaque extends Page
 
     public static function canAccess(): bool
     {
-        $u = auth()->user();
-        if (! $u) {
-            return false;
-        }
-        return $u->esAracely() || $u->hasAnyRole(['Alistador']);
+        // Antes era `hasAnyRole(['Alistador'])`: la casilla «Estación de
+        //   empaque» de Roles no abría esta pantalla. La casilla manda.
+        return Permisos::puede(auth()->user(), 'estacion_empaque');
     }
 
     /**

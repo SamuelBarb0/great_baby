@@ -173,6 +173,13 @@ class User extends Authenticatable implements FilamentUser
             //   es «Cosas del día» y pide perfil de bodega — o sea, entraban al
             //   sistema directo a un 403, que es exactamente lo que este método
             //   existe para evitar.
+            // Quien tiene la casilla «Dashboard» de Dropi trabaja en Dropi y
+            //   entra por su panel. Va ANTES del colaborador y del alistador:
+            //   todo el que entra por Gestión Humana es colaborador, y marcar
+            //   «Operación» le enciende la Vista del alistador; con cualquiera
+            //   de las dos el operador caía en «Mi espacio» o en la cola de
+            //   bodega. El alistador de verdad no tiene esta casilla.
+            $this->tieneAcceso('dropi_dashboard') => '/admin',
             // El colaborador entra a lo suyo y a nada más. Va ANTES que el
             //   resto porque es el rol más acotado: si alguien fuera las dos
             //   cosas, manda su trabajo, no su espacio personal.

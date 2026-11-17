@@ -2,6 +2,7 @@
 
 namespace App\Modules\Dropi\Filament\Pages;
 
+use App\Auth\Permisos;
 use App\Modules\Dropi\Jobs\LeerCatalogoDropiJob;
 use App\Modules\Dropi\Services\CatalogoDropi;
 use App\Modules\Dropi\Support\DestinosVinculo;
@@ -44,7 +45,20 @@ class ProductosDeDropi extends Page
 
     public static function canAccess(): bool
     {
-        return auth()->user()?->esAracely() ?? false;
+        // Antes era `esAracely()`: un rol de Dropi creado en Roles no podía
+        //   destrabar los pedidos que esperan producto. La casilla manda.
+        return Permisos::puede(auth()->user(), 'dropi_vincular_productos');
+    }
+
+    /** Ver qué llaves faltan es una cosa; vincularlas cambia pedidos e inventario. */
+    public function getPuedeEditarProperty(): bool
+    {
+        return Permisos::puedeAccion(auth()->user(), 'dropi_vincular_productos', 'editar');
+    }
+
+    protected function exigirEdicion(): void
+    {
+        abort_unless($this->puedeEditar, 403, 'Vincular productos de Dropi necesita permiso de edición.');
     }
 
     public static function getNavigationBadge(): ?string
@@ -119,10 +133,13 @@ class ProductosDeDropi extends Page
                 ->label(fn () => 'Vincular ' . ($this->previa['resumen']['enlazar'] ?? 0))
                 ->icon('heroicon-o-link')
                 ->disabled(fn () => ($this->previa['resumen']['enlazar'] ?? 0) === 0)
+                ->visible(fn () => $this->puedeEditar)
                 ->requiresConfirmation()
                 ->modalHeading('Vincular lo seguro')
                 ->modalDescription('Se vinculan las llaves con la misma referencia o la misma variación en el ERP. Los pedidos que las esperaban toman el producto y, si hay stock, salen de «pendiente por inventario».')
                 ->action(function () {
+                    $this->exigirEdicion();
+
                     $r = app(CatalogoDropi::class)->vincular(auth()->id());
                     $n = Notification::make()->title("{$r['vinculos']} vínculos hechos")
                         ->body("{$r['items']} líneas de pedido ya tienen producto · {$r['pedidos_liberados']} pedidos salieron de «pendiente por inventario».");
@@ -138,6 +155,7 @@ class ProductosDeDropi extends Page
             ->label(fn (array $arguments) => ($arguments['vinculado'] ?? false) ? 'Cambiar…' : 'Vincular…')
             ->size('sm')
             ->outlined()
+            ->visible(fn () => $this->puedeEditar)
             ->modalSubmitActionLabel('Vincular')
             ->modalHeading(fn (array $arguments) => 'Vincular ' . ($arguments['nombre'] ?? $arguments['llave']))
             ->modalDescription(fn (array $arguments) => 'Llave en Dropi: ' . $arguments['llave']
@@ -152,6 +170,8 @@ class ProductosDeDropi extends Page
                     ->getOptionLabelUsing(fn ($value) => DestinosVinculo::etiqueta((string) $value)),
             ])
             ->action(function (array $data, array $arguments) {
+                $this->exigirEdicion();
+
                 try {
                     $r = app(CatalogoDropi::class)->vincularLlave($arguments['llave'], (string) $data['destino'], auth()->id());
                 } catch (\DomainException $e) {
