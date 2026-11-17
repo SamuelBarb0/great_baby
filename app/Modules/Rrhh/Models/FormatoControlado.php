@@ -98,6 +98,14 @@ class FormatoControlado extends Model
             'version' => '001',
             'fecha' => null,
         ],
+        'entrevista_ser' => [
+            // Sin código todavía: el formato en papel no existe, nació acá.
+            'codigo' => null,
+            'nombre' => 'Entrevista del ser',
+            'proceso' => self::PROCESO_GH,
+            'version' => '001',
+            'fecha' => null,
+        ],
         'entrevista_psicologica' => [
             // Éste SÍ trae código en el papel: GH-F-004, versión 001.
             'codigo' => 'GH-F-004',
