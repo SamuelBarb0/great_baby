@@ -185,8 +185,21 @@ class User extends Authenticatable implements FilamentUser
             //   cosas, manda su trabajo, no su espacio personal.
             $this->tieneAcceso('portal_colaborador') && ! $this->tieneAcceso('rrhh_requisiciones')
                 => '/app/mi-espacio',
-            $this->tieneAcceso('rrhh_requisiciones') => '/app/rrhh/requisiciones',
+            /*
+             * La bodega va ANTES que las solicitudes de personal.
+             *
+             * El jefe de logística es líder de su área además de jefe de
+             * bodega, así que lleva los dos sombreros y los dos accesos. Con
+             * las solicitudes primero, entraba todas las mañanas a la pantalla
+             * de pedir personal —algo que hace una vez cada tanto— y tenía que
+             * navegar a mano hasta su cola, que es donde trabaja todo el día.
+             *
+             * Sólo cambia para quien tiene los dos: a Gestión Humana y a un
+             * líder que no sea de bodega no les toca nada. Es el mismo empate
+             * que el colaborador de arriba ya resuelve con su `&& !`.
+             */
             $this->esAdminBodega() || $this->esAlistador() || $this->hasRole('Despachador') => '/app/logistica/cola-jorge',
+            $this->tieneAcceso('rrhh_requisiciones') => '/app/rrhh/requisiciones',
             // Dropi se opera en /admin (el panel quedó siendo sólo Dropi). Un
             //   perfil creado desde la pantalla de Roles, como «Operador
             //   Dropi», no aparecía en ninguna rama de arriba y caía en el
