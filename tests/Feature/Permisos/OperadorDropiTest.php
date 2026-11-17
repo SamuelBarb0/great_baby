@@ -15,9 +15,33 @@ use App\Models\User;
 use App\Modules\Contabilidad\Actions\Gastos;
 use App\Modules\Dropi\Filament\Pages\CambiosFinancierosDropi;
 use App\Modules\Dropi\Filament\Pages\ConexionDropi;
+use App\Modules\Dropi\Filament\Pages\EscannerCamara;
+use App\Modules\Dropi\Filament\Pages\EstacionEmpaque;
 use App\Modules\Dropi\Filament\Pages\ImportarPedidos;
+use App\Modules\Dropi\Filament\Pages\InventarioEnVivo;
+use App\Modules\Dropi\Filament\Pages\MisProductosDropi;
+use App\Modules\Dropi\Filament\Pages\ProductosDeDropi;
 use App\Modules\Dropi\Filament\Pages\SiigoDropi;
+use App\Modules\Dropi\Filament\Pages\TorreControl;
+use App\Modules\Dropi\Filament\Pages\VistaAlistador;
+use App\Modules\Dropi\Filament\Resources\DropiDevolucionResource\Pages\EditDropiDevolucion;
+use App\Modules\Dropi\Filament\Resources\DropiPedidoResource\Pages\ListDropiPedidos;
+use App\Modules\Dropi\Models\DropiDevolucion;
+use App\Modules\Dropi\Models\DropiPedido;
+use Filament\Facades\Filament;
+use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
+
+/** Las pantallas del panel que antes preguntaban por un nombre de rol. */
+const PANTALLAS_CON_CASILLA = [
+    TorreControl::class => 'torre_control',
+    EstacionEmpaque::class => 'estacion_empaque',
+    VistaAlistador::class => 'vista_alistador',
+    EscannerCamara::class => 'escanner_camara',
+    InventarioEnVivo::class => 'inventario_vivo',
+    MisProductosDropi::class => 'dropi_mis_productos',
+    ProductosDeDropi::class => 'dropi_vincular_productos',
+];
 
 beforeEach(function () {
     $this->seed(\Database\Seeders\PermisosSeeder::class);
@@ -84,4 +108,162 @@ it('aprueba gastos con su casilla, sin abrirle la firma al contador', function (
     $quien->assignRole($contador);
 
     expect(Gastos::puedeAprobar($quien))->toBeFalse();
+});
+
+it('sin sus casillas no ve Operación ni Productos del panel', function () {
+    $this->actingAs($this->operador);
+
+    foreach (array_keys(PANTALLAS_CON_CASILLA) as $pantalla) {
+        expect($pantalla::canAccess())->toBeFalse("{$pantalla} se abrió sin su casilla");
+    }
+});
+
+it('marcando las casillas abre Operación y Productos del panel', function () {
+    $this->rol->givePermissionTo([
+        ...array_map(fn ($s) => "ver.{$s}", array_values(PANTALLAS_CON_CASILLA)),
+        'editar.dropi_vincular_productos',
+    ]);
+    $this->actingAs($this->operador->fresh());
+
+    foreach (array_keys(PANTALLAS_CON_CASILLA) as $pantalla) {
+        expect($pantalla::canAccess())->toBeTrue("{$pantalla} no se abrió con su casilla");
+    }
+    expect(Permisos::puedeAccion($this->operador->fresh(), 'dropi_vincular_productos', 'editar'))->toBeTrue();
+});
+
+it('con solo ver en Vincular mira las llaves pero no vincula', function () {
+    $soloMira = User::factory()->create();
+    $soloMira->givePermissionTo('ver.dropi_vincular_productos');
+    $this->actingAs($soloMira);
+
+    expect(ProductosDeDropi::canAccess())->toBeTrue()
+        ->and(Permisos::puedeAccion($soloMira, 'dropi_vincular_productos', 'editar'))->toBeFalse();
+
+    Filament::setCurrentPanel(Filament::getPanel('admin'));
+    \Livewire\Livewire::test(ProductosDeDropi::class)
+        ->assertActionHidden('vincularSeguros')
+        ->assertActionVisible('leer');
+});
+
+it('el Alistador sigue viendo exactamente lo que veía', function () {
+    Role::firstOrCreate(['name' => 'Alistador', 'guard_name' => 'web']);
+    $this->seed(\Database\Seeders\PermisosSeeder::class);
+
+    $alistador = User::factory()->create();
+    $alistador->assignRole('Alistador');
+    $this->actingAs($alistador);
+
+    // Lo que le daban los nombres de rol antes del cambio.
+    expect(TorreControl::canAccess())->toBeTrue()
+        ->and(EstacionEmpaque::canAccess())->toBeTrue()
+        ->and(VistaAlistador::canAccess())->toBeTrue()
+        ->and(EscannerCamara::canAccess())->toBeTrue()
+        ->and(InventarioEnVivo::canAccess())->toBeTrue()
+        ->and(MisProductosDropi::canAccess())->toBeFalse()
+        ->and(ProductosDeDropi::canAccess())->toBeFalse();
+});
+
+it('ninguna pantalla del panel depende de un nombre de rol', function () {
+    // Un rol con TODAS las casillas tiene que abrir lo mismo que root. Si una
+    //   pantalla vuelve a preguntar `esAracely()` o `hasAnyRole()`, esto falla.
+    $todas = Role::firstOrCreate(['name' => 'Todas las casillas', 'guard_name' => 'web']);
+    $todas->syncPermissions(Permission::all());
+    $conTodas = User::factory()->create();
+    $conTodas->assignRole($todas);
+
+    $root = User::factory()->create();
+    $root->assignRole(Role::firstOrCreate(['name' => 'Aracely', 'guard_name' => 'web']));
+
+    $panel = Filament::getPanel('admin');
+    Filament::setCurrentPanel($panel);
+
+    $abre = function (User $u) use ($panel) {
+        $this->actingAs($u);
+
+        return collect([...$panel->getPages(), ...$panel->getResources()])
+            ->filter(fn ($cls) => $cls::canAccess())
+            ->values()
+            ->all();
+    };
+
+    $deRoot = $abre($root);
+    expect($deRoot)->not->toBeEmpty()
+        ->and(array_values(array_diff($deRoot, $abre($conTodas))))->toBe([]);
+});
+
+it('Productos ofrece «Carga masiva en Dropi» en vez de importar al ERP', function () {
+    $panel = Filament::getPanel('admin');
+    Filament::setCurrentPanel($panel);
+
+    $cargaMasiva = fn () => collect($panel->getNavigationItems())
+        ->first(fn ($item) => $item->getLabel() === 'Carga masiva en Dropi');
+
+    expect($cargaMasiva())->not->toBeNull()
+        ->and($cargaMasiva()->getUrl())->toStartWith('https://app.dropi.co/dashboard/products')
+        ->and($cargaMasiva()->getGroup())->toBe('Productos')
+        ->and(collect($panel->getPages())->contains(fn ($p) => str_ends_with($p, '\\ImportarProductos')))->toBeFalse();
+
+    // La ve quien ve «Mis productos en Dropi», que es su mismo catálogo.
+    $this->actingAs($this->operador);
+    expect($cargaMasiva()->isVisible())->toBeFalse();
+
+    $this->rol->givePermissionTo('ver.dropi_mis_productos');
+    $this->actingAs($this->operador->fresh());
+    expect($cargaMasiva()->isVisible())->toBeTrue();
+});
+
+/** Un pedido que vino de Dropi (con orden), que es cuando aparece su menú. */
+function pedidoDeDropiParaElOperador(): DropiPedido
+{
+    return DropiPedido::create([
+        'corte_id' => \App\Modules\Dropi\Actions\AsignarCorteACarga::run(\Carbon\CarbonImmutable::now())->id,
+        'guia' => 'GOPER1', 'dropi_orden_id' => '880001',
+        'cliente_nombre' => 'Ana', 'monto_esperado_proveedor' => 1000,
+    ]);
+}
+
+it('el menú Dropi del pedido pide su casilla, no el nombre de Aracely', function () {
+    $pedido = pedidoDeDropiParaElOperador();
+    Filament::setCurrentPanel(Filament::getPanel('admin'));
+    $this->actingAs($this->operador);
+
+    \Livewire\Livewire::test(ListDropiPedidos::class)
+        ->assertTableActionHidden('infoDropi', $pedido)
+        ->assertTableActionHidden('actualizarEstatusDropi', $pedido)
+        ->assertTableActionHidden('etiquetasDropi', $pedido);
+
+    $this->rol->givePermissionTo('ver.dropi_cambiar_en_dropi');
+    $this->actingAs($this->operador->fresh());
+
+    \Livewire\Livewire::test(ListDropiPedidos::class)
+        ->assertTableActionVisible('infoDropi', $pedido)
+        ->assertTableActionVisible('actualizarEstatusDropi', $pedido)
+        ->assertTableActionVisible('etiquetasDropi', $pedido);
+});
+
+it('el destino de una devolución pide su casilla aparte de «Editar»', function () {
+    // Con orden de Dropi o sin ella da igual; la guía distinta evita chocar
+    //   con el pedido de la otra prueba si algún día comparten datos.
+    $pedido = DropiPedido::create([
+        'corte_id' => \App\Modules\Dropi\Actions\AsignarCorteACarga::run(\Carbon\CarbonImmutable::now())->id,
+        'guia' => 'GOPER2', 'cliente_nombre' => 'Ana', 'monto_esperado_proveedor' => 1000,
+    ]);
+    // Sin eventos: crearla dispara la contabilización y la nota crédito, que
+    //   no son lo que se prueba acá.
+    $devolucion = DropiDevolucion::withoutEvents(fn () => DropiDevolucion::create([
+        'pedido_id' => $pedido->id, 'recibido_at' => now(),
+        'destino_inventario' => 'reingreso', 'decision_por' => $this->operador->id,
+    ]));
+    Filament::setCurrentPanel(Filament::getPanel('admin'));
+
+    // «Editar» solo deja corregir las notas: el destino sigue bloqueado (SEG-C3).
+    $this->rol->givePermissionTo('editar.dropi_devoluciones');
+    $this->actingAs($this->operador->fresh());
+    \Livewire\Livewire::test(EditDropiDevolucion::class, ['record' => $devolucion->getRouteKey()])
+        ->assertFormFieldDisabled('destino_inventario');
+
+    $this->rol->givePermissionTo('ver.dropi_devoluciones_destino');
+    $this->actingAs($this->operador->fresh());
+    \Livewire\Livewire::test(EditDropiDevolucion::class, ['record' => $devolucion->getRouteKey()])
+        ->assertFormFieldEnabled('destino_inventario');
 });

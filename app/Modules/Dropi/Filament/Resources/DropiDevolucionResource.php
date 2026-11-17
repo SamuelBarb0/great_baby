@@ -48,8 +48,9 @@ class DropiDevolucionResource extends Resource
     }
 
     // Re-audit DR-γ (SEG-C3) · SAC/Alistador NO deben editar destino_inventario:
-    //   reingreso vs averia_baja mueve el kardex real. Sólo root (Aracely y
-    //   Gerencia) cambia el destino; el resto sólo puede corregir las notas.
+    //   reingreso vs averia_baja mueve el kardex real. Lo cambia root y quien
+    //   tenga la casilla propia `dropi_devoluciones_destino` (nace vacía); el
+    //   resto sólo puede corregir las notas.
     public static function canCreate(): bool
     {
         // La casilla «Crear» de Devoluciones Dropi manda: registrar una
@@ -60,7 +61,7 @@ class DropiDevolucionResource extends Resource
     public static function canEdit($record): bool
     {
         // La casilla «Editar» manda. El destino de inventario queda además
-        //   bloqueado en el formulario para quien no sea root (SEG-C3).
+        //   bloqueado en el formulario sin su casilla propia (SEG-C3).
         return \App\Auth\Permisos::puedeAccion(auth()->user(), 'dropi_devoluciones', 'editar');
     }
 
@@ -84,10 +85,12 @@ class DropiDevolucionResource extends Resource
             Select::make('destino_inventario')
                 ->options(collect(DestinoDevolucion::cases())->mapWithKeys(fn ($d) => [$d->value => $d->label()]))
                 ->required()
-                // Cambiarlo mueve kardex (SEG-C3): sólo root lo toca. Los
-                //   demás ven el valor pero no lo reenvían al guardar.
-                ->disabled(fn () => ! auth()->user()?->esRoot())
-                ->dehydrated(fn () => (bool) auth()->user()?->esRoot()),
+                // Cambiarlo mueve kardex (SEG-C3): antes sólo root, por nombre
+                //   de rol. Ahora tiene su casilla, que no va incluida en
+                //   «Editar» para no abrírselo a SAC ni al Alistador. Sin ella
+                //   se ve el valor pero no se reenvía al guardar.
+                ->disabled(fn () => ! \App\Auth\Permisos::puede(auth()->user(), 'dropi_devoluciones_destino'))
+                ->dehydrated(fn () => \App\Auth\Permisos::puede(auth()->user(), 'dropi_devoluciones_destino')),
             Textarea::make('notas')->columnSpanFull(),
         ]);
     }

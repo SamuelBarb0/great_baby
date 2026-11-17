@@ -2,6 +2,7 @@
 
 namespace App\Modules\Dropi\Filament\Pages;
 
+use App\Auth\Permisos;
 use App\Modules\Dropi\Enums\CategoriaUbicacion;
 use App\Modules\Dropi\Models\InventarioMovimiento;
 use App\Modules\Dropi\Models\InventarioUbicacion;
@@ -31,8 +32,9 @@ class InventarioEnVivo extends Page
 
     public static function canAccess(): bool
     {
-        $u = auth()->user();
-        return $u ? ($u->esAracely() || $u->esAlistador()) : false;
+        // Antes preguntaba por la casilla de la Vista del alistador
+        //   (`esAlistador()`): «Inventario en vivo» tiene la suya.
+        return Permisos::puede(auth()->user(), 'inventario_vivo');
     }
 
     /**
