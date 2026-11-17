@@ -10,6 +10,10 @@ const props = defineProps({
     items: { type: Array, required: true },
     // Multiempresa · razones sociales activas para cambiar quién factura.
     empresas: { type: Array, default: () => [] },
+    // De qué bodega puede salir el pedido. Sin bodega no se aparta mercancía
+    // y bodega nunca lo ve en su cola, así que esto no es un detalle.
+    bodegas_origen: { type: Array, default: () => [] },
+    puede_cambiar_bodega: { type: Boolean, default: false },
     /*
      * Qué puede apretar QUIEN está mirando. Antes los botones salían sólo por
      * `pedido.estado`, así que un despachador veía «Aprobar», «Rechazar» y
@@ -26,6 +30,20 @@ const props = defineProps({
 
 const cambiarEmpresa = (e) => {
     router.post(`/app/pedidos-b2b/${props.pedido.id}/empresa`, { empresa_id: Number(e.target.value) }, { preserveScroll: true });
+};
+
+const errorBodega = ref(null);
+
+const cambiarBodega = (e) => {
+    const elegido = Number(e.target.value);
+    errorBodega.value = null;
+    router.post(`/app/pedidos-b2b/${props.pedido.id}/bodega`, { ubicacion_origen_id: elegido }, {
+        preserveScroll: true,
+        // Sin esto, un rechazo del servidor —pedido ya despachado, bodega
+        // desactivada— dejaba el select mostrando lo que la persona eligió y
+        // ningún mensaje: parecía que había quedado guardado.
+        onError: (errs) => { errorBodega.value = Object.values(errs)[0] || 'No se pudo cambiar la bodega.'; },
+    });
 };
 
 const money = (n) => new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n || 0);
@@ -143,6 +161,29 @@ const rechazar = () => {
                             </select>
                             <b v-else>{{ pedido.empresa }}</b>
                         </div>
+
+                        <!-- De qué bodega sale. Sin esto, el aviso que sale al
+                             aprobar —«asignale una bodega y volvé a aprobarlo»—
+                             mandaba a hacer algo que la pantalla no permitía. -->
+                        <div class="text-sm mt-2 flex items-center gap-2 flex-wrap">
+                            <span class="text-xs text-surface-500 uppercase">Sale de</span>
+                            <select v-if="puede_cambiar_bodega && bodegas_origen.length"
+                                    :value="pedido.ubicacion_origen_id ?? ''" @change="cambiarBodega"
+                                    class="input py-1 text-sm"
+                                    aria-label="Bodega de origen del pedido">
+                                <option value="" disabled>— sin bodega —</option>
+                                <option v-for="b in bodegas_origen" :key="b.id" :value="b.id">{{ b.nombre }}</option>
+                            </select>
+                            <b v-else>{{ pedido.bodega_origen || '— sin bodega —' }}</b>
+                            <span v-if="!pedido.ubicacion_origen_id && !errorBodega"
+                                  class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">
+                                Sin bodega no se aparta mercancía y bodega no lo ve en su cola.
+                            </span>
+                            <span v-if="errorBodega"
+                                  class="text-xs text-red-700 bg-red-50 border border-red-200 rounded px-1.5 py-0.5">
+                                {{ errorBodega }}
+                            </span>
+                        </div>
                     </div>
                     <div class="text-right">
                         <div class="text-xs text-surface-500 uppercase">Total</div>
@@ -226,6 +267,10 @@ const rechazar = () => {
                                 'bg-red-100 text-red-700': h.color === 'red',
                                 'bg-brand-100 text-brand-700': h.color === 'brand',
                                 'bg-indigo-100 text-indigo-700': h.color === 'indigo',
+                                // El hito de «retención liberada»: no es un paso
+                                // más del trámite, es alguien pasando por encima
+                                // del semáforo de cartera, y se ve distinto.
+                                'bg-amber-100 text-amber-800': h.color === 'amber',
                               }">
                             {{ h.icon }}
                         </span>

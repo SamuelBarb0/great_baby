@@ -98,6 +98,12 @@ const MENU_APP = [
     '/app/inventario/traslados' => 'bodega_operativa',
     '/app/inventario/alertas' => 'bodega_operativa',
     '/app/inventario/ubicaciones' => 'ubicaciones',
+    // Las dos pantallas de logística del 17-nov. Reusan la casilla
+    // `ubicaciones` a propósito: una casilla nueva exigiría correr el
+    // sembrador de permisos antes de que nadie pudiera abrirlas, y ese
+    // sembrador sigue pendiente en producción.
+    '/app/inventario/catalogo-bodega' => 'ubicaciones',
+    '/app/logistica/reglas-ruteo' => 'ubicaciones',
     '/app/inventario/reporte-stock' => 'bodega_operativa',
     '/app/inventario/importar-cliente' => 'bodega',
     '/app/catalogo/productos' => 'catalogo',

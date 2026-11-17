@@ -17,11 +17,25 @@ td { padding: 2mm; border-bottom:1px solid #f3f4f6; }
 <div class="small">
     OC origen: <strong>{{ $recepcion->orden?->numero }}</strong> ·
     Proveedor: <strong>{{ $recepcion->orden?->proveedor?->nombreDisplay() }}</strong> ·
-    Bodega: <strong>{{ $recepcion->bodega?->nombre }}</strong> ·
+    {{-- Con el reparto, el encabezado ya no puede nombrar una sola bodega: el
+         PDF es lo que firma quien recibe y diría que las 50 unidades entraron
+         todas al mismo sitio. --}}
+    @php($repartida = $recepcion->items->contains(
+        fn ($x) => $x->bodegaDondeQuedo() !== (int) $recepcion->bodega_id
+    ))
+    Bodega: <strong>{{ $repartida ? 'varias (ver detalle)' : $recepcion->bodega?->nombre }}</strong> ·
     Fecha: <strong>{{ $recepcion->fecha_recepcion?->format('Y-m-d') }}</strong>
 </div>
 @if($recepcion->factura_proveedor)<div class="small">Factura proveedor: {{ $recepcion->factura_proveedor }}</div>@endif
 @if($recepcion->transportista)<div class="small">Transportista: {{ $recepcion->transportista }}</div>@endif
+
+{{-- Los nombres de las bodegas que tocan estas líneas, de una sola consulta.
+     Buscarlos renglón por renglón dentro del @foreach le pedía a la base una
+     fila por línea sólo para imprimir un nombre. --}}
+@php($nombresBodega = \App\Modules\Dropi\Models\InventarioUbicacion::whereIn(
+    'id',
+    $recepcion->items->map(fn ($x) => $x->bodegaDondeQuedo())->filter()->unique()->values()->all()
+)->pluck('nombre', 'id'))
 
 <table>
     <thead><tr>
@@ -29,7 +43,7 @@ td { padding: 2mm; border-bottom:1px solid #f3f4f6; }
         <th class="right">Cant recibida</th>
         <th class="right">Costo unit</th>
         <th class="right">Subtotal</th>
-        <th>Lote</th><th>Vence</th>
+        <th>Lote</th><th>Vence</th><th>Va para</th>
     </tr></thead>
     <tbody>
     @foreach($recepcion->items as $i => $it)
@@ -42,6 +56,21 @@ td { padding: 2mm; border-bottom:1px solid #f3f4f6; }
             <td class="right">${{ number_format((float)$it->subtotal, 0, ',', '.') }}</td>
             <td>{{ $it->lote ?? '—' }}</td>
             <td>{{ $it->fecha_vencimiento?->format('Y-m-d') ?? '—' }}</td>
+            {{-- Dónde QUEDÓ, no a dónde la mandaron: lo que no llegó apto entra
+                 a averías y lo faltante no entra a ninguna parte. Este papel se
+                 firma, así que no puede decir que hay cajas en la principal
+                 cuando están en averías. --}}
+            <td class="small">
+                @php($quedoEn = $it->bodegaDondeQuedo())
+                @if($quedoEn === null)
+                    <em>no llegó</em>
+                @else
+                    {{ $nombresBodega[$quedoEn] ?? '—' }}
+                    @if(($it->clasificacion ?: 'apto') !== 'apto')
+                        <br><em>({{ $it->clasificacion }})</em>
+                    @endif
+                @endif
+            </td>
         </tr>
     @endforeach
     </tbody>
@@ -49,7 +78,10 @@ td { padding: 2mm; border-bottom:1px solid #f3f4f6; }
         <tr>
             <td colspan="5" class="right"><strong>Total recibido:</strong></td>
             <td class="right"><strong>${{ number_format((float)$recepcion->total_recibido, 0, ',', '.') }}</strong></td>
-            <td colspan="2"></td>
+            {{-- El encabezado tiene nueve columnas: 5 + 1 + 3. Con dos, la
+                 última celda del pie quedaba sin cerrar y el borde de la tabla
+                 salía cortado en el papel. --}}
+            <td colspan="3"></td>
         </tr>
     </tfoot>
 </table>

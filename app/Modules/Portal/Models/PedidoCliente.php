@@ -35,6 +35,14 @@ class PedidoCliente extends Model implements AuditableContract
         'facturado_por_id', 'facturado_at', 'factura_id', 'motivo_rechazo',
         // LOG-J2 · si cae en retenido por cartera, guardamos el porqué.
         'motivo_retencion',
+        /*
+         * Y la retención sobrevive a la liberación.
+         *
+         * Sin estas tres, el hito del historial se pintaba leyendo el estado y
+         * desaparecía apenas Gerencia liberaba: después nadie veía que el
+         * semáforo lo había frenado ni quién decidió vender igual.
+         */
+        'retenido_at', 'retencion_liberada_at', 'retencion_liberada_por_id',
         // LOG-J7 · columnas de despacho con huella.
         'despachado_at', 'despachado_por_id', 'guia_transportadora', 'transportadora',
         'entregado_at', 'entregado_por_id', 'entrega_nota',
@@ -54,13 +62,21 @@ class PedidoCliente extends Model implements AuditableContract
         'rechazado_at' => 'datetime',
         'facturado_at' => 'datetime',
         'despachado_at' => 'datetime',
+        'entregado_at' => 'datetime',
+        'retenido_at' => 'datetime',
+        'retencion_liberada_at' => 'datetime',
         'alistado_asignado_at' => 'datetime',
         'alistado_inicio_at' => 'datetime',
         'alistado_fin_at' => 'datetime',
         'alistado_con_novedad' => 'boolean',
         'novedad_resuelta_at' => 'datetime',
-        'entregado_at' => 'datetime',
     ];
+
+    /** Quién decidió vender aunque el semáforo de cartera lo había frenado. */
+    public function retencionLiberadaPor(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'retencion_liberada_por_id');
+    }
 
     public function despachadoPor(): BelongsTo { return $this->belongsTo(User::class, 'despachado_por_id'); }
     public function alistador(): BelongsTo { return $this->belongsTo(User::class, 'alistador_id'); }

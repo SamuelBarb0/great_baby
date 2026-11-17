@@ -147,22 +147,45 @@ class ColoresDeImportacion
         }
 
         return DB::transaction(function () use ($fila, $recepcion, $color, $cantidad, $userId) {
+            /*
+             * La bodega es la de la FILA, no la del encabezado.
+             *
+             * Desde que una recepción se puede repartir, el encabezado ya no
+             * dice dónde quedó cada línea. Leerlo acá tenía dos finales malos:
+             * el saldo salía en cero y la mercancía se quedaba sin color para
+             * siempre, o —peor— los dos movimientos de la reclasificación se
+             * escribían en la bodega equivocada y dejaban negativo lo que
+             * estaba bien.
+             *
+             * Y es «dónde QUEDÓ», no «a dónde la mandaron»: una línea que no
+             * llegó apta tiene un destino elegido que no se respetó, porque el
+             * stock entró a averías. Con el destino elegido los dos
+             * movimientos se escribían en una bodega sin saldo.
+             */
+            $bodega = $fila->bodegaDondeQuedo();
+
+            if ($bodega === null) {
+                throw new InvalidArgumentException(
+                    'Esa línea no entró a ninguna bodega: se marcó como faltante al descargar.'
+                );
+            }
+
             $origen = ProductoVariante::whereKey($fila->variante_id)->lockForUpdate()->first();
-            $saldo = $this->saldoSinIdentificar($fila, (int) $recepcion->bodega_id);
+            $saldo = $this->saldoSinIdentificar($fila, $bodega);
             if (! $origen || $cantidad > $saldo + 0.0001) {
                 throw new InvalidArgumentException("Sólo quedan {$saldo} sin identificar.");
             }
 
             $destino = $this->varianteDe(Producto::findOrFail($origen->producto_id), $color);
             $costo = (float) InventarioMovimiento::where('variante_id', $origen->id)
-                ->where('ubicacion_id', $recepcion->bodega_id)->where('cantidad', '>', 0)
+                ->where('ubicacion_id', $bodega)->where('cantidad', '>', 0)
                 ->latest('id')->value('costo_unit');
 
             foreach ([[$origen, -$cantidad, 'reclasificacion_salida'], [$destino, $cantidad, 'reclasificacion_entrada']] as [$variante, $movida, $tipo]) {
                 InventarioMovimiento::create([
                     'variante_id' => $variante->id,
                     'producto_id' => $variante->producto_id,
-                    'ubicacion_id' => $recepcion->bodega_id,
+                    'ubicacion_id' => $bodega,
                     'tipo' => $tipo,
                     'cantidad' => $movida,
                     'costo_unit' => $costo,

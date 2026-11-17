@@ -14,7 +14,7 @@ class RecepcionPdfController extends Controller
         abort_unless(auth()->check(), 401);
         abort_unless(\App\Auth\Permisos::puede(auth()->user(), 'compras_recepcion'), 403);
 
-        $recepcion->load(['items.producto', 'items.variante', 'orden.proveedor', 'bodega', 'receptor']);
+        $recepcion->load(['items.producto', 'items.variante', 'items.ubicacion', 'orden.proveedor', 'bodega', 'receptor']);
 
         return Pdf::loadView('compras.pdf.recepcion', ['recepcion' => $recepcion])
             ->setPaper('letter', 'portrait')

@@ -127,8 +127,18 @@ class RecibirMercancia
                     InventarioMovimiento::create([
                         'variante_id' => $it->variante_id,
                         'producto_id' => $it->producto_id, // creating hook lo popula si vacío en granular
-                        // Lo que llegó mal entra al inventario, pero no a la venta.
-                        'ubicacion_id' => $clasificacion === 'apto' ? $recepcion->bodega_id : $tras->ubicacionNoVendible()->id,
+                        /*
+                         * El destino lo elige quien descarga, línea por línea:
+                         * «de estas 50, 30 a Great Baby y 20 a Dropi». Sin
+                         * elegir nada va a la bodega de la orden, que es como
+                         * entró todo hasta hoy.
+                         *
+                         * Lo que llegó mal entra al inventario pero no a la
+                         * venta, y eso pesa más que cualquier destino elegido.
+                         */
+                        'ubicacion_id' => $clasificacion === 'apto'
+                            ? ($it->ubicacion_id ?: $recepcion->bodega_id)
+                            : $tras->ubicacionNoVendible()->id,
                         'tipo' => $esImportacion ? 'entrada_importacion' : 'entrada_compra',
                         'cantidad' => round($cantidadRecibida, 4),
                         'costo_unit' => $costoUnit,

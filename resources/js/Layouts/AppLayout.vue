@@ -200,6 +200,10 @@ const groups = [
             // «despachado» y el primero en enterarse de un retraso era el
             // cliente llamando a reclamar.
             { name: '🚚 Seguimiento de guías', href: '/app/logistica/guias', icon: Truck, permiso: 'logistica' },
+            // Va junto a la cola porque es lo que decide si un pedido aparece
+            // en ella: sin regla de ruteo el pedido nace sin bodega y bodega
+            // nunca lo ve.
+            { name: '🗺 De qué bodega sale cada ciudad', href: '/app/logistica/reglas-ruteo', icon: Truck, permiso: 'ubicaciones' },
         ],
     },
     {
@@ -361,6 +365,7 @@ const groups = [
             { name: 'Traslados entre bodegas', href: '/app/inventario/traslados', icon: Warehouse, permiso: 'bodega_operativa' },
             { name: 'Alertas de stock', href: '/app/inventario/alertas', icon: Warehouse, permiso: 'bodega_operativa' },
             { name: '🏢 Bodegas · ubicaciones (Rack·Sección·Nivel)', href: '/app/inventario/ubicaciones', icon: Warehouse, permiso: 'ubicaciones' },
+            { name: '🗂 Catálogo de la bodega (oficinas y almacenes)', href: '/app/inventario/catalogo-bodega', icon: Warehouse, permiso: 'ubicaciones' },
             { name: 'Reporte de stock por bodega', href: '/app/inventario/reporte-stock', icon: BarChart3, permiso: 'bodega_operativa' },
             { name: '📥 Importar inventario (Excel)', href: '/app/inventario/importar-cliente', icon: Warehouse, permiso: 'bodega' },
         ],

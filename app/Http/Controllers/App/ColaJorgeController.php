@@ -75,7 +75,19 @@ class ColaJorgeController extends Controller implements HasMiddleware
         if ($u->esAracely()) {
             $misBodegas = null;
         } else {
-            $ids = $u->bodegasAsignadasIds();
+            /*
+             * H2 · Antes preguntaba `bodegasAsignadasIds()`, que sólo hereda
+             * si el usuario es AdminBodega. Un Alistador marcado responsable
+             * de su propia bodega recibía [] → [-1] → cola en cero, todos los
+             * días. Y al responsable de un rack le pasaba lo mismo: el id del
+             * rack no es el origen del pedido, lo es la sede.
+             *
+             * `bodegasQueVeIds()` hereda por responsable sin pedir rol —quién
+             * entra a esta pantalla ya lo decidió el middleware de arriba— y
+             * sube del rack a su sede. No abre ninguna puerta de escritura:
+             * mover inventario sigue preguntando por el otro método.
+             */
+            $ids = $u->bodegasQueVeIds();
             $misBodegas = ! empty($ids) ? $ids : [-1];
         }
 

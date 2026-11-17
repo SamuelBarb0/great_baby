@@ -298,6 +298,12 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     Route::post('/cartera/pagos-proveedor/{pagoProveedor}/anular', [\App\Http\Controllers\App\PagosProveedorController::class, 'anular'])->middleware('throttle:20,1')->name('app.cartera.pagos-proveedor.anular');
     // QA-FIX #11 · preview retenciones desde el motor real.
     Route::post('/api/retenciones/preview', [\App\Http\Controllers\App\PagosProveedorController::class, 'previewRetenciones'])->middleware('throttle:120,1');
+    // La factura del proveedor trae mercancía que no está en el catálogo:
+    // quien descarga la enlaza o la crea sin salir de la recepción. Antes su
+    // única salida era el catálogo, que pide otra casilla, y en la práctica
+    // recibía igual y el inventario no se movía sin que nadie se enterara.
+    Route::post('/compras/oc/linea/{item}/producto', [\App\Http\Controllers\App\ComprasGestionController::class, 'lineaProducto'])->middleware('throttle:60,1')->name('app.compras.oc.linea.producto');
+
     Route::get('/compras/recepcion/nueva', [\App\Http\Controllers\App\ComprasGestionController::class, 'recepcionForm'])->name('app.compras.recepcion.nueva');
     Route::post('/compras/recepcion', [\App\Http\Controllers\App\ComprasGestionController::class, 'recepcionCrear'])->middleware('throttle:60,1')->name('app.compras.recepcion.crear');
     Route::get('/compras/recepcion/{recepcion}', [\App\Http\Controllers\App\ComprasGestionController::class, 'recepcionShow'])->name('app.compras.recepcion.show');
@@ -372,6 +378,14 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     // Sprint 3 · A.4 · anular en curso + eliminar borrador vacío.
     Route::post('/inventario/conteos/{id}/anular', [\App\Http\Controllers\App\InventarioGestionController::class, 'conteoAnular'])->middleware('throttle:20,1')->name('app.inventario.conteo.anular');
     Route::delete('/inventario/conteos/{id}', [\App\Http\Controllers\App\InventarioGestionController::class, 'conteoEliminar'])->middleware('throttle:20,1')->name('app.inventario.conteo.eliminar');
+    // El catálogo con el que clasifica la bodega: las oficinas (de quién es la
+    // mercancía) y los almacenes (en qué estado está). El área las entregó por
+    // escrito y avisó que van a cambiar, así que se editan desde la pantalla.
+    Route::get('/inventario/catalogo-bodega', [\App\Http\Controllers\App\CatalogoBodegaController::class, 'index'])->middleware('throttle:60,1')->name('app.inventario.catalogo-bodega');
+    Route::post('/inventario/catalogo-bodega/oficina', [\App\Http\Controllers\App\CatalogoBodegaController::class, 'guardarOficina'])->middleware('throttle:30,1')->name('app.inventario.catalogo-bodega.oficina');
+    Route::post('/inventario/catalogo-bodega/almacen', [\App\Http\Controllers\App\CatalogoBodegaController::class, 'guardarAlmacen'])->middleware('throttle:30,1')->name('app.inventario.catalogo-bodega.almacen');
+    Route::post('/inventario/catalogo-bodega/mapear', [\App\Http\Controllers\App\CatalogoBodegaController::class, 'mapear'])->middleware('throttle:30,1')->name('app.inventario.catalogo-bodega.mapear');
+
     // UBIC-2 · CRUD Ubicaciones (bodegas / puntos de venta).
     Route::get('/inventario/ubicaciones', [\App\Http\Controllers\App\InventarioUbicacionesController::class, 'index'])->middleware('throttle:60,1')->name('app.inventario.ubicaciones');
     Route::post('/inventario/ubicaciones', [\App\Http\Controllers\App\InventarioUbicacionesController::class, 'guardar'])->middleware('throttle:30,1')->name('app.inventario.ubicacion.guardar');
@@ -379,8 +393,13 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     Route::post('/inventario/ubicaciones/sync-resoluciones', [\App\Http\Controllers\App\InventarioUbicacionesController::class, 'sincronizarResoluciones'])->middleware('throttle:5,1')->name('app.inventario.ubicacion.sync-resoluciones');
     // UBIC-6 · marca una resolución SIIGO como default para auto-asignación.
     Route::post('/inventario/ubicaciones/resolucion-default', [\App\Http\Controllers\App\InventarioUbicacionesController::class, 'marcarResolucionDefault'])->middleware('throttle:10,1')->name('app.inventario.ubicacion.resolucion-default');
-    // UBIC-8 · crear admin bodega sin salir del CRUD de ubicaciones.
+    // UBIC-8 · crear la gente de bodega —bodeguero, alistador, despachador—
+    // sin salir del CRUD de ubicaciones. Lo hace el jefe de bodega, que es
+    // quien sabe que entró alguien nuevo el lunes.
     Route::post('/inventario/ubicaciones/admin-bodega', [\App\Http\Controllers\App\InventarioUbicacionesController::class, 'crearAdminBodega'])->middleware('throttle:10,1')->name('app.inventario.ubicacion.admin-bodega');
+    // Y decir quién responde por cada estante, que es trabajo de todos los
+    // días: va aparte de `guardar`, que además toca SIIGO y el PUC.
+    Route::post('/inventario/ubicaciones/responsable', [\App\Http\Controllers\App\InventarioUbicacionesController::class, 'asignarResponsable'])->middleware('throttle:60,1')->name('app.inventario.ubicacion.responsable');
     // UBIC-9 · botón manual "Enviar a SIIGO" (crear o re-enviar warehouse).
     Route::post('/inventario/ubicaciones/{id}/enviar-siigo', [\App\Http\Controllers\App\InventarioUbicacionesController::class, 'enviarASiigo'])->middleware('throttle:20,1')->name('app.inventario.ubicacion.enviar-siigo');
     Route::post('/inventario/ubicaciones/{id}/toggle', [\App\Http\Controllers\App\InventarioUbicacionesController::class, 'toggleActiva'])->middleware('throttle:30,1')->name('app.inventario.ubicacion.toggle');
@@ -801,11 +820,29 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     Route::post('/pedidos-b2b/{pedido}/rechazar', [\App\Http\Controllers\App\PedidosB2BController::class, 'rechazar'])->name('app.pedidos-b2b.rechazar');
     Route::post('/pedidos-b2b/{pedido}/facturar', [\App\Http\Controllers\App\PedidosB2BController::class, 'facturar'])->name('app.pedidos-b2b.facturar');
     Route::post('/pedidos-b2b/{pedido}/empresa', [\App\Http\Controllers\App\PedidosB2BController::class, 'cambiarEmpresa'])->name('app.pedidos-b2b.empresa');
+    // De qué bodega sale. El aviso de «asignale una bodega» mandaba a hacer
+    // algo que la pantalla no permitía; acá está la puerta.
+    Route::post('/pedidos-b2b/{pedido}/bodega', [\App\Http\Controllers\App\PedidosB2BController::class, 'cambiarBodega'])->middleware('throttle:30,1')->name('app.pedidos-b2b.bodega');
     // LOG-J7 · gate duro: no se despacha sin factura (raíz inventario negativo que reportó Don Jorge).
     Route::post('/pedidos-b2b/{pedido}/despachar', [\App\Http\Controllers\App\PedidosB2BController::class, 'despachar'])->middleware('throttle:30,1')->name('app.pedidos-b2b.despachar');
 
     // LOG-J5 · Cola Don Jorge · reemplaza el Excel manual de alistamiento.
     // Seguimiento de guías · dónde está lo que ya salió de bodega.
+    /*
+     * De qué bodega sale cada ciudad.
+     *
+     * La tabla existe desde octubre y nunca tuvo pantalla, así que estaba
+     * vacía: todo pedido nacía sin bodega de origen, no se le apartaba
+     * mercancía y la cola de bodega nunca lo veía. Va al lado de la cola, que
+     * es la que se arregla con ella.
+     */
+    // El index corre dos agregados sobre contactos y pedidos; se le pone el
+    // mismo techo que a la pantalla hermana del catálogo.
+    Route::get('/logistica/reglas-ruteo', [\App\Http\Controllers\App\ReglasRuteoController::class, 'index'])->middleware('throttle:60,1')->name('app.ruteo.index');
+    Route::post('/logistica/reglas-ruteo', [\App\Http\Controllers\App\ReglasRuteoController::class, 'guardar'])->middleware('throttle:30,1')->name('app.ruteo.guardar');
+    Route::post('/logistica/reglas-ruteo/{regla}/alternar', [\App\Http\Controllers\App\ReglasRuteoController::class, 'alternar'])->middleware('throttle:30,1')->name('app.ruteo.alternar');
+    Route::delete('/logistica/reglas-ruteo/{regla}', [\App\Http\Controllers\App\ReglasRuteoController::class, 'eliminar'])->middleware('throttle:30,1')->name('app.ruteo.eliminar');
+
     Route::get('/logistica/guias', [\App\Http\Controllers\App\SeguimientoGuiasController::class, 'index'])->name('app.guias.index');
     Route::post('/logistica/guias/{pedido}/entregar', [\App\Http\Controllers\App\SeguimientoGuiasController::class, 'entregar'])->middleware('throttle:60,1')->name('app.guias.entregar');
     Route::get('/logistica/cola-jorge', [\App\Http\Controllers\App\ColaJorgeController::class, 'index'])->name('app.cola-jorge.index');

@@ -497,7 +497,10 @@ class ComprasGestionController extends Controller implements HasMiddleware
     // ================== RECEPCIÓN ==================
     public function recepcionShow(int $recepcion): Response
     {
-        $rc = RecepcionCompra::with(['orden.items', 'items'])->findOrFail($recepcion);
+        $rc = RecepcionCompra::with([
+            'orden.items', 'items.ubicacion', 'items.producto:id,nombre,referencia',
+            'items.ordenItem:id,descripcion', 'bodega',
+        ])->findOrFail($recepcion);
         $contenedor = $rc->orden ? $this->contenedorDe($rc->orden) : null;
 
         /*
@@ -521,6 +524,22 @@ class ComprasGestionController extends Controller implements HasMiddleware
             ->get(['id', 'mensaje', 'created_at']);
 
         $ultimoFallo = $fallosSiigo->first();
+
+        /*
+         * Los nombres de las bodegas que tocan estas líneas, de una sola
+         * consulta. Se resuelven acá y no dentro del map para no pedirle a la
+         * base una fila por renglón sólo para pintar un nombre.
+         */
+        $nombresBodega = \App\Modules\Dropi\Models\InventarioUbicacion::query()
+            ->whereIn('id', $rc->items
+                ->map(fn ($i) => $i->bodegaDondeQuedo())
+                ->merge($rc->items->pluck('ubicacion_id'))
+                ->push($rc->bodega_id)
+                ->filter()->unique()->values()->all())
+            ->pluck('nombre', 'id');
+
+        $nombreDeBodega = fn (?int $id) => $id ? ($nombresBodega[$id] ?? null) : null;
+
         return Inertia::render('Compras/Recepcion/Show', [
             'paso' => $rc->orden ? app(\App\Modules\Compras\Services\PasoDeCompra::class)->deOrden($rc->orden, auth()->user()) : null,
             'contenedor' => $contenedor ? ['id' => $contenedor->id, 'nombre' => $contenedor->contenedor ?: $contenedor->numero] : null,
@@ -548,6 +567,18 @@ class ComprasGestionController extends Controller implements HasMiddleware
                 ] : null,
                 'items' => $rc->items->map(fn ($i) => [
                     'id' => $i->id,
+                    /*
+                     * De qué producto es el renglón.
+                     *
+                     * Esta es la pantalla con la que se audita el reparto —«de
+                     * estas 50, 30 a Great Baby y 20 a Dropi»— y no decía de
+                     * qué era cada línea: nueve columnas de cantidades, costos
+                     * y bodegas, y ninguna con el nombre. Con una recepción de
+                     * veinte renglones no se puede revisar nada.
+                     */
+                    'producto' => $i->producto?->nombre
+                        ?: ($i->ordenItem?->descripcion ?: '—'),
+                    'referencia' => $i->producto?->referencia,
                     'cantidad_recibida' => (float) $i->cantidad_recibida,
                     'costo_unit' => (float) $i->costo_unit,
                     'subtotal' => (float) $i->subtotal,
@@ -557,9 +588,38 @@ class ComprasGestionController extends Controller implements HasMiddleware
                     'clasificacion' => $i->clasificacion ?? 'apto',
                     'motivo_clasificacion' => $i->motivo_clasificacion,
                     'color_nombre' => $i->color_nombre,
-                    // El saldo es de la variante: dos filas «Sin identificar» comparten uno solo.
-                    'sin_identificar' => $rc->items->firstWhere('variante_id', $i->variante_id)?->id === $i->id
-                        ? app(\App\Modules\Compras\Services\ColoresDeImportacion::class)->saldoSinIdentificar($i, (int) $rc->bodega_id)
+                    /*
+                     * Dónde QUEDÓ esta parte de la línea, no a dónde la
+                     * mandaron. No es lo mismo: lo que no llegó apto entra a
+                     * averías —no al destino elegido— y lo faltante no entra a
+                     * ninguna parte. Esta columna se imprime en el PDF que
+                     * alguien firma, así que decía que unas cajas estaban en la
+                     * principal cuando estaban en averías.
+                     */
+                    'bodega_destino' => $nombreDeBodega($i->bodegaDondeQuedo())
+                        ?: (($i->clasificacion ?: 'apto') === 'faltante' ? 'no llegó' : '—'),
+                    'bodega_elegida' => $i->ubicacion_id !== null
+                        && ($i->clasificacion ?: 'apto') === 'apto',
+                    // Para que la pantalla pueda explicar por qué el destino
+                    // que eligieron no es el que salió.
+                    'destino_pedido' => $i->ubicacion_id !== null
+                        && ($i->clasificacion ?: 'apto') !== 'apto'
+                        ? $nombreDeBodega($i->ubicacion_id)
+                        : null,
+                    /*
+                     * El saldo sin identificar es de la variante EN SU BODEGA.
+                     *
+                     * Antes se buscaba una sola fila por variante y se medía
+                     * contra el encabezado. Repartida la misma variante entre
+                     * dos bodegas, la segunda nunca ofrecía su formulario y
+                     * esas unidades se quedaban sin color para siempre.
+                     */
+                    'sin_identificar' => ($bodegaReal = $i->bodegaDondeQuedo()) !== null
+                        && $rc->items
+                            ->first(fn ($o) => $o->variante_id === $i->variante_id
+                                && $o->bodegaDondeQuedo() === $bodegaReal)?->id === $i->id
+                        ? app(\App\Modules\Compras\Services\ColoresDeImportacion::class)
+                            ->saldoSinIdentificar($i, $bodegaReal)
                         : 0.0,
                 ])->all(),
             ],
@@ -678,6 +738,18 @@ class ComprasGestionController extends Controller implements HasMiddleware
                     'no_sube' => $esImportacion && ! $i->producto_id && ! $i->variante_id && ! $i->esComponente()
                         && ! \App\Modules\Compras\Actions\CrearProductosDeOrden::referenciaDe($i),
                     'es_componente' => $i->esComponente(),
+                    /*
+                     * La línea no tiene producto del catálogo, así que al
+                     * recibirla NO va a sumar inventario.
+                     *
+                     * A veces está bien —un flete o un seguro no son
+                     * mercancía— y por eso no se bloquea la recepción. Lo que
+                     * no puede seguir pasando es que nadie se entere: antes la
+                     * recepción se confirmaba, la orden quedaba recibida, el
+                     * asiento se hacía, y el inventario no se movía en
+                     * silencio.
+                     */
+                    'sin_producto' => ! $i->producto_id && ! $i->variante_id && ! $i->esComponente(),
                     'referencia' => \App\Modules\Compras\Actions\CrearProductosDeOrden::referenciaDe($i),
                     'color_nombre' => $i->color_nombre,
                     // Ya tiene stock sin colores: el color queda en la recepción y su stock sigue siendo uno.
@@ -686,7 +758,158 @@ class ComprasGestionController extends Controller implements HasMiddleware
                 ])->filter(fn ($x) => $x['cantidad_pendiente'] > 0)->values(),
                 'colores' => \App\Modules\Catalogo\Models\Color::query()->where('activo', true)->orderBy('nombre')->pluck('nombre')->values(),
             ] : null,
+
+            /*
+             * A dónde se puede mandar lo que se está descargando.
+             *
+             * No se ofrece la lista de bodegas: hay 55 filas y 44 son espejos
+             * del catálogo compartido de SIIGO —«TK0007UREA», «Miyuki Test»,
+             * «Bodega pruebas luis»—, indistinguibles por `activa`,
+             * `categoria` o `disponible_para_venta`. Se ofrece el par con el
+             * que razona la bodega, que además es la regla que puso el área:
+             * oficina 10 u 11, almacén 01 ó 07. Son cuatro opciones limpias en
+             * vez de sesenta sucias.
+             */
+            'destinos' => $this->destinosDeIngreso(),
+            'bodega_orden' => $oc?->bodega_id ? [
+                'id' => $oc->bodega_id,
+                'nombre' => $oc->bodega?->nombre,
+            ] : null,
         ]);
+    }
+
+    /**
+     * Le pone producto a una línea de la orden, sin salir de la recepción.
+     *
+     * Quien descarga el contenedor se encuentra con que la factura trae
+     * mercancía que no está en el catálogo. Hasta hoy su única salida era
+     * irse al catálogo —otra casilla de permiso—, crear el producto, volver a
+     * la orden y empezar de nuevo; en la práctica recibía igual y la
+     * mercancía no entraba al inventario sin que nadie se enterara.
+     *
+     * Va con la casilla de recepción, no con la de productos: la persona que
+     * tiene el contenedor abierto es la que sabe qué llegó.
+     */
+    public function lineaProducto(Request $r, int $item): RedirectResponse
+    {
+        abort_unless(\App\Auth\Permisos::puede($r->user(), 'compras_recepcion'), 403,
+            'Esta parte de Compras necesita su propio acceso.');
+
+        $data = $r->validate([
+            // Enlazar uno que ya existe…
+            'producto_id' => ['nullable', 'integer', 'exists:productos,id'],
+            // …o crear uno con lo mínimo.
+            'nombre' => ['nullable', 'string', 'max:200'],
+            'referencia' => ['nullable', 'string', 'max:100'],
+            'desglose_stock' => ['boolean'],
+            'color_nombre' => ['nullable', 'string', 'max:60'],
+        ]);
+
+        $linea = \App\Modules\Compras\Models\OrdenCompraItem::findOrFail($item);
+
+        try {
+            $linea = \App\Modules\Compras\Actions\EnlazarProductoALinea::run($linea, $data);
+        } catch (\InvalidArgumentException $e) {
+            return back()->withErrors(['producto' => $e->getMessage()]);
+        }
+
+        return back()->with('success',
+            "«{$linea->descripcion}» quedó enlazada a {$linea->producto?->nombre}. Ahora sí va a sumar inventario.");
+    }
+
+    /**
+     * Traduce el par «oficina:almacén» de cada renglón a la bodega concreta.
+     *
+     * Si el par no admite ingreso directo, `UbicacionDelPar` lo rechaza con el
+     * motivo en palabras —«al almacén 04 OUTLET no se ingresa directo…»— y la
+     * recepción no se crea. Esa es la única puerta por donde entra el destino,
+     * así que por acá no pasa una bodega inventada.
+     *
+     * @param  array<int, array>  $items
+     * @return array<int, array>
+     */
+    private function resolverDestinos(array $items, ?int $bodegaDeLaOrdenId = null): array
+    {
+        $par = app(\App\Modules\Inventario\Support\UbicacionDelPar::class);
+        $cache = [];
+
+        foreach ($items as $i => $it) {
+            $elegido = trim((string) ($it['destino_ingreso'] ?? ''));
+            unset($items[$i]['destino_ingreso']);
+
+            if ($elegido === '') {
+                $items[$i]['ubicacion_id'] = null;
+
+                continue;
+            }
+
+            if (! isset($cache[$elegido])) {
+                [$oficinaId, $almacenId] = array_pad(explode(':', $elegido, 2), 2, null);
+
+                $oficina = \App\Modules\Inventario\Models\Oficina::find((int) $oficinaId);
+                $almacen = \App\Modules\Inventario\Models\Almacen::find((int) $almacenId);
+
+                if (! $oficina || ! $almacen) {
+                    throw new \InvalidArgumentException('El destino elegido ya no existe en el catálogo.');
+                }
+
+                // Se pregunta el motivo ANTES de resolver, para poder decirlo
+                // en palabras en vez de cortar la petición con un 422 mudo.
+                $motivo = $par->motivoParaNoRecibir($oficina, $almacen);
+                if ($motivo !== null) {
+                    throw new \InvalidArgumentException($motivo);
+                }
+
+                /*
+                 * La bodega de la orden va como molde: si hay que crear la del
+                 * par, hereda responsable y ciudad de ella. Sin eso la bodega
+                 * nueva nace sin dueño y lo que acaban de recibir no le
+                 * aparece a nadie en su cola ni en su kardex.
+                 */
+                $cache[$elegido] = $par->resolver(
+                    $oficina,
+                    $almacen,
+                    false,
+                    $bodegaDeLaOrdenId
+                        ? \App\Modules\Dropi\Models\InventarioUbicacion::find($bodegaDeLaOrdenId)
+                        : null,
+                )->id;
+            }
+
+            $items[$i]['ubicacion_id'] = $cache[$elegido];
+        }
+
+        return array_values($items);
+    }
+
+    /**
+     * Los pares (oficina, almacén) que admiten mercancía del contenedor.
+     *
+     * Se resuelven acá y no en el Vue para que la pantalla no tenga que
+     * repetir la regla, y para que si el área la cambia desde el catálogo, la
+     * lista cambie sola.
+     *
+     * @return array<int, array{valor:string, label:string, oficina_id:int, almacen_id:int}>
+     */
+    private function destinosDeIngreso(): array
+    {
+        $destinos = [];
+
+        $oficinas = \App\Modules\Inventario\Models\Oficina::deIngreso()->orderBy('orden')->get();
+        $almacenes = \App\Modules\Inventario\Models\Almacen::deIngreso()->orderBy('orden')->get();
+
+        foreach ($oficinas as $o) {
+            foreach ($almacenes as $a) {
+                $destinos[] = [
+                    'valor' => "{$o->id}:{$a->id}",
+                    'label' => "{$o->nombre} · {$a->nombre}",
+                    'oficina_id' => $o->id,
+                    'almacen_id' => $a->id,
+                ];
+            }
+        }
+
+        return $destinos;
     }
 
     public function recepcionCrear(Request $r): RedirectResponse
@@ -735,8 +958,43 @@ class ComprasGestionController extends Controller implements HasMiddleware
             'items.*.clasificacion' => ['nullable', 'string', 'in:apto,averia,cuarentena,revision,faltante'],
             'items.*.motivo_clasificacion' => ['nullable', 'string', 'max:180'],
             'items.*.color_nombre' => ['nullable', 'string', 'max:60'],
+            /*
+             * El destino de ESTA parte de la línea, como par oficina:almacén.
+             *
+             * Vacío = la bodega de la orden, que es como entró todo hasta hoy;
+             * así el panel de Dropi, que confirma con esta misma acción y no
+             * manda destino, sigue funcionando sin tocarlo.
+             *
+             * Se valida como par y no como id de bodega a propósito: por el
+             * POST no puede entrar un espejo de SIIGO ni una ubicación de
+             * avería, porque sólo se aceptan combinaciones que el catálogo
+             * marcó como de ingreso directo.
+             */
+            'items.*.destino_ingreso' => ['nullable', 'string', 'max:20'],
             'motivo_exceso' => ['nullable', 'string', 'max:300'],
         ]);
+
+        try {
+            $data['items'] = $this->resolverDestinos(
+                $data['items'],
+                (int) OrdenCompra::whereKey($data['orden_id'])->value('bodega_id') ?: null,
+            );
+        } catch (\Symfony\Component\HttpKernel\Exception\HttpException $e) {
+            // `UbicacionDelPar` rechaza con abort cuando la bodega del par
+            // está desactivada: mismo trato, o el mensaje no llega.
+            if ($e->getStatusCode() >= 500) {
+                throw $e;
+            }
+
+            return back()->withErrors([
+                'recepcion' => $e->getMessage() ?: 'No se pudo resolver el destino.',
+            ]);
+        } catch (\InvalidArgumentException $e) {
+            // El motivo tiene que LEERSE. Con `abort(422)` la pantalla de
+            // Inertia se queda muda y quien está descargando no sabe por qué
+            // no se guardó.
+            return back()->withErrors(['recepcion' => $e->getMessage()]);
+        }
 
         // La lógica vive en RegistrarRecepcion (7-nov): el panel de Dropi recibe
         //   con las mismas reglas.
@@ -745,6 +1003,30 @@ class ComprasGestionController extends Controller implements HasMiddleware
         } catch (\InvalidArgumentException $e) {
             // Sin tasa de cambio o recibiendo de más: que lo lea quien está contando.
             return back()->withErrors(['recepcion' => $e->getMessage()]);
+        } catch (\Symfony\Component\HttpKernel\Exception\HttpException $e) {
+            /*
+             * Los `abort(422)` del Action tampoco se pueden quedar mudos.
+             *
+             * `RegistrarRecepcion` rechaza con abort cuando la OC no está en
+             * estado receptable, cuando no tiene bodega destino o cuando una
+             * línea no le pertenece. Son rechazos correctos, pero en una
+             * petición de Inertia un abort devuelve una página de error que la
+             * pantalla no sabe leer: el botón «Confirmar recepción» se apaga,
+             * la pantalla se queda exactamente igual y quien está descargando
+             * no tiene idea de por qué no pasó nada. Lo probamos con una orden
+             * en borrador: 422 y ni una letra.
+             *
+             * Se reenvía como error de campo, que es lo que el resto del
+             * sistema ya usa y la pantalla sí pinta. Se deja el abort en el
+             * Action porque el panel de Dropi también lo llama.
+             */
+            if ($e->getStatusCode() >= 500) {
+                throw $e;
+            }
+
+            return back()->withErrors([
+                'recepcion' => $e->getMessage() ?: 'No se pudo registrar la recepción.',
+            ]);
         }
 
         return redirect()->route('app.compras.recepcion.show', $rc->id)->with('success', "Recepción {$rc->numero} creada.");

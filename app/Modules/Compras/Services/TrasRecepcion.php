@@ -44,25 +44,85 @@ class TrasRecepcion
     public function separarEcommerce(RecepcionCompra $recepcion): ?Traslado
     {
         $principal = EmpresaConfig::current()->id;
-        $suyos = $recepcion->items
+
+        // Todo lo que llegó bien y es de ella. Sirve para AVISARLE, se haya
+        // repartido o no: la mercancía llegó y tiene que saberlo.
+        $deElla = $recepcion->items
             ->filter(fn ($i) => ($i->clasificacion ?? 'apto') === 'apto')
             ->filter(fn ($i) => $i->ordenItem?->empresa_destino_id && (int) $i->ordenItem->empresa_destino_id !== (int) $principal);
 
-        if ($suyos->isEmpty()) {
+        if ($deElla->isEmpty()) {
             return null;
         }
 
-        $traslado = $this->crearTraslado($recepcion, $suyos);
-        $unidades = rtrim(rtrim(number_format((float) $suyos->sum('cantidad_recibida'), 3, ',', '.'), '0'), ',');
+        /*
+         * Pero sólo se TRASLADA lo que quedó en la bodega de la recepción.
+         *
+         * Desde que quien descarga puede mandar la mercancía directo al
+         * destino —«estas 20 son de Dropi, van a su bodega»—, esas unidades
+         * nunca pasaron por la principal. Sacarlas de ahí con un traslado
+         * dejaría la principal en negativo y el stock duplicado del otro lado:
+         * el saldo diría que hay 40 donde hay 20.
+         */
+        $aTrasladar = $deElla->filter(fn ($i) => $i->ubicacion_id === null);
+
+        /*
+         * De lo que SÍ se repartió, hay que distinguir dos cosas muy
+         * distintas, y antes se contaban juntas.
+         *
+         * «De quién es la mercancía» y «a qué bodega la mandaron» son dos
+         * ejes independientes: quien descarga puede marcar que 20 unidades de
+         * Aracely entran a la bodega de Great Baby —y a veces es lo correcto,
+         * porque ahí hay espacio—. Dando por hecho que todo lo repartido fue
+         * a la bodega de ella, el aviso decía «entró directo a su bodega, no
+         * hace falta aceptar ningún traslado» de unas cajas que estaban en la
+         * bodega de otra empresa. Aracely no salía a buscarlas, y ese stock
+         * quedaba contra su empresa en una bodega que no es suya.
+         */
+        $empresaDeLaBodega = $this->empresaPorBodega();
+
+        $repartidas = $deElla->filter(fn ($i) => $i->ubicacion_id !== null);
+
+        // Suya de verdad: la oficina de esa bodega es de la misma empresa a la
+        // que la línea está destinada. Si la bodega no tiene oficina mapeada
+        // todavía, no se sabe, y no se afirma que sea suya.
+        $enSuBodega = $repartidas->filter(fn ($i) => ($empresaDeLaBodega[(int) $i->ubicacion_id] ?? null)
+            === (int) $i->ordenItem->empresa_destino_id);
+
+        $enBodegaAjena = $repartidas->reject(fn ($i) => ($empresaDeLaBodega[(int) $i->ubicacion_id] ?? null)
+            === (int) $i->ordenItem->empresa_destino_id);
+
+        $traslado = $aTrasladar->isNotEmpty()
+            ? $this->crearTraslado($recepcion, $aTrasladar)
+            : null;
+
+        $unidades = rtrim(rtrim(number_format((float) $deElla->sum('cantidad_recibida'), 3, ',', '.'), '0'), ',');
+
+        $ajenas = $enBodegaAjena->isNotEmpty()
+            ? ' Ojo: '.rtrim(rtrim(number_format((float) $enBodegaAjena->sum('cantidad_recibida'), 3, ',', '.'), '0'), ',')
+                .' unidades suyas quedaron en '
+                .($enBodegaAjena->map(fn ($i) => $i->ubicacion?->nombre)->filter()->unique()->implode(', ') ?: 'otra bodega')
+                .': pedí el traslado si las querés en la tuya.'
+            : '';
+
+        $mensaje = match (true) {
+            $traslado !== null => "Recepción {$recepcion->numero}. Traslado {$traslado->numero} listo para aceptar.".$ajenas,
+            // Se repartió al recibir: no hay nada que trasladar y eso es lo
+            // correcto. Decirlo evita que alguien salga a buscar un traslado
+            // que no existe.
+            $enSuBodega->isNotEmpty() => "Recepción {$recepcion->numero}. Entró directo a su bodega al descargar, "
+                .'no hace falta aceptar ningún traslado.'.$ajenas,
+            $enBodegaAjena->isNotEmpty() => "Recepción {$recepcion->numero}.".$ajenas,
+            default => "Recepción {$recepcion->numero}. No se creó el traslado: falta configurar la ubicación "
+                .'de e-commerce en Reglas, o crear el producto de estas líneas.',
+        };
 
         foreach ($this->aracelis() as $u) {
             NotificacionErp::crear([
                 'user_id' => $u->id,
                 'tipo' => 'recepcion_ecommerce',
                 'titulo' => "Llegó mercancía de e-commerce: {$unidades} unidades",
-                'mensaje' => $traslado
-                    ? "Recepción {$recepcion->numero}. Traslado {$traslado->numero} listo para aceptar."
-                    : "Recepción {$recepcion->numero}. No se creó el traslado: falta configurar la ubicación de e-commerce en Reglas, o crear el producto de estas líneas.",
+                'mensaje' => $mensaje,
                 'color' => 'info',
                 'icono' => 'heroicon-o-truck',
                 'url' => $traslado ? "/app/inventario/traslados/{$traslado->id}" : "/app/compras/recepcion/{$recepcion->id}",
@@ -70,6 +130,32 @@ class TrasRecepcion
         }
 
         return $traslado;
+    }
+
+    /**
+     * De qué empresa es cada bodega, por el eje de oficinas.
+     *
+     * La oficina del catálogo dice de quién es la mercancía y apunta a una
+     * `empresa_config`. Es la única forma de saber si la bodega a la que
+     * mandaron unas cajas es de la misma empresa a la que esas cajas están
+     * destinadas. Devuelve [bodega_id => empresa_id], y las bodegas sin
+     * oficina mapeada simplemente no están: de ésas no se sabe.
+     */
+    private function empresaPorBodega(): array
+    {
+        $empresaDeOficina = \App\Modules\Inventario\Models\Oficina::query()
+            ->whereNotNull('empresa_config_id')
+            ->pluck('empresa_config_id', 'id');
+
+        $salida = [];
+
+        foreach (InventarioUbicacion::query()->whereNotNull('oficina_id')->get(['id', 'oficina_id']) as $b) {
+            if (isset($empresaDeOficina[$b->oficina_id])) {
+                $salida[(int) $b->id] = (int) $empresaDeOficina[$b->oficina_id];
+            }
+        }
+
+        return $salida;
     }
 
     private function crearTraslado(RecepcionCompra $recepcion, Collection $items): ?Traslado

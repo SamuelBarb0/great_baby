@@ -17,6 +17,17 @@ const props = defineProps({
     // Activas sin ciudad: ningún admin de bodega las puede operar.
     sin_sede: { type: Number, default: 0 },
     bodegas: { type: Array, default: () => [] },
+    // El jefe de bodega puede decir quién responde por sus estantes.
+    puede_asignar_responsable: { type: Boolean, default: false },
+    // Null = Gerencia, que puede sobre todas.
+    mis_ubicaciones: { type: Array, default: null },
+    // Crear/editar/activar/borrar la ubicación, empujarla a SIIGO y traer las
+    // resoluciones DIAN son de Gerencia: tocan el enlace con SIIGO, la
+    // resolución y las cuentas del PUC. Sin esta bandera la pantalla ofrecía
+    // los seis controles a cualquiera que pudiera MIRARLA —al jefe de bodega
+    // también— y el servidor los cerraba con 403; dos de ellos, activar y
+    // borrar, ni siquiera avisaban: el click no hacía nada.
+    puede_editar_la_ubicacion: { type: Boolean, default: false },
 });
 
 const modal = ref(null);
@@ -30,7 +41,22 @@ const sincronizandoResol = ref(false);
 const defaultResolId = ref(props.resolucion_default_id);
 // UBIC-8 · lista reactiva de candidatos admin (crecerá al crear uno nuevo in-situ).
 const candidatosAdmin = ref([...props.candidatos_admin]);
-const nuevoAdmin = reactive({ abierto: false, name: '', email: '', password: '', creando: false, passGenerado: null });
+/*
+ * El jefe de bodega crea a su gente desde acá.
+ *
+ * Antes sólo se podía crear un AdminBodega, y era de Gerencia. Pedirle a
+ * Gerencia que cree al alistador que entró el lunes terminaba en estantes sin
+ * responsable durante semanas, que es exactamente por lo que los alistadores
+ * tenían la cola vacía.
+ */
+/*
+ * Dos sitios crean gente de bodega: el panel de la cabecera y el botón
+ * «Nuevo» de dentro del formulario de la ubicación. Comparten los campos a
+ * propósito —es el mismo formulario— pero NO la bandera de abierto: con una
+ * sola, abrir uno abría el otro, y el de la cabecera quedaba desplegado
+ * detrás del formulario, con las mismas casillas duplicadas en pantalla.
+ */
+const nuevoAdmin = reactive({ abierto: false, abiertoEnForm: false, name: '', email: '', password: '', rol: 'Alistador', creando: false, passGenerado: null });
 
 const vacio = () => ({
     id: null, codigo: '', nombre: '', categoria: 'venta', activa: true,
@@ -139,6 +165,23 @@ const confirmarEliminar = (u) => {
     };
 };
 
+/*
+ * Cuántas veces se rechazó el select de cada fila.
+ *
+ * Es la `key` del control: al subirla, Vue descarta el <select> y lo vuelve a
+ * crear leyendo `u.responsable_user_id`, que es el valor que de verdad quedó
+ * guardado. Sin esto el control se quedaba mostrando a la persona que el
+ * servidor acababa de rechazar.
+ */
+const reintentosDelSelect = ref({});
+
+/** Vuelve a pedir sólo los datos del encabezado, sin recargar la página. */
+const refrescarContadores = () => router.reload({
+    only: ['sin_sede', 'candidatos_admin', 'bodegas'],
+    preserveScroll: true,
+    preserveState: true,
+});
+
 const mostrarFlash = (type, message) => {
     flash.value = { type, message };
     setTimeout(() => { flash.value = null; }, 5000);
@@ -179,6 +222,60 @@ const copiarCredencial = async () => {
 };
 
 // UBIC-8 · crea un nuevo Admin Bodega sin salir del modal, lo deja seleccionado.
+/*
+ * Sobre qué ubicaciones puede decidir quien está mirando.
+ *
+ * Gerencia sobre todas (`mis_ubicaciones` llega en null); el jefe de bodega
+ * sólo sobre las suyas, para que no reparta las de otra sede.
+ */
+const puedeAsignar = (u) =>
+    props.puede_asignar_responsable
+    && (props.mis_ubicaciones === null || props.mis_ubicaciones.includes(u.id));
+
+const asignarResponsable = async (u, valor) => {
+    try {
+        const { data } = await axios.post('/app/inventario/ubicaciones/responsable', {
+            ubicacion_id: u.id,
+            responsable_user_id: valor ? Number(valor) : null,
+        });
+        u.responsable_user_id = data.responsable?.id ?? null;
+        u.responsable_nombre = data.responsable?.name ?? null;
+        /*
+         * `mostrarFlash` y no `flash.value = texto`.
+         *
+         * El banner lee `flash.type` y `flash.message`. Con un string adentro,
+         * `type` es undefined —así que nunca es 'success' y pinta el estilo de
+         * error— y `message` es undefined, que se imprime vacío: una caja ROJA
+         * SIN UNA LETRA, idéntica en el camino que funcionó y en el que falló.
+         * Era la única confirmación de todo este flujo.
+         */
+        mostrarFlash('success', data.mensaje);
+        /*
+         * Y se recalculan los contadores del encabezado.
+         *
+         * Estas operaciones van por axios, no por Inertia, así que las props
+         * no se vuelven a pedir nunca: el aviso de «N ubicaciones activas sin
+         * bodega» y la lista de candidatos se quedaban con el número del
+         * arranque. Nombrar a tres responsables seguidos dejaba el aviso
+         * diciendo lo mismo que antes de empezar.
+         */
+        refrescarContadores();
+    } catch (e) {
+        /*
+         * Y el select vuelve a lo que de verdad quedó guardado.
+         *
+         * `:value` es de una vía: si el servidor rechaza a la persona, el
+         * valor del modelo no cambia, Vue no vuelve a pintar el control y la
+         * fila se queda MOSTRANDO asignado a alguien que el servidor negó.
+         * Forzar el re-pintado con la misma clave no sirve, así que se
+         * reasigna el id y el `key` del select lo sigue.
+         */
+        u.responsable_user_id = u.responsable_user_id ?? null;
+        reintentosDelSelect.value[u.id] = (reintentosDelSelect.value[u.id] ?? 0) + 1;
+        mostrarFlash('error', mensajeDeError(e));
+    }
+};
+
 const crearAdminBodega = async () => {
     if (!nuevoAdmin.name || !nuevoAdmin.email) {
         mostrarFlash('error', 'Nombre y email son obligatorios.');
@@ -190,6 +287,7 @@ const crearAdminBodega = async () => {
             name: nuevoAdmin.name,
             email: nuevoAdmin.email,
             password: nuevoAdmin.password || null,
+            rol: nuevoAdmin.rol,
         });
         if (data.ok) {
             candidatosAdmin.value.push(data.usuario);
@@ -207,6 +305,7 @@ const crearAdminBodega = async () => {
             }
             nuevoAdmin.name = ''; nuevoAdmin.email = ''; nuevoAdmin.password = '';
             nuevoAdmin.abierto = false;
+            nuevoAdmin.abiertoEnForm = false;
         }
     } catch (e) {
         const err = e.response?.data;
@@ -254,14 +353,71 @@ const crearAdminBodega = async () => {
                     </p>
                 </div>
                 <div class="flex items-center gap-2">
-                    <button @click="sincronizarResoluciones" :disabled="sincronizandoResol"
+                    <button v-if="puede_editar_la_ubicacion" @click="sincronizarResoluciones" :disabled="sincronizandoResol"
                             class="text-sm inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-sky-500 text-sky-700 hover:bg-sky-50 disabled:opacity-50"
                             title="Trae de SIIGO las resoluciones DIAN de factura venta activas">
                         <RefreshCw :class="['h-4 w-4', sincronizandoResol && 'animate-spin']"/>
                         {{ sincronizandoResol ? 'Trayendo…' : 'Traer resoluciones de SIIGO' }}
                     </button>
-                    <button @click="abrirNueva" class="btn-primary text-sm inline-flex items-center gap-1.5">
+                    <!-- El jefe de bodega crea a su gente sin pasar por Gerencia.
+                         Vive acá afuera y no dentro del formulario de la ubicación,
+                         que toca SIIGO y el PUC y sí es de Gerencia. -->
+                    <button v-if="puede_asignar_responsable"
+                            @click="nuevoAdmin.abierto = !nuevoAdmin.abierto"
+                            class="text-sm inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-violet-500 text-violet-700 hover:bg-violet-50">
+                        <UserPlus class="h-4 w-4"/> Nueva persona de bodega
+                    </button>
+                    <button v-if="puede_editar_la_ubicacion" @click="abrirNueva" class="btn-primary text-sm inline-flex items-center gap-1.5">
                         <Plus class="h-4 w-4"/> Nueva ubicación
+                    </button>
+                </div>
+            </div>
+
+            <!-- Crear alistador, despachador o jefe de bodega. -->
+            <div v-if="nuevoAdmin.abierto" class="card p-4 border-l-4 border-violet-500 space-y-2">
+                <!--
+                    Si el jefe de bodega no responde por ninguna ubicación, crear
+                    gente acá no le sirve de nada: el select de responsable sólo
+                    aparece en SUS ubicaciones, y no tiene ninguna. Antes el panel
+                    se abría igual, él creaba la persona, y después no encontraba
+                    dónde asignarla ni por qué.
+                -->
+                <div v-if="mis_ubicaciones !== null && !mis_ubicaciones.length"
+                     class="rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-xs p-2.5">
+                    Ojo: usted todavía no responde por ninguna bodega, así que la persona que cree acá
+                    no la va a poder asignar a nada. Pídale a Gerencia que lo deje como responsable de
+                    su bodega primero.
+                </div>
+                <div class="font-semibold text-sm">Nueva persona de bodega</div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    <input v-model="nuevoAdmin.name" class="input" placeholder="Nombre completo"/>
+                    <input v-model="nuevoAdmin.email" type="email" class="input" placeholder="correo@dominio.com"/>
+                    <input v-model="nuevoAdmin.password" type="text" class="input" placeholder="Clave (opcional, se genera sola)"/>
+                    <select v-model="nuevoAdmin.rol" class="input" aria-label="Qué hace esta persona">
+                        <option value="Alistador">Alistador · alista pedidos</option>
+                        <option value="Despachador">Despachador · entrega a la transportadora</option>
+                        <option value="AdminBodega">Jefe de bodega · administra y mueve inventario</option>
+                    </select>
+                </div>
+                <p class="text-[11px] text-violet-700">
+                    <template v-if="nuevoAdmin.rol === 'AdminBodega'">
+                        Va a poder mover inventario en las bodegas de las que lo hagan responsable.
+                    </template>
+                    <template v-else>
+                        Va a ver la cola y el stock de las bodegas de las que lo hagan responsable.
+                        Mover inventario sigue siendo del jefe de bodega.
+                    </template>
+                    Después de crearlo, asignalo en la columna «Admin bodega» de su ubicación.
+                </p>
+                <div v-if="nuevoAdmin.passGenerado" class="text-xs bg-violet-50 border border-violet-200 rounded p-2">
+                    Clave generada: <strong class="font-mono">{{ nuevoAdmin.passGenerado }}</strong> ·
+                    anotala ahora, no se vuelve a mostrar.
+                </div>
+                <div class="flex justify-end gap-2">
+                    <button type="button" @click="nuevoAdmin.abierto = false" class="text-xs px-3 py-1.5 rounded-lg hover:bg-surface-100">Cancelar</button>
+                    <button type="button" @click="crearAdminBodega" :disabled="nuevoAdmin.creando"
+                            class="text-xs px-3 py-1.5 rounded-lg bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50">
+                        {{ nuevoAdmin.creando ? 'Creando…' : 'Crear' }}
                     </button>
                 </div>
             </div>
@@ -283,7 +439,7 @@ const crearAdminBodega = async () => {
                     </div>
                 </div>
                 <div class="flex flex-wrap gap-2">
-                    <button v-for="r in resolucionesList" :key="r.id" @click="marcarDefault(r)"
+                    <button v-for="r in resolucionesList" :key="r.id" :disabled="!puede_editar_la_ubicacion" @click="marcarDefault(r)"
                             :class="[
                                 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs',
                                 r.id === defaultResolId ? 'border-amber-400 bg-amber-50 text-amber-800' : 'border-surface-200 hover:border-amber-300 hover:bg-amber-50/50'
@@ -345,7 +501,7 @@ const crearAdminBodega = async () => {
                                 <!-- Decía «Crear en SIIGO» y no creaba nada: ese
                                      catálogo es de sólo lectura allá. Ahora el
                                      botón sólo explica cómo enlazarla. -->
-                                <button v-else @click="enviarASiigo(u)" :disabled="enviandoSiigo[u.id]"
+                                <button v-else-if="puede_editar_la_ubicacion" @click="enviarASiigo(u)" :disabled="enviandoSiigo[u.id]"
                                         class="inline-flex items-center gap-0.5 ml-1 text-[10px] bg-surface-100 text-surface-600 hover:bg-surface-200 px-1 py-0.5 rounded border border-surface-300 disabled:opacity-50"
                                         title="Cómo enlazar esta ubicación con una bodega de SIIGO">
                                     <CloudOff class="h-2.5 w-2.5"/>
@@ -362,11 +518,17 @@ const crearAdminBodega = async () => {
                                 <template v-else-if="u.es_bodega && u.responsable_user_id">
                                     {{ u.ciudad || 'sede' }}
                                 </template>
-                                <button v-else @click="abrirEditar(u)"
+                                <button v-else-if="puede_editar_la_ubicacion" @click="abrirEditar(u)"
                                         class="inline-flex items-center gap-1 text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5 hover:bg-amber-100"
                                         title="Nadie la puede contar ni mover hasta que diga de qué bodega es">
                                     <AlertTriangle class="h-3 w-3"/> Asignar bodega
                                 </button>
+                                <!-- Mandar a «asignar bodega» a quien no puede abrir el
+                                     formulario es mandarlo a una puerta cerrada. -->
+                                <span v-else class="inline-flex items-center gap-1 text-amber-700"
+                                      title="Nadie la puede contar ni mover hasta que diga de qué bodega es">
+                                    <AlertTriangle class="h-3 w-3"/> sin bodega · lo asigna Gerencia
+                                </span>
                             </td>
                             <td class="p-2 text-xs">
                                 <span v-if="u.siigo_resolution_prefix" class="font-mono bg-sky-50 text-sky-700 px-1.5 py-0.5 rounded">
@@ -376,20 +538,37 @@ const crearAdminBodega = async () => {
                             </td>
                             <td class="p-2 text-xs font-mono text-surface-600">{{ u.cta_inventario || '—' }}</td>
                             <td class="p-2 text-xs">
-                                <span v-if="u.responsable_nombre" class="inline-flex items-center gap-1 bg-violet-50 text-violet-700 px-1.5 py-0.5 rounded">
-                                    <ShieldCheck class="h-3 w-3"/> {{ u.responsable_nombre }}
-                                </span>
-                                <span v-else class="text-surface-300">— sin admin —</span>
+                                <!-- Decir quién responde por un estante es trabajo de todos
+                                     los días del jefe de bodega: se hace acá mismo, en la
+                                     fila, sin abrir el formulario completo (que además toca
+                                     SIIGO y el PUC y es de Gerencia). -->
+                                <select v-if="puedeAsignar(u)"
+                                        :key="`resp-${u.id}-${reintentosDelSelect[u.id] || 0}`"
+                                        :value="u.responsable_user_id"
+                                        @change="asignarResponsable(u, $event.target.value)"
+                                        class="input text-xs py-1 w-full max-w-[14rem]"
+                                        :aria-label="`Responsable de ${u.nombre}`">
+                                    <option :value="''">— sin responsable —</option>
+                                    <option v-for="c in candidatosAdmin" :key="c.id" :value="c.id">
+                                        {{ c.name }}<template v-if="c.roles.length"> · {{ c.roles[0] }}</template>
+                                    </option>
+                                </select>
+                                <template v-else>
+                                    <span v-if="u.responsable_nombre" class="inline-flex items-center gap-1 bg-violet-50 text-violet-700 px-1.5 py-0.5 rounded">
+                                        <ShieldCheck class="h-3 w-3"/> {{ u.responsable_nombre }}
+                                    </span>
+                                    <span v-else class="text-surface-300">— sin responsable —</span>
+                                </template>
                             </td>
                             <td class="p-2 text-center text-xs text-surface-500">{{ u.movimientos_count || 0 }}</td>
                             <td class="p-2 text-center">
-                                <button @click="toggleActiva(u)">
+                                <button v-if="puede_editar_la_ubicacion" @click="toggleActiva(u)">
                                     <Power v-if="u.activa" class="h-4 w-4 text-emerald-600 inline"/>
                                     <PowerOff v-else class="h-4 w-4 text-rose-400 inline"/>
                                 </button>
                             </td>
                             <td class="p-2 text-right whitespace-nowrap">
-                                <button @click="abrirEditar(u)" class="text-brand-600 hover:text-brand-700 p-1" title="Editar">
+                                <button v-if="puede_editar_la_ubicacion" @click="abrirEditar(u)" class="text-brand-600 hover:text-brand-700 p-1" title="Editar">
                                     <Pencil class="h-4 w-4"/>
                                 </button>
                                 <button @click="confirmarEliminar(u)" class="text-red-500 hover:text-red-700 p-1" title="Eliminar">
@@ -565,26 +744,34 @@ const crearAdminBodega = async () => {
                                         {{ c.name }} · {{ c.email }}<template v-if="c.roles.length"> · [{{ c.roles.join(', ') }}]</template>
                                     </option>
                                 </select>
-                                <button type="button" @click="nuevoAdmin.abierto = !nuevoAdmin.abierto"
+                                <button type="button" @click="nuevoAdmin.abiertoEnForm = !nuevoAdmin.abiertoEnForm"
                                         class="text-xs inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-violet-500 text-violet-700 hover:bg-violet-50">
                                     <UserPlus class="h-3.5 w-3.5"/> Nuevo
                                 </button>
                             </div>
-                            <div v-if="nuevoAdmin.abierto" class="mt-3 p-3 rounded-lg border border-violet-200 bg-violet-50/50 space-y-2">
-                                <div class="grid grid-cols-1 md:grid-cols-3 gap-2">
+                            <div v-if="nuevoAdmin.abiertoEnForm" class="mt-3 p-3 rounded-lg border border-violet-200 bg-violet-50/50 space-y-2">
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
                                     <input v-model="nuevoAdmin.name" class="input" placeholder="Nombre completo"/>
                                     <input v-model="nuevoAdmin.email" type="email" class="input" placeholder="correo@dominio.com"/>
                                     <input v-model="nuevoAdmin.password" type="text" class="input" placeholder="Password (opcional, se genera)"/>
+                                    <select v-model="nuevoAdmin.rol" class="input" aria-label="Qué hace esta persona">
+                                        <option value="Alistador">Alistador · alista pedidos</option>
+                                        <option value="Despachador">Despachador · entrega a la transportadora</option>
+                                        <option value="AdminBodega">Jefe de bodega · administra y mueve inventario</option>
+                                    </select>
                                 </div>
                                 <div class="flex justify-end gap-2">
-                                    <button type="button" @click="nuevoAdmin.abierto = false" class="text-xs px-3 py-1.5 rounded-lg hover:bg-white">Cancelar</button>
+                                    <button type="button" @click="nuevoAdmin.abiertoEnForm = false" class="text-xs px-3 py-1.5 rounded-lg hover:bg-white">Cancelar</button>
                                     <button type="button" @click="crearAdminBodega" :disabled="nuevoAdmin.creando"
                                             class="text-xs px-3 py-1.5 rounded-lg bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50">
                                         {{ nuevoAdmin.creando ? 'Creando…' : 'Crear + asignar' }}
                                     </button>
                                 </div>
                                 <p class="text-[11px] text-violet-700">
-                                    Se creará con rol <strong>AdminBodega</strong> y quedará asignado a esta ubicación al guardar.
+                                    Se creará como <strong>{{ nuevoAdmin.rol }}</strong> y quedará asignado a esta ubicación al guardar.
+                                    <template v-if="nuevoAdmin.rol !== 'AdminBodega'">
+                                        Va a ver la cola y el stock de esta bodega; mover inventario sigue siendo del jefe de bodega.
+                                    </template>
                                 </p>
                             </div>
                         </div>

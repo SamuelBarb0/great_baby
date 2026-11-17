@@ -91,10 +91,27 @@ class DemoGestionHumanaSeeder extends Seeder
             return;
         }
 
-        $sinDuenio = InventarioUbicacion::whereNull('responsable_user_id')->get();
+        /*
+         * Sólo las bodegas de venta, y sólo las propias.
+         *
+         * Antes repartía TODA ubicación sin responsable en round-robin, lo que
+         * dejaba al alistador a cargo de avería, de bajas y de garantía —las
+         * tres cosas que justamente no debe tocar— y encima de las 43 filas
+         * importadas del catálogo compartido de SIIGO, que son de otras
+         * empresas. Con el alcance de lectura por responsable, eso le habría
+         * mostrado media base de datos.
+         */
+        $propias = InventarioUbicacion::query()
+            ->whereNull('responsable_user_id')
+            ->where('activa', true)
+            ->where('categoria', 'venta')
+            ->where('codigo', 'not like', 'SIIGO-%')
+            ->orderBy('id')
+            ->get();
 
-        foreach ($sinDuenio as $i => $u) {
-            $u->update(['responsable_user_id' => $i % 3 === 0 && $alistador
+        foreach ($propias as $i => $u) {
+            // El alistador queda con una sola; el resto son del jefe de bodega.
+            $u->update(['responsable_user_id' => ($i === 0 && $alistador)
                 ? $alistador->id
                 : $bodeguero->id]);
         }

@@ -44,6 +44,14 @@ else
     $PHP artisan migrate --force
 fi
 
+# Catálogo de oficinas y almacenes (logística).
+#
+# La migración crea las dos tablas vacías y vacías el reparto del contenedor
+# no funciona: sin pares no hay a dónde mandar la mercancía. El sembrador es
+# idempotente —no pisa lo que se haya editado a mano— así que corre siempre,
+# también en un despliegue de actualización.
+$PHP artisan db:seed --class=CatalogoOficinasAlmacenesSeeder --force
+
 # --- Purgar caches y regenerar optimizados ---
 $PHP artisan optimize:clear
 $PHP artisan config:cache

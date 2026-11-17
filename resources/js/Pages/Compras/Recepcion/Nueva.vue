@@ -9,6 +9,10 @@ const props = defineProps({
     oc: { type: Object, default: null },
     // Órdenes por recibir, para elegir una sin salir de esta pantalla.
     ocs_pendientes: { type: Array, default: () => [] },
+    // A dónde puede entrar lo que se descarga: los pares oficina+almacén que
+    // el área marcó como de ingreso directo. Vacío = la bodega de la orden.
+    destinos: { type: Array, default: () => [] },
+    bodega_orden: { type: Object, default: null },
 });
 
 const ocsPendientes = computed(() => props.ocs_pendientes ?? []);
@@ -30,6 +34,7 @@ const form = reactive({
         precio_unit: i.precio_unit,
         cajas: i.cajas,
         es_componente: i.es_componente,
+        sin_producto: i.sin_producto,
         referencia: i.referencia,
         color_nombre: i.color_nombre || '',
         sin_colores: i.sin_colores,
@@ -39,6 +44,9 @@ const form = reactive({
         destino: i.destino,
         para_otra_empresa: i.para_otra_empresa,
         lote: '',
+        // A dónde va ESTA parte de la línea. Vacío = la bodega de la orden,
+        // que es como entró todo hasta hoy.
+        destino_ingreso: '',
         // LOG-J8 · clasificación por línea · default apto para no romper el flujo
         //   actual, pero el logístico puede cambiarlo al descargar.
         clasificacion: 'apto',
@@ -47,15 +55,146 @@ const form = reactive({
 });
 const procesando = ref(false);
 
+/*
+ * Resolver una línea que llegó sin producto del catálogo.
+ *
+ * No se bloquea la recepción: un flete o un seguro son líneas legítimas sin
+ * mercancía. Lo que se cierra es el silencio — la línea se ve marcada y tiene
+ * botón para resolverla sin salir de acá.
+ */
+const linea = ref(null);
+const buscando = ref(false);
+const encontrados = ref([]);
+const guardandoProducto = ref(false);
+
+const abrirProducto = (it) => {
+    linea.value = {
+        orden_item_id: it.orden_item_id,
+        descripcion: it.descripcion,
+        modo: 'buscar',
+        q: it.referencia || it.descripcion || '',
+        producto_id: null,
+        producto_nombre: '',
+        nombre: it.descripcion || '',
+        referencia: it.referencia || '',
+        desglose_stock: false,
+        color_nombre: it.color_nombre || '',
+    };
+    encontrados.value = [];
+    buscar();
+};
+
+const buscar = async () => {
+    const q = (linea.value?.q || '').trim();
+    if (q.length < 2) { encontrados.value = []; return; }
+    buscando.value = true;
+    try {
+        const r = await fetch(`/app/catalogo/productos-buscar?q=${encodeURIComponent(q)}`, {
+            headers: { Accept: 'application/json' },
+        });
+        const data = await r.json();
+        encontrados.value = (Array.isArray(data) ? data : (data.datos || data.data || [])).slice(0, 12);
+    } catch {
+        encontrados.value = [];
+    } finally {
+        buscando.value = false;
+    }
+};
+
+const guardarProducto = () => {
+    if (!linea.value || guardandoProducto.value) return;
+    const l = linea.value;
+    if (l.modo === 'buscar' && !l.producto_id) return;
+    if (l.modo === 'crear' && (!l.nombre.trim() || !l.referencia.trim())) return;
+
+    guardandoProducto.value = true;
+    router.post(`/app/compras/oc/linea/${l.orden_item_id}/producto`,
+        l.modo === 'buscar'
+            ? { producto_id: l.producto_id, color_nombre: l.color_nombre || null }
+            : { nombre: l.nombre, referencia: l.referencia, desglose_stock: l.desglose_stock, color_nombre: l.color_nombre || null },
+        {
+            preserveScroll: true,
+            onSuccess: (page) => {
+                /*
+                 * Los avisos de la línea se refrescan acá, a mano.
+                 *
+                 * `form.items` se arma una sola vez al abrir la pantalla —y
+                 * encima se repisa con el conteo guardado en el navegador—,
+                 * así que recargar las props no lo toca: la línea seguía
+                 * diciendo «no está en el catálogo» después de enlazarla, y
+                 * quien está descargando no tiene por qué dudar de si quedó.
+                 *
+                 * Se copian TODAS las banderas que el servidor recalculó, no
+                 * sólo `sin_producto`: el producto que acabo de enlazar puede
+                 * tener stock sin colores, y ese otro aviso —«el color queda
+                 * en esta recepción y el stock sigue siendo uno solo»— se
+                 * quedaba con el valor de antes de que la línea tuviera
+                 * producto, o sea en falso para siempre.
+                 */
+                // Las líneas vuelven dentro de `oc`, y ahí la clave de la
+                // línea de la orden se llama `id`.
+                const fresca = (page?.props?.oc?.items ?? [])
+                    .find(f => f.id === l.orden_item_id);
+
+                for (const it of form.items) {
+                    if (it.orden_item_id !== l.orden_item_id) continue;
+
+                    it.sin_producto = false;
+
+                    if (fresca) {
+                        it.sin_colores = fresca.sin_colores ?? it.sin_colores;
+                        it.referencia = fresca.referencia ?? it.referencia;
+                    }
+                }
+                linea.value = null;
+            },
+            onFinish: () => { guardandoProducto.value = false; },
+        });
+};
+
 // Descargar un contenedor toma horas: si se cierra la página, no se pierde lo contado.
 const claveConteo = props.oc ? `conteo-oc-${props.oc.id}` : null;
 const hayConteoGuardado = ref(false);
+// Hubo que ajustar algo de lo guardado contra la orden de hoy: se dice, no se
+// corrige a escondidas.
+const conteoRecortado = ref(false);
 if (claveConteo) {
     try {
         const guardado = JSON.parse(localStorage.getItem(claveConteo) || 'null');
         if (Array.isArray(guardado)) {
             const base = Object.fromEntries(form.items.map(i => [i.orden_item_id, i]));
-            form.items = guardado.filter(g => base[g.orden_item_id]).map(g => ({ ...base[g.orden_item_id], ...g }));
+            const destinosValidos = new Set(props.destinos.map(d => d.valor));
+
+            /*
+             * Lo guardado se revisa contra la orden de HOY antes de pintarlo.
+             *
+             * Entre el conteo de ayer y el de hoy la orden pudo recibir otra
+             * entrega, así que el pendiente ya no es el mismo: restaurar 50
+             * sobre un pendiente de 20 dejaba la pantalla mostrando un conteo
+             * que el servidor iba a rechazar, y la persona no tenía forma de
+             * saber de dónde salía ese número. La rama vieja —la del objeto—
+             * sí tenía este tope; la nueva, la que soporta el reparto, se
+             * quedó sin él.
+             *
+             * Y el destino también: un par que dejó de admitir ingreso, o un
+             * almacén que Gerencia apagó, deja el select en blanco mandando el
+             * valor viejo escondido adentro.
+             */
+            form.items = guardado
+                .filter(g => base[g.orden_item_id])
+                .map(g => {
+                    const fila = { ...base[g.orden_item_id], ...g };
+                    const tope = Number(base[g.orden_item_id].cantidad_pendiente || 0);
+                    if (Number(fila.cantidad_recibida) > tope) {
+                        fila.cantidad_recibida = tope;
+                        conteoRecortado.value = true;
+                    }
+                    if (fila.destino_ingreso && !destinosValidos.has(fila.destino_ingreso)) {
+                        fila.destino_ingreso = '';
+                        conteoRecortado.value = true;
+                    }
+                    return fila;
+                });
             hayConteoGuardado.value = true;
         } else if (guardado) {
             for (const it of form.items) {
@@ -70,7 +209,7 @@ if (claveConteo) {
             localStorage.setItem(claveConteo, JSON.stringify(items.map(i => ({
                 orden_item_id: i.orden_item_id, cantidad_recibida: i.cantidad_recibida, lote: i.lote,
                 clasificacion: i.clasificacion, motivo_clasificacion: i.motivo_clasificacion,
-                color_nombre: i.color_nombre, extra: i.extra,
+                color_nombre: i.color_nombre, extra: i.extra, destino_ingreso: i.destino_ingreso,
             }))));
         } catch { /* ídem */ }
     }, { deep: true });
@@ -83,6 +222,83 @@ const otroColor = (it, color = '') => {
     });
 };
 const quitarFila = (it) => form.items.splice(form.items.indexOf(it), 1);
+
+// Repartir una línea entre dos destinos: «de estas 50, 30 a Great Baby y 20 a
+// Dropi». Es el mismo mecanismo de los colores —un renglón hermano justo
+// debajo— para que no haya dos formas distintas de partir una línea.
+const otroDestino = (it) => {
+    /*
+     * Lo que queda es el pendiente menos lo que YA está contado en todos los
+     * renglones de esa línea, no sólo en este.
+     *
+     * Restando sólo este renglón, partir una línea en tres proponía de más:
+     * 40 pendientes repartidos 20/20 ofrecían otros 20 para el tercero, o sea
+     * 60 de una orden de 40, y la persona tenía que darse cuenta sola. Y
+     * cuando ya no queda nada, el renglón nuevo nace en cero —que es correcto,
+     * pero hay que decirlo.
+     */
+    const yaContado = form.items
+        .filter(o => o.orden_item_id === it.orden_item_id)
+        .reduce((t, o) => t + Number(o.cantidad_recibida || 0), 0);
+
+    const restante = Math.max(0, Number(it.cantidad_pendiente || 0) - yaContado);
+
+    form.items.splice(form.items.indexOf(it) + 1, 0, {
+        ...it, cantidad_recibida: restante, lote: '', destino_ingreso: '',
+        clasificacion: 'apto', motivo_clasificacion: '', extra: true, repartir: true,
+    });
+};
+
+// Cuánto se está mandando a cada sitio, para que quien cuenta lo vea sin sumar
+// de cabeza.
+const repartoDe = (it) => form.items
+    .filter(o => o.orden_item_id === it.orden_item_id && Number(o.cantidad_recibida) > 0)
+    .map(o => ({
+        /*
+         * El destino elegido sólo se respeta si la mercancía llegó apta.
+         *
+         * Lo que llegó roto entra a averías y lo marcado «faltante» no entra a
+         * ninguna parte: no se recibió. Este resumen es lo que mira quien está
+         * descargando para confirmar antes de guardar, y decía que 10 unidades
+         * averiadas iban a la bodega principal.
+         */
+        destino: o.clasificacion === 'faltante'
+            ? 'no entra · no llegó'
+            : (o.clasificacion && o.clasificacion !== 'apto')
+                ? `averías · ${o.clasificacion}`
+                : (o.destino_ingreso
+                    ? (props.destinos.find(d => d.valor === o.destino_ingreso)?.label ?? '—')
+                    : (props.bodega_orden?.nombre ?? 'la bodega de la orden')),
+        cantidad: Number(o.cantidad_recibida),
+        aparte: o.clasificacion && o.clasificacion !== 'apto',
+    }));
+
+const estaRepartida = (it) => form.items.filter(o => o.orden_item_id === it.orden_item_id).length > 1;
+
+// Las líneas que se partieron en más de un destino, con la suma, para avisar
+// antes de guardar si se está repartiendo más de lo que queda pendiente.
+const lineasRepartidas = computed(() => {
+    const vistas = new Set();
+    const salida = [];
+    for (const it of form.items) {
+        if (vistas.has(it.orden_item_id)) continue;
+        vistas.add(it.orden_item_id);
+        const partes = repartoDe(it);
+        if (partes.length < 2) continue;
+        salida.push({
+            orden_item_id: it.orden_item_id,
+            descripcion: it.descripcion,
+            pendiente: Number(it.cantidad_pendiente || 0),
+            partes,
+            // Lo faltante no cuenta contra el pendiente: no entra al
+            // inventario y la orden lo sigue teniendo pendiente. Sumándolo, el
+            // aviso rojo salía por una suma que estaba bien.
+            suma: partes.filter(p => !p.destino.startsWith('no entra'))
+                .reduce((s, p) => s + p.cantidad, 0),
+        });
+    }
+    return salida;
+});
 
 // La cuenta que importa es la de la referencia: cada color puede subir o bajar.
 const cuentas = computed(() => {
@@ -140,6 +356,7 @@ const guardar = () => {
             clasificacion: i.clasificacion || 'apto',
             motivo_clasificacion: i.motivo_clasificacion || null,
             color_nombre: i.color_nombre || null,
+            destino_ingreso: i.destino_ingreso || null,
         })),
     }, {
         preserveScroll: true,
@@ -220,6 +437,12 @@ const guardar = () => {
                     <div v-if="oc.contenedor" class="text-sm text-surface-500">Contenedor <span class="font-mono">{{ oc.contenedor }}</span></div>
                     <p v-if="oc.es_importacion" class="text-sm mt-2">Cuente producto por producto y corrija lo que llegó distinto. <b>Nada sube al inventario hasta que confirme.</b></p>
                     <p v-if="hayConteoGuardado" class="text-xs text-surface-500 mt-1">Se recuperó su conteo anterior.</p>
+                    <!-- Si hubo que ajustar algo contra la orden de hoy se dice: corregir
+                         números a escondidas deja a quien cuenta sin entender qué pasó. -->
+                    <p v-if="conteoRecortado" class="text-xs text-amber-700 dark:text-amber-400 mt-1">
+                        Ojo: la orden cambió desde ese conteo. Se ajustó alguna cantidad al pendiente de hoy
+                        y se borró algún destino que ya no admite ingreso. Revisá antes de guardar.
+                    </p>
                 </div>
 
                 <div v-if="oc.falta_tasa" class="p-3 rounded-lg bg-red-50 dark:bg-red-950/40 border-l-4 border-red-500 text-red-700 dark:text-red-300 text-sm">{{ oc.falta_tasa }}</div>
@@ -255,10 +478,23 @@ const guardar = () => {
                     <div class="md:col-span-3"><label class="text-xs font-semibold text-surface-600 dark:text-surface-300">Observaciones</label><textarea v-model="form.observaciones" rows="2" class="input w-full" maxlength="1000"></textarea></div>
                 </div>
 
+                <!-- Una orden ya recibida no es un error, pero la pantalla tiene que
+                     decirlo: antes mostraba una tabla vacía con el texto genérico
+                     «no hay nada con estos filtros», y acá no hay filtros. -->
+                <div v-if="oc && !form.items.length"
+                     class="card p-4 border-l-4 border-emerald-500 bg-emerald-50/60 dark:bg-emerald-950/30">
+                    <div class="font-bold text-emerald-900 dark:text-emerald-200">Esta orden ya se recibió completa</div>
+                    <p class="text-sm text-surface-700 dark:text-surface-300 mt-0.5">
+                        No le queda nada pendiente, así que no hay nada que contar.
+                        <Link :href="`/app/compras/oc/${oc.id}`" class="underline font-medium">Ver la orden</Link>
+                        o <Link href="/app/compras/recepcion/nueva" class="underline font-medium">elegir otra</Link>.
+                    </p>
+                </div>
+
                 <div class="card p-4">
                     <div class="text-xs uppercase font-bold text-brand-600 mb-2">Ítems a recibir ({{ form.items.length }})</div>
                     <div class="overflow-x-auto">
-                        <table v-tabla-movil class="w-full text-sm">
+                        <table v-tabla-movil data-vacia="Esta orden ya se recibió completa: no queda nada pendiente." class="w-full text-sm">
                             <thead class="text-[10px] text-surface-500 uppercase border-b border-surface-200 dark:border-surface-800">
                                 <tr>
                                     <th class="text-left p-2">Descripción</th>
@@ -266,8 +502,10 @@ const guardar = () => {
                                     <th class="text-right p-2">A recibir</th>
                                     <th class="text-right p-2">Subtotal línea</th>
                                     <th class="text-left p-2">Lote</th>
-                                    <!-- LOG-J8 · destino por línea · cierra el descuadre que mencionó Don Jorge -->
-                                    <th class="text-left p-2">Destino</th>
+                                    <!-- A qué bodega entra esta parte de la línea: el par oficina+almacén. -->
+                                    <th class="text-left p-2">Va para</th>
+                                    <!-- LOG-J8 · en qué estado llegó · cierra el descuadre que mencionó Don Jorge -->
+                                    <th class="text-left p-2">Estado</th>
                                     <th class="text-left p-2">Motivo</th>
                                 </tr>
                             </thead>
@@ -287,20 +525,58 @@ const guardar = () => {
                                             <button v-if="it.extra" type="button" @click="quitarFila(it)" class="btn-ghost text-xs text-red-600">Quitar</button>
                                         </span>
                                         <span v-if="it.sin_colores && it.color_nombre" class="block text-xs text-amber-700 dark:text-amber-400 mt-0.5">Este producto ya tiene stock sin colores: el color queda en esta recepción y el stock sigue siendo uno solo.</span>
+                                        <!-- Sin producto del catálogo esta línea NO suma inventario. A
+                                             veces está bien (un flete, un seguro); lo que no puede ser es
+                                             que nadie se entere. -->
+                                        <span v-if="it.sin_producto && !it.extra" class="block mt-1 text-xs">
+                                            <span class="inline-block px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 font-semibold">
+                                                No está en el catálogo · no va a sumar inventario
+                                            </span>
+                                            <button type="button" @click="abrirProducto(it)" class="ml-1 text-brand-600 hover:underline font-medium">
+                                                Enlazar o crear producto
+                                            </button>
+                                        </span>
                                         <span v-if="it.cajas" class="block text-xs text-surface-500">{{ it.cajas }} cajas de {{ it.unidades_por_caja }}<template v-if="it.destino"> · {{ it.destino }}</template></span>
                                     </td>
                                     <td class="p-2 text-right font-mono">{{ it.cantidad_pendiente }}</td>
                                     <td class="p-2">
+                                        <!-- Es la casilla que más se usa de la pantalla y no tenía
+                                             etiqueta: con ocho columnas y la tabla deslizándose de
+                                             lado, sin ver bien no se sabe en cuál se está escribiendo. -->
                                         <input type="number" step="0.001" min="0" :max="oc.es_importacion ? null : it.cantidad_pendiente"
                                                v-model.number="it.cantidad_recibida"
                                                @change="clampCantidad(it)"
                                                @blur="clampCantidad(it)"
+                                               :aria-label="`Cantidad recibida de ${it.descripcion}`"
                                                class="input w-24 text-right text-sm"/>
                                     </td>
                                     <td class="p-2 text-right font-mono text-xs">{{ money(valorLinea(it)) }}</td>
-                                    <td class="p-2"><input v-model="it.lote" class="input w-full text-sm" placeholder="Opcional" maxlength="80"/></td>
+                                    <td class="p-2"><input v-model="it.lote" class="input w-full text-sm" placeholder="Opcional" maxlength="80"
+                                                           :aria-label="`Lote de ${it.descripcion}`"/></td>
                                     <td class="p-2">
-                                        <select v-model="it.clasificacion" class="input text-xs w-full">
+                                        <select v-model="it.destino_ingreso"
+                                                :disabled="it.es_componente || it.clasificacion !== 'apto'"
+                                                class="input text-xs w-full"
+                                                :aria-label="`Destino de ${it.descripcion}`">
+                                            <option value="">{{ bodega_orden?.nombre || 'La bodega de la orden' }}</option>
+                                            <option v-for="d in destinos" :key="d.valor" :value="d.valor">{{ d.label }}</option>
+                                        </select>
+                                        <button v-if="!it.es_componente && it.clasificacion === 'apto'"
+                                                type="button" @click="otroDestino(it)"
+                                                class="btn-ghost text-xs mt-0.5">+ Repartir</button>
+                                        <!-- En una importación el «Quitar» ya está arriba, junto al
+                                             color: con los dos, el mismo renglón mostraba dos botones
+                                             rojos idénticos y no se sabía si borraban cosas distintas. -->
+                                        <button v-if="it.extra && (!oc.es_importacion || it.es_componente)"
+                                                type="button" @click="quitarFila(it)"
+                                                class="btn-ghost text-xs text-red-600 mt-0.5">Quitar</button>
+                                        <span v-if="it.clasificacion !== 'apto'" class="block text-[10px] text-surface-500 mt-0.5">
+                                            Lo que no llegó apto va a la zona no vendible, no acá.
+                                        </span>
+                                    </td>
+                                    <td class="p-2">
+                                        <select v-model="it.clasificacion" class="input text-xs w-full"
+                                                :aria-label="`Cómo llegó ${it.descripcion}`">
                                             <option value="apto">✓ Apto venta</option>
                                             <option value="averia">⚠ Avería</option>
                                             <option value="cuarentena">⏳ Cuarentena</option>
@@ -320,10 +596,29 @@ const guardar = () => {
                                 <tr>
                                     <td colspan="3" class="p-2 text-right">Total recepción</td>
                                     <td class="p-2 text-right font-mono">{{ money(totalRecepcion) }}</td>
-                                    <td colspan="3"></td>
+                                    <td colspan="4"></td>
                                 </tr>
                             </tfoot>
                         </table>
+                    </div>
+
+                    <!-- Quien cuenta no tiene por qué sumar de cabeza: si una
+                         línea se repartió, acá se ve a dónde fue cada parte. -->
+                    <div v-if="lineasRepartidas.length" class="mt-3 rounded-lg border border-brand-200 dark:border-brand-900 bg-brand-50/60 dark:bg-brand-950/30 p-3 text-xs space-y-1.5">
+                        <div class="font-semibold text-brand-700 dark:text-brand-300">Cómo queda repartido</div>
+                        <div v-for="l in lineasRepartidas" :key="l.orden_item_id">
+                            <span class="font-medium">{{ l.descripcion }}</span>
+                            <span class="text-surface-500"> · pendiente {{ l.pendiente }}</span>
+                            <ul class="ml-3 mt-0.5">
+                                <li v-for="(p, k) in l.partes" :key="k"
+                                    :class="p.aparte ? 'text-amber-700 dark:text-amber-400' : ''">
+                                    {{ p.cantidad }} → {{ p.destino }}
+                                </li>
+                            </ul>
+                            <div v-if="l.suma > l.pendiente + 0.0001" class="text-red-600 font-semibold">
+                                Está repartiendo {{ l.suma }} y sólo quedan {{ l.pendiente }} pendientes.
+                            </div>
+                        </div>
                     </div>
 
                     <div v-if="itemsAConfirmar.length === 0" class="mt-3 p-3 rounded-lg bg-amber-50 dark:bg-amber-950/40 border-l-4 border-amber-500 text-amber-800 dark:text-amber-200 text-xs flex items-start gap-2">
@@ -341,5 +636,76 @@ const guardar = () => {
                 </div>
             </div>
         </div>
+
+        <!-- ============ Resolver la línea sin producto ============ -->
+        <div v-if="linea" class="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50" @click.self="linea = null">
+            <div class="bg-white dark:bg-surface-900 rounded-xl w-full max-w-lg p-5 space-y-3">
+                <div>
+                    <h3 class="font-semibold">Producto de esta línea</h3>
+                    <p class="text-xs text-surface-500 mt-0.5">{{ linea.descripcion }}</p>
+                </div>
+
+                <div class="flex gap-2 text-sm">
+                    <button type="button" @click="linea.modo = 'buscar'"
+                            :class="linea.modo === 'buscar' ? 'bg-brand-600 text-white' : 'bg-surface-100 dark:bg-surface-800'"
+                            class="px-3 py-1.5 rounded">Buscar uno que ya existe</button>
+                    <button type="button" @click="linea.modo = 'crear'"
+                            :class="linea.modo === 'crear' ? 'bg-brand-600 text-white' : 'bg-surface-100 dark:bg-surface-800'"
+                            class="px-3 py-1.5 rounded">Crear uno nuevo</button>
+                </div>
+
+                <template v-if="linea.modo === 'buscar'">
+                    <input v-model="linea.q" @input="buscar" placeholder="Referencia, nombre o color…"
+                           class="input w-full text-sm" aria-label="Buscar producto"/>
+                    <div class="max-h-56 overflow-y-auto border border-surface-200 dark:border-surface-800 rounded">
+                        <div v-if="buscando" class="p-3 text-xs text-surface-500">Buscando…</div>
+                        <div v-else-if="!encontrados.length" class="p-3 text-xs text-surface-500">
+                            Nada con eso. Si de verdad no existe, creálo en la otra pestaña.
+                        </div>
+                        <button v-for="p in encontrados" :key="p.id ?? p.producto_id" type="button"
+                                @click="linea.producto_id = p.id ?? p.producto_id; linea.producto_nombre = p.nombre"
+                                class="w-full text-left px-3 py-2 text-sm hover:bg-surface-50 dark:hover:bg-surface-800 border-b border-surface-100 dark:border-surface-800"
+                                :class="(linea.producto_id === (p.id ?? p.producto_id)) ? 'bg-brand-50 dark:bg-brand-950/40' : ''">
+                            <span class="font-medium">{{ p.nombre }}</span>
+                            <span class="text-xs text-surface-500 block">{{ p.referencia || p.sku }}</span>
+                        </button>
+                    </div>
+                </template>
+
+                <template v-else>
+                    <label class="block text-sm">
+                        <span class="text-surface-600">Nombre</span>
+                        <input v-model="linea.nombre" maxlength="200" class="input w-full mt-1"/>
+                    </label>
+                    <label class="block text-sm">
+                        <span class="text-surface-600">Referencia / SKU</span>
+                        <input v-model="linea.referencia" maxlength="100" class="input w-full mt-1"/>
+                    </label>
+                    <label class="flex items-start gap-2 text-sm">
+                        <input v-model="linea.desglose_stock" type="checkbox" class="mt-1 rounded"/>
+                        <span>
+                            <span>Se cuenta por color</span>
+                            <span class="block text-xs text-surface-500">
+                                Decidilo ahora: un producto que ya tiene movimientos no puede empezar a
+                                contar por color sin rehacer su kardex.
+                            </span>
+                        </span>
+                    </label>
+                </template>
+
+                <label v-if="linea.desglose_stock || linea.modo === 'buscar'" class="block text-sm">
+                    <span class="text-surface-600">Color (opcional)</span>
+                    <input v-model="linea.color_nombre" maxlength="60" class="input w-full mt-1" placeholder="Sólo si se cuenta por color"/>
+                </label>
+
+                <div class="flex justify-end gap-2 pt-1">
+                    <button type="button" class="btn-ghost text-sm" @click="linea = null">Cancelar</button>
+                    <button type="button" class="btn-primary text-sm"
+                            :disabled="guardandoProducto"
+                            @click="guardarProducto">Guardar</button>
+                </div>
+            </div>
+        </div>
+
     </AppLayout>
 </template>

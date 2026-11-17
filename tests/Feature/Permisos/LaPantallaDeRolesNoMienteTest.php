@@ -49,6 +49,22 @@ it('cada acción que la pantalla ofrece, el código la consulta', function () {
         }
     }
 
+    /*
+     * `puedeEditar($u, 'seccion')` también cuenta.
+     *
+     * Es el atajo documentado para lo que más se pregunta, y por dentro llama
+     * a `puedeAccion($u, $seccion, 'editar')`: consultar por ahí es consultar
+     * igual. Buscando sólo `puedeAccion` esta prueba tenía un hueco —una
+     * sección consultada por el atajo se veía como casilla que nadie mira— y
+     * lo encontramos el 17-nov, cuando `editar.ubicaciones` empezó a usarse
+     * así y la prueba la acusó de mentir estando bien puesta.
+     */
+    preg_match_all("/puedeEditar\(\s*[^,]+,\s*'([a-z_]+)'\s*\)/", $codigo, $atajo);
+
+    foreach ($atajo[1] as $seccion) {
+        $consultadas[$seccion][] = 'editar';
+    }
+
     $mentiras = [];
 
     foreach (Permisos::ACCIONES_QUE_SE_CUMPLEN as $seccion => $acciones) {

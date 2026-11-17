@@ -117,7 +117,9 @@ class InventarioUbicacionesController extends Controller
         // rol todavía. Al guardar la ubicación auto-promovemos a AdminBodega.
         $candidatos = User::query()
             ->where(function ($q) {
-                $q->whereHas('roles', fn ($r) => $r->whereIn('name', ['AdminBodega', 'Alistador']))
+                // El despachador también responde por una zona: entrega a la
+                // transportadora y es quien sabe qué salió de ahí.
+                $q->whereHas('roles', fn ($r) => $r->whereIn('name', ['AdminBodega', 'Alistador', 'Despachador']))
                     ->orWhereIn('id', InventarioUbicacion::whereNotNull('responsable_user_id')->pluck('responsable_user_id'));
             })
             ->orderBy('name')
@@ -146,6 +148,30 @@ class InventarioUbicacionesController extends Controller
                 ->map(fn ($c) => ['id' => (int) $c->codigo, 'nombre' => $c->nombre])->all(),
             // UBIC-8 · usuarios candidatos y endpoint para crear nuevos.
             'candidatos_admin' => $candidatos,
+            /*
+             * El jefe de bodega puede decir quién responde por cada estante
+             * SUYO, sin pasar por Gerencia. Es trabajo de todos los días y
+             * mandárselo a Gerencia dejaba estantes sin dueño por semanas —que
+             * es, exactamente, por lo que los alistadores tenían la cola vacía.
+             */
+            'puede_asignar_responsable' => \App\Auth\Permisos::puedeEditar($r->user(), 'ubicaciones'),
+            /*
+             * Crear y editar la ubicación, activarla, borrarla, empujarla a
+             * SIIGO y traer las resoluciones DIAN son todas de Gerencia: tocan
+             * el enlace con SIIGO, la resolución y las cuentas del PUC.
+             *
+             * La pantalla las mostraba a cualquiera que pudiera MIRARLA, o sea
+             * también al jefe de bodega, y el servidor las cerraba con 403.
+             * Dos de ellas —activar y borrar— ni siquiera avisaban: el click
+             * no hacía nada y la fila se quedaba igual.
+             */
+            'puede_editar_la_ubicacion' => \App\Auth\Permisos::esRoot($r->user()),
+            // El mismo alcance que revisa `asignarResponsable`: el de
+            // escribir. Mandar el de leer dejaba el select a la vista en
+            // ubicaciones que el servidor después rechazaba con 403.
+            'mis_ubicaciones' => \App\Auth\Permisos::esRoot($r->user())
+                ? null
+                : $r->user()->bodegasAsignadasIds(),
             // Ubicaciones activas que no pertenecen a ninguna bodega y tampoco
             // son una: nadie las puede contar ni mover. Se muestra arriba para
             // que no quede invisible — era la causa de que los conteos en los
@@ -183,31 +209,146 @@ class InventarioUbicacionesController extends Controller
      * Útil cuando Aracely está creando la ubicación y aún no existe el usuario
      * del encargado. Lo deja listo para pre-seleccionarlo como responsable.
      */
+    /**
+     * Crear la gente de bodega sin salir de la pantalla de ubicaciones.
+     *
+     * Lo hace quien administra bodegas —no sólo Gerencia— porque es él quien
+     * sabe que entró un alistador nuevo el lunes, y porque el camino viejo
+     * —pedirle a Gerencia que cree el usuario y volver a asignarlo— terminaba
+     * en estantes sin responsable durante semanas.
+     *
+     * Los roles que puede crear están cerrados a los tres de bodega. Dejar el
+     * rol abierto habría convertido esta casilla en una fábrica de Gerencias.
+     */
     public function crearAdminBodega(Request $r): JsonResponse
     {
-        abort_unless(\App\Auth\Permisos::esRoot($r->user()), 403);
+        abort_unless(
+            \App\Auth\Permisos::puedeEditar($r->user(), 'ubicaciones'),
+            403,
+            'Crear gente de bodega es de quien administra las bodegas.'
+        );
+
         $datos = $r->validate([
             'name' => ['required', 'string', 'max:120'],
             'email' => ['required', 'email', 'max:160', 'unique:users,email'],
             'password' => ['nullable', 'string', 'min:8', 'max:120'],
+            // Sólo los tres papeles de bodega, y nada más.
+            'rol' => ['nullable', \Illuminate\Validation\Rule::in(['AdminBodega', 'Alistador', 'Despachador'])],
         ]);
+
+        $rol = $datos['rol'] ?? 'AdminBodega';
+
+        /*
+         * El rol tiene que existir como fila.
+         *
+         * Sin esto, `syncRoles` revienta con una excepción de Spatie y la
+         * pantalla devuelve un 500 pelado. No es hipotético: si el sembrador
+         * de permisos no se ha corrido en ese ambiente, el rol puede
+         * sencillamente no estar, y quien queda mirando el error es el jefe de
+         * bodega tratando de dar de alta a alguien que ya está trabajando.
+         */
+        abort_unless(
+            \Spatie\Permission\Models\Role::where('name', $rol)->where('guard_name', 'web')->exists(),
+            422,
+            "El rol «{$rol}» todavía no existe en este sistema. Pedile a Gerencia que corra el sembrador de permisos."
+        );
         $pwd = $datos['password'] ?? Str::password(12, symbols: false);
         // FIX-S0 · User::create + syncRoles son dos escrituras separadas; si
         // Spatie falla, el user queda sin rol. Encerrar en transacción.
-        $u = DB::transaction(function () use ($datos, $pwd) {
+        $u = DB::transaction(function () use ($datos, $pwd, $rol) {
             $user = User::create([
                 'name' => $datos['name'],
                 'email' => $datos['email'],
                 'password' => Hash::make($pwd),
             ]);
-            $user->syncRoles(['AdminBodega']);
+            $user->syncRoles([$rol]);
             return $user;
         });
+
+        $comoSeLlama = match ($rol) {
+            'Alistador' => 'Alistador',
+            'Despachador' => 'Despachador',
+            default => 'Admin Bodega',
+        };
+
         return response()->json([
             'ok' => true,
-            'mensaje' => "Usuario {$u->name} creado como Admin Bodega.",
+            'mensaje' => "Usuario {$u->name} creado como {$comoSeLlama}.",
             'password_generado' => empty($datos['password']) ? $pwd : null,
-            'usuario' => ['id' => $u->id, 'name' => $u->name, 'email' => $u->email, 'roles' => ['AdminBodega']],
+            'usuario' => ['id' => $u->id, 'name' => $u->name, 'email' => $u->email, 'roles' => [$rol]],
+        ]);
+    }
+
+    /**
+     * Poner o quitar el responsable de una ubicación.
+     *
+     * Existe aparte de `guardar()` por una razón concreta: guardar una
+     * ubicación toca también el enlace con SIIGO, la resolución DIAN y las
+     * cuentas del PUC, y eso es de Gerencia. Decir quién responde por un
+     * estante es trabajo de todos los días del jefe de bodega, y mandárselo a
+     * Gerencia terminaba en estantes sin dueño durante semanas —que es,
+     * exactamente, por qué los alistadores tenían la cola vacía—.
+     *
+     * Dos candados, y los dos importan:
+     *   · sólo sobre SUS ubicaciones, para que no reparta las de otra sede;
+     *   · sólo gente con papel de bodega, para que esto no se convierta en la
+     *     puerta por la que un vendedor termina viendo el inventario.
+     */
+    public function asignarResponsable(Request $r): JsonResponse
+    {
+        abort_unless(
+            \App\Auth\Permisos::puedeEditar($r->user(), 'ubicaciones'),
+            403,
+            'Asignar responsables es de quien administra las bodegas.'
+        );
+
+        $datos = $r->validate([
+            'ubicacion_id' => ['required', 'integer', 'exists:inventario_ubicaciones,id'],
+            'responsable_user_id' => ['nullable', 'integer', 'exists:users,id'],
+        ]);
+
+        $u = $r->user();
+        $ubicacion = InventarioUbicacion::findOrFail($datos['ubicacion_id']);
+
+        /*
+         * El alcance que se pide acá es el de ESCRIBIR, no el de ver.
+         *
+         * `bodegasQueVeIds()` sube del estante a la sede y de ahí baja a todo
+         * lo que vive en ella, a propósito: un alistador que responde por un
+         * rack tiene que poder ver la cola de su bodega. Usarlo acá era una
+         * escalación: ese mismo alistador podía repartir los responsables de
+         * TODA la sede —incluida la bodega de averías— y el responsable es
+         * justamente la columna de la que cuelga el permiso de operar. O sea
+         * que con un rack se nombraba dueño de la sede entera.
+         *
+         * `bodegasAsignadasIds()` sólo baja, y pide AdminBodega.
+         */
+        if (! \App\Auth\Permisos::esRoot($u)) {
+            abort_unless(
+                in_array((int) $ubicacion->id, $u->bodegasAsignadasIds(), true),
+                403,
+                "«{$ubicacion->nombre}» no es una de sus bodegas."
+            );
+        }
+
+        $responsable = $datos['responsable_user_id'] ? User::find($datos['responsable_user_id']) : null;
+
+        if ($responsable) {
+            abort_unless(
+                $responsable->hasAnyRole(['AdminBodega', 'Alistador', 'Despachador', 'Aracely', 'Gerencia']),
+                422,
+                "{$responsable->name} no tiene ningún papel en bodega. Creálo como alistador o bodeguero primero."
+            );
+        }
+
+        $ubicacion->update(['responsable_user_id' => $responsable?->id]);
+
+        return response()->json([
+            'ok' => true,
+            'mensaje' => $responsable
+                ? "{$responsable->name} responde por {$ubicacion->nombre}."
+                : "{$ubicacion->nombre} quedó sin responsable.",
+            'responsable' => $responsable ? ['id' => $responsable->id, 'name' => $responsable->name] : null,
         ]);
     }
 
@@ -339,12 +480,26 @@ class InventarioUbicacionesController extends Controller
          * en SIIGO y acá se eligen.
          */
 
-        // UBIC-8 · si el responsable asignado todavía no tiene rol AdminBodega
-        // (ni Aracely/Gerencia, que ya ven todo), lo promovemos automáticamente.
+        /*
+         * UBIC-8 · a quien se nombra responsable y no tiene NINGÚN papel en
+         * bodega se le da el de AdminBodega, para que la ubicación no quede a
+         * cargo de alguien que no puede ni abrirla.
+         *
+         * Pero a un Alistador o a un Despachador NO se los promueve, y eso
+         * cambió el 17-nov: desde que ver la cola, el kardex y el stock usa
+         * `bodegasQueVeIds()` —que hereda por responsable sin pedir rol—, ya no
+         * hace falta promoverlos para que vean su trabajo. Y promoverlos sí
+         * tenía precio: AdminBodega puede mover inventario entre las
+         * ubicaciones de su sede, incluidas las de avería y bajas, así que un
+         * alistador promovido podía devolver a stock vendible una caja dada de
+         * baja sin segunda firma. Nombrar a alguien responsable de un estante
+         * no puede ser la puerta por la que se entrega ese poder.
+         */
         $promovido = null;
         if (! empty($datos['responsable_user_id'])) {
             $resp = User::find($datos['responsable_user_id']);
-            if ($resp && ! $resp->hasAnyRole(['AdminBodega', 'Aracely', 'Gerencia'])) {
+            $yaEsDeBodega = $resp?->hasAnyRole(['AdminBodega', 'Alistador', 'Despachador', 'Aracely', 'Gerencia']);
+            if ($resp && ! $yaEsDeBodega) {
                 $resp->assignRole('AdminBodega');
                 $promovido = $resp->name;
             }

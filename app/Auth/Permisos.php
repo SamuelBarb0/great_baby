@@ -406,6 +406,18 @@ final class Permisos
         'productos' => ['crear', 'editar'],
         'programacion_pagos' => ['crear'],
         'servicio_cliente' => ['editar'],
+        /*
+         * 17-nov-2026 · `editar.ubicaciones` empezó a consultarse de verdad:
+         * es la casilla con la que el jefe de bodega crea su gente y dice
+         * quién responde por cada estante, sin pasar por Gerencia.
+         *
+         * Sin esta línea la casilla no aparece en /app/roles y el permiso NO
+         * SE PUEDE DAR. Hoy funciona de casualidad, por el respaldo por rol
+         * que aplica mientras los permisos no estén sembrados; el día que se
+         * corra el sembrador en producción —que está pendiente— Jorge
+         * perdería las dos cosas y nadie podría devolvérselas.
+         */
+        'ubicaciones' => ['editar'],
     ];
 
     /*

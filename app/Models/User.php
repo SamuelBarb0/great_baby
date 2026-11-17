@@ -198,15 +198,85 @@ class User extends Authenticatable implements FilamentUser
     }
 
     /**
-     * Re-audit M3 λ (SEG-C2) · alcance de bodegas para un Alistador.
+     * De qué bodegas responde esta persona, PARA VER.
      *
-     * Se lee de `setting('inventario.alistador_bodegas.<user_id>', [])` que
-     * Aracely/Gerencia mantienen desde el panel de Reglas de Negocio.
-     * Si el user tiene meta directa `bodegas_asignadas` (JSON) también se
-     * respeta. Vacío = SIN acceso (fail-closed) para no permitir escalación
-     * silenciosa cuando el operador aún no fue configurado.
+     * Son dos métodos y no uno, a propósito:
+     *
+     *   · éste es el alcance de LECTURA —la cola de alistamiento, el kardex,
+     *     el buscador de stock—. No pregunta por ningún rol: responde un hecho
+     *     de los datos, «¿de qué bodegas responde esta persona?», y quién
+     *     puede entrar a la pantalla ya lo decidió el middleware;
+     *
+     *   · `bodegasAsignadasIds()` es el alcance de OPERAR —mover stock, crear
+     *     tomas físicas, aprobar muestras— y ése sí exige AdminBodega.
+     *
+     * Partirlos fue la única forma de arreglar la cola sin regalar poder. El
+     * Alistador necesita VER su trabajo; no necesita poder devolver a stock
+     * vendible una caja dada de baja, que es lo que habría ganado si se le
+     * abría el método de operar: las ubicaciones de avería y garantía de su
+     * sede habrían entrado en su set, y el traslado autoriza cuando las dos
+     * puntas están dentro.
+     *
+     * Sube del rack a su sede: a quien lo marcaron responsable de un estante
+     * le toca el trabajo de toda la bodega donde ese estante vive, porque el
+     * origen de un pedido es la sede, nunca el rack.
+     *
+     * @return array<int, int>
+     */
+    public function bodegasQueVeIds(): array
+    {
+        try {
+            $suyas = \DB::table('inventario_ubicaciones')
+                ->where('responsable_user_id', $this->id)
+                ->where('activa', true)
+                ->get(['id', 'bodega_id']);
+
+            if ($suyas->isEmpty()) {
+                return [];
+            }
+
+            $ids = $suyas->pluck('id')->map(fn ($x) => (int) $x)->all();
+
+            /*
+             * Las sedes de las que cuelgan sus ubicaciones, siempre que la
+             * sede esté activa. Confiar en el valor de la columna sin mirar
+             * la fila padre metería en el set una sede desactivada —y con
+             * ella todas sus demás ubicaciones.
+             */
+            $sedes = \DB::table('inventario_ubicaciones')
+                ->whereIn('id', $suyas->pluck('bodega_id')->filter()->unique()->all())
+                ->where('activa', true)
+                ->pluck('id')->map(fn ($x) => (int) $x)->all();
+
+            // Y lo que vive dentro de todo eso.
+            $dentro = \DB::table('inventario_ubicaciones')
+                ->where('activa', true)
+                ->whereIn('bodega_id', array_merge($ids, $sedes))
+                ->pluck('id')->map(fn ($x) => (int) $x)->all();
+
+            return array_values(array_unique(array_merge($ids, $sedes, $dentro)));
+        } catch (\Throwable) {
+            // Fail-closed: sin datos no se ve nada, nunca se ve todo.
+            return [];
+        }
+    }
+
+    /**
+     * Alcance de bodegas para OPERAR inventario: mover stock, crear tomas
+     * físicas, aprobar muestras. Escritura, no lectura.
+     *
+     * Pide AdminBodega a propósito. Para VER la cola, el kardex o el buscador
+     * está `bodegasQueVeIds()`, que no pide rol.
+     *
+     * Vacío = SIN acceso (fail-closed), para no permitir escalación silenciosa
+     * cuando el operador aún no fue configurado.
      *
      * Aracely/Gerencia NO deben pasar por aquí: usar `esAracely()` primero.
+     *
+     * Dos de sus tres fuentes hoy no existen y se dejan por si alguien las
+     * revive: la columna `bodegas_asignadas` no está en la tabla `users`, y
+     * la llave `inventario.alistador_bodegas.<id>` no tiene ninguna pantalla
+     * que la escriba. La que funciona es `responsable_user_id`.
      */
     public function bodegasAsignadasIds(): array
     {

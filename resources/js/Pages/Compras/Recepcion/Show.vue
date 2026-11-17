@@ -146,12 +146,21 @@ const pasarAColor = (it) => {
                 <table v-tabla-movil class="w-full text-sm">
                     <thead class="text-[10px] text-surface-500 uppercase border-b">
                         <tr>
+                            <!-- Sin esta columna la pantalla que audita el reparto no
+                                 decía de qué producto es cada renglón: nueve columnas
+                                 de cantidades, costos y bodegas y ninguna con el
+                                 nombre. Va primera, que es donde se busca. -->
+                            <th class="text-left p-2">Ítem</th>
                             <th class="text-right p-2">Cantidad</th>
                             <th class="text-right p-2">Costo unit</th>
                             <th class="text-right p-2">Subtotal</th>
                             <th class="text-left p-2">Lote</th>
                             <th class="text-left p-2">Color</th>
-                            <th class="text-left p-2">Destino</th>
+                            <!-- A qué bodega entró esta parte. Sin esta columna una
+                                 recepción repartida se ve igual que una que entró
+                                 toda junta, y nadie puede auditar qué fue a dónde. -->
+                            <th class="text-left p-2">Va para</th>
+                            <th class="text-left p-2">Estado</th>
                             <th class="text-left p-2">Motivo</th>
                             <th class="text-left p-2">Obs</th>
                         </tr>
@@ -159,13 +168,27 @@ const pasarAColor = (it) => {
                     <tbody class="divide-y">
                         <tr v-for="it in recepcion.items" :key="it.id"
                             :class="it.clasificacion && it.clasificacion !== 'apto' ? 'bg-amber-50/40 dark:bg-amber-950/20' : ''">
+                            <td class="p-2">
+                                <div class="font-medium">{{ it.producto }}</div>
+                                <div v-if="it.referencia" class="text-[10px] text-surface-500 font-mono">{{ it.referencia }}</div>
+                            </td>
                             <td class="p-2 text-right">{{ it.cantidad_recibida }}</td>
                             <td class="p-2 text-right">{{ money(it.costo_unit) }}</td>
                             <td class="p-2 text-right font-bold">{{ money(it.subtotal) }}</td>
                             <td class="p-2 text-xs">{{ it.lote || '—' }}</td>
                             <td class="p-2 text-xs">{{ it.color_nombre || '—' }}</td>
+                            <td class="p-2 text-xs">
+                                {{ it.bodega_destino || '—' }}
+                                <span v-if="it.bodega_elegida" class="block text-[10px] text-brand-600">elegida al recibir</span>
+                                <!-- Lo que no llegó apto NO entra al destino que eligieron:
+                                     entra a averías. Decir sólo la bodega real dejaba la
+                                     duda de si el reparto se había perdido. -->
+                                <span v-if="it.destino_pedido" class="block text-[10px] text-amber-700">
+                                    se había elegido {{ it.destino_pedido }}
+                                </span>
+                            </td>
                             <td class="p-2">
-                                <!-- LOG-J8 · chip del destino -->
+                                <!-- LOG-J8 · chip del estado en que llegó -->
                                 <span class="inline-block px-1.5 py-0.5 rounded text-[10px] font-bold uppercase"
                                       :class="{
                                         'bg-emerald-100 text-emerald-800': (it.clasificacion || 'apto') === 'apto',
@@ -184,9 +207,9 @@ const pasarAColor = (it) => {
                 </table>
                 <template v-for="it in recepcion.items" :key="`sin-${it.id}`">
                     <form v-if="it.sin_identificar > 0" @submit.prevent="pasarAColor(it)" class="mt-3 p-3 rounded-lg bg-amber-50 dark:bg-amber-950/40 border-l-4 border-amber-500 flex flex-wrap items-end gap-2 text-sm">
-                        <div class="flex-1 min-w-[12rem]"><b>{{ it.sin_identificar }} sin identificar.</b> Cuando sepa de qué color son, páselas aquí. El total no cambia.</div>
-                        <input v-model="(reclasificar[it.id] ??= {}).color" required maxlength="60" placeholder="Color" class="input w-36 text-sm" :aria-label="`Color para ${it.id}`"/>
-                        <input v-model.number="(reclasificar[it.id] ??= {}).cantidad" required type="number" step="1" min="1" :max="it.sin_identificar" placeholder="Cantidad" class="input w-24 text-sm" :aria-label="`Cantidad para ${it.id}`"/>
+                        <div class="flex-1 min-w-[12rem]"><b>{{ it.sin_identificar }} sin identificar</b> de {{ it.producto }}. Cuando sepa de qué color son, páselas aquí. El total no cambia.</div>
+                        <input v-model="(reclasificar[it.id] ??= {}).color" required maxlength="60" placeholder="Color" class="input w-36 text-sm" :aria-label="`Color para ${it.producto}`"/>
+                        <input v-model.number="(reclasificar[it.id] ??= {}).cantidad" required type="number" step="1" min="1" :max="it.sin_identificar" placeholder="Cantidad" class="input w-24 text-sm" :aria-label="`Cantidad para ${it.producto}`"/>
                         <button class="btn-primary text-sm">Pasar al color</button>
                     </form>
                 </template>

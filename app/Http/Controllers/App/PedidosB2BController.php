@@ -157,6 +157,9 @@ class PedidosB2BController extends Controller implements HasMiddleware
             'aprobadoPor:id,name', 'facturadoPor:id,name', 'despachadoPor:id,name',
             // LOG-J5 · incluimos el alistador para el timeline + Show card.
             'alistador:id,name',
+            // Quién firmó la liberación de cartera y de qué bodega sale.
+            'retencionLiberadaPor:id,name', 'entregadoPor:id,name',
+            'ubicacionOrigen:id,codigo,nombre',
         ])->findOrFail($pedido);
 
         /*
@@ -193,6 +196,10 @@ class PedidosB2BController extends Controller implements HasMiddleware
                 // Multiempresa · razón social que factura (NULL = la principal).
                 'empresa_id' => \App\Models\EmpresaConfig::porId($p->empresa_id)->id,
                 'empresa' => \App\Models\EmpresaConfig::porId($p->empresa_id)->nombreCorto(),
+                // De qué bodega sale. Null = de ninguna, que es el caso que
+                // deja el pedido sin mercancía apartada y fuera de la cola.
+                'ubicacion_origen_id' => $p->ubicacion_origen_id,
+                'bodega_origen' => $p->ubicacionOrigen?->nombre,
                 'creado' => $p->created_at?->format('Y-m-d H:i'),
                 'enviado_at' => $p->enviado_at?->format('Y-m-d H:i'),
                 'aprobado_at' => $p->aprobado_at?->format('Y-m-d H:i'),
@@ -228,16 +235,39 @@ class PedidosB2BController extends Controller implements HasMiddleware
                         'color' => 'blue',
                         'detalle' => 'Cola de pedidos para gerencia.',
                     ] : null,
-                    // LOG-J2 · si el semáforo de cartera lo retuvo, lo pintamos
-                    //   justo después de "enviado" para que Don Jorge entienda
-                    //   por qué no entró a la cola de alistamiento todavía.
-                    $p->estado === 'retenido' ? [
+                    /*
+                     * LOG-J2 · si el semáforo de cartera lo retuvo, va justo
+                     * después de «enviado» para que se entienda por qué no
+                     * entró a la cola de alistamiento.
+                     *
+                     * Se mira `retenido_at` y NO el estado actual: con el
+                     * estado, el hito desaparecía en el momento en que
+                     * Gerencia liberaba el pedido, y después nadie podía ver
+                     * que el semáforo lo había frenado. El `estado` sigue
+                     * valiendo para los pedidos anteriores a esta columna, que
+                     * están retenidos y no tienen fecha.
+                     */
+                    ($p->retenido_at || $p->estado === 'retenido') ? [
                         'hito' => 'Pedido RETENIDO por cartera',
                         'actor' => 'Semáforo automático',
-                        'at' => $p->enviado_at?->format('Y-m-d H:i') ?? $p->created_at?->format('Y-m-d H:i'),
+                        'at' => ($p->retenido_at ?? $p->enviado_at ?? $p->created_at)?->format('Y-m-d H:i'),
                         'icon' => '⏸',
                         'color' => 'red',
                         'detalle' => $p->motivo_retencion ?: 'Requiere aprobación de Gerencia.',
+                    ] : null,
+                    /*
+                     * Quién pasó por encima del semáforo. Va aparte del hito
+                     * de aprobación porque no es lo mismo aprobar un pedido
+                     * limpio que autorizar venderle a quien debe.
+                     */
+                    $p->retencion_liberada_at ? [
+                        'hito' => 'Retención liberada por Gerencia',
+                        'actor' => $p->retencionLiberadaPor?->name ?? 'Gerencia',
+                        'at' => $p->retencion_liberada_at->format('Y-m-d H:i'),
+                        'icon' => '🔓',
+                        'color' => 'amber',
+                        'detalle' => 'Se autorizó vender aunque cartera lo había bloqueado'
+                            .($p->motivo_retencion ? ": {$p->motivo_retencion}." : '.'),
                     ] : null,
                     $p->aprobado_at ? [
                         'hito' => 'Pedido aprobado',
@@ -319,6 +349,22 @@ class PedidosB2BController extends Controller implements HasMiddleware
                         'color' => 'indigo',
                         'detalle' => ($p->transportadora ? $p->transportadora.' · ' : '').'Guía '.$p->guia_transportadora,
                     ] : null,
+                    /*
+                     * Y la entrega cierra el ciclo.
+                     *
+                     * El historial terminaba en «despachado»: quién recibió y
+                     * cuándo vivía sólo en la pantalla de guías, así que desde
+                     * el pedido no se podía responder la pregunta más común
+                     * que hace un cliente por teléfono.
+                     */
+                    $p->entregado_at ? [
+                        'hito' => 'Pedido entregado',
+                        'actor' => $p->entregadoPor?->name ?? 'Logística',
+                        'at' => $p->entregado_at->format('Y-m-d H:i'),
+                        'icon' => '🏁',
+                        'color' => 'emerald',
+                        'detalle' => $p->entrega_nota ?: 'Sin constancia de quién recibió.',
+                    ] : null,
                 ])),
                 'contacto' => [
                     'id' => $p->contacto->id,
@@ -342,6 +388,31 @@ class PedidosB2BController extends Controller implements HasMiddleware
             ])->values(),
             'empresas' => \App\Models\EmpresaConfig::activas()
                 ->map(fn ($e) => ['id' => $e->id, 'nombre' => $e->nombreCorto()])->values(),
+            /*
+             * De qué bodega sale, y de cuáles podría salir.
+             *
+             * Sólo las sedes propias y vendibles: de las 55 ubicaciones, 43
+             * son espejos del catálogo compartido de SIIGO y muchas son de
+             * otras empresas. Rutear un pedido a una de ésas lo dejaría
+             * colgando de una bodega que no existe en el piso.
+             */
+            'bodegas_origen' => \App\Modules\Dropi\Models\InventarioUbicacion::query()
+                ->whereNull('bodega_id')
+                ->where('activa', true)
+                ->where('disponible_para_venta', true)
+                ->where('codigo', 'not like', 'SIIGO-%')
+                ->orderBy('codigo')
+                ->get(['id', 'codigo', 'nombre'])
+                ->map(fn ($b) => ['id' => $b->id, 'nombre' => "{$b->codigo} · {$b->nombre}"])
+                ->values(),
+            /*
+             * Un pedido rechazado no cambia de bodega: `cambiarBodega` lo
+             * niega, con razón —no hay nada que despachar—, pero la pantalla
+             * ofrecía el selector igual y el servidor contestaba que no.
+             */
+            'puede_cambiar_bodega' => $this->puedeAprobar($r->user())
+                && $p->despachado_at === null
+                && $p->estado !== 'rechazado',
         ]);
     }
 
@@ -350,6 +421,110 @@ class PedidosB2BController extends Controller implements HasMiddleware
      * haya factura: después, el número, el NIT y la cuenta de SIIGO ya son
      * los de la empresa que facturó.
      */
+    /**
+     * Decirle a un pedido de qué bodega sale.
+     *
+     * Existe porque el aviso que aparece al aprobar —«el pedido no tiene
+     * bodega de origen, así que no se apartó nada: asignale una bodega y
+     * volvé a aprobarlo»— mandaba a hacer algo que la pantalla no permitía.
+     * Quien lo leía no tenía dónde asignarla, así que el aviso se volvía ruido
+     * y el pedido se quedaba sin apartar mercancía y fuera de la cola de
+     * bodega.
+     *
+     * Desde que existen las reglas de ruteo, los pedidos nuevos nacen con
+     * bodega. Esto es para los viejos, y para el caso en que la ciudad del
+     * cliente no corresponda con de dónde va a salir de verdad.
+     *
+     * Reasignar vuelve a apartar: la reserva vieja se suelta y se toma en la
+     * bodega nueva. Si no, la mercancía quedaría apartada en una sede de la
+     * que el pedido ya no sale.
+     */
+    public function cambiarBodega(Request $r, int $pedido): RedirectResponse
+    {
+        abort_unless($this->puedeAprobar($r->user()), 403,
+            'Cambiar la bodega de origen es decisión de Gerencia o cartera.');
+
+        $data = $r->validate([
+            'ubicacion_origen_id' => ['required', 'integer', 'exists:inventario_ubicaciones,id'],
+        ]);
+
+        $p = PedidoCliente::with('items')->findOrFail($pedido);
+
+        /*
+         * Los motivos se devuelven como error de campo y no con `abort(422)`:
+         * en una petición de Inertia el abort deja un cuerpo que la pantalla no
+         * sabe leer, así que el usuario no ve nada y cree que no pasó nada.
+         */
+        $noSePuede = match (true) {
+            $p->despachado_at !== null => 'Ese pedido ya salió de bodega: cambiarle el origen movería stock que ya no está ahí.',
+            $p->estado === 'rechazado' => 'El pedido está rechazado.',
+            default => null,
+        };
+
+        if ($noSePuede) {
+            return back()->withErrors(['ubicacion_origen_id' => $noSePuede]);
+        }
+
+        $destino = \App\Modules\Dropi\Models\InventarioUbicacion::findOrFail($data['ubicacion_origen_id']);
+
+        /*
+         * El servidor tiene que negar lo mismo que la pantalla esconde.
+         *
+         * El desplegable ofrece sólo sedes propias, activas y vendibles; por
+         * el POST entraba cualquier id, incluidos los 43 espejos que el
+         * importador trajo del catálogo compartido de SIIGO —«TK0007UREA»,
+         * «Bodega pruebas luis», muchas de otras empresas— y las bodegas de
+         * averías. Un pedido con origen en una de ésas no tiene stock ni
+         * aparece en ninguna cola.
+         */
+        $destinoMal = match (true) {
+            $destino->bodega_id !== null => "«{$destino->nombre}» es una posición dentro de otra bodega. El origen de un pedido es la bodega.",
+            ! $destino->activa => "«{$destino->nombre}» está desactivada.",
+            ! $destino->disponible_para_venta => "De «{$destino->nombre}» no se vende: es una zona de averías, bajas o garantías.",
+            str_starts_with((string) $destino->codigo, 'SIIGO-') => "«{$destino->nombre}» vino del catálogo de SIIGO y no es una bodega de la empresa.",
+            default => null,
+        };
+
+        if ($destinoMal) {
+            return back()->withErrors(['ubicacion_origen_id' => $destinoMal]);
+        }
+
+        $p->update(['ubicacion_origen_id' => $destino->id]);
+
+        /*
+         * Y se vuelve a apartar, pero sólo si hay algo que apartar.
+         *
+         * Un pedido APROBADO sí: tiene mercancía reservada en la bodega vieja
+         * y hay que moverla a la nueva.
+         *
+         * Un pedido FACTURADO no. Al facturar se suelta lo apartado a
+         * propósito —desde ahí manda la factura y el despacho descuenta el
+         * stock de verdad—, así que volver a reservar contaba la misma caja
+         * dos veces y el disponible salía más bajo de lo que es. Esa reserva
+         * no la suelta nadie después: el único que la soltaba era el facturar
+         * que ya pasó, y de ahí en adelante sólo expira sola a los días.
+         *
+         * En un borrador o un rechazado tampoco hay nada que reservar.
+         */
+        $faltantes = [];
+        $yaFacturado = $p->estado === 'facturado' || $p->factura_id !== null;
+
+        if ($p->estado === 'aprobado' && ! $yaFacturado) {
+            $reserva = app(\App\Modules\Inventario\Actions\ReservarPedido::class)->handle($p->fresh('items'));
+            $faltantes = $reserva['faltantes'] ?? [];
+        }
+
+        $msg = "Este pedido sale de {$destino->nombre}.";
+        if ($faltantes) {
+            $msg .= ' Ojo: ahí no alcanza para '.count($faltantes).' ítem(s).';
+        } elseif ($yaFacturado) {
+            $msg .= ' Ya está facturado, así que no se apartó nada: '
+                .'el despacho descuenta el stock de esa bodega.';
+        }
+
+        return back()->with($faltantes ? 'warning' : 'success', $msg);
+    }
+
     public function cambiarEmpresa(Request $r, int $pedido): RedirectResponse
     {
         $data = $r->validate([
@@ -383,14 +558,28 @@ class PedidosB2BController extends Controller implements HasMiddleware
             $p = PedidoCliente::whereKey($pedido)->lockForUpdate()->firstOrFail();
             abort_unless(in_array($p->estado, ['enviado', 'retenido'], true), 422,
                 'Sólo se aprueban pedidos enviados o retenidos por cartera.');
+
+            $venia = $p->estado === 'retenido';
+
             $p->update([
                 'estado' => 'aprobado',
                 'aprobado_at' => now(),
                 // Quién aprobó, que no se guardaba. Era el único paso de la
                 // cadena sin autor, justo el que autoriza que salga mercancía.
                 'aprobado_por_id' => $aprobadorId,
-                // LOG-J3 · si venía retenido, dejamos el motivo como huella para
-                //   el timeline (hito 'retenido') pero el pedido ya está vivo.
+                /*
+                 * Y la retención queda firmada.
+                 *
+                 * Antes el hito «retenido por cartera» se pintaba leyendo
+                 * `estado === 'retenido'`, así que al liberar DESAPARECÍA del
+                 * historial: después nadie podía ver que el semáforo lo había
+                 * bloqueado ni quién decidió vender igual. Autorizar un
+                 * despacho a un cliente con facturas vencidas es una decisión
+                 * comercial, y las decisiones se firman.
+                 */
+                'retenido_at' => $venia ? ($p->retenido_at ?: ($p->enviado_at ?: $p->created_at)) : $p->retenido_at,
+                'retencion_liberada_at' => $venia ? now() : $p->retencion_liberada_at,
+                'retencion_liberada_por_id' => $venia ? $aprobadorId : $p->retencion_liberada_por_id,
             ]);
         });
 

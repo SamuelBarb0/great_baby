@@ -157,6 +157,16 @@ class CrearPedidoCliente
                 'ubicacion_origen_id' => ReglaRuteoCiudad::resolver($cliente->ciudad),
                 'estado' => $retenido ? 'retenido' : 'enviado',
                 'motivo_retencion' => $retenido ? implode(' · ', $motivos) : null,
+                /*
+                 * Y cuándo lo frenó, que sobrevive a la liberación.
+                 *
+                 * El hito del historial se pintaba leyendo el estado, así que
+                 * desaparecía en el momento en que Gerencia liberaba el
+                 * pedido: después nadie podía ver que cartera lo había
+                 * bloqueado. Se estampa acá, que es donde de verdad ocurre, y
+                 * no al aprobarlo.
+                 */
+                'retenido_at' => $retenido ? now() : null,
                 'notas_cliente' => $notas,
                 'enviado_at' => now(),
                 'subtotal' => 0, 'iva' => 0, 'total' => 0,

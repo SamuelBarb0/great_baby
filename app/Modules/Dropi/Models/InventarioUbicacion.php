@@ -15,6 +15,11 @@ class InventarioUbicacion extends Model
         // no tiene `bodega_id`. Pasillo/estante/nivel dicen dónde está parada
         // físicamente la mercancía dentro de esa bodega.
         'bodega_id', 'pasillo', 'estante', 'nivel',
+        // Los dos ejes con los que clasifica la bodega: de quién es la
+        // mercancía (oficina) y en qué estado está (almacén). Sin ellos acá,
+        // `create()` los descartaba en silencio y el resolvedor del par creaba
+        // una bodega nueva en cada recepción.
+        'oficina_id', 'almacen_id',
         'codigo', 'nombre', 'categoria',
         'disponible_para_venta', 'activa', 'notas',
         // UBIC-3 · datos de operación / SIIGO por ubicación.
@@ -30,7 +35,21 @@ class InventarioUbicacion extends Model
         'siigo_resolution_id' => 'integer',
         'responsable_user_id' => 'integer',
         'bodega_id' => 'integer',
+        'oficina_id' => 'integer',
+        'almacen_id' => 'integer',
     ];
+
+    /** De quién es la mercancía que vive acá. Null en las ubicaciones sin mapear. */
+    public function oficina(): \Illuminate\Database\Eloquent\Relations\BelongsTo
+    {
+        return $this->belongsTo(\App\Modules\Inventario\Models\Oficina::class, 'oficina_id');
+    }
+
+    /** En qué estado y condición comercial está lo que vive acá. */
+    public function almacen(): \Illuminate\Database\Eloquent\Relations\BelongsTo
+    {
+        return $this->belongsTo(\App\Modules\Inventario\Models\Almacen::class, 'almacen_id');
+    }
 
     /** La bodega (sede) a la que pertenece. Null = esto ES una bodega. */
     public function bodega(): \Illuminate\Database\Eloquent\Relations\BelongsTo

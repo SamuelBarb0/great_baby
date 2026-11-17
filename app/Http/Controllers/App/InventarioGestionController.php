@@ -93,7 +93,12 @@ class InventarioGestionController extends Controller implements HasMiddleware
                     $q->whereNull('variante_id')->where('producto_id', $productoAgregado->id);
                 }
                 if (! $u->esAracely()) {
-                    $bodegas = $u->bodegasAsignadasIds();
+                    // H2 · el kardex es LECTURA, y la matriz ya le da esta
+                    //   sección al Alistador. Con el método de operar le caía
+                    //   el `whereRaw('1=0')` de abajo y el kardex salía vacío:
+                    //   se lee como «nunca se movió», y había mercancía en el
+                    //   estante. El alcance por bodega se mantiene.
+                    $bodegas = $u->bodegasQueVeIds();
                     if (empty($bodegas)) {
                         $q->whereRaw('1=0');
                     } else {
@@ -1065,7 +1070,10 @@ class InventarioGestionController extends Controller implements HasMiddleware
             ]);
         }
         $u = $r->user();
-        $bodegasPermitidas = $u->esAracely() ? null : $u->bodegasAsignadasIds();
+        // H2 · lectura: ver el stock de su propia bodega. Antes el Alistador
+        //   caía siempre en el scope vacío de abajo y el buscador le devolvía
+        //   stock nulo aunque la bodega fuera suya.
+        $bodegasPermitidas = $u->esAracely() ? null : $u->bodegasQueVeIds();
 
         // FIX-S0 · si el user tiene scope restringido pero vacío (Alistador/
         // AdminBodega sin bodegas aún asignadas), devolvemos resultados pero
