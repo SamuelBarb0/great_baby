@@ -135,46 +135,17 @@ it('guardar una regla de ruteo sin prioridad no revienta', function () {
         ->and($regla->prioridad)->not->toBeNull();
 });
 
-// ───────────── G · nadie se deja a sí mismo sin la última bodega ────────────
-
-it('el jefe de bodega no se puede quitar de su única bodega', function () {
-    Role::findOrCreate('AdminBodega');
-    Role::findOrCreate('Alistador');
-
-    $jorge = User::factory()->create(['name' => 'Jorge']);
-    $jorge->assignRole('AdminBodega');
-
-    $suya = bodegaRev('PPAL', ['responsable_user_id' => $jorge->id]);
-
-    $otro = User::factory()->create(['name' => 'Alistador']);
-    $otro->assignRole('Alistador');
-
-    /*
-     * El alcance de operar se calcula desde esta misma columna: quitándose de
-     * su última bodega, se quedaba sin cola, sin kardex y sin la pantalla desde
-     * la cual lo acababa de hacer, y sin forma de devolvérselo.
-     */
-    $this->actingAs($jorge)
-        ->postJson('/app/inventario/ubicaciones/responsable', [
-            'ubicacion_id' => $suya->id,
-            'responsable_user_id' => null,
-        ])
-        ->assertStatus(422);
-
-    expect($suya->fresh()->responsable_user_id)->toBe($jorge->id);
-
-    // Con dos bodegas sí puede soltar una: lo que se cuida es quedarse en cero.
-    $segunda = bodegaRev('SEG', ['responsable_user_id' => $jorge->id]);
-
-    $this->actingAs($jorge)
-        ->postJson('/app/inventario/ubicaciones/responsable', [
-            'ubicacion_id' => $segunda->id,
-            'responsable_user_id' => $otro->id,
-        ])
-        ->assertOk();
-
-    expect($segunda->fresh()->responsable_user_id)->toBe($otro->id);
-});
+/*
+ * G · «nadie se deja a sí mismo sin la última bodega» NO se implementó.
+ *
+ * La revisión lo señaló y el riesgo es cierto: el alcance de operar se calcula
+ * desde `responsable_user_id`, así que quien se quita de su única bodega se
+ * queda sin cola, sin kardex y sin la pantalla desde la cual lo hizo.
+ *
+ * Pero poder quitar el responsable es una decisión ya tomada y probada
+ * —`JorgeArmaSuEquipoTest`: «quitar el responsable se puede, y deja la
+ * ubicación sin dueño»—. Cambiarla es del área, no nuestra. Queda en la lista.
+ */
 
 // ───────── F · el sembrador no resucita una fila que el área renombró ───────
 

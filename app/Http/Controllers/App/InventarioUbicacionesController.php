@@ -342,30 +342,17 @@ class InventarioUbicacionesController extends Controller
         }
 
         /*
-         * Nadie se puede dejar a sí mismo sin la última bodega.
+         * NOTA, 18-nov-2026 · quedarse sin bodega.
          *
-         * El alcance de operar se calcula desde esta misma columna, así que un
-         * jefe de bodega que se quita de su única ubicación sale de la jugada
-         * en el mismo clic: se queda sin cola, sin kardex y sin la pantalla
-         * desde la cual acaba de hacerlo. No hay forma de devolvérselo a sí
-         * mismo, y hay que ir a buscar a Gerencia. Se le deja soltar ubicaciones
-         * mientras le quede al menos una.
+         * La revisión señaló que un jefe de bodega puede quitarse a sí mismo de
+         * su única ubicación y en el mismo clic se queda sin cola, sin kardex y
+         * sin esta pantalla, sin forma de devolvérselo. Es un riesgo real.
+         *
+         * Pero PODER quitar el responsable es una decisión tomada y probada
+         * —«quitar el responsable se puede, y deja la ubicación sin dueño», en
+         * JorgeArmaSuEquipoTest—, y cerrarla cambia el comportamiento que el
+         * área pidió. Queda anotado para decidirlo con ellos, no acá.
          */
-        $seQuitaASiMismo = (int) $ubicacion->responsable_user_id === (int) $u->id
-            && (int) ($responsable?->id ?? 0) !== (int) $u->id;
-
-        if ($seQuitaASiMismo && ! \App\Auth\Permisos::esRoot($u)) {
-            $leQuedan = array_diff($u->bodegasAsignadasIds(), [(int) $ubicacion->id]);
-
-            abort_if(
-                $leQuedan === [],
-                422,
-                "«{$ubicacion->nombre}» es la última bodega de la que usted responde. "
-                .'Si se la quita se queda sin cola, sin kardex y sin esta pantalla, y no '
-                .'podría devolvérsela: pídale a Gerencia que lo haga.'
-            );
-        }
-
         $ubicacion->update(['responsable_user_id' => $responsable?->id]);
 
         return response()->json([
