@@ -105,8 +105,31 @@ class TrasRecepcion
                 .': pedí el traslado si las querés en la tuya.'
             : '';
 
+        /*
+         * La pregunta que manda es si quedó algo SIN TRASLADAR, no si el
+         * traslado existe.
+         *
+         * `$traslado` en null significa dos cosas muy distintas: que no hacía
+         * falta ninguno, o que hacía falta y NO SE PUDO —falta la ubicación de
+         * e-commerce en Reglas, que viene en cero de fábrica, o las líneas no
+         * tienen producto—. Mirando sólo si es null, una recepción repartida a
+         * medias le decía a Aracely «entró directo a su bodega, no hace falta
+         * aceptar ningún traslado» mientras la otra mitad se quedaba en la
+         * bodega de Great Baby, sin traslado y sin que nadie se enterara.
+         */
+        $faltoTraslado = $aTrasladar->isNotEmpty() && $traslado === null;
+
+        $pendiente = $faltoTraslado
+            ? ' Quedaron '.rtrim(rtrim(number_format((float) $aTrasladar->sum('cantidad_recibida'), 3, ',', '.'), '0'), ',')
+                .' unidades en '.($recepcion->bodega?->nombre ?: 'la bodega de la recepción')
+                .' SIN traslado: falta configurar la ubicación de e-commerce en Reglas, '
+                .'o crear el producto de esas líneas.'
+            : '';
+
         $mensaje = match (true) {
             $traslado !== null => "Recepción {$recepcion->numero}. Traslado {$traslado->numero} listo para aceptar.".$ajenas,
+            // Hacía falta trasladar y no se pudo: es lo primero que hay que decir.
+            $faltoTraslado => "Recepción {$recepcion->numero}.".$pendiente.$ajenas,
             // Se repartió al recibir: no hay nada que trasladar y eso es lo
             // correcto. Decirlo evita que alguien salga a buscar un traslado
             // que no existe.

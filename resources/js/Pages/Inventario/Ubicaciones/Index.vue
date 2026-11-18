@@ -144,9 +144,26 @@ const guardar = async () => {
     } finally { guardando.value = false; }
 };
 
+/*
+ * Activar y borrar tienen que DECIR cuando no se pudo.
+ *
+ * Las dos salían sin `try/catch`, así que un rechazo del servidor —que es de
+ * Gerencia, no del jefe de bodega— se convertía en una promesa rota que nadie
+ * atrapa: el modal se cerraba, la fila quedaba igual y la persona volvía a
+ * pulsar. Esconder los botones cuando no se puede evita el camino normal, pero
+ * la raíz es ésta: una llamada que falla sin avisar miente igual que un dato
+ * equivocado.
+ */
 const toggleActiva = async (u) => {
-    const { data } = await axios.post(`/app/inventario/ubicaciones/${u.id}/toggle`);
-    if (data.ok) { router.reload({ only: ['ubicaciones'] }); }
+    try {
+        const { data } = await axios.post(`/app/inventario/ubicaciones/${u.id}/toggle`);
+        if (data.ok) {
+            mostrarFlash('success', data.mensaje || `${u.codigo} ${u.activa ? 'desactivada' : 'activada'}.`);
+            router.reload({ only: ['ubicaciones', 'sin_sede'] });
+        }
+    } catch (e) {
+        mostrarFlash('error', mensajeDeError(e, 'No pude cambiar el estado de la ubicación'));
+    }
 };
 
 const confirmarEliminar = (u) => {
@@ -158,9 +175,13 @@ const confirmarEliminar = (u) => {
         color: 'rose', textoConfirmar: u.movimientos_count > 0 ? 'Desactivar' : 'Eliminar',
         onConfirmar: async () => {
             modalConfirm.value = null;
-            const { data } = await axios.delete(`/app/inventario/ubicaciones/${u.id}`);
-            mostrarFlash('success', data.mensaje);
-            router.reload({ only: ['ubicaciones'] });
+            try {
+                const { data } = await axios.delete(`/app/inventario/ubicaciones/${u.id}`);
+                mostrarFlash('success', data.mensaje);
+                router.reload({ only: ['ubicaciones', 'bodegas', 'sin_sede'] });
+            } catch (e) {
+                mostrarFlash('error', mensajeDeError(e, 'No pude eliminar la ubicación'));
+            }
         },
     };
 };
@@ -442,9 +463,17 @@ const crearAdminBodega = async () => {
                     <button v-for="r in resolucionesList" :key="r.id" :disabled="!puede_editar_la_ubicacion" @click="marcarDefault(r)"
                             :class="[
                                 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs',
-                                r.id === defaultResolId ? 'border-amber-400 bg-amber-50 text-amber-800' : 'border-surface-200 hover:border-amber-300 hover:bg-amber-50/50'
+                                r.id === defaultResolId ? 'border-amber-400 bg-amber-50 text-amber-800' : 'border-surface-200',
+                                /* Un control apagado no puede seguir invitando a pulsarlo: sin
+                                   esto, los chips quedaban muertos para el jefe de bodega pero
+                                   con el mismo hover y el mismo «Click para…» de siempre. */
+                                puede_editar_la_ubicacion
+                                    ? (r.id === defaultResolId ? '' : 'hover:border-amber-300 hover:bg-amber-50/50')
+                                    : 'opacity-60 cursor-default'
                             ]"
-                            :title="r.id === defaultResolId ? 'Click para quitar como default' : 'Click para marcar como default'">
+                            :title="!puede_editar_la_ubicacion
+                                ? 'La resolución por defecto la marca Gerencia'
+                                : (r.id === defaultResolId ? 'Click para quitar como default' : 'Click para marcar como default')">
                         <Star :class="['h-3.5 w-3.5', r.id === defaultResolId ? 'text-amber-500 fill-amber-500' : 'text-surface-300']"/>
                         <span v-if="r.prefix" class="font-mono bg-sky-100 text-sky-700 px-1 py-0.5 rounded text-[10px]">{{ r.prefix }}</span>
                         {{ r.nombre }}
@@ -571,7 +600,7 @@ const crearAdminBodega = async () => {
                                 <button v-if="puede_editar_la_ubicacion" @click="abrirEditar(u)" class="text-brand-600 hover:text-brand-700 p-1" title="Editar">
                                     <Pencil class="h-4 w-4"/>
                                 </button>
-                                <button @click="confirmarEliminar(u)" class="text-red-500 hover:text-red-700 p-1" title="Eliminar">
+                                <button v-if="puede_editar_la_ubicacion" @click="confirmarEliminar(u)" class="text-red-500 hover:text-red-700 p-1" title="Eliminar">
                                     <Trash2 class="h-4 w-4"/>
                                 </button>
                             </td>

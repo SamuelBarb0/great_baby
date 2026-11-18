@@ -20,9 +20,14 @@ td { padding: 2mm; border-bottom:1px solid #f3f4f6; }
     {{-- Con el reparto, el encabezado ya no puede nombrar una sola bodega: el
          PDF es lo que firma quien recibe y diría que las 50 unidades entraron
          todas al mismo sitio. --}}
-    @php($repartida = $recepcion->items->contains(
-        fn ($x) => $x->bodegaDondeQuedo() !== (int) $recepcion->bodega_id
-    ))
+    {{-- Lo faltante no entró a ninguna bodega, así que no cuenta para decidir si
+         la mercancía quedó repartida: `bodegaDondeQuedo()` devuelve null y null
+         nunca es igual al id, así que una sola línea anotada como faltante hacía
+         que este papel —el que se firma— dejara de nombrar la bodega y dijera
+         «varias» de una recepción que entró entera a un solo sitio. --}}
+    @php($repartida = $recepcion->items
+        ->reject(fn ($x) => $x->bodegaDondeQuedo() === null)
+        ->contains(fn ($x) => $x->bodegaDondeQuedo() !== (int) $recepcion->bodega_id))
     Bodega: <strong>{{ $repartida ? 'varias (ver detalle)' : $recepcion->bodega?->nombre }}</strong> ·
     Fecha: <strong>{{ $recepcion->fecha_recepcion?->format('Y-m-d') }}</strong>
 </div>

@@ -341,6 +341,31 @@ class InventarioUbicacionesController extends Controller
             );
         }
 
+        /*
+         * Nadie se puede dejar a sí mismo sin la última bodega.
+         *
+         * El alcance de operar se calcula desde esta misma columna, así que un
+         * jefe de bodega que se quita de su única ubicación sale de la jugada
+         * en el mismo clic: se queda sin cola, sin kardex y sin la pantalla
+         * desde la cual acaba de hacerlo. No hay forma de devolvérselo a sí
+         * mismo, y hay que ir a buscar a Gerencia. Se le deja soltar ubicaciones
+         * mientras le quede al menos una.
+         */
+        $seQuitaASiMismo = (int) $ubicacion->responsable_user_id === (int) $u->id
+            && (int) ($responsable?->id ?? 0) !== (int) $u->id;
+
+        if ($seQuitaASiMismo && ! \App\Auth\Permisos::esRoot($u)) {
+            $leQuedan = array_diff($u->bodegasAsignadasIds(), [(int) $ubicacion->id]);
+
+            abort_if(
+                $leQuedan === [],
+                422,
+                "«{$ubicacion->nombre}» es la última bodega de la que usted responde. "
+                .'Si se la quita se queda sin cola, sin kardex y sin esta pantalla, y no '
+                .'podría devolvérsela: pídale a Gerencia que lo haga.'
+            );
+        }
+
         $ubicacion->update(['responsable_user_id' => $responsable?->id]);
 
         return response()->json([

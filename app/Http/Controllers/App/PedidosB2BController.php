@@ -398,12 +398,29 @@ class PedidosB2BController extends Controller implements HasMiddleware
              */
             'bodegas_origen' => \App\Modules\Dropi\Models\InventarioUbicacion::query()
                 ->whereNull('bodega_id')
-                ->where('activa', true)
-                ->where('disponible_para_venta', true)
-                ->where('codigo', 'not like', 'SIIGO-%')
+                /*
+                 * Y la bodega que el pedido YA tiene va siempre, aunque hoy no
+                 * cumpla los filtros.
+                 *
+                 * Una bodega que se desactivó, o que dejó de venderse, sigue
+                 * siendo de dónde sale este pedido. Si no está en la lista, el
+                 * `<select>` cae en la opción vacía y la pantalla dice «— sin
+                 * bodega —» de un pedido que sí la tiene: quien mira cree que
+                 * hay que asignarla y al guardar le cambia el origen a una
+                 * mercancía que ya está apartada en otro sitio.
+                 */
+                ->where(fn ($q) => $q
+                    ->where(fn ($ok) => $ok
+                        ->where('activa', true)
+                        ->where('disponible_para_venta', true)
+                        ->where('codigo', 'not like', 'SIIGO-%'))
+                    ->orWhere('id', $p->ubicacion_origen_id))
                 ->orderBy('codigo')
-                ->get(['id', 'codigo', 'nombre'])
-                ->map(fn ($b) => ['id' => $b->id, 'nombre' => "{$b->codigo} · {$b->nombre}"])
+                ->get(['id', 'codigo', 'nombre', 'activa'])
+                ->map(fn ($b) => [
+                    'id' => $b->id,
+                    'nombre' => "{$b->codigo} · {$b->nombre}".($b->activa ? '' : '  (desactivada)'),
+                ])
                 ->values(),
             /*
              * Un pedido rechazado no cambia de bodega: `cambiarBodega` lo

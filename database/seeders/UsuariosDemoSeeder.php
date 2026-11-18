@@ -22,15 +22,26 @@ class UsuariosDemoSeeder extends Seeder
 {
     public const PASSWORD_DEMO = 'demo';
 
-    /** Un usuario demo por rol del sistema. */
+    /**
+     * Un usuario demo por rol del sistema.
+     *
+     * El tercer campo admite UN rol o VARIOS. Una persona de verdad lleva más
+     * de un sombrero —el jefe de logística es jefe de bodega y además líder de
+     * su área, por eso puede pedir un alistador nuevo— y el sistema está hecho
+     * para eso: «una persona puede tener más de un rol y suma los accesos de
+     * todos», como dice la propia pantalla de Roles. Mientras esta lista
+     * admitía uno solo, los dos sombreros había que ponerlos a mano y se
+     * perdían en la siguiente resiembra.
+     */
     public const USUARIOS = [
-        // [email, name, rol, ciudad para AdminBodega]
+        // [email, name, rol o [roles], ciudad para AdminBodega]
         ['aracely@greatbaby.com',               'Aracely (demo)',             'Aracely'],
         ['gerencia.demo@greatbaby.com',         'Gerencia Demo',              'Gerencia'],
         ['gerente.demo@greatbaby.com',          'Gerente Demo',               'Gerente'],
         ['contador.demo@greatbaby.com',         'Contador Demo',              'Contador'],
         ['vendedor.demo@greatbaby.com',         'Carlos Vendedor Demo',       'Vendedor'],
-        ['admin.bodega.bog@greatbaby.com',      'Jorge AdminBodega BOG',      'AdminBodega'],
+        // Jorge lleva los dos: manda la bodega Y es líder de su área.
+        ['admin.bodega.bog@greatbaby.com',      'Jorge AdminBodega BOG',      ['AdminBodega', 'LiderArea']],
         ['alistador.bog@greatbaby.com',         'Alistador BOG Demo',         'Alistador'],
         ['despachador.bog@greatbaby.com',       'Despachador BOG Demo',       'Despachador'],
         ['sac.demo@greatbaby.com',              'Servicio Cliente Demo',      'ServicioCliente'],
@@ -56,14 +67,19 @@ class UsuariosDemoSeeder extends Seeder
             return;
         }
 
-        // 1. Asegurar que los 10 roles existen (fail-closed si falta uno).
-        foreach (array_unique(array_column(self::USUARIOS, 2)) as $rol) {
+        // 1. Asegurar que todos los roles existen (fail-closed si falta uno).
+        $todos = collect(self::USUARIOS)
+            ->flatMap(fn ($fila) => (array) $fila[2])
+            ->unique();
+
+        foreach ($todos as $rol) {
             Role::firstOrCreate(['name' => $rol, 'guard_name' => 'web']);
         }
 
         // 2. Crear/actualizar cada usuario demo.
         $creados = 0; $actualizados = 0;
-        foreach (self::USUARIOS as [$email, $name, $rol]) {
+        foreach (self::USUARIOS as [$email, $name, $roles]) {
+            $roles = (array) $roles;
             $u = User::firstOrNew(['email' => $email]);
             $exista = $u->exists;
 
@@ -73,10 +89,10 @@ class UsuariosDemoSeeder extends Seeder
                 'email_verified_at' => now(),
             ])->save();
 
-            $u->syncRoles([$rol]);
+            $u->syncRoles($roles);
 
             $exista ? $actualizados++ : $creados++;
-            $this->command?->line("  <fg=green>✓</> {$email} · <fg=cyan>{$rol}</>");
+            $this->command?->line("  <fg=green>✓</> {$email} · <fg=cyan>".implode(' + ', $roles).'</>');
         }
 
         $this->command?->newLine();

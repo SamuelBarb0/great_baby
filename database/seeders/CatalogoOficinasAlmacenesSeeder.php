@@ -70,7 +70,28 @@ class CatalogoOficinasAlmacenesSeeder extends Seeder
     private function oficinas(): void
     {
         foreach (self::OFICINAS as $i => [$codigo, $nombre, $ingreso, $empresaCodigo, $respaldo, $obs]) {
+            /*
+             * Si el área le cambió el CÓDIGO a una fila, no se resucita la vieja.
+             *
+             * `firstOrNew(['codigo' => ...])` busca por código, así que renombrar
+             * «11» a «11A» hacía que la siguiente corrida creara otra vez la «11»:
+             * dos oficinas para el mismo lugar físico, las dos admitiendo ingreso
+             * directo. El reparto ofrece el par con el id NUEVO y `UbicacionDelPar`
+             * busca por id, así que no encuentra la bodega mapeada y crea otra —y
+             * el stock queda partido en dos, que es el daño que todo este catálogo
+             * existe para evitar. Si ya hay una fila con ese nombre, es la misma.
+             */
             $o = Oficina::firstOrNew(['codigo' => $codigo]);
+
+            if (! $o->exists) {
+                $renombrada = Oficina::where('nombre', $nombre)->first();
+                if ($renombrada) {
+                    $this->command?->line("  <fg=yellow>~</> oficina «{$nombre}» ya existe con código {$renombrada->codigo}: no se recrea como {$codigo}.");
+
+                    continue;
+                }
+            }
+
             $nueva = ! $o->exists;
 
             // En una fila nueva se escribe todo. En una que ya existe sólo se
@@ -108,7 +129,18 @@ class CatalogoOficinasAlmacenesSeeder extends Seeder
     private function almacenes(): void
     {
         foreach (self::ALMACENES as $i => [$codigo, $nombre, $estado, $comercial, $ingreso, $categoria, $obs]) {
+            // Ídem: un almacén renombrado no se vuelve a crear con el código viejo.
             $a = Almacen::firstOrNew(['codigo' => $codigo]);
+
+            if (! $a->exists) {
+                $renombrado = Almacen::where('nombre', $nombre)->first();
+                if ($renombrado) {
+                    $this->command?->line("  <fg=yellow>~</> almacén «{$nombre}» ya existe con código {$renombrado->codigo}: no se recrea como {$codigo}.");
+
+                    continue;
+                }
+            }
+
             $nueva = ! $a->exists;
 
             $a->nombre = $nueva ? $nombre : ($a->nombre ?: $nombre);

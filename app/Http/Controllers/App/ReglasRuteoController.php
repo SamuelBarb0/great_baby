@@ -208,6 +208,22 @@ class ReglasRuteoController extends Controller
             ]);
         }
 
+        /*
+         * La prioridad vacía no es un null: es «la de siempre».
+         *
+         * La columna es `NOT NULL` con default 100, y la casilla del formulario
+         * es opcional —`v-model.number` deja cadena vacía, que Laravel convierte
+         * a null antes de validar—. Como la regla dice `nullable`, ese null
+         * pasaba la validación entera y moría en el INSERT con un 500: la
+         * persona dejaba un campo opcional en blanco y el sistema se caía sin
+         * decir nada que se entienda. Se quita del arreglo: en una regla nueva
+         * manda el default de la columna, y en una que se edita se respeta la
+         * que ya tenía.
+         */
+        if (array_key_exists('prioridad', $data) && $data['prioridad'] === null) {
+            unset($data['prioridad']);
+        }
+
         $regla = ReglaRuteoCiudad::findOrNew($data['id'] ?? null);
         $regla->fill($data)->save();
 

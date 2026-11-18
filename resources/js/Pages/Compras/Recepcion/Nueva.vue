@@ -184,8 +184,21 @@ if (claveConteo) {
                 .filter(g => base[g.orden_item_id])
                 .map(g => {
                     const fila = { ...base[g.orden_item_id], ...g };
+
+                    /*
+                     * El tope NO se aplica en una importación.
+                     *
+                     * De China llega agrupado y en otras cantidades por color,
+                     * así que contar más de lo que esa línea tenía pendiente es
+                     * legítimo: el tope real es el total de la referencia, y de
+                     * eso se encarga el aviso de excesos, que pide el motivo.
+                     * Recortando acá se borraba en silencio el número físico que
+                     * alguien contó con las cajas en la mano y se lo reemplazaba
+                     * por el pendiente de la orden. Los otros cuatro sitios que
+                     * topan sí preguntan si es importación; éste no preguntaba.
+                     */
                     const tope = Number(base[g.orden_item_id].cantidad_pendiente || 0);
-                    if (Number(fila.cantidad_recibida) > tope) {
+                    if (! props.oc?.es_importacion && Number(fila.cantidad_recibida) > tope) {
                         fila.cantidad_recibida = tope;
                         conteoRecortado.value = true;
                     }
