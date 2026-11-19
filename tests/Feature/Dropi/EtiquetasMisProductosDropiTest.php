@@ -81,16 +81,30 @@ it('el PDF lleva el código del ERP: el de la variante o la referencia del agreg
     $this->actingAs($this->aracely);
 
     $vistas = [];
-    \Illuminate\Support\Facades\View::composer('catalogo.pdf.etiquetas-lote', function ($v) use (&$vistas) {
+    $conQr = [];
+    \Illuminate\Support\Facades\View::composer('catalogo.pdf.etiquetas-dropi', function ($v) use (&$vistas, &$conQr) {
         $vistas[] = array_column($v->getData()['etiquetas'], 'codigo');
+        $conQr[] = collect($v->getData()['etiquetas'])->contains(fn ($e) => isset($e['qr']));
     });
 
-    $this->get(route('catalogo.etiquetas.dropi', 1))->assertOk()->assertHeader('content-type', 'application/pdf');
+    $pdf = $this->get(route('catalogo.etiquetas.dropi', 1))->assertOk()->assertHeader('content-type', 'application/pdf');
+    // Una etiqueta por página, del rollo de 30 × 25 mm de la SAT TT460.
+    expect($pdf->getContent())->toContain('/MediaBox [0.000 0.000 85.040 70.870]');
     $this->get(route('catalogo.etiquetas.dropi', 2))->assertOk();
 
     // La variación sin vincular (Rosa 6M) no sale; la vinculada lleva el código de la variante.
     expect($vistas[0])->toBe(['AND2512-79/154-02LEÓ-6M'])
-        ->and($vistas[1])->toBe(['899']);
+        ->and($vistas[1])->toBe(['899'])
+        // Las de Dropi llevan SOLO el código de barras: ni QR se genera.
+        ->and($conQr)->toBe([false, false]);
+});
+
+it('las etiquetas de Dropi son solo el código de barras; las del catálogo siguen completas', function () {
+    $dropi = view('catalogo.pdf.etiquetas-dropi', ['etiquetas' => [['codigo' => '899', 'barras' => 'data:image/png;base64,AAA', 'nombre' => 'VOLANTE', 'detalle' => 'Azul', 'precio' => 12000]]])->render();
+    expect($dropi)->toContain('alt="899"')->not->toContain('QR')->not->toContain('VOLANTE')->not->toContain('12.000');
+
+    $catalogo = view('catalogo.pdf.etiquetas-lote', ['etiquetas' => [['codigo' => '899', 'barras' => 'data:image/png;base64,AAA', 'qr' => 'data:image/png;base64,BBB', 'nombre' => 'VOLANTE', 'detalle' => 'Azul', 'precio' => 12000]]])->render();
+    expect($catalogo)->toContain('alt="QR"')->toContain('VOLANTE')->toContain('12.000');
 });
 
 it('sin vínculo no hay etiqueta, y sin permiso no se imprime', function () {
