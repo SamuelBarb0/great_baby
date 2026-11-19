@@ -251,7 +251,7 @@ class UbicacionesDeLaBodegaSeeder extends Seeder
             // aparte: si el área abre una zona D, su responsable nace como
             // «Responsable 4» sin tocar código.
             $numero = $i + 1;
-            $email = "responsable{$numero}@greatbaby.com";
+            $email = Zona::correoDeEtiqueta($numero);
 
             $u = User::firstOrNew(['email' => $email]);
 

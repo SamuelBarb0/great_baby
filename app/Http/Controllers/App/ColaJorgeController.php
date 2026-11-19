@@ -163,6 +163,22 @@ class ColaJorgeController extends Controller implements HasMiddleware
          */
         $alistadores = User::query()
             ->whereHas('roles', fn ($q) => $q->whereIn('name', ['Alistador', 'AdminBodega']))
+            /*
+             * Las cuentas que sólo marcan una zona no alistan nada.
+             *
+             * «Responsable 1/2/3» existen para decir quién responde por cada
+             * zona de la bodega, y nacen sin contraseña utilizable: nadie
+             * entra con ellas, y el ERP no tiene recuperación de clave para
+             * este guard. Llevan rol Alistador porque el sistema exige papel
+             * de bodega para ser responsable de una ubicación, así que caían
+             * en esta lista.
+             *
+             * Asignarle un pedido a una de ellas lo PARQUEA: queda a nombre de
+             * alguien que no puede entrar a tomarlo, y el alistador de verdad
+             * recibe 403 «este pedido es de otro» si intenta iniciarlo. El
+             * pedido sólo se desatasca reasignándolo desde acá.
+             */
+            ->whereNotIn('email', Zona::correosDeEtiqueta())
             ->orderBy('name')
             ->get(['id', 'name']);
 

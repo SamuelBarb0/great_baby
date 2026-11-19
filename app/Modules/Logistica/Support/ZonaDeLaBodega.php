@@ -153,6 +153,33 @@ class ZonaDeLaBodega
         return $pos === false ? null : $pos + 1;
     }
 
+    /**
+     * El correo con el que nace la cuenta que etiqueta una zona.
+     *
+     * Vive acá porque lo usan dos sitios que no se pueden separar: el
+     * sembrador que crea esas cuentas, y la Cola de alistamiento, que tiene
+     * que EXCLUIRLAS de la lista de a quién asignarle un pedido. Si los dos
+     * arman el correo por su cuenta y uno cambia, la cola vuelve a ofrecer
+     * cuentas con las que nadie puede entrar.
+     */
+    public static function correoDeEtiqueta(int $numero): string
+    {
+        return "responsable{$numero}@greatbaby.com";
+    }
+
+    /**
+     * Los correos de todas las cuentas-etiqueta del reparto de hoy.
+     *
+     * @return array<int, string>
+     */
+    public static function correosDeEtiqueta(): array
+    {
+        return array_map(
+            fn ($i) => self::correoDeEtiqueta($i + 1),
+            array_keys(self::letras()),
+        );
+    }
+
     /** Los racks de una zona. */
     public static function racksDe(?string $letra): array
     {

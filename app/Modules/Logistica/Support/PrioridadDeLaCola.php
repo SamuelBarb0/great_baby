@@ -160,9 +160,29 @@ class PrioridadDeLaCola
     /** La lista de ciudades, ya escapada, lista para un IN de SQL. */
     private function listaSqlDelAreaMetropolitana(): string
     {
-        $crudas = (array) setting('logistica.area_metropolitana', self::AREA_METROPOLITANA);
+        // Se lee SIN default en la llamada: en este ERP el default de `setting()`
+        // le gana al de la tabla de reglas, y pasarlo acá haría que configurar
+        // la regla no sirviera de nada.
+        $crudas = (array) setting('logistica.area_metropolitana');
 
         $limpias = collect($crudas)
+            /*
+             * Lo que no sea un texto se descarta ANTES de convertirlo.
+             *
+             * La regla es un cuadro de texto libre de tipo JSON, y la pantalla
+             * la acepta con cualquier forma: basta con que sea JSON válido.
+             * Si alguien escribe algo anidado —{"zona":["bucaramanga"]} o
+             * [["bucaramanga"]]— el `(string) $c` de abajo lanza «Array to
+             * string conversion», que Laravel convierte en excepción, y la
+             * cola de alistamiento —la única pantalla operativa de la bodega—
+             * deja de abrir con un 500 para Jorge, el alistador y el
+             * despachador. Peor: queda guardado, así que sobrevive reinicios, y
+             * sólo Gerencia puede entrar a Reglas a deshacerlo.
+             *
+             * Descartándolo acá, una regla mal escrita degrada a la lista por
+             * defecto en vez de tumbar la pantalla.
+             */
+            ->filter(fn ($c) => is_scalar($c))
             ->map(fn ($c) => mb_strtolower(trim((string) $c)))
             ->filter()
             ->unique()

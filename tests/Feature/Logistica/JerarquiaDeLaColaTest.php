@@ -31,7 +31,16 @@ beforeEach(function () {
 });
 
 /** Un cliente de una ciudad. */
-function clienteDe(string $nombre, string $ciudad): \App\Models\Contacto
+/*
+ * Nombre propio a proposito.
+ *
+ * En Pest las funciones sueltas de un archivo de prueba son GLOBALES: dos
+ * archivos con una `clienteDe()` cada uno hacen que la suite completa muera
+ * con «Cannot redeclare». Paso el 19-nov-2026 contra
+ * tests/Feature/Marketing/FuenteDelLeadTest.php, y no se ve corriendo este
+ * archivo solo: sale unicamente cuando corre todo junto.
+ */
+function clienteDeLaCola(string $nombre, string $ciudad): \App\Models\Contacto
 {
     return \App\Models\Contacto::create([
         'nombre_completo' => $nombre,
@@ -85,8 +94,8 @@ function colaOrdenada(): array
 }
 
 it('el contado local va antes que el contado nacional, y el crédito de último', function () {
-    $bogota = clienteDe('Pañalera Bogotá', 'Bogotá');
-    $bucara = clienteDe('Pañalera Bucaramanga', 'Bucaramanga');
+    $bogota = clienteDeLaCola('Pañalera Bogotá', 'Bogotá');
+    $bucara = clienteDeLaCola('Pañalera Bucaramanga', 'Bucaramanga');
 
     $credito  = pedidoEnCola(['numero' => 'PB-CREDITO', 'contacto_id' => $bogota->id, 'total' => 9_000_000], false);
     $nacional = pedidoEnCola(['numero' => 'PB-NACIONAL', 'contacto_id' => $bogota->id, 'total' => 100_000]);
@@ -100,7 +109,7 @@ it('el contado local va antes que el contado nacional, y el crédito de último'
 });
 
 it('dentro del mismo escalón manda el valor, de mayor a menor', function () {
-    $bucara = clienteDe('Pañalera Bucaramanga', 'Bucaramanga');
+    $bucara = clienteDeLaCola('Pañalera Bucaramanga', 'Bucaramanga');
 
     // El chico se facturó PRIMERO: con el orden viejo habría ido adelante.
     pedidoEnCola(['numero' => 'PB-CHICO', 'contacto_id' => $bucara->id, 'total' => 80_000]);
@@ -110,7 +119,7 @@ it('dentro del mismo escalón manda el valor, de mayor a menor', function () {
 });
 
 it('a igual escalón y a igual valor, primero el más viejo', function () {
-    $bucara = clienteDe('Pañalera Bucaramanga', 'Bucaramanga');
+    $bucara = clienteDeLaCola('Pañalera Bucaramanga', 'Bucaramanga');
 
     $viejo = pedidoEnCola(['numero' => 'PB-VIEJO', 'contacto_id' => $bucara->id, 'total' => 500_000]);
     $nuevo = pedidoEnCola(['numero' => 'PB-NUEVO', 'contacto_id' => $bucara->id, 'total' => 500_000]);
@@ -122,8 +131,8 @@ it('a igual escalón y a igual valor, primero el más viejo', function () {
 });
 
 it('los pedidos de la señora Tania van primeros, cuando se dice cuál contacto es', function () {
-    $tania  = clienteDe('Sra. Tania', 'Bogotá');
-    $bucara = clienteDe('Pañalera Bucaramanga', 'Bucaramanga');
+    $tania  = clienteDeLaCola('Sra. Tania', 'Bogotá');
+    $bucara = clienteDeLaCola('Pañalera Bucaramanga', 'Bucaramanga');
 
     pedidoEnCola(['numero' => 'PB-LOCAL-GRANDE', 'contacto_id' => $bucara->id, 'total' => 5_000_000]);
     pedidoEnCola(['numero' => 'PB-TANIA', 'contacto_id' => $tania->id, 'total' => 10_000]);
@@ -145,8 +154,8 @@ it('los de Dropi van después de Tania y antes que todo lo demás', function () 
             'razon_social' => 'E-commerce Dropi SAS', 'nit' => '900111222', 'activa' => true,
         ]);
 
-    $bucara = clienteDe('Pañalera Bucaramanga', 'Bucaramanga');
-    $cli = clienteDe('Cliente Dropi', 'Bogotá');
+    $bucara = clienteDeLaCola('Pañalera Bucaramanga', 'Bucaramanga');
+    $cli = clienteDeLaCola('Cliente Dropi', 'Bogotá');
 
     pedidoEnCola(['numero' => 'PB-LOCAL', 'contacto_id' => $bucara->id, 'total' => 4_000_000]);
     pedidoEnCola(['numero' => 'PB-DROPI', 'contacto_id' => $cli->id, 'total' => 20_000, 'empresa_id' => $dropi->id]);
@@ -155,8 +164,8 @@ it('los de Dropi van después de Tania y antes que todo lo demás', function () 
 });
 
 it('el área metropolitana se puede cambiar sin tocar código', function () {
-    $neiva = clienteDe('Pañalera Neiva', 'Neiva');
-    $bucara = clienteDe('Pañalera Bucaramanga', 'Bucaramanga');
+    $neiva = clienteDeLaCola('Pañalera Neiva', 'Neiva');
+    $bucara = clienteDeLaCola('Pañalera Bucaramanga', 'Bucaramanga');
 
     pedidoEnCola(['numero' => 'PB-NEIVA', 'contacto_id' => $neiva->id, 'total' => 10_000]);
     pedidoEnCola(['numero' => 'PB-BUCARA', 'contacto_id' => $bucara->id, 'total' => 10_000]);

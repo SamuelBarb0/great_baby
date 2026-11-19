@@ -42,7 +42,30 @@ class ImportacionDocumentosController extends Controller implements HasMiddlewar
     {
         return [
             new Middleware(function (Request $r, \Closure $next) {
-                abort_unless(\App\Auth\Permisos::puede($r->user(), 'compras_importacion'), 403);
+                /*
+                 * Descargar es de quien cuenta; subir y borrar siguen siendo
+                 * de Compras.
+                 *
+                 * La pantalla de recepción muestra los papeles del contenedor
+                 * —factura final, lista de empaque— al lado del conteo,
+                 * justamente para que se cuente contra ellos. Pero esa
+                 * pantalla la abre quien tenga `compras_recepcion`, que
+                 * incluye al Alistador, y acá se exigía `compras_importacion`,
+                 * que NO lo incluye: los enlaces se le pintaban y todos le
+                 * daban 403. O sea, la función quedó hecha para el único rol
+                 * que no podía usarla.
+                 *
+                 * Ver un papel contra el que hay que contar no es lo mismo que
+                 * poder cambiarlo: por eso sólo se abre `descargar`.
+                 */
+                $soloMira = $r->route()?->getActionMethod() === 'descargar';
+
+                abort_unless(
+                    \App\Auth\Permisos::puede($r->user(), 'compras_importacion')
+                        || ($soloMira && \App\Auth\Permisos::puede($r->user(), 'compras_recepcion')),
+                    403,
+                );
+
                 return $next($r);
             }),
         ];

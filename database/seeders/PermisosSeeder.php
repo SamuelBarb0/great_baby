@@ -48,6 +48,36 @@ class PermisosSeeder extends Seeder
         }
 
         /*
+         * ORDEN: primero los «ver», después las acciones. NO AL REVÉS.
+         *
+         * Comprobado el 19-nov-2026 sobre una base limpia con los 15 roles de
+         * producción: con las acciones primero, los 13 roles que no son root
+         * terminaban con sus «ver» y CERO crear/editar/eliminar. El Contador
+         * sin crear factura, Jorge sin el botón de crear gente de bodega ni el
+         * selector de responsable —que es la razón de ser del módulo—.
+         *
+         * La causa: el bloque de las acciones pregunta `hasPermissionTo($ver)`
+         * para decidir a quién dárselas, y en una base donde los permisos nacen
+         * todos juntos ese «ver» todavía no se había repartido. Después, el
+         * paso 2 salta a todo rol que ya tenga alguna fila —y ya tenía el
+         * «ver»—, así que tampoco lo corregía: el hueco quedaba abierto.
+         *
+         * Con los «ver» repartidos antes, el bloque de las acciones encuentra
+         * lo que espera y cada rol queda igual que con la matriz.
+         */
+        // 1b · Los permisos recién creados se reparten según la matriz, sin
+        //      tocar nada de lo que el admin ya haya configurado a mano.
+        foreach ($nuevos as $nombre => $seccion) {
+            foreach (Role::all() as $rol) {
+                $leCorresponde = in_array($rol->name, Permisos::MATRIZ[$seccion], true)
+                    || in_array($rol->name, ['Aracely', 'Gerencia'], true);
+                if ($leCorresponde) {
+                    $rol->givePermissionTo($nombre);
+                }
+            }
+        }
+
+        /*
          * 1a · Las acciones nuevas sobre secciones viejas son ADITIVAS.
          *
          * Antes una sección era un solo permiso y quien la veía podía hacerle
@@ -65,18 +95,6 @@ class PermisosSeeder extends Seeder
             foreach (Role::all() as $rol) {
                 if ($rol->hasPermissionTo($verDeLaSeccion)
                     || in_array($rol->name, ['Aracely', 'Gerencia'], true)) {
-                    $rol->givePermissionTo($nombre);
-                }
-            }
-        }
-
-        // 1b · Los permisos recién creados se reparten según la matriz, sin
-        //      tocar nada de lo que el admin ya haya configurado a mano.
-        foreach ($nuevos as $nombre => $seccion) {
-            foreach (Role::all() as $rol) {
-                $leCorresponde = in_array($rol->name, Permisos::MATRIZ[$seccion], true)
-                    || in_array($rol->name, ['Aracely', 'Gerencia'], true);
-                if ($leCorresponde) {
                     $rol->givePermissionTo($nombre);
                 }
             }

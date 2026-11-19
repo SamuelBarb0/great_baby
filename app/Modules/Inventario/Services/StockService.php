@@ -196,12 +196,59 @@ class StockService
      */
     public function disponibleParaVenta(Producto|ProductoVariante $sujeto): int
     {
-        $total = 0;
-        foreach ($this->ubicacionesDeVenta() as $ubicacionId) {
-            $total += $this->saldoDisponibleSujeto($sujeto, $ubicacionId);
+        /*
+         * Dos consultas, no dos por ubicación.
+         *
+         * Esto preguntaba ubicación por ubicación: `foreach
+         * (ubicacionesDeVenta() as $id) { fisico($id) - reservado($id) }`. Con
+         * las 52 ubicaciones de antes eran ~105 consultas y se notaba poco.
+         * Al cargar las 435 posiciones de la bodega, `ubicacionesDeVenta()`
+         * pasó a devolver 487 y la cuenta se fue a 975 consultas y ~1 segundo
+         * POR SUJETO. La ficha de producto del portal lo llama una vez por el
+         * agregado y una por cada variante, así que un producto de tres
+         * variantes se iba a ~2.900 consultas y ~2 segundos; y
+         * `CrearPedidoCliente` lo llama por cada línea del pedido.
+         *
+         * Medido el 19-nov-2026. El resultado es idéntico: sumar
+         * (físico − reservado) de cada ubicación es lo mismo que restar las
+         * dos sumas, y el `max(0, …)` se sigue aplicando al final, no por
+         * ubicación, igual que antes.
+         *
+         * La versión por lotes de más abajo —`disponibleParaVentaDeProductos`,
+         * la que usa el índice del catálogo— ya lo hacía así; esta se quedó
+         * atrás.
+         */
+        $ubicaciones = $this->ubicacionesDeVenta();
+
+        if ($ubicaciones === []) {
+            return 0;
         }
 
-        return max(0, $total);
+        $esVariante = $sujeto instanceof ProductoVariante;
+
+        if (! $esVariante) {
+            $this->assertProductoAgregado($sujeto);
+        }
+
+        $fisico = (int) InventarioMovimiento::query()
+            ->whereIn('ubicacion_id', $ubicaciones)
+            ->when($esVariante,
+                fn ($q) => $q->where('variante_id', $sujeto->id),
+                fn ($q) => $q->where('producto_id', $sujeto->id)->whereNull('variante_id'),
+            )
+            ->sum('cantidad');
+
+        $reservado = (int) ReservaInventario::query()
+            ->whereIn('ubicacion_id', $ubicaciones)
+            ->where('activa', true)
+            ->where(fn ($q) => $q->whereNull('expira_at')->orWhere('expira_at', '>', now()))
+            ->when($esVariante,
+                fn ($q) => $q->where('variante_id', $sujeto->id),
+                fn ($q) => $q->where('producto_id', $sujeto->id)->whereNull('variante_id'),
+            )
+            ->sum('cantidad');
+
+        return max(0, $fisico - $reservado);
     }
 
     /**
