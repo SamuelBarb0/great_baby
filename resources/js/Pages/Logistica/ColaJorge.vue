@@ -6,6 +6,7 @@ import { Boxes, Clock, CheckCheck, PackageCheck, AlertTriangle } from 'lucide-vu
 
 const props = defineProps({
     en_cola: { type: Array, required: true },
+    casillas_disponibles: { type: Number, default: 18 },
     en_alistamiento: { type: Array, required: true },
     con_novedad: { type: Array, default: () => [] },
     listos: { type: Array, required: true },
@@ -18,6 +19,29 @@ const props = defineProps({
 });
 
 const money = (n) => new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n || 0);
+/*
+ * La oleada: varios pedidos recogidos de una sola pasada.
+ *
+ * El procedimiento del área pone un paso de CONSOLIDACIÓN entre el picking y
+ * el packing: varias personas recogen por zonas, todo baja a un punto y ahí se
+ * reparte por pedido. Esto es lo que lo arranca.
+ *
+ * El tope son las casillas de la zona de alistamiento: no se pueden armar más
+ * pedidos a la vez de los que caben en el piso.
+ */
+const elegidos = ref([]);
+
+const alternar = (id) => {
+    const i = elegidos.value.indexOf(id);
+    if (i >= 0) elegidos.value.splice(i, 1);
+    else if (elegidos.value.length < props.casillas_disponibles) elegidos.value.push(id);
+};
+
+const armarOleada = () => {
+    if (! elegidos.value.length) return;
+    window.location.href = `/app/logistica/cola-jorge/oleada?pedidos=${elegidos.value.join(',')}`;
+};
+
 const procesando = ref(false);
 
 // LOG-J5 · recarga suave cada 10s para que Jorge vea el movimiento sin F5.
@@ -220,15 +244,42 @@ const minutosDesde = (hhmm) => {
                             <Clock class="h-4 w-4"/> En cola · {{ en_cola.length }}
                         </div>
                     </div>
+
+                    <!--
+                        Armar la oleada. El área recoge por zonas y consolida:
+                        se eligen los pedidos que entran en una pasada y sale
+                        UNA hoja con el recorrido y el reparto por casilla.
+                    -->
+                    <div v-if="en_cola.length && rol.puede_reasignar"
+                         class="mb-3 flex items-center justify-between gap-2 flex-wrap text-xs">
+                        <span class="text-surface-600 dark:text-surface-300">
+                            {{ elegidos.length }} de {{ casillas_disponibles }} casillas
+                            <span v-if="elegidos.length >= casillas_disponibles" class="font-bold">
+                                · la zona está llena
+                            </span>
+                        </span>
+                        <button @click="armarOleada" :disabled="!elegidos.length"
+                                class="btn-primary text-xs px-2 py-1 disabled:opacity-40">
+                            Armar oleada
+                        </button>
+                    </div>
                     <div v-if="!en_cola.length" class="text-center text-sm text-surface-400 py-10">
                         Sin pedidos esperando.
                     </div>
                     <div v-else class="space-y-3">
                         <div v-for="p in en_cola" :key="p.id" class="p-3 rounded-lg border border-surface-200 dark:border-surface-700 bg-surface-50 dark:bg-surface-900 space-y-2">
                             <div class="flex items-center justify-between gap-2 flex-wrap">
-                                <Link :href="`/app/pedidos-b2b/${p.id}`" class="font-bold text-brand-700 hover:underline">
-                                    {{ p.numero }}
-                                </Link>
+                                <label class="flex items-center gap-2 font-bold text-brand-700">
+                                    <input v-if="rol.puede_reasignar" type="checkbox"
+                                           :checked="elegidos.includes(p.id)"
+                                           @change="alternar(p.id)"
+                                           :disabled="!elegidos.includes(p.id) && elegidos.length >= casillas_disponibles"
+                                           :aria-label="`Meter el pedido ${p.numero} en la oleada`"
+                                           class="h-4 w-4"/>
+                                    <Link :href="`/app/pedidos-b2b/${p.id}`" class="hover:underline">
+                                        {{ p.numero }}
+                                    </Link>
+                                </label>
                                 <div class="flex items-center gap-1">
                                     <span v-if="p.tipo_pago === 'contado'" class="text-[10px] px-1.5 py-0.5 rounded bg-red-100 text-red-700 font-bold">CONTADO</span>
                                     <span v-else class="text-[10px] px-1.5 py-0.5 rounded bg-surface-200 text-surface-700">crédito</span>

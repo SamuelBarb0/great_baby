@@ -852,6 +852,9 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     // LOG-J5-fix · resolver novedad del alistamiento (gerencia/admin de bodega).
     Route::post('/logistica/cola-jorge/{pedido}/resolver-novedad', [\App\Http\Controllers\App\ColaJorgeController::class, 'resolverNovedad'])->middleware('throttle:30,1')->name('app.cola-jorge.resolver-novedad');
     // LOG-J6 · hoja de picking imprimible con Rack · Sección · Nivel.
+    // La oleada va ANTES de la ruta con {pedido}: si fuera despues, Laravel
+    // tomaria «oleada» como el id del pedido y respondaria 404.
+    Route::get('/logistica/cola-jorge/oleada', [\App\Http\Controllers\App\ColaJorgeController::class, 'oleada'])->name('app.cola-jorge.oleada');
     Route::get('/logistica/cola-jorge/{pedido}/picking', [\App\Http\Controllers\App\ColaJorgeController::class, 'imprimir'])->name('app.cola-jorge.picking');
 
     // LOG-J1 + Miracle port · Panel de Gestión Comercial del Vendedor.

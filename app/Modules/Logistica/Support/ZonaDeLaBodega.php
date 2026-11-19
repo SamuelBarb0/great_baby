@@ -33,8 +33,38 @@ class ZonaDeLaBodega
     /** La regla que manda. Se lee SIN default en la llamada, para que gane DEFAULTS. */
     public const REGLA = 'logistica.zonas_bodega';
 
+    /*
+     * EL PLANO, Y POR QUÉ EL ORDEN DE LOS RACKS ES EL RECORRIDO
+     *
+     * Don Jorge mandó el plano con la entrada marcada (19-nov-2026). Leído por
+     * coordenadas de la hoja, la bodega queda así:
+     *
+     *      ← fondo                                            entrada →
+     *   R15 R14 R13 R12 R11 R10 R9 R8 R7 R6 R5 R4 R3 R2 R1   [ENTRADA]
+     *         ↑R10.5 al fondo        ↑R6.5 al fondo
+     *                      [ZONA DE ALISTAMIENTO]
+     *                       debajo de R7, en el centro
+     *
+     * De ahí salen tres cosas que el sistema usa:
+     *
+     *   1. El recorrido eficiente es R1 → R2 → … → R15. Se entra por la
+     *      derecha, junto al rack 1, y se camina hacia el fondo sin
+     *      devolverse. Por eso la hoja de oleada ordena las paradas por rack
+     *      ASCENDENTE: es el orden en que se pasa por delante de ellos.
+     *
+     *   2. Las zonas quedan por cercanía a la puerta: la A es la de la
+     *      entrada, la B la del medio, la C el fondo. El responsable 1 es
+     *      entonces el que está más cerca de la salida, que es donde se
+     *      despacha.
+     *
+     *   3. La zona de alistamiento está en el CENTRO, no en una punta. Es
+     *      coherente con el paso de consolidación del procedimiento: los tres
+     *      operarios convergen ahí desde sus zonas con lo que recogieron.
+     */
+
     /**
-     * El reparto que entregó el área el 17-nov-2026.
+     * El reparto que entregó el área el 17-nov-2026, confirmado con el plano
+     * del 19-nov: coincide con la cercanía a la puerta.
      *
      * Es el valor por defecto de la regla, no la verdad: si la regla dice otra
      * cosa, manda la regla.

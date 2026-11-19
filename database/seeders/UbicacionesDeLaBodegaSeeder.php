@@ -69,8 +69,24 @@ use Spatie\Permission\Models\Role;
  */
 class UbicacionesDeLaBodegaSeeder extends Seeder
 {
-    /** El código de la bodega física donde viven las 435 posiciones. */
+    /**
+     * El código de la bodega física donde viven las 435 posiciones.
+     *
+     * Es el valor por defecto: lo que manda es la regla
+     * `logistica.bodega_principal`, editable en /app/reglas. Sin eso, una
+     * bodega que se llame de otro modo —que es lo que pasa cuando el sistema
+     * se montó con datos de prueba y después llegaron los reales— obligaba a
+     * renombrarla a mano antes de poder sembrar.
+     */
     public const BODEGA = 'PPAL';
+
+    /** El código efectivo: lo que diga la regla, o el de arriba. */
+    public static function codigoDeLaBodega(): string
+    {
+        $codigo = trim((string) setting('logistica.bodega_principal'));
+
+        return $codigo !== '' ? $codigo : self::BODEGA;
+    }
 
     /**
      * La bodega, tal como la describió el área.
@@ -88,8 +104,28 @@ class UbicacionesDeLaBodegaSeeder extends Seeder
         ['racks' => ['13', '14', '15'],               'secciones' => [1],             'niveles' => 1, 'lados' => true],
     ];
 
-    /** Las tres que no se dividen en sección ni nivel. */
-    private const ZONAS_SUELTAS = ['PARQUEADERO', 'ARSUTEX', 'LOCAL'];
+    /**
+     * Las que no se dividen en sección ni nivel, con el nombre que les puso
+     * el área.
+     *
+     * Las tres primeras vienen del levantamiento escrito del 17-nov. La ZONA
+     * DE ALISTAMIENTO sale del plano del 19-nov: es el punto de consolidación
+     * —está en el centro de la bodega, debajo del rack 7— donde converge lo
+     * que recogen los tres operarios antes de repartirlo por pedido.
+     *
+     * Existe como ubicación porque la mercancía está físicamente ahí un rato:
+     * salió de su estante y todavía no se despacha. Sin ella, ese tramo del
+     * proceso no se puede ver en el sistema.
+     *
+     * Los nombres se editan después desde /app/inventario/ubicaciones; esto es
+     * sólo el punto de partida.
+     */
+    private const ZONAS_SUELTAS = [
+        'PARQUEADERO' => 'Zona Parqueadero',
+        'ARSUTEX' => 'Zona Arsutex',
+        'LOCAL' => 'Zona Local',
+        'ALISTAMIENTO' => 'ZONA DE ALISTAMIENTO',
+    ];
 
     /**
      * Qué rack pertenece a qué zona operativa.
@@ -111,15 +147,36 @@ class UbicacionesDeLaBodegaSeeder extends Seeder
 
     public function run(): void
     {
+        $codigo = self::codigoDeLaBodega();
+
         $bodega = InventarioUbicacion::whereNull('bodega_id')
-            ->where('codigo', self::BODEGA)
+            ->where('codigo', $codigo)
             ->first();
 
         if (! $bodega) {
-            $this->command?->error(
-                'No existe la bodega «'.self::BODEGA.'». Creala primero en '.
-                '/app/inventario/ubicaciones, o cambiá la constante BODEGA de este sembrador.'
-            );
+            $this->command?->error("No existe la bodega «{$codigo}».");
+            $this->command?->newLine();
+            $this->command?->line('  Hay dos salidas, las dos sin tocar código:');
+            $this->command?->line('   1. Crearla en /app/inventario/ubicaciones con ese código, o');
+            $this->command?->line('   2. Si la bodega principal ya existe con otro nombre, escribir SU código');
+            $this->command?->line('      en /app/reglas → Logística → «Código de la bodega donde están los racks».');
+            $this->command?->newLine();
+
+            $candidatas = InventarioUbicacion::whereNull('bodega_id')
+                ->where('activa', true)
+                ->where('codigo', 'not like', 'SIIGO-%')
+                ->withCount('movimientos')
+                ->orderByDesc('movimientos_count')
+                ->take(5)
+                ->get(['id', 'codigo', 'nombre']);
+
+            if ($candidatas->isNotEmpty()) {
+                $this->command?->line('  Las bodegas con más movimiento hoy, por si alguna es la principal:');
+
+                foreach ($candidatas as $c) {
+                    $this->command?->line("   <fg=gray>·</> {$c->codigo} — {$c->nombre} ({$c->movimientos_count} movimientos)");
+                }
+            }
 
             return;
         }
@@ -221,10 +278,10 @@ class UbicacionesDeLaBodegaSeeder extends Seeder
             }
         }
 
-        foreach (self::ZONAS_SUELTAS as $zona) {
+        foreach (self::ZONAS_SUELTAS as $zona => $nombre) {
             yield [
                 'codigo' => "Z-{$zona}",
-                'nombre' => 'Zona '.mb_convert_case($zona, MB_CASE_TITLE, 'UTF-8'),
+                'nombre' => $nombre,
                 'rack' => $zona,
                 'seccion' => null,
                 'nivel' => null,
