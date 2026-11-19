@@ -39,7 +39,10 @@ $PHP artisan storage:link || true
 if [ "${1:-}" = "--fresh" ]; then
     echo "▶ Primera vez: migrar + seed"
     $PHP artisan migrate --force
-    $PHP artisan db:seed --class=RolesYPermisosSeeder --force
+    # Este sembrador se llamaba `RolesYPermisosSeeder` y NO EXISTE en el repo:
+    # con `set -e`, una instalación desde cero se abortaba justo acá. El que
+    # existe —y el que crea los roles con sus permisos— es `PermisosSeeder`.
+    $PHP artisan db:seed --class=PermisosSeeder --force
 else
     $PHP artisan migrate --force
 fi

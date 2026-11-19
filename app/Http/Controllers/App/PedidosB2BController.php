@@ -413,7 +413,10 @@ class PedidosB2BController extends Controller implements HasMiddleware
                     ->where(fn ($ok) => $ok
                         ->where('activa', true)
                         ->where('disponible_para_venta', true)
-                        ->where('codigo', 'not like', 'SIIGO-%'))
+                        ->where('codigo', 'not like', 'SIIGO-%')
+                        // Ni los racks que quedaron sin padre: un pedido con
+                        // origen en un estante no tiene de dónde despacharse.
+                        ->whereNull('pasillo')->whereNull('estante')->whereNull('nivel'))
                     ->orWhere('id', $p->ubicacion_origen_id))
                 ->orderBy('codigo')
                 ->get(['id', 'codigo', 'nombre', 'activa'])
@@ -495,7 +498,11 @@ class PedidosB2BController extends Controller implements HasMiddleware
          * aparece en ninguna cola.
          */
         $destinoMal = match (true) {
-            $destino->bodega_id !== null => "«{$destino->nombre}» es una posición dentro de otra bodega. El origen de un pedido es la bodega.",
+            $destino->bodega_id !== null
+            || $destino->pasillo !== null
+            || $destino->estante !== null
+            || $destino->nivel !== null
+                => "«{$destino->nombre}» es una posición dentro de una bodega, no una bodega. El origen de un pedido es la bodega.",
             ! $destino->activa => "«{$destino->nombre}» está desactivada.",
             ! $destino->disponible_para_venta => "De «{$destino->nombre}» no se vende: es una zona de averías, bajas o garantías.",
             str_starts_with((string) $destino->codigo, 'SIIGO-') => "«{$destino->nombre}» vino del catálogo de SIIGO y no es una bodega de la empresa.",

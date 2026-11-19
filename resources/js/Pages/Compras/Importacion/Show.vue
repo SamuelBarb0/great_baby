@@ -2,7 +2,7 @@
 import { ref, reactive, computed, watch, nextTick } from 'vue';
 import { useBogotaDate } from '@/composables/useBogotaDate';
 import { Head, Link, router } from '@inertiajs/vue3';
-import { ArrowLeft, Package, Plus, Zap, AlertTriangle, FileText, Paperclip, Rocket, Upload, Trash2 } from 'lucide-vue-next';
+import { ArrowLeft, Package, Plus, Zap, AlertTriangle, FileText, Paperclip, Rocket, Upload, Trash2, Ship, Users } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import { useMoney } from '@/composables/useMoney';
 import { fechaCorta } from '@/composables/useFecha';
@@ -19,6 +19,35 @@ import SiguientePaso from '../SiguientePaso.vue';
  * escrita en el documento.
  */
 const { hoy: hoyBogota } = useBogotaDate();
+
+/*
+ * Qué hacer con los días que faltan.
+ *
+ * Un número de días solo no mueve a nadie. Lo que la bodega necesita saber es
+ * cuándo empezar a hacer espacio y cuándo pedir la gente para descargar —y la
+ * gente se pide antes, no el día que llega el camión—.
+ */
+const queHacerConEseTiempo = computed(() => {
+    const f = props.importacion?.cuanto_falta;
+    if (!f) return null;
+
+    if (f.estado === 'llego') return null;
+    if (f.estado === 'atrasado') return 'Pregúntele al agente de aduana antes de mover gente.';
+
+    // Los dos umbrales los manda el servidor, y el servidor los lee de Reglas
+    // (Logística · días de aviso y días para hacer espacio). Acá no se repiten
+    // números: si el área los cambia porque conseguir gente se demora más, el
+    // consejo se corre con ellos. Los `??` son por si la pantalla queda
+    // abierta con datos viejos de antes de que estos campos existieran.
+    const aviso = f.dias_aviso ?? 7;
+    const espacio = f.dias_espacio ?? 15;
+
+    if (f.dias <= 1) return 'Llega ya: tenga el espacio y la gente listos hoy.';
+    if (f.dias <= aviso) return 'Alístese: pida la gente para descargar y libere el espacio.';
+    if (f.dias <= espacio) return 'Vaya haciendo espacio en la bodega.';
+
+    return 'Hay tiempo. Revise que la factura final y la lista de empaque estén cargadas.';
+});
 
 const props = defineProps({
     importacion: { type: Object, required: true },
@@ -183,6 +212,54 @@ const fmtMoneda = (monto, mon) => mon === 'COP'
                               :class="importacion.estado === 'liquidada' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200' : 'bg-brand-100 text-brand-800 dark:bg-brand-900/40 dark:text-brand-200'">{{ estados[importacion.estado] || importacion.estado }}</span>
                     </div>
                 </div>
+                <!--
+                    Cuánto falta, a la vista y en letra grande.
+                    La fecha estimada vivía escondida detrás de «Ver más datos» y
+                    nunca decía cuántos días faltaban: quien organiza la bodega
+                    leía «ETA: 11/dic/2026» y hacía la cuenta de cabeza contra
+                    hoy, todos los días. Y de esa cuenta salen las decisiones:
+                    cuándo hacer espacio, cuándo pedir gente, cuándo planear la
+                    descarga.
+                -->
+                <div v-if="importacion.cuanto_falta"
+                     class="mt-3 rounded-lg px-4 py-3 flex items-center gap-3"
+                     :class="{
+                        'bg-amber-50 text-amber-900 border border-amber-300 dark:bg-amber-950/30 dark:text-amber-200': importacion.cuanto_falta.estado === 'cerca',
+                        'bg-rose-50 text-rose-900 border border-rose-300 dark:bg-rose-950/30 dark:text-rose-200': importacion.cuanto_falta.estado === 'atrasado',
+                        'bg-brand-50 text-brand-900 border border-brand-200 dark:bg-brand-950/30 dark:text-brand-200': importacion.cuanto_falta.estado === 'en_camino',
+                        'bg-emerald-50 text-emerald-900 border border-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-200': importacion.cuanto_falta.estado === 'llego',
+                     }">
+                    <Ship class="h-6 w-6 flex-shrink-0"/>
+                    <div>
+                        <div class="text-xl font-bold leading-tight">{{ importacion.cuanto_falta.frase }}</div>
+                        <div class="text-xs opacity-80 mt-0.5">
+                            <template v-if="importacion.cuanto_falta.estado !== 'llego'">
+                                Fecha estimada {{ importacion.eta }}<template v-if="importacion.fecha_zarpe"> · zarpó el {{ importacion.fecha_zarpe }}</template>
+                            </template>
+                            <template v-else>Llegó el {{ importacion.fecha_llegada }}</template>
+                        </div>
+                        <!-- Saber cuántos días faltan sólo sirve si se sabe qué hacer
+                             con ellos: de esa cuenta salen el espacio en la bodega y la
+                             gente para descargar, y la gente hay que pedirla ANTES. -->
+                        <div v-if="queHacerConEseTiempo" class="text-sm font-semibold mt-1.5">
+                            {{ queHacerConEseTiempo }}
+                        </div>
+                    </div>
+                    <a v-if="['cerca','atrasado'].includes(importacion.cuanto_falta.estado)"
+                       href="/app/rrhh/requisiciones"
+                       class="ml-auto inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-white/70 dark:bg-black/20 border border-current text-xs font-semibold hover:bg-white">
+                        <Users class="h-4 w-4"/> Pedir gente
+                    </a>
+                </div>
+
+                <!-- Sin fecha estimada no se inventa un número: se dice qué falta. -->
+                <div v-else-if="importacion.estado !== 'liquidada' && importacion.estado !== 'cerrada'"
+                     class="mt-3 rounded-lg px-4 py-2.5 bg-surface-100 dark:bg-surface-800 text-xs text-surface-600 dark:text-surface-300 flex items-center gap-2">
+                    <Ship class="h-4 w-4 flex-shrink-0"/>
+                    Este contenedor todavía no tiene fecha estimada de llegada, así que nadie puede saber
+                    cuánto falta. Pongala en «Editar datos del contenedor».
+                </div>
+
                 <details class="mt-3 border-t border-surface-200 dark:border-surface-800 pt-3">
                 <summary class="cursor-pointer text-xs font-semibold text-surface-600 dark:text-surface-300">Ver más datos</summary>
                 <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3 text-sm">

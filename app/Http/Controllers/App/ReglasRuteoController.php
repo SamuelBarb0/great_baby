@@ -101,6 +101,17 @@ class ReglasRuteoController extends Controller
     {
         return InventarioUbicacion::query()
             ->whereNull('bodega_id')
+            /*
+             * Y tampoco las que llevan posición física.
+             *
+             * `bodega_id IS NULL` debería alcanzar para decir «esto es una
+             * bodega», pero en la base hay racks con el padre en null —«Rack A
+             * · Nivel 01», «Rack B · Nivel 01»— y se colaban en la lista. Un
+             * pedido ruteado a un estante queda colgando de un estante: la
+             * reserva y la cola razonan con la sede. Lo que tiene pasillo,
+             * estante o nivel es una POSICIÓN, tenga padre o no.
+             */
+            ->whereNull('pasillo')->whereNull('estante')->whereNull('nivel')
             ->where('activa', true)
             ->where('disponible_para_venta', true)
             ->where('codigo', 'not like', 'SIIGO-%')
@@ -201,10 +212,17 @@ class ReglasRuteoController extends Controller
         // un estante: la cola y la reserva razonan con la sede.
         $destino = InventarioUbicacion::findOrFail($data['ubicacion_id']);
 
-        if ($destino->bodega_id !== null) {
+        // Una posición se reconoce por su padre O por llevar pasillo, estante o
+        // nivel: hay racks viejos con el padre en null que pasaban el guardia.
+        $esPosicion = $destino->bodega_id !== null
+            || $destino->pasillo !== null
+            || $destino->estante !== null
+            || $destino->nivel !== null;
+
+        if ($esPosicion) {
             return back()->withErrors([
-                'ubicacion_id' => "«{$destino->nombre}» es una posición dentro de otra bodega. "
-                    .'El origen de un pedido es la bodega.',
+                'ubicacion_id' => "«{$destino->nombre}» es una posición dentro de una bodega, no una bodega. "
+                    .'El origen de un pedido es la bodega: la reserva y la cola razonan con la sede.',
             ]);
         }
 

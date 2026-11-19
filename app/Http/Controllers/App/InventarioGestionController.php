@@ -501,11 +501,66 @@ class InventarioGestionController extends Controller implements HasMiddleware
     // ---------- TRASLADOS ----------
     public function trasladosIndex(Request $r): Response
     {
-        // PATRÓN α · pasar lista de ubicaciones para el selector por NOMBRE
-        //   (antes: modal pedía "Origen (ID)" y "Destino (ID)" → operario
-        //   tenía que ir a otro tab a copiar números).
+        /*
+         * PATRÓN α · pasar lista de ubicaciones para el selector por NOMBRE
+         *   (antes: modal pedía "Origen (ID)" y "Destino (ID)" → operario
+         *   tenía que ir a otro tab a copiar números).
+         *
+         * 18-nov-2026 · van AGRUPADAS. Con el levantamiento del área la tabla
+         * pasó de una veintena a 491 filas —435 posiciones de rack— y dos
+         * desplegables de 491 opciones cada uno no se recorren: encontrar
+         * «rack 12, sección 4, nivel 3 derecha» entre medio millar de líneas
+         * seguidas es rendirse.
+         *
+         * Acá las posiciones SÍ son destino válido —el traslado es la única
+         * puerta para que la mercancía llegue del muelle a su estante— así que
+         * no se filtran: se agrupan. Las bodegas primero, que es a donde se
+         * mueve más seguido, y después cada rack con las suyas.
+         */
+        /*
+         * El codigo de cada bodega, para no mezclar racks de bodegas distintas
+         * bajo un mismo titulo.
+         *
+         * Paso: la bodega demo de Bogota tiene una posicion con pasillo «4», y
+         * salia bajo «Rack 4» junto a las 30 posiciones reales del rack 4 de la
+         * principal. Elegir ahi manda la mercancia a otra ciudad creyendo que
+         * va al estante de al lado.
+         *
+         * El codigo de la bodega se antepone solo si hay posiciones en mas de
+         * una: con una sola bodega con racks —que es el caso hoy— ponerle
+         * «PPAL ·» delante a 435 grupos es ruido que no distingue nada.
+         */
+        $bodegas = InventarioUbicacion::whereNull('bodega_id')->pluck('codigo', 'id');
+
+        $conPosiciones = InventarioUbicacion::where('activa', true)
+            ->whereNotNull('bodega_id')
+            ->distinct()
+            ->pluck('bodega_id');
+
+        $prefijar = $conPosiciones->count() > 1;
+
         $ubicaciones = InventarioUbicacion::where('activa', true)
-            ->orderBy('codigo')->get(['id','codigo','nombre','categoria']);
+            ->orderBy('codigo')
+            ->get(['id', 'codigo', 'nombre', 'categoria', 'bodega_id', 'pasillo'])
+            ->map(fn ($u) => [
+                'id' => $u->id,
+                'codigo' => $u->codigo,
+                'nombre' => $u->nombre,
+                'categoria' => $u->categoria,
+                // Parqueadero, Arsutex y Local son ZONAS, no racks: decirles
+                // «Rack PARQUEADERO» en el desplegable es hablarle a la bodega
+                // en un idioma que no es el suyo. Rack sólo cuando el pasillo
+                // es un número —1, 6.5, 12—, que es como los numeró el área.
+                'grupo' => $u->bodega_id === null
+                    ? 'Bodegas'
+                    : ($prefijar ? ($bodegas[$u->bodega_id] ?? 'Otra bodega').' · ' : '').
+                      match (true) {
+                          ! $u->pasillo => 'Posiciones',
+                          is_numeric($u->pasillo) => "Rack {$u->pasillo}",
+                          default => mb_convert_case($u->pasillo, MB_CASE_TITLE, 'UTF-8'),
+                      },
+            ])
+            ->values();
 
         $q = Traslado::with(['origen:id,codigo,nombre', 'destino:id,codigo,nombre', 'solicitante:id,name'])
             ->orderByDesc('id');

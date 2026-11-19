@@ -1,5 +1,5 @@
 <script setup>
-import { ref, reactive } from 'vue';
+import { ref, reactive, computed } from 'vue';
 import { Head, Link, router } from '@inertiajs/vue3';
 import { ArrowLeftRight, Plus, ExternalLink, Ban, Truck, CheckCircle } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
@@ -12,6 +12,29 @@ const props = defineProps({
     traslados: { type: Object, required: true },
     ubicaciones: { type: Array, default: () => [] },
     filtros: { type: Object, default: () => ({}) },
+});
+
+/*
+ * Las ubicaciones agrupadas para el desplegable.
+ *
+ * Con 491 opciones seguidas no se encuentra «rack 12, sección 4, nivel 3
+ * derecha»: agrupadas por bodega y por rack, el navegador deja saltar de grupo
+ * en grupo y la lista se vuelve recorrible. Las bodegas van primero porque es
+ * a donde se mueve más seguido.
+ */
+const ubicacionesPorGrupo = computed(() => {
+    const salida = {};
+
+    for (const u of props.ubicaciones) {
+        const g = u.grupo || 'Otras';
+        (salida[g] ??= []).push(u);
+    }
+
+    // «Bodegas» primero; el resto, por nombre de rack.
+    return Object.fromEntries(
+        Object.entries(salida).sort(([a], [b]) =>
+            a === 'Bodegas' ? -1 : b === 'Bodegas' ? 1 : a.localeCompare(b, 'es', { numeric: true })),
+    );
 });
 
 // Confirmaciones con el modal propio: el confirm() nativo queda bloqueado
@@ -216,7 +239,9 @@ const puedeAnular = (t) => ['borrador', 'en_transito'].includes(t.estado);
                         <label class="text-xs font-semibold">Origen</label>
                         <select v-model.number="form.origen_id" class="input w-full" autofocus>
                             <option value="">— Selecciona una ubicación —</option>
-                            <option v-for="u in ubicaciones" :key="u.id" :value="u.id">{{ u.codigo }} · {{ u.nombre }}</option>
+                            <optgroup v-for="(lista, grupo) in ubicacionesPorGrupo" :key="grupo" :label="grupo">
+                                <option v-for="u in lista" :key="u.id" :value="u.id">{{ u.codigo }} · {{ u.nombre }}</option>
+                            </optgroup>
                         </select>
                         <p v-if="errores.origen_id" class="text-xs text-red-600 mt-1">{{ errores.origen_id }}</p>
                     </div>
@@ -224,7 +249,9 @@ const puedeAnular = (t) => ['borrador', 'en_transito'].includes(t.estado);
                         <label class="text-xs font-semibold">Destino</label>
                         <select v-model.number="form.destino_id" class="input w-full">
                             <option value="">— Selecciona una ubicación —</option>
-                            <option v-for="u in ubicaciones" :key="u.id" :value="u.id" :disabled="u.id === form.origen_id">{{ u.codigo }} · {{ u.nombre }}</option>
+                            <optgroup v-for="(lista, grupo) in ubicacionesPorGrupo" :key="grupo" :label="grupo">
+                                <option v-for="u in lista" :key="u.id" :value="u.id" :disabled="u.id === form.origen_id">{{ u.codigo }} · {{ u.nombre }}</option>
+                            </optgroup>
                         </select>
                         <p v-if="errores.destino_id" class="text-xs text-red-600 mt-1">{{ errores.destino_id }}</p>
                     </div>

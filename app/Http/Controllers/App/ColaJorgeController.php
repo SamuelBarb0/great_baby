@@ -10,6 +10,7 @@ use Illuminate\Http\Request;
 use Illuminate\Routing\Controllers\HasMiddleware;
 use Illuminate\Routing\Controllers\Middleware;
 use Illuminate\Support\Facades\DB;
+use App\Modules\Logistica\Support\ZonaDeLaBodega as Zona;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -100,22 +101,18 @@ class ColaJorgeController extends Controller implements HasMiddleware
             ->where('estado', 'facturado')
             ->whereNull('despachado_at')
             ->when($misBodegas !== null, fn ($q) => $q->whereIn('ubicacion_origen_id', $misBodegas))
-            // LOG-J5 · prioridad calculada en SQL para que el orden sobreviva
-            //   a los reloads de 10s. Contado (0) sube; local Bucaramanga sube
-            //   dentro de su tipo.
-            ->selectRaw("pedidos_cliente.*,
-                CASE
-                    WHEN EXISTS (SELECT 1 FROM facturas_venta f
-                                  WHERE f.id = pedidos_cliente.factura_id AND f.tipo = 'contado') THEN 0
-                    ELSE 1
-                END AS prio_tipo,
-                CASE
-                    WHEN EXISTS (SELECT 1 FROM contactos c
-                                  WHERE c.id = pedidos_cliente.contacto_id
-                                    AND LOWER(COALESCE(c.ciudad,'')) IN ('bucaramanga','girón','giron','floridablanca','piedecuesta')) THEN 0
-                    ELSE 1
-                END AS prio_zona")
-            ->orderBy('prio_tipo')->orderBy('prio_zona')->orderBy('facturado_at');
+            // LOG-J5 · la prioridad se calcula en SQL para que el orden
+            //   sobreviva a los reloads de 10 s: armado después, las tarjetas
+            //   bailarían en cada recarga.
+            //
+            // 17-nov-2026 · el orden ya no es el que habíamos puesto nosotros
+            //   —contado, luego Bucaramanga, luego fecha— sino la jerarquía de
+            //   cinco escalones que entregó el área por escrito. El valor del
+            //   pedido entra en la cuenta: antes uno de ochenta mil le ganaba a
+            //   uno de tres millones por haberse facturado diez minutos antes.
+            ;
+
+        $base = app(\App\Modules\Logistica\Support\PrioridadDeLaCola::class)->aplicar($base);
 
         $pedidos = $base->get();
 
@@ -278,6 +275,9 @@ class ColaJorgeController extends Controller implements HasMiddleware
             'contacto:id,nombre_completo,razon_social,ciudad,direccion,telefono',
             'factura:id,numero',
             'alistador:id,name',
+            // El asesor que vendio: su nombre va en la hoja, para que la bodega
+            // pueda preguntarle sin tener que averiguar quien fue.
+            'vendedor:id,name',
         ])->findOrFail($pedido);
 
         // Un AdminBodega sólo imprime pedidos facturados · sanity check.
@@ -306,8 +306,10 @@ class ColaJorgeController extends Controller implements HasMiddleware
             // variante; si no, se sumaría el stock de sus variantes.
             ->when($campo === 'producto_id', fn ($q) => $q->whereNull('m.variante_id'))
             ->where('u.activa', true)
-            ->groupBy("m.{$campo}", 'u.id', 'u.codigo', 'u.nombre', 'u.categoria')
-            ->selectRaw("m.{$campo} as sujeto, u.codigo, u.nombre, u.categoria, SUM(m.cantidad) as stock")
+            // `u.pasillo` es el RACK, y de ahi sale la zona operativa: la hoja
+            // tiene que decir por que zona se camina y quien responde por ella.
+            ->groupBy("m.{$campo}", 'u.id', 'u.codigo', 'u.nombre', 'u.categoria', 'u.pasillo', 'u.responsable_user_id')
+            ->selectRaw("m.{$campo} as sujeto, u.codigo, u.nombre, u.categoria, u.pasillo, u.responsable_user_id, SUM(m.cantidad) as stock")
             ->having('stock', '>', 0)
             ->orderByDesc('stock')
             ->get();
@@ -324,6 +326,9 @@ class ColaJorgeController extends Controller implements HasMiddleware
                     'nombre' => $row->nombre,
                     'categoria' => $row->categoria,
                     'stock' => (int) $row->stock,
+                    'rack' => $row->pasillo,
+                    'zona' => Zona::deRack($row->pasillo),
+                    'responsable_id' => $row->responsable_user_id ? (int) $row->responsable_user_id : null,
                 ];
             }
         }
@@ -331,8 +336,27 @@ class ColaJorgeController extends Controller implements HasMiddleware
         $items = $p->items->map(function ($it) use ($saldosPorSujeto) {
             $clave = $it->variante_id ? 'v:'.$it->variante_id : 'p:'.$it->producto_id;
             $saldos = $saldosPorSujeto[$clave] ?? [];
-            // Priorizar categoría 'venta' en la hoja (lo apto para despacho).
-            usort($saldos, fn ($a, $b) => ($a['categoria'] === 'venta' ? 0 : 1) <=> ($b['categoria'] === 'venta' ? 0 : 1));
+            /*
+             * El orden en que la hoja manda a buscar.
+             *
+             *   1. Lo apto para despacho primero (categoría «venta»).
+             *   2. Entre esas, las POSICIONES antes que las bodegas enteras.
+             *   3. Y dentro de cada grupo, la de más stock primero.
+             *
+             * El punto 2 es el que importa en bodega: «PPAL» no le dice a
+             * nadie dónde pararse, y «R5-S2-N3-D» sí. Mientras la mercancía
+             * se esté pasando a posiciones va a haber de las dos, y si se
+             * ordenara sólo por stock la hoja mandaría siempre a la bodega
+             * entera —que es la que acumula más— y las 435 posiciones no
+             * servirían para nada.
+             *
+             * `usort` es estable desde PHP 8, así que dentro de cada grupo se
+             * conserva el orden por stock que trajo la consulta.
+             */
+            usort($saldos, function ($a, $b) {
+                return [$a['categoria'] === 'venta' ? 0 : 1, $a['rack'] ? 0 : 1]
+                   <=> [$b['categoria'] === 'venta' ? 0 : 1, $b['rack'] ? 0 : 1];
+            });
             return [
                 'sku' => $it->sku_snapshot,
                 'descripcion' => $it->descripcion_snapshot,
@@ -356,6 +380,108 @@ class ColaJorgeController extends Controller implements HasMiddleware
         //   El quien-imprime se saca del user autenticado — si no hay un
         //   alistador asignado todavía, él queda como responsable por default.
         $usuario = $r->user();
+
+        /*
+         * Por que zona se camina, y si hay que caminar dos.
+         *
+         * El area reparte la bodega en tres zonas con un responsable cada una,
+         * y su lista de picking trae las casillas «ZONA», «RESPONSABLE DE LA
+         * ZONA» y «COMPARTIDO CON ZONA». Esa ultima es la que importa: un
+         * pedido que toca racks de dos zonas necesita dos personas o un
+         * recorrido el doble de largo, y eso hay que saberlo ANTES de empezar,
+         * no a mitad de camino.
+         *
+         * No se mira solo la PRIMERA ubicacion de cada item: se miran las que
+         * de verdad hay que visitar. Si el item pide 50 unidades y la primera
+         * ubicacion tiene 12, el alistador va a tener que ir tambien a la
+         * segunda; contar solo la primera imprimiria «todo sale de la zona A»
+         * y lo mandaria a la C sin avisarle, que es justo lo que esta casilla
+         * existe para evitar.
+         *
+         * Las ubicaciones vienen ordenadas con lo vendible primero y de mayor
+         * a menor stock, asi que se acumulan en ese orden hasta cubrir la
+         * cantidad del item.
+         */
+        $visitadas = $items->flatMap(function ($it) {
+            $faltan = (int) $it['cantidad'];
+            $usadas = [];
+
+            foreach ($it['ubicaciones'] as $u) {
+                $usadas[] = $u;
+                $faltan -= (int) $u['stock'];
+
+                if ($faltan <= 0) {
+                    break;
+                }
+            }
+
+            return $usadas;
+        });
+
+        /*
+         * Cuál es LA zona del pedido, cuando toca más de una.
+         *
+         * La que más unidades aporta, no la primera del plano: un pedido que
+         * saca 19 unidades de la C y 1 de la A es un pedido de la zona C
+         * compartido con la A, y al revés la hoja le pondría el nombre del
+         * responsable equivocado y mandaría a la persona que casi no trabaja
+         * en él.
+         */
+        $porZona = [];
+
+        foreach ($visitadas as $u) {
+            if ($u['zona'] ?? null) {
+                $porZona[$u['zona']] = ($porZona[$u['zona']] ?? 0) + (int) $u['stock'];
+            }
+        }
+
+        // A igualdad de unidades manda el orden del plano, para que la misma
+        // hoja impresa dos veces diga siempre lo mismo.
+        $orden = array_flip(Zona::letras());
+        uksort($porZona, fn ($a, $b) => [-$porZona[$a], $orden[$a] ?? 99] <=> [-$porZona[$b], $orden[$b] ?? 99]);
+
+        $zonas = array_keys($porZona);
+        $principal = $zonas[0] ?? null;
+        $compartidas = array_slice($zonas, 1);
+
+        /*
+         * Quien responde por la zona sale de la ubicacion, no de una cadena
+         * armada aca.
+         *
+         * El area los identifica como «Responsable 1/2/3» mientras no tengan
+         * nombre propio, pero eso es el nombre POR DEFECTO de unas cuentas que
+         * se pueden renombrar desde la pantalla de usuarios. Si la hoja lo
+         * armara sola —«Responsable 2»— el dia que esas cuentas tengan nombre
+         * la hoja seguiria imprimiendo el numero y nadie sabria a quien
+         * buscar. Asi que se lee el responsable real de la ubicacion, y solo
+         * si nadie responde por ella se cae al numero de la zona.
+         */
+        $responsable = null;
+
+        if ($principal !== null) {
+            $id = $visitadas->firstWhere(fn ($u) => ($u['zona'] ?? null) === $principal)['responsable_id'] ?? null;
+
+            $responsable = $id
+                ? \App\Models\User::whereKey($id)->value('name')
+                : null;
+
+            $responsable ??= 'Responsable '.Zona::numero($principal);
+        }
+
+        /*
+         * El telefono del asesor sale de su ficha de Gestion Humana.
+         *
+         * La tabla `users` no guarda telefono —se reviso— y agregarle una
+         * columna seria tener el mismo dato en dos lados: el que la empresa
+         * mantiene de verdad es el de la ficha del empleado, que es el que
+         * actualiza Gestion Humana cuando alguien cambia de numero. Si el
+         * asesor no tiene ficha, la hoja imprime el nombre sin telefono en vez
+         * de inventarse uno.
+         */
+        $telefonoAsesor = $p->vendedor_id
+            ? \App\Modules\Rrhh\Models\Empleado::where('user_id', $p->vendedor_id)->value('telefono')
+            : null;
+
         return Inertia::render('Logistica/HojaPicking', [
             'pedido' => [
                 'id' => $p->id,
@@ -372,6 +498,14 @@ class ColaJorgeController extends Controller implements HasMiddleware
                 'impreso_por' => $usuario?->name,
                 'total' => (float) $p->total,
                 'generado_at' => now()->format('Y-m-d H:i'),
+
+                // Los campos de la lista que entrego el area (17-nov-2026).
+                'numero_picking' => 'PCK-'.str_pad((string) $p->id, 6, '0', STR_PAD_LEFT),
+                'zona' => $principal,
+                'responsable_zona' => $responsable,
+                'compartido_con' => $compartidas,
+                'asesor' => $p->vendedor?->name,
+                'asesor_telefono' => $telefonoAsesor,
             ],
             'items' => $items,
         ]);

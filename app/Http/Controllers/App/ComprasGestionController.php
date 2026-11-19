@@ -217,8 +217,22 @@ class ComprasGestionController extends Controller implements HasMiddleware
                     'nombre' => $c->razon_social ?: $c->nombre_completo,
                     'numero_documento' => $c->numero_documento,
                 ]),
-            // Re-audit M2 UX-A4 · bodegas destino para elección explícita en OC.
-            'bodegas' => \App\Modules\Dropi\Models\InventarioUbicacion::orderBy('nombre')->get(['id', 'nombre'])
+            /*
+             * Re-audit M2 UX-A4 · bodegas destino para elección explícita en OC.
+             *
+             * 18-nov-2026 · se filtra. Esta lista traía TODA la tabla, y con el
+             * levantamiento del área son 435 posiciones de rack —«Rack 1 ·
+             * Sección 1 · Nivel 1 · Derecha»— más los 43 espejos del catálogo
+             * compartido de SIIGO. Un contenedor no se recibe en un estante ni
+             * en la bodega de otra empresa: se recibe en una bodega, y de ahí
+             * se guarda en su posición. El desplegable tenía quinientas
+             * opciones y las cuatro que servían estaban perdidas en el medio.
+             */
+            'bodegas' => \App\Modules\Dropi\Models\InventarioUbicacion::query()
+                ->whereNull('bodega_id')
+                ->where('activa', true)
+                ->where('codigo', 'not like', 'SIIGO-%')
+                ->orderBy('nombre')->get(['id', 'nombre'])
                 ->map(fn ($b) => ['id' => $b->id, 'nombre' => $b->nombre]),
             // Importación: con qué parámetros y tasa nace la pre-liquidación, y
             // para quién va cada línea (Great Baby o el e-commerce de Aracely).
@@ -725,6 +739,22 @@ class ComprasGestionController extends Controller implements HasMiddleware
                 'es_importacion' => $esImportacion,
                 'contenedor' => $this->contenedorDe($oc)?->contenedor,
                 'importacion_id' => $this->contenedorDe($oc)?->id,
+                /*
+                 * Los papeles del contenedor, en la pantalla donde se cuenta.
+                 *
+                 * Quien descarga cuenta CONTRA la factura final y la lista de
+                 * empaque que mandó China, no contra lo que la orden pidió
+                 * hace tres meses: del contenedor sale lo que de verdad
+                 * embarcaron, que casi nunca es idéntico. Hasta hoy esta
+                 * pantalla mostraba el nombre del contenedor y una casilla en
+                 * blanco para teclear el número de la factura de memoria; los
+                 * documentos estaban cargados, pero en otra pantalla, y había
+                 * que saber que existían.
+                 *
+                 * Van ordenados por lo que sirve para contar: primero la
+                 * factura final, después el packing list, después el invoice.
+                 */
+                'documentos' => $this->papelesParaContar($this->contenedorDe($oc)),
                 'falta_tasa' => $faltaTasa,
                 'items' => $oc->items->map(fn ($i) => [
                     'id' => $i->id, 'descripcion' => $i->descripcion,
@@ -1032,6 +1062,56 @@ class ComprasGestionController extends Controller implements HasMiddleware
         return redirect()->route('app.compras.recepcion.show', $rc->id)->with('success', "Recepción {$rc->numero} creada.");
     }
 
+    /**
+     * Los documentos del contenedor que sirven para contar, primero los que
+     * dicen QUÉ VIENE.
+     *
+     * @return array<int, array{id:int, nombre:string, tipo:string, url:string, clave:bool}>
+     */
+    private function papelesParaContar(?Importacion $contenedor): array
+    {
+        if (! $contenedor) {
+            return [];
+        }
+
+        // El orden importa: es el orden en que los busca quien está contando.
+        $peso = [
+            'factura_final' => 1,
+            'lista_empaque' => 2,
+            'invoice' => 3,
+            'borrador_lista_empaque' => 4,
+            'prelista_empaque' => 5,
+        ];
+
+        return \App\Modules\Compras\Models\ImportacionDocumento::query()
+            ->where('importacion_id', $contenedor->id)
+            ->orderByDesc('version')
+            ->orderByDesc('id')
+            ->get(['id', 'nombre', 'tipo', 'version'])
+            ->sortBy(fn ($d) => $peso[$d->tipo] ?? 99)
+            ->map(fn ($d) => [
+                'id' => $d->id,
+                'nombre' => $d->nombre,
+                'tipo' => \App\Modules\Compras\Models\ImportacionDocumento::TIPOS[$d->tipo] ?? $d->tipo,
+                'url' => "/app/compras/importacion/documento/{$d->id}",
+                // Los tres que de verdad dicen qué viene adentro.
+                'clave' => in_array($d->tipo, ['factura_final', 'lista_empaque', 'invoice'], true),
+                /*
+                 * Y si es un Excel, el atajo para compararlo con la orden ANTES
+                 * de contar. El comparador ya existía, pero sólo se llegaba a él
+                 * desde la pantalla del contenedor: quien está descargando no
+                 * pasa por ahí. Saber de entrada que China embarcó 8.700 donde
+                 * la orden decía 9.000 cambia cómo se cuenta.
+                 */
+                'comparar_url' => str_ends_with(mb_strtolower((string) $d->nombre), '.xlsx')
+                    && in_array($d->tipo, ['prelista_empaque', 'borrador_lista_empaque', 'lista_empaque', 'invoice', 'factura_final'], true)
+                        ? "/app/compras/importacion/{$contenedor->id}/documento/{$d->id}/comparar"
+                        : null,
+            ])
+            ->values()
+            ->all();
+    }
+
     /** Sin tasa todavía se muestra lo que hay: la pantalla de recibir avisa que falta. */
     private function totalEnPesos(OrdenCompra $orden): float
     {
@@ -1116,6 +1196,7 @@ class ComprasGestionController extends Controller implements HasMiddleware
                 'moneda_origen' => $i->moneda_origen,
                 'tasa_cambio_liquidacion' => (float) $i->tasa_cambio_liquidacion,
                 'eta' => $i->eta?->format('Y-m-d'),
+                'cuanto_falta' => $i->cuantoFaltaParaLlegar(),
                 'fecha_llegada' => $i->fecha_llegada?->format('Y-m-d'),
                 'fecha_liquidacion' => $i->fecha_liquidacion?->format('Y-m-d'),
                 'total_fob' => (float) $i->lineas()->sum('costo_fob_total'),
@@ -1161,6 +1242,9 @@ class ComprasGestionController extends Controller implements HasMiddleware
                 'tasa_cambio_liquidacion' => (float) $imp->tasa_cambio_liquidacion,
                 'fecha_zarpe' => $imp->fecha_zarpe?->toDateString(),
                 'eta' => $imp->eta?->toDateString(),
+                // Cuánto falta, ya contado. Es el dato con el que la bodega
+                // decide cuándo hacer espacio y cuándo pedir gente.
+                'cuanto_falta' => $imp->cuantoFaltaParaLlegar(),
                 'fecha_llegada' => $imp->fecha_llegada?->toDateString(),
                 'fecha_liquidacion' => $imp->fecha_liquidacion?->toDateString(),
                 'observaciones' => $imp->observaciones,

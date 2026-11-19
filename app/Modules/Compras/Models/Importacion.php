@@ -146,6 +146,81 @@ class Importacion extends Model implements AuditableContract
         });
     }
 
+    /**
+     * Cuánto falta para que llegue, en palabras que sirvan en la bodega.
+     *
+     * La pantalla tenía la fecha estimada de llegada escondida detrás de «Ver
+     * más datos», y nunca decía cuánto faltaba: quien organiza la bodega leía
+     * «ETA: 11/dic/2026» y tenía que hacer la cuenta de cabeza contra hoy,
+     * todos los días. Y esa cuenta es la que decide cuándo empieza a hacer
+     * espacio, a pedir gente y a planear la descarga.
+     *
+     * Devuelve null cuando todavía no hay fecha estimada: entonces no se
+     * inventa un número, se dice que falta ponerla.
+     *
+     * @return array{dias:int, estado:string, frase:string}|null
+     */
+    public function cuantoFaltaParaLlegar(): ?array
+    {
+        if ($this->fecha_llegada) {
+            $dias = (int) round($this->fecha_llegada->diffInDays(now()));
+
+            return [
+                'dias' => $dias,
+                'estado' => 'llego',
+                'frase' => $dias === 0 ? 'Llegó hoy' : "Llegó hace {$dias} día".($dias === 1 ? '' : 's'),
+            ];
+        }
+
+        if (! $this->eta) {
+            return null;
+        }
+
+        // En días enteros: `diffInDays` es flotante en Carbon 3 y «faltan
+        // 22.6 días» no le sirve a nadie para planear una descarga.
+        $dias = (int) round(now()->startOfDay()->diffInDays($this->eta->startOfDay(), false));
+
+        if ($dias < 0) {
+            $atraso = abs($dias);
+
+            return [
+                'dias' => $atraso,
+                'estado' => 'atrasado',
+                'frase' => "Atrasado {$atraso} día".($atraso === 1 ? '' : 's').' sobre la fecha estimada',
+            ];
+        }
+
+        /*
+         * Cuántos días antes se da el contenedor por encima.
+         *
+         * Lo manda la regla `logistica.dias_aviso_contenedor` y no un 7 clavado
+         * acá: de ese número depende con cuánta anticipación la bodega pide la
+         * gente para descargar, y eso no lo decide el programador —depende de
+         * cuánto se demore conseguir personal, que cambia con la temporada—.
+         *
+         * Se lee SIN default en la llamada: en este ERP el default de
+         * `setting()` le gana al de la tabla de reglas, así que pasarlo acá
+         * haría que cambiar la regla no sirviera de nada.
+         */
+        $aviso = max(0, (int) setting('logistica.dias_aviso_contenedor'));
+        $espacio = max($aviso, (int) setting('logistica.dias_espacio_contenedor'));
+
+        return [
+            'dias' => $dias,
+            'estado' => $dias <= $aviso ? 'cerca' : 'en_camino',
+            // Los dos umbrales viajan con la respuesta para que la pantalla no
+            // tenga su propia copia: si se configuran en 10 y 20, el consejo
+            // que lee don Jorge cambia con ellos.
+            'dias_aviso' => $aviso,
+            'dias_espacio' => $espacio,
+            'frase' => match (true) {
+                $dias === 0 => 'Llega hoy',
+                $dias === 1 => 'Llega mañana',
+                default => "Llega en {$dias} días",
+            },
+        ];
+    }
+
     public function diasEnTransito(): ?int
     {
         if (! $this->fecha_zarpe) {

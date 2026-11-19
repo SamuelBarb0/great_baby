@@ -194,6 +194,34 @@ const confirmarEliminar = (u) => {
  * guardado. Sin esto el control se quedaba mostrando a la persona que el
  * servidor acababa de rechazar.
  */
+/*
+ * El buscador de la tabla.
+ *
+ * La pantalla se diseñó para una veintena de ubicaciones. Con el levantamiento
+ * del área son 435 posiciones en una sola bodega —17 racks por sección, nivel
+ * y lado— y encontrar «el rack 12, sección 4, nivel 3 derecha» recorriendo
+ * cuatrocientas noventa filas no es buscar: es rendirse.
+ *
+ * Filtra por código, nombre y posición, sin tildes y sin mayúsculas, porque la
+ * bodega escribe «seccion» tan seguido como «sección».
+ */
+const buscar = ref('');
+
+const sinTildes = (t) => String(t ?? '')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+
+const ubicacionesFiltradas = computed(() => {
+    const q = sinTildes(buscar.value).trim();
+    if (!q) return props.ubicaciones;
+
+    const partes = q.split(/\s+/);
+
+    return props.ubicaciones.filter((u) => {
+        const heno = sinTildes([u.codigo, u.nombre, u.posicion, u.bodega_nombre].join(' '));
+        return partes.every((p) => heno.includes(p));
+    });
+});
+
 const reintentosDelSelect = ref({});
 
 /** Vuelve a pedir sólo los datos del encabezado, sin recargar la página. */
@@ -481,6 +509,29 @@ const crearAdminBodega = async () => {
                 </div>
             </div>
 
+            <!--
+                El buscador. Con 435 posiciones en una sola bodega, encontrar
+                «rack 12 sección 4 nivel 3 derecha» recorriendo la tabla no es
+                buscar: es rendirse.
+            -->
+            <div class="card p-3 flex items-center gap-3 flex-wrap">
+                <div class="relative flex-1 min-w-[16rem]">
+                    <input v-model="buscar" type="search"
+                           placeholder="Buscar por código, nombre o posición · ej: R12-S4  ·  rack 5 derecha"
+                           aria-label="Buscar ubicación"
+                           class="input w-full pl-3"/>
+                </div>
+                <div class="text-xs text-surface-500 whitespace-nowrap">
+                    <template v-if="buscar.trim()">
+                        <strong>{{ ubicacionesFiltradas.length }}</strong> de {{ ubicaciones.length }}
+                        <button class="ml-2 underline hover:text-brand-600" @click="buscar = ''">limpiar</button>
+                    </template>
+                    <template v-else>
+                        {{ ubicaciones.length }} ubicación(es)
+                    </template>
+                </div>
+            </div>
+
             <!-- Tabla principal · FIX-S0 overflow-x-auto para móvil (10 cols) -->
             <div class="card overflow-x-auto">
                 <table v-tabla-movil class="w-full text-sm min-w-[900px]">
@@ -503,7 +554,7 @@ const crearAdminBodega = async () => {
                         </tr>
                     </thead>
                     <tbody class="divide-y">
-                        <tr v-for="u in ubicaciones" :key="u.id"
+                        <tr v-for="u in ubicacionesFiltradas" :key="u.id"
                             :class="[!u.activa && 'opacity-50 bg-surface-50/50', 'hover:bg-surface-50']">
                             <td class="p-2 font-mono font-bold"
                                 :class="u.importada_de_siigo ? 'text-surface-400' : 'text-brand-600'">{{ u.codigo }}</td>
@@ -608,6 +659,15 @@ const crearAdminBodega = async () => {
                         <tr v-if="!ubicaciones.length">
                             <td colspan="10" class="p-8 text-center text-sm text-surface-500">
                                 Aún no hay ubicaciones · creá la primera con el botón de arriba.
+                            </td>
+                        </tr>
+                        <!-- Hay ubicaciones, pero ninguna coincide: es otra cosa muy
+                             distinta de no tener ninguna, y hay que decirlo distinto. -->
+                        <tr v-else-if="!ubicacionesFiltradas.length">
+                            <td colspan="10" class="p-8 text-center text-sm text-surface-500">
+                                Ninguna de las {{ ubicaciones.length }} ubicaciones coincide con
+                                «{{ buscar }}».
+                                <button class="underline hover:text-brand-600" @click="buscar = ''">Ver todas</button>
                             </td>
                         </tr>
                     </tbody>

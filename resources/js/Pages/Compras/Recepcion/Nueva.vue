@@ -1,7 +1,7 @@
 <script setup>
 import { reactive, ref, computed, watch } from 'vue';
 import { Head, Link, router } from '@inertiajs/vue3';
-import { Truck, Save, ArrowLeft, AlertTriangle } from 'lucide-vue-next';
+import { Truck, Save, ArrowLeft, AlertTriangle, FileText } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import { useMoney } from '@/composables/useMoney';
 
@@ -482,6 +482,55 @@ const guardar = () => {
                 <div v-if="cajasOtraEmpresa.length" class="p-3 rounded-lg bg-sky-50 dark:bg-sky-950/40 border-l-4 border-sky-500 text-sky-800 dark:text-sky-200 text-sm">
                     <b>Para separar:</b>
                     <div v-for="i in cajasOtraEmpresa" :key="i.orden_item_id">{{ i.cajas }} cajas de {{ i.descripcion }} son para {{ i.destino }}.</div>
+                </div>
+
+                <!--
+                    Los papeles del contenedor, acá, donde se cuenta.
+                    Quien descarga cuenta CONTRA la factura final y la lista de
+                    empaque que mandó China, no contra lo que la orden pidió
+                    hace tres meses. Estaban cargados, pero en otra pantalla.
+                -->
+                <div v-if="oc?.documentos?.length" class="card p-4">
+                    <div class="text-xs uppercase font-bold text-brand-600 mb-2 flex items-center gap-1.5">
+                        <FileText class="h-3.5 w-3.5"/>
+                        Papeles del contenedor {{ oc.contenedor }} · cuente contra éstos
+                    </div>
+                    <div class="flex flex-wrap gap-2">
+                        <span v-for="d in oc.documentos" :key="d.id"
+                              :class="['inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs',
+                                       d.clave
+                                           ? 'border-brand-500 bg-brand-50 text-brand-800 font-semibold dark:bg-brand-950/40 dark:text-brand-200'
+                                           : 'border-surface-200 text-surface-600']">
+                            <a :href="d.url" target="_blank" rel="noopener"
+                               class="inline-flex items-center gap-1.5 hover:underline">
+                                <FileText class="h-3.5 w-3.5 flex-shrink-0"/>
+                                <span>{{ d.tipo }}</span>
+                                <span class="text-surface-400 font-normal truncate max-w-[13rem]">{{ d.nombre }}</span>
+                            </a>
+                            <!-- Compararlo con la orden ANTES de contar: saber que
+                                 embarcaron 8.700 donde se pidieron 9.000 cambia cómo
+                                 se cuenta. El comparador existía, pero sólo se llegaba
+                                 desde la pantalla del contenedor. -->
+                            <a v-if="d.comparar_url" :href="d.comparar_url"
+                               class="ml-1 pl-2 border-l border-current/30 hover:underline whitespace-nowrap">
+                                comparar con la orden
+                            </a>
+                        </span>
+                    </div>
+                </div>
+
+                <!-- Sin papeles cargados hay que decirlo: contar sin la factura final
+                     es contar contra lo que se pidió, no contra lo que embarcaron. -->
+                <div v-else-if="oc?.es_importacion && oc?.importacion_id"
+                     class="card p-3 border-l-4 border-amber-500 bg-amber-50 dark:bg-amber-950/30 text-xs text-amber-900 dark:text-amber-200 flex items-start gap-2">
+                    <AlertTriangle class="h-4 w-4 flex-shrink-0 mt-0.5"/>
+                    <div>
+                        El contenedor <strong>{{ oc.contenedor }}</strong> no tiene cargada la factura final
+                        ni la lista de empaque. Sin ellas se cuenta contra lo que se pidió, no contra lo que
+                        de verdad embarcaron.
+                        <a :href="`/app/compras/importacion/${oc.importacion_id}?tab=documentos`"
+                           class="underline font-semibold">Cargarlas en el contenedor</a>.
+                    </div>
                 </div>
 
                 <div class="card p-4 grid grid-cols-1 md:grid-cols-3 gap-3">

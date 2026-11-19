@@ -48,6 +48,9 @@ const totalUnidades = (items) => items.reduce((acc, it) => acc + (it.cantidad ||
                     <div class="text-right">
                         <div class="text-3xl font-black">{{ pedido.numero }}</div>
                         <div class="text-sm">Factura {{ pedido.factura || '—' }}</div>
+                        <div v-if="pedido.numero_picking" class="text-xs font-mono text-surface-600">
+                            {{ pedido.numero_picking }}
+                        </div>
                     </div>
                 </div>
                 <div class="grid grid-cols-2 gap-4 mt-3 text-sm">
@@ -62,9 +65,63 @@ const totalUnidades = (items) => items.reduce((acc, it) => acc + (it.cantidad ||
                     <div class="text-right">
                         <div class="font-bold">Alistador asignado</div>
                         <div>{{ pedido.alistador || '— sin asignar —' }}</div>
+                        <!--
+                            Quién vendió, para que la bodega pueda preguntarle sin
+                            tener que averiguar de quién era el pedido. El teléfono
+                            sale de su ficha de Gestión Humana; si no tiene ficha,
+                            sale el nombre solo.
+                        -->
+                        <div v-if="pedido.asesor" class="mt-2 text-xs">
+                            <span class="font-bold">Asesor:</span> {{ pedido.asesor }}<!--
+                            --><span v-if="pedido.asesor_telefono"> · {{ pedido.asesor_telefono }}</span>
+                        </div>
                         <div class="mt-2 text-xs">Total pedido: <b>{{ money(pedido.total) }}</b></div>
                     </div>
                 </div>
+            </div>
+
+            <!--
+                POR DóNDE SE CAMINA
+
+                El área reparte la bodega en zonas con un responsable cada una, y
+                su lista de picking pide tres casillas: la zona, quién responde
+                por ella y «compartido con zona». Esa última es la que importa:
+                un pedido que toca racks de dos zonas necesita dos personas o un
+                recorrido el doble de largo, y eso hay que verlo ANTES de
+                arrancar, no a mitad de camino.
+
+                El reparto lo manda la regla `logistica.zonas_bodega`, así que
+                esta banda cambia sola cuando el área mueve un rack de zona.
+            -->
+            <div v-if="pedido.zona" class="mb-4 flex items-stretch gap-3 border-2 border-black">
+                <div class="bg-black text-white px-5 py-3 text-center">
+                    <div class="text-[10px] uppercase tracking-widest opacity-80">Zona</div>
+                    <div class="text-4xl font-black leading-none">{{ pedido.zona }}</div>
+                </div>
+                <div class="flex-1 py-2 pr-3 text-sm">
+                    <div>
+                        <span class="font-bold uppercase text-xs">Responsable de la zona:</span>
+                        {{ pedido.responsable_zona }}
+                    </div>
+                    <div v-if="pedido.compartido_con && pedido.compartido_con.length"
+                         class="mt-1 font-bold text-amber-800">
+                        ⚠ Compartido con zona {{ pedido.compartido_con.join(' y ') }} ·
+                        este pedido no se alista de una sola zona
+                    </div>
+                    <div v-else class="mt-1 text-xs text-surface-600">
+                        Todo el pedido sale de esta zona.
+                    </div>
+                </div>
+            </div>
+
+            <!--
+                Sin zona no se inventó una: o el pedido no tiene stock ubicado, o
+                sus racks no están en el reparto. Decirlo es más útil que
+                imprimir una letra que manda a caminar a donde no es.
+            -->
+            <div v-else class="mb-4 border-2 border-dashed border-surface-400 px-4 py-2 text-xs text-surface-700">
+                Sin zona: los racks de este pedido no están repartidos en ninguna zona
+                (se configura en Reglas · Logística), o todavía no hay stock ubicado.
             </div>
 
             <!-- Tabla de items -->
@@ -105,7 +162,7 @@ const totalUnidades = (items) => items.reduce((acc, it) => acc + (it.cantidad ||
                                          'px-1.5 py-0.5 inline-block rounded mr-1 font-mono',
                                          i === 0 ? 'bg-black text-white font-bold text-sm' : 'bg-surface-200 text-xs',
                                      ]">
-                                    {{ u.codigo }}
+                                    <span v-if="u.zona" class="mr-0.5">{{ u.zona }}·</span>{{ u.codigo }}
                                     <span class="ml-1 opacity-75">({{ u.stock }} disp.)</span>
                                 </div>
                                 <div v-if="it.ubicaciones.length > 1" class="text-[10px] text-surface-500 mt-0.5">
