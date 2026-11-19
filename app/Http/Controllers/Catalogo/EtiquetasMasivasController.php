@@ -17,6 +17,14 @@ use Symfony\Component\HttpFoundation\Response;
 
 class EtiquetasMasivasController extends Controller
 {
+    /**
+     * Rollo de la térmica SAT TT460 para las etiquetas de Dropi, en mm: 3
+     * etiquetas de 30 × 25 por fila. El ancho del papel y la separación entre
+     * columnas son estimados (19-nov-2026); si la impresión se corre, se
+     * ajustan aquí con las medidas reales del rollo.
+     */
+    private const ROLLO_DROPI = ['ancho' => 100, 'alto' => 25, 'columnas' => 3, 'etiqueta' => 30, 'separacion' => 2];
+
     public function pdf(Request $request): Response
     {
         abort_unless(auth()->check(), 401);
@@ -122,9 +130,17 @@ class EtiquetasMasivasController extends Controller
         }
         unset($e);
 
-        return Pdf::loadView($soloBarras ? 'catalogo.pdf.etiquetas-dropi' : 'catalogo.pdf.etiquetas-lote', ['etiquetas' => $etiquetas])
-            // Las de Dropi van al rollo de 30 × 25 mm de la SAT TT460 (en puntos).
-            ->setPaper($soloBarras ? [0, 0, 85.04, 70.87] : 'letter', 'portrait')
+        if ($soloBarras) {
+            // Cada página es una fila completa del rollo de la SAT TT460 (mm → pt).
+            $mm = 72 / 25.4;
+
+            return Pdf::loadView('catalogo.pdf.etiquetas-dropi', ['etiquetas' => $etiquetas, 'rollo' => self::ROLLO_DROPI])
+                ->setPaper([0, 0, self::ROLLO_DROPI['ancho'] * $mm, self::ROLLO_DROPI['alto'] * $mm], 'portrait')
+                ->stream($archivo . '-' . now()->format('Ymd-His') . '.pdf');
+        }
+
+        return Pdf::loadView('catalogo.pdf.etiquetas-lote', ['etiquetas' => $etiquetas])
+            ->setPaper('letter', 'portrait')
             ->stream($archivo . '-' . now()->format('Ymd-His') . '.pdf');
     }
 }

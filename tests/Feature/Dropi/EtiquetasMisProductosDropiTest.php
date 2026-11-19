@@ -88,8 +88,8 @@ it('el PDF lleva el código del ERP: el de la variante o la referencia del agreg
     });
 
     $pdf = $this->get(route('catalogo.etiquetas.dropi', 1))->assertOk()->assertHeader('content-type', 'application/pdf');
-    // Una etiqueta por página, del rollo de 30 × 25 mm de la SAT TT460.
-    expect($pdf->getContent())->toContain('/MediaBox [0.000 0.000 85.040 70.870]');
+    // Cada página es una fila completa del rollo de la SAT TT460: 100 × 25 mm.
+    expect($pdf->getContent())->toContain('/MediaBox [0.000 0.000 283.465 70.866]');
     $this->get(route('catalogo.etiquetas.dropi', 2))->assertOk();
 
     // La variación sin vincular (Rosa 6M) no sale; la vinculada lleva el código de la variante.
@@ -100,7 +100,7 @@ it('el PDF lleva el código del ERP: el de la variante o la referencia del agreg
 });
 
 it('las etiquetas de Dropi son solo el código de barras; las del catálogo siguen completas', function () {
-    $dropi = view('catalogo.pdf.etiquetas-dropi', ['etiquetas' => [['codigo' => '899', 'barras' => 'data:image/png;base64,AAA', 'nombre' => 'VOLANTE', 'detalle' => 'Azul', 'precio' => 12000]]])->render();
+    $dropi = view('catalogo.pdf.etiquetas-dropi', ['rollo' => ['ancho' => 100, 'alto' => 25, 'columnas' => 3, 'etiqueta' => 30, 'separacion' => 2], 'etiquetas' => [['codigo' => '899', 'barras' => 'data:image/png;base64,AAA', 'nombre' => 'VOLANTE', 'detalle' => 'Azul', 'precio' => 12000]]])->render();
     expect($dropi)->toContain('alt="899"')->not->toContain('QR')->not->toContain('VOLANTE')->not->toContain('12.000');
 
     $catalogo = view('catalogo.pdf.etiquetas-lote', ['etiquetas' => [['codigo' => '899', 'barras' => 'data:image/png;base64,AAA', 'qr' => 'data:image/png;base64,BBB', 'nombre' => 'VOLANTE', 'detalle' => 'Azul', 'precio' => 12000]]])->render();
