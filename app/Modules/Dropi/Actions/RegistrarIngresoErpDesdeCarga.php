@@ -39,7 +39,10 @@ class RegistrarIngresoErpDesdeCarga
             $ci = $carga->carga_inventario_id ? CargaInventario::find($carga->carga_inventario_id) : null;
             $r = ['creados' => 0, 'actualizados' => 0, 'movimientos' => 0, 'ya_estaban' => 0, 'omitidos' => 0, 'sin_costo' => 0, 'filas' => []];
 
-            Producto::sinKardexAutomatico(function () use ($carga, $ingreso, $motivo, $ubicacionId, &$ci, &$r) {
+            // fila del Excel → producto de Dropi con que la vista previa la emparejó
+            $dropiPorFila = $carga->operaciones()->whereNotNull('dropi_producto_id')->pluck('dropi_producto_id', 'fila')->all();
+
+            Producto::sinKardexAutomatico(function () use ($carga, $ingreso, $motivo, $ubicacionId, $dropiPorFila, &$ci, &$r) {
                 foreach ($carga->filas_excel ?? [] as $f) {
                     $ref = trim((string) $f['ref']);
                     $cantidad = (int) round((float) $f['cantidad']);
@@ -48,7 +51,12 @@ class RegistrarIngresoErpDesdeCarga
                     }
                     $costo = isset($f['costo']) && (float) $f['costo'] > 0 ? (float) $f['costo'] : null;
 
-                    $producto = Producto::where('referencia', $ref)->first();
+                    // La referencia del Excel no siempre es la del ERP (el Excel
+                    // dice DROP2606-41 y el producto, traído de Dropi, AND2606-41):
+                    // si no casa exacta, se usa el producto de Dropi que encontró
+                    // la vista previa para esa fila. Solo si no hay ninguno se crea.
+                    $producto = Producto::where('referencia', $ref)->first()
+                        ?? (isset($dropiPorFila[$f['fila']]) ? Producto::where('dropi_sku', (string) $dropiPorFila[$f['fila']])->first() : null);
                     if ($producto && $producto->desglose_stock) {
                         $r['omitidos']++;
                         $r['filas'][$ref] = 'omitido: en el ERP se maneja por variantes (granular)';

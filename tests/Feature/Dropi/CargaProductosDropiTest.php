@@ -628,3 +628,19 @@ it('una compra al ERP exige el proveedor antes de confirmar', function () {
 
     $this->post("/app/dropi/carga-productos/{$carga->id}/confirmar")->assertSessionHasErrors(['confirmar' => 'Para registrar el ingreso al inventario del ERP falta: el proveedor.']);
 });
+
+it('el ingreso al ERP usa el producto traído de Dropi aunque la referencia del Excel sea otra', function () {
+    \Illuminate\Support\Facades\Queue::fake();
+    $this->actingAs(dcGerente());
+    // Así quedó el ERP tras reimportar desde Dropi: referencia de Dropi y su id guardado.
+    $erp = Producto::create(['referencia' => 'AND2606-41', 'nombre' => 'Gusanos magicos moving', 'desglose_stock' => false, 'precio_proveedor' => 0]);
+    $erp->forceFill(['dropi_sku' => '500'])->save(); // no es asignable en masa
+
+    $carga = dcCargaConIngreso([['DROP2606-41 GUSANOS MÁGICOS', 178, 4754, null, 'NO HAY VARIABLE']]);
+    $this->post("/app/dropi/carga-productos/{$carga->id}/confirmar")->assertSessionHasNoErrors();
+
+    expect(Producto::where('referencia', 'DROP2606-41')->exists())->toBeFalse() // no se duplicó
+        ->and((int) InventarioMovimiento::where('producto_id', $erp->id)->sum('cantidad'))->toBe(178)
+        ->and((float) $erp->fresh()->precio_proveedor)->toBe(4754.0)
+        ->and($carga->fresh()->ingreso_erp['resultado'])->toMatchArray(['creados' => 0, 'actualizados' => 1]);
+});
