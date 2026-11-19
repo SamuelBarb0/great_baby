@@ -71,6 +71,22 @@
                                     Editar en Dropi ↗
                                 </a>
                             </div>
+                            {{-- La etiqueta lleva el código del ERP vinculado: es lo que reconoce la pistola de empaque. --}}
+                            @if($p['vinculo'] !== 'no')
+                                <a href="{{ route('catalogo.etiquetas.dropi', $p['id']) }}" target="_blank" rel="noopener"
+                                   title="PDF con QR y código de barras de cada variación vinculada al ERP"
+                                   style="font-size:.78rem;font-weight:600;color:#2563eb;border:1px solid #3b82f6;border-radius:.5rem;padding:.2rem .6rem;text-align:center;text-decoration:none;">
+                                    🏷️ Etiquetas con código de barras
+                                </a>
+                                @if($p['vinculo'] === 'parcial')
+                                    <span style="font-size:.7rem;color:#d97706;">Solo salen las variaciones vinculadas al ERP.</span>
+                                @endif
+                            @else
+                                <span style="font-size:.72rem;color:#9ca3af;">
+                                    Para imprimir su código de barras, vincúlalo en
+                                    <a href="{{ \App\Modules\Dropi\Filament\Pages\ProductosDeDropi::getUrl() }}" style="color:#f59e0b;font-weight:600;">Vincular con el ERP</a>.
+                                </span>
+                            @endif
                             @if(count($p['variaciones']) > 1 || $p['variaciones'][0]['variacion'])
                                 <button type="button" x-on:click="abierto = ! abierto"
                                         style="margin-top:auto;font-size:.78rem;color:#f59e0b;text-align:left;background:none;border:none;cursor:pointer;padding:0;">

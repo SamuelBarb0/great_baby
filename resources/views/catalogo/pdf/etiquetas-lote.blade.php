@@ -22,32 +22,28 @@
     </style>
 </head><body>
     <table class="grid">
-        @foreach($variantes->chunk(2) as $fila)
+        @foreach(array_chunk($etiquetas, 2) as $fila)
             <tr>
-                @foreach($fila as $v)
+                @foreach($fila as $e)
                     <td class="celda">
                         <table class="etiqueta">
                             <tr>
-                                <td style="width:20mm"><img src="{{ $qrs[$v->id] ?? '' }}" class="qr" alt="QR"></td>
+                                <td style="width:20mm"><img src="{{ $e['qr'] }}" class="qr" alt="QR"></td>
                                 <td class="info">
                                     <div class="marca">GREAT BABY</div>
-                                    <div class="nombre">{{ \Illuminate\Support\Str::limit($v->producto?->nombre ?? '—', 28) }}</div>
-                                    <div class="var">
-                                        @if($v->color_nombre)🎨 {{ $v->color_nombre }}@endif
-                                        @if($v->diseno_nombre) · {{ $v->diseno_nombre }}@endif
-                                        @if($v->talla) · T{{ $v->talla }}@endif
-                                    </div>
-                                    <div class="precio">${{ number_format((float) ($v->producto?->precio_proveedor ?? 0), 0, ',', '.') }}</div>
+                                    <div class="nombre">{{ \Illuminate\Support\Str::limit($e['nombre'] ?? '—', 28) }}</div>
+                                    <div class="var">{{ $e['detalle'] }}</div>
+                                    <div class="precio">${{ number_format($e['precio'], 0, ',', '.') }}</div>
                                 </td>
                             </tr>
                             <tr>
                                 {{-- Code 128 con el código impreso debajo, para lector de mano. --}}
-                                <td colspan="2" class="barras-celda"><img src="{{ $barras[$v->id] ?? '' }}" class="barras" alt="{{ $v->codigo_barras }}"></td>
+                                <td colspan="2" class="barras-celda"><img src="{{ $e['barras'] }}" class="barras" alt="{{ $e['codigo'] }}"></td>
                             </tr>
                         </table>
                     </td>
                 @endforeach
-                @if($fila->count() < 2)<td class="celda" style="border:none"></td>@endif
+                @if(count($fila) < 2)<td class="celda" style="border:none"></td>@endif
             </tr>
         @endforeach
     </table>

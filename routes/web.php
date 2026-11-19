@@ -1032,6 +1032,8 @@ Route::middleware(['web', 'auth'])->group(function () {
     Route::get('/catalogo/variante/{variante}/barcode', [CodigoBarrasController::class, 'barcode'])->name('catalogo.variante.barcode');
     Route::get('/catalogo/variante/{variante}/etiqueta', [CodigoBarrasController::class, 'etiqueta'])->name('catalogo.variante.etiqueta');
     Route::get('/catalogo/etiquetas-lote', [EtiquetasMasivasController::class, 'pdf'])->name('catalogo.etiquetas.lote');
+    Route::get('/catalogo/etiquetas-dropi/{dropiId}', [EtiquetasMasivasController::class, 'dropi'])
+        ->whereNumber('dropiId')->middleware('throttle:30,1')->name('catalogo.etiquetas.dropi');
 
     // PDF de Compras: los abre quien tiene la sección de esa pantalla, que ya ve esos costos.
     // Cada controlador lo revisa (fix auditor #19: antes los veía cualquier autenticado).
