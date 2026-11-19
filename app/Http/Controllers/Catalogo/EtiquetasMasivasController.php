@@ -72,7 +72,7 @@ class EtiquetasMasivasController extends Controller
 
         abort_if($etiquetas === [], 404, 'Este producto no está vinculado al ERP: vincúlalo para poder imprimir sus etiquetas.');
 
-        return $this->lote(array_values($etiquetas), 'etiquetas-dropi-' . $dropiId);
+        return $this->lote(array_values($etiquetas), 'etiquetas-dropi-' . $dropiId, soloBarras: true);
     }
 
     /** @return array{nombre:?string, detalle:string, precio:float, codigo:string} */
@@ -101,23 +101,30 @@ class EtiquetasMasivasController extends Controller
         ];
     }
 
-    /** @param list<array{nombre:?string, detalle:string, precio:float, codigo:string}> $etiquetas */
-    private function lote(array $etiquetas, string $archivo): Response
+    /**
+     * @param  list<array{nombre:?string, detalle:string, precio:float, codigo:string}>  $etiquetas
+     * @param  bool  $soloBarras  las de «Mis productos en Dropi» llevan SOLO el código
+     *                            de barras (19-nov-2026); las del catálogo, completas.
+     */
+    private function lote(array $etiquetas, string $archivo, bool $soloBarras = false): Response
     {
-        $qrOpts = new QROptions([
+        $qrOpts = $soloBarras ? null : new QROptions([
             'outputType' => QRCode::OUTPUT_IMAGE_PNG,
             'eccLevel' => QRCode::ECC_M,
             'scale' => 8,
             'imageBase64' => true,
         ]);
         foreach ($etiquetas as &$e) {
-            $e['qr'] = (new QRCode($qrOpts))->render($e['codigo']);
+            if ($qrOpts) {
+                $e['qr'] = (new QRCode($qrOpts))->render($e['codigo']);
+            }
             $e['barras'] = 'data:image/png;base64,' . base64_encode(Code128::png($e['codigo']));
         }
         unset($e);
 
-        return Pdf::loadView('catalogo.pdf.etiquetas-lote', ['etiquetas' => $etiquetas])
-            ->setPaper('letter', 'portrait')
+        return Pdf::loadView($soloBarras ? 'catalogo.pdf.etiquetas-dropi' : 'catalogo.pdf.etiquetas-lote', ['etiquetas' => $etiquetas])
+            // Las de Dropi van al rollo de 30 × 25 mm de la SAT TT460 (en puntos).
+            ->setPaper($soloBarras ? [0, 0, 85.04, 70.87] : 'letter', 'portrait')
             ->stream($archivo . '-' . now()->format('Ymd-His') . '.pdf');
     }
 }
