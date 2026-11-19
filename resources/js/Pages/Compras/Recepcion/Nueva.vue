@@ -12,6 +12,8 @@ const props = defineProps({
     // A dónde puede entrar lo que se descarga: los pares oficina+almacén que
     // el área marcó como de ingreso directo. Vacío = la bodega de la orden.
     destinos: { type: Array, default: () => [] },
+    // Las posiciones de cada bodega, indexadas por bodega_id.
+    posiciones: { type: Object, default: () => ({}) },
     bodega_orden: { type: Object, default: null },
 });
 
@@ -47,6 +49,7 @@ const form = reactive({
         // A dónde va ESTA parte de la línea. Vacío = la bodega de la orden,
         // que es como entró todo hasta hoy.
         destino_ingreso: '',
+        posicion_ingreso: '',
         // LOG-J8 · clasificación por línea · default apto para no romper el flujo
         //   actual, pero el logístico puede cambiarlo al descargar.
         clasificacion: 'apto',
@@ -163,7 +166,37 @@ if (claveConteo) {
         const guardado = JSON.parse(localStorage.getItem(claveConteo) || 'null');
         if (Array.isArray(guardado)) {
             const base = Object.fromEntries(form.items.map(i => [i.orden_item_id, i]));
-            const destinosValidos = new Set(props.destinos.map(d => d.valor));
+            
+/*
+ * Las posiciones que se le pueden ofrecer a este renglón.
+ *
+ * Dependen del destino elegido: cada par (oficina, almacén) resuelve a una
+ * bodega, y sólo los estantes DE ESA bodega son un destino válido. Sin destino
+ * elegido la mercancía va a la bodega de la orden, y ahí tampoco hay posición
+ * que elegir hasta que se sepa a cuál.
+ *
+ * El servidor vuelve a comprobarlo al guardar: esto es comodidad, no candado.
+ */
+const posicionesDe = (fila) => {
+    if (! fila?.destino_ingreso) return [];
+    const d = props.destinos.find(x => x.valor === fila.destino_ingreso);
+    if (! d?.bodega_id) return [];
+    return props.posiciones[d.bodega_id] || [];
+};
+
+/*
+ * Cambiar de destino limpia la posición: un estante de la bodega anterior no
+ * existe en la nueva, y el servidor lo rechazaría al guardar.
+ */
+watch(() => form.items.map(f => f.destino_ingreso).join('|'), () => {
+    form.items.forEach((f) => {
+        if (f.posicion_ingreso && ! posicionesDe(f).some(p => p.id === f.posicion_ingreso)) {
+            f.posicion_ingreso = '';
+        }
+    });
+});
+
+const destinosValidos = new Set(props.destinos.map(d => d.valor));
 
             /*
              * Lo guardado se revisa contra la orden de HOY antes de pintarlo.
@@ -257,7 +290,7 @@ const otroDestino = (it) => {
     const restante = Math.max(0, Number(it.cantidad_pendiente || 0) - yaContado);
 
     form.items.splice(form.items.indexOf(it) + 1, 0, {
-        ...it, cantidad_recibida: restante, lote: '', destino_ingreso: '',
+        ...it, cantidad_recibida: restante, lote: '', destino_ingreso: '', posicion_ingreso: '',
         clasificacion: 'apto', motivo_clasificacion: '', extra: true, repartir: true,
     });
 };
@@ -370,6 +403,7 @@ const guardar = () => {
             motivo_clasificacion: i.motivo_clasificacion || null,
             color_nombre: i.color_nombre || null,
             destino_ingreso: i.destino_ingreso || null,
+            posicion_ingreso: i.posicion_ingreso || null,
         })),
     }, {
         preserveScroll: true,
@@ -623,6 +657,25 @@ const guardar = () => {
                                             <option value="">{{ bodega_orden?.nombre || 'La bodega de la orden' }}</option>
                                             <option v-for="d in destinos" :key="d.valor" :value="d.valor">{{ d.label }}</option>
                                         </select>
+                                        <!--
+                                            En qué estante quedó.
+                                            El procedimiento del área lo pide: «el registro deberá
+                                            contener también la nomenclatura de la ubicación
+                                            asignada», y su flujograma pone el almacenamiento en
+                                            racks ANTES del ingreso al sistema. Cuando quien recibe
+                                            ya bajó la caja a su estante, puede decirlo acá y se
+                                            ahorra el traslado posterior.
+                                            Sólo aparece si esa bodega tiene posiciones cargadas.
+                                        -->
+                                        <select v-if="posicionesDe(it).length"
+                                                v-model="it.posicion_ingreso"
+                                                :disabled="it.es_componente || it.clasificacion !== 'apto'"
+                                                class="input text-xs w-full mt-1"
+                                                :aria-label="`Posición dentro de la bodega para ${it.descripcion}`">
+                                            <option value="">Sin posición · entra a la bodega</option>
+                                            <option v-for="p in posicionesDe(it)" :key="p.id" :value="p.id">{{ p.codigo }}</option>
+                                        </select>
+
                                         <button v-if="!it.es_componente && it.clasificacion === 'apto'"
                                                 type="button" @click="otroDestino(it)"
                                                 class="btn-ghost text-xs mt-0.5">+ Repartir</button>

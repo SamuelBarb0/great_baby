@@ -817,6 +817,22 @@ class ComprasGestionController extends Controller implements HasMiddleware
              * vez de sesenta sucias.
              */
             'destinos' => $this->destinosDeIngreso(),
+
+            /*
+             * Las posiciones de cada bodega, para que el ingreso quede con su
+             * nomenclatura.
+             *
+             * El procedimiento del area lo pide con todas las letras: «el
+             * registro debera contener tambien la nomenclatura de la ubicacion
+             * asignada», y su flujograma pone el almacenamiento en racks ANTES
+             * del ingreso al sistema. O sea que cuando Contabilidad registra,
+             * la caja ya esta en su estante y hay que poder decirlo.
+             *
+             * Sin esto la mercancia entraba al monton de la bodega y despues
+             * tocaba un traslado para bajarla al estante: dos pasos para lo
+             * que es uno solo.
+             */
+            'posiciones' => $this->posicionesPorBodega(),
             'bodega_orden' => $oc?->bodega_id ? [
                 'id' => $oc->bodega_id,
                 'nombre' => $oc->bodega?->nombre,
@@ -881,7 +897,9 @@ class ComprasGestionController extends Controller implements HasMiddleware
 
         foreach ($items as $i => $it) {
             $elegido = trim((string) ($it['destino_ingreso'] ?? ''));
-            unset($items[$i]['destino_ingreso']);
+            $posicion = (int) ($it['posicion_ingreso'] ?? 0);
+
+            unset($items[$i]['destino_ingreso'], $items[$i]['posicion_ingreso']);
 
             if ($elegido === '') {
                 $items[$i]['ubicacion_id'] = null;
@@ -922,7 +940,33 @@ class ComprasGestionController extends Controller implements HasMiddleware
                 )->id;
             }
 
-            $items[$i]['ubicacion_id'] = $cache[$elegido];
+            $bodegaDelDestino = $cache[$elegido];
+
+            /*
+             * Si quien recibe dijo en que estante quedo, el ingreso va al
+             * estante.
+             *
+             * Se comprueba que la posicion sea hija DE ESA bodega: el valor
+             * llega del navegador y un id de otra sede metido a mano mandaria
+             * el contenedor a otra ciudad. Si no cuadra, se dice por que, en
+             * vez de caer callado a la bodega —que es lo que el area no podria
+             * distinguir de un acierto—.
+             */
+            if ($posicion > 0) {
+                $u = \App\Modules\Dropi\Models\InventarioUbicacion::find($posicion);
+
+                if (! $u || ! $u->activa || (int) $u->bodega_id !== (int) $bodegaDelDestino) {
+                    throw new \InvalidArgumentException(
+                        'La posición elegida no pertenece a la bodega del destino, o ya no está activa.'
+                    );
+                }
+
+                $items[$i]['ubicacion_id'] = $u->id;
+
+                continue;
+            }
+
+            $items[$i]['ubicacion_id'] = $bodegaDelDestino;
         }
 
         return array_values($items);
@@ -937,12 +981,37 @@ class ComprasGestionController extends Controller implements HasMiddleware
      *
      * @return array<int, array{valor:string, label:string, oficina_id:int, almacen_id:int}>
      */
+    /**
+     * Las posiciones activas de cada bodega: [bodega_id => [{id, codigo, nombre}]].
+     *
+     * Van indexadas por su bodega porque la pantalla solo puede ofrecer las de
+     * la bodega que resolvio el destino elegido: un estante de la sede de
+     * Bogota no es un destino valido para lo que se descarga en Bucaramanga.
+     */
+    private function posicionesPorBodega(): array
+    {
+        return \App\Modules\Dropi\Models\InventarioUbicacion::query()
+            ->whereNotNull('bodega_id')
+            ->where('activa', true)
+            ->orderBy('codigo')
+            ->get(['id', 'codigo', 'nombre', 'bodega_id'])
+            ->groupBy('bodega_id')
+            ->map(fn ($g) => $g->map(fn ($u) => [
+                'id' => $u->id,
+                'codigo' => $u->codigo,
+                'nombre' => $u->nombre,
+            ])->values()->all())
+            ->all();
+    }
+
     private function destinosDeIngreso(): array
     {
         $destinos = [];
 
         $oficinas = \App\Modules\Inventario\Models\Oficina::deIngreso()->orderBy('orden')->get();
         $almacenes = \App\Modules\Inventario\Models\Almacen::deIngreso()->orderBy('orden')->get();
+
+        $par = app(\App\Modules\Inventario\Support\UbicacionDelPar::class);
 
         foreach ($oficinas as $o) {
             foreach ($almacenes as $a) {
@@ -951,6 +1020,11 @@ class ComprasGestionController extends Controller implements HasMiddleware
                     'label' => "{$o->nombre} · {$a->nombre}",
                     'oficina_id' => $o->id,
                     'almacen_id' => $a->id,
+                    // A que bodega resuelve este par, para que la pantalla sepa
+                    // que posiciones ofrecer. `buscar()` NO crea nada: un par
+                    // que todavia no tiene bodega simplemente no tiene
+                    // posiciones, y el selector no aparece.
+                    'bodega_id' => $par->buscar($o, $a)?->id,
                 ];
             }
         }
@@ -1017,6 +1091,9 @@ class ComprasGestionController extends Controller implements HasMiddleware
              * marcó como de ingreso directo.
              */
             'items.*.destino_ingreso' => ['nullable', 'string', 'max:20'],
+            // La posicion exacta dentro de la bodega del destino. Opcional:
+            // sin ella la mercancia entra a la bodega, como siempre.
+            'items.*.posicion_ingreso' => ['nullable', 'integer'],
             'motivo_exceso' => ['nullable', 'string', 'max:300'],
         ]);
 

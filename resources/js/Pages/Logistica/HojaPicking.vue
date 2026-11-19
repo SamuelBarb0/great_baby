@@ -157,15 +157,32 @@ const totalUnidades = (items) => items.reduce((acc, it) => acc + (it.cantidad ||
                                 ⚠ SIN STOCK — reportar a Jorge
                             </div>
                             <div v-else class="space-y-0.5">
+                                <!--
+                                    El respaldo de surtido se pinta distinto a
+                                    propósito. El área lo pide por escrito: si
+                                    falta en los racks hay que completar desde
+                                    Exhibición, pero eso NO es un estante más
+                                    del recorrido —obliga a registrar un
+                                    traslado—. Mezclarlo con los demás haría
+                                    que alguien tome de ahí sin saber que debe
+                                    reportarlo.
+                                -->
                                 <div v-for="(u, i) in it.ubicaciones" :key="i"
                                      :class="[
                                          'px-1.5 py-0.5 inline-block rounded mr-1 font-mono',
-                                         i === 0 ? 'bg-black text-white font-bold text-sm' : 'bg-surface-200 text-xs',
+                                         u.es_respaldo
+                                             ? 'border-2 border-dashed border-black text-xs'
+                                             : (i === 0 ? 'bg-black text-white font-bold text-sm' : 'bg-surface-200 text-xs'),
                                      ]">
                                     <span v-if="u.zona" class="mr-0.5">{{ u.zona }}·</span>{{ u.codigo }}
                                     <span class="ml-1 opacity-75">({{ u.stock }} disp.)</span>
+                                    <span v-if="u.es_respaldo" class="ml-1 font-sans font-bold">· EXHIBICIÓN</span>
                                 </div>
-                                <div v-if="it.ubicaciones.length > 1" class="text-[10px] text-surface-500 mt-0.5">
+                                <div v-if="it.ubicaciones.some(u => u.es_respaldo)" class="text-[10px] font-bold mt-0.5">
+                                    ⚠ Si los racks no completan la cantidad, tome de EXHIBICIÓN
+                                    y reporte el traslado. El pedido sale completo o no sale.
+                                </div>
+                                <div v-else-if="it.ubicaciones.length > 1" class="text-[10px] text-surface-500 mt-0.5">
                                     1ª opción en negro · alternativas si está vacía
                                 </div>
                             </div>

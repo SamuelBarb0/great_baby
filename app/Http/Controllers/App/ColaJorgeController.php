@@ -226,6 +226,10 @@ class ColaJorgeController extends Controller implements HasMiddleware
              * Reglas de ruteo: «hay 23 pedidos sin bodega» se entiende;
              * «configure el ruteo» no.
              */
+            // Cuantos pedidos caben en una oleada: es el numero de casillas
+            // de la zona de alistamiento, porque no se pueden armar mas de los
+            // que caben en el piso.
+            'casillas_disponibles' => \App\Modules\Logistica\Support\ZonaDeAlistamiento::cuantasCaben(),
             'pedidos_sin_bodega' => PedidoCliente::whereNull('ubicacion_origen_id')
                 ->where('estado', 'facturado')
                 ->whereNull('despachado_at')
@@ -303,23 +307,22 @@ class ColaJorgeController extends Controller implements HasMiddleware
      * agregados (sin variante_id) decimos "varias ubicaciones" porque el
      * alistador decide dónde arma el pedido según colores disponibles.
      */
-    public function imprimir(Request $r, int $pedido): Response
+    /**
+     * Donde esta la mercancia de cada item de un pedido.
+     *
+     * Devuelve [clave => [ubicaciones]], con la clave `v:<id>` para lo
+     * desglosado por variante y `p:<id>` para lo agregado, ya ordenadas en el
+     * orden en que la hoja manda a buscar.
+     *
+     * Vive aparte porque lo usan dos pantallas: la hoja de un pedido y la
+     * oleada, que recoge varios de una sola pasada. Repetida en las dos se
+     * separan al primer cambio, y de este orden depende que el alistador no
+     * camine de mas.
+     *
+     * @return array<string, array<int, array>>
+     */
+    private function dondeEstaCadaItem(PedidoCliente $p): array
     {
-        $p = PedidoCliente::with([
-            'items.variante:id,codigo_barras,color_nombre,talla,producto_id',
-            'items.variante.producto:id,referencia,nombre',
-            'contacto:id,nombre_completo,razon_social,ciudad,direccion,telefono',
-            'factura:id,numero',
-            'alistador:id,name',
-            // El asesor que vendio: su nombre va en la hoja, para que la bodega
-            // pueda preguntarle sin tener que averiguar quien fue.
-            'vendedor:id,name',
-        ])->findOrFail($pedido);
-
-        // Un AdminBodega sólo imprime pedidos facturados · sanity check.
-        abort_unless(in_array($p->estado, ['facturado', 'despachado', 'aprobado'], true), 422,
-            'Sólo se imprime hoja de picking de pedidos aprobados/facturados.');
-
         /*
          * La sede de la que sale este pedido, con sus posiciones hijas.
          *
@@ -328,6 +331,7 @@ class ColaJorgeController extends Controller implements HasMiddleware
          * que imprimir una hoja sin ubicaciones.
          */
         $sedeDelPedido = null;
+        $idsDeRespaldo = [];
 
         if ($p->ubicacion_origen_id) {
             $sedeDelPedido = \App\Modules\Dropi\Models\InventarioUbicacion::query()
@@ -335,6 +339,36 @@ class ColaJorgeController extends Controller implements HasMiddleware
                 ->orWhere('bodega_id', $p->ubicacion_origen_id)
                 ->pluck('id')
                 ->all();
+
+            /*
+             * Exhibicion tambien cuenta, y el area lo pide por escrito.
+             *
+             * Su procedimiento de preparacion de pedidos trae una «directriz
+             * critica de abastecimiento»: hay que surtir el 100% de lo pedido,
+             * y si falta en los racks el operario debe tomar de la sala de
+             * exhibicion —oficina 14— gestionando el traslado. La razon es
+             * comercial: Great Baby vende al por mayor y un pedido incompleto
+             * deja picos de referencia que despues no se venden.
+             *
+             * Asi que la hoja tiene que DECIR que hay existencias ahi. Lo que
+             * no puede es ofrecerlo como un estante mas: no es el recorrido
+             * normal, es una excepcion que obliga a registrar un traslado.
+             * Por eso entra al alcance pero se marca distinto mas abajo.
+             *
+             * Cual oficina es el respaldo sale del catalogo, no de un 14
+             * escrito aca: el area puede mover esa marca desde la pantalla.
+             */
+            $respaldo = \App\Modules\Inventario\Models\Oficina::respaldoDeSurtido();
+
+            if ($respaldo) {
+                $idsDeRespaldo = \App\Modules\Dropi\Models\InventarioUbicacion::query()
+                    ->where('oficina_id', $respaldo->id)
+                    ->where('activa', true)
+                    ->pluck('id')
+                    ->all();
+
+                $sedeDelPedido = array_values(array_unique([...$sedeDelPedido, ...$idsDeRespaldo]));
+            }
         }
 
         /*
@@ -378,7 +412,7 @@ class ColaJorgeController extends Controller implements HasMiddleware
             // `u.pasillo` es el RACK, y de ahi sale la zona operativa: la hoja
             // tiene que decir por que zona se camina y quien responde por ella.
             ->groupBy("m.{$campo}", 'u.id', 'u.codigo', 'u.nombre', 'u.categoria', 'u.pasillo', 'u.responsable_user_id')
-            ->selectRaw("m.{$campo} as sujeto, u.codigo, u.nombre, u.categoria, u.pasillo, u.responsable_user_id, SUM(m.cantidad) as stock")
+            ->selectRaw("m.{$campo} as sujeto, u.id as ubicacion_id, u.codigo, u.nombre, u.categoria, u.pasillo, u.responsable_user_id, SUM(m.cantidad) as stock")
             ->having('stock', '>', 0)
             ->orderByDesc('stock')
             ->get();
@@ -397,10 +431,60 @@ class ColaJorgeController extends Controller implements HasMiddleware
                     'stock' => (int) $row->stock,
                     'rack' => $row->pasillo,
                     'zona' => Zona::deRack($row->pasillo),
+                    // Si sale de aca, no es el recorrido normal: toca traslado.
+                    'es_respaldo' => in_array((int) $row->ubicacion_id, $idsDeRespaldo, true),
                     'responsable_id' => $row->responsable_user_id ? (int) $row->responsable_user_id : null,
                 ];
             }
         }
+
+
+        /*
+         * El orden en que se manda a buscar, aplicado una sola vez.
+         *
+         *   1. Lo apto para despacho primero (categoria «venta»).
+         *   2. Entre esas, las POSICIONES antes que las bodegas enteras.
+         *   3. Y el respaldo de surtido —Exhibicion— de ultimo, siempre: alla
+         *      se va cuando los racks no alcanzan, no antes.
+         *
+         * El punto 2 es el que importa en bodega: «PPAL» no le dice a nadie
+         * donde pararse, y «R5-S2-N3-D» si. Mientras la mercancia se este
+         * pasando a posiciones va a haber de las dos, y ordenando solo por
+         * stock la hoja mandaria siempre a la bodega entera —que es la que
+         * acumula mas— y las 435 posiciones no servirian para nada.
+         *
+         * `usort` es estable desde PHP 8, asi que dentro de cada grupo se
+         * conserva el orden por stock que trajo la consulta.
+         */
+        foreach ($saldosPorSujeto as &$lista) {
+            usort($lista, function ($a, $b) {
+                return [$a['es_respaldo'] ? 1 : 0, $a['categoria'] === 'venta' ? 0 : 1, $a['rack'] ? 0 : 1]
+                   <=> [$b['es_respaldo'] ? 1 : 0, $b['categoria'] === 'venta' ? 0 : 1, $b['rack'] ? 0 : 1];
+            });
+        }
+        unset($lista);
+
+        return $saldosPorSujeto;
+    }
+
+    public function imprimir(Request $r, int $pedido): Response
+    {
+        $p = PedidoCliente::with([
+            'items.variante:id,codigo_barras,color_nombre,talla,producto_id',
+            'items.variante.producto:id,referencia,nombre',
+            'contacto:id,nombre_completo,razon_social,ciudad,direccion,telefono',
+            'factura:id,numero',
+            'alistador:id,name',
+            // El asesor que vendio: su nombre va en la hoja, para que la bodega
+            // pueda preguntarle sin tener que averiguar quien fue.
+            'vendedor:id,name',
+        ])->findOrFail($pedido);
+
+        // Un AdminBodega sólo imprime pedidos facturados · sanity check.
+        abort_unless(in_array($p->estado, ['facturado', 'despachado', 'aprobado'], true), 422,
+            'Sólo se imprime hoja de picking de pedidos aprobados/facturados.');
+
+        $saldosPorSujeto = $this->dondeEstaCadaItem($p);
 
         $items = $p->items->map(function ($it) use ($saldosPorSujeto) {
             $clave = $it->variante_id ? 'v:'.$it->variante_id : 'p:'.$it->producto_id;
@@ -422,10 +506,6 @@ class ColaJorgeController extends Controller implements HasMiddleware
              * `usort` es estable desde PHP 8, así que dentro de cada grupo se
              * conserva el orden por stock que trajo la consulta.
              */
-            usort($saldos, function ($a, $b) {
-                return [$a['categoria'] === 'venta' ? 0 : 1, $a['rack'] ? 0 : 1]
-                   <=> [$b['categoria'] === 'venta' ? 0 : 1, $b['rack'] ? 0 : 1];
-            });
             return [
                 'sku' => $it->sku_snapshot,
                 'descripcion' => $it->descripcion_snapshot,
@@ -476,6 +556,14 @@ class ColaJorgeController extends Controller implements HasMiddleware
             $usadas = [];
 
             foreach ($it['ubicaciones'] as $u) {
+                // Exhibicion no es una zona del recorrido: ir alla es una
+                // excepcion con traslado, no un estante mas que caminar. Si
+                // entrara, la hoja diria «compartido con zona» por algo que no
+                // es una zona.
+                if ($u['es_respaldo']) {
+                    continue;
+                }
+
                 $usadas[] = $u;
                 $faltan -= (int) $u['stock'];
 
@@ -578,6 +666,126 @@ class ColaJorgeController extends Controller implements HasMiddleware
             ],
             'items' => $items,
         ]);
+    }
+
+
+    /**
+     * La hoja de una OLEADA: varios pedidos recogidos de una sola pasada.
+     *
+     * El procedimiento del area pone tres pasos —picking por zonas,
+     * consolidacion y packing— y esta es la herramienta del primero y el
+     * segundo. Hasta aca el sistema sabia alistar UN pedido: con cien en cola
+     * eso son cien recorridos, y una referencia que este en la mitad de las
+     * facturas son cincuenta viajes al mismo estante.
+     *
+     * La hoja trae las dos caras del proceso:
+     *   · RECOGER, por ubicacion y en el orden de la bodega, con el total de
+     *     todos los pedidos juntos.
+     *   · REPARTIR, por pedido, diciendo en que casilla de la zona de
+     *     alistamiento se arma cada uno.
+     *
+     * Las casillas se asignan al abrir la hoja y quedan guardadas: si alguien
+     * la reimprime, cada pedido sigue en el mismo sitio del piso. Sin eso la
+     * segunda impresion mandaria a armar el mismo pedido en otra casilla.
+     */
+    public function oleada(Request $r): Response
+    {
+        $u = $r->user();
+
+        $ids = collect(explode(',', (string) $r->query('pedidos', '')))
+            ->map(fn ($x) => (int) trim($x))
+            ->filter()
+            ->unique()
+            ->values();
+
+        abort_if($ids->isEmpty(), 422, 'No se eligio ningun pedido para la oleada.');
+
+        $caben = \App\Modules\Logistica\Support\ZonaDeAlistamiento::cuantasCaben();
+
+        abort_if($ids->count() > $caben, 422,
+            "La zona de alistamiento tiene {$caben} casillas: no se pueden armar mas de {$caben} pedidos a la vez. "
+            .'Si el area agrando la zona, se ajusta en Reglas.');
+
+        $pedidos = PedidoCliente::with([
+            'items.variante:id,codigo_barras,color_nombre,talla,producto_id',
+            'contacto:id,nombre_completo,razon_social,ciudad',
+            'factura:id,numero',
+        ])->whereIn('id', $ids)->get();
+
+        abort_if($pedidos->isEmpty(), 404, 'Esos pedidos ya no existen.');
+
+        /*
+         * Solo pedidos que de verdad se pueden alistar, y solo de SU bodega.
+         *
+         * Sin esto, pasar ids a mano en la direccion armaria una oleada con
+         * pedidos de otra sede o que todavia no estan facturados.
+         */
+        $misBodegas = \App\Auth\Permisos::esRoot($u) ? null : $u->bodegasQueVeIds();
+
+        foreach ($pedidos as $p) {
+            abort_unless(in_array($p->estado, ['facturado', 'despachado', 'aprobado'], true), 422,
+                "El pedido {$p->numero} no esta listo para alistar.");
+
+            abort_if(
+                $misBodegas !== null && $p->ubicacion_origen_id && ! in_array($p->ubicacion_origen_id, $misBodegas, true),
+                403,
+                "El pedido {$p->numero} es de otra bodega."
+            );
+        }
+
+        $this->repartirCasillas($pedidos);
+
+        $ubicaciones = [];
+
+        foreach ($pedidos as $p) {
+            $ubicaciones[$p->id] = $this->dondeEstaCadaItem($p);
+        }
+
+        $oleada = app(\App\Modules\Logistica\Support\OleadaDeAlistamiento::class)->armar($pedidos, $ubicaciones);
+
+        return Inertia::render('Logistica/HojaOleada', [
+            'oleada' => $oleada,
+            'generado_at' => now()->format('Y-m-d H:i'),
+            'impreso_por' => $u?->name,
+        ]);
+    }
+
+    /**
+     * Le da a cada pedido su casilla en la zona de alistamiento.
+     *
+     * El que ya tenga una se la queda: reimprimir la hoja no puede mover un
+     * pedido que ya esta a medio armar en el piso. Los demas toman las libres
+     * en orden, sin pisar las de otras oleadas en curso.
+     */
+    private function repartirCasillas($pedidos): void
+    {
+        $zona = \App\Modules\Logistica\Support\ZonaDeAlistamiento::class;
+
+        // Las que estan en uso ahora mismo, en cualquier oleada.
+        $ocupadas = PedidoCliente::whereNotNull('casilla_consolidacion')
+            ->whereNull('despachado_at')
+            ->pluck('casilla_consolidacion')
+            ->all();
+
+        $libres = $zona::libres($ocupadas);
+
+        foreach ($pedidos as $p) {
+            if ($zona::existe($p->casilla_consolidacion)) {
+                continue;
+            }
+
+            $casilla = array_shift($libres);
+
+            if ($casilla === null) {
+                // No deberia pasar —el tope se valido arriba— pero si la zona
+                // esta llena de oleadas viejas sin despachar, se dice en vez
+                // de dejar pedidos sin sitio en silencio.
+                abort(422, 'No quedan casillas libres en la zona de alistamiento: '
+                    .'hay pedidos de otras oleadas todavia sin despachar.');
+            }
+
+            $p->forceFill(['casilla_consolidacion' => $casilla])->save();
+        }
     }
 
     public function finalizar(Request $r, int $pedido): RedirectResponse
