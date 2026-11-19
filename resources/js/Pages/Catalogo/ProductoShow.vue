@@ -3,7 +3,7 @@ import { ref, reactive, watch, computed, onBeforeUnmount, onMounted } from 'vue'
 import { Head, Link, useForm, router } from '@inertiajs/vue3';
 import {
     Package, ArrowLeft, Save, Info, DollarSign, Ruler, FileText,
-    Cloud, CloudOff, Trash2, Plus, X, Search, Copy, AlertTriangle,
+    Cloud, CloudOff, Trash2, Plus, X, Search, Copy, AlertTriangle, Printer,
 } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import AppConfirmModal from '@/Components/AppConfirmModal.vue';
@@ -1031,6 +1031,7 @@ const matrizDisenos = ref([]);
                                 <th class="text-left p-2 border">Talla</th>
                                 <th class="text-left p-2 border">Código de barras (EAN)</th>
                                 <th class="text-left p-2 border w-24">Stock mín.</th>
+                                <th class="text-left p-2 border">Imprimir</th>
                                 <th class="p-2 border w-10"></th>
                             </tr>
                         </thead>
@@ -1070,6 +1071,16 @@ const matrizDisenos = ref([]);
                                     <input v-model.number="v.stock_minimo" type="number" min="0"
                                            class="input w-full text-xs"/>
                                 </td>
+                                <td class="p-1 border whitespace-nowrap">
+                                    <!-- Sólo las variantes ya guardadas tienen código definitivo para imprimir. -->
+                                    <template v-if="v.id">
+                                        <a :href="`/catalogo/variante/${v.id}/etiqueta`" target="_blank"
+                                           class="text-brand-600 hover:underline mr-2">Etiqueta</a>
+                                        <a :href="`/catalogo/variante/${v.id}/barcode`" target="_blank"
+                                           class="text-brand-600 hover:underline">Barras</a>
+                                    </template>
+                                    <span v-else class="text-surface-400" title="Guarda el producto para poder imprimirla">—</span>
+                                </td>
                                 <td class="p-1 border text-center">
                                     <button type="button" @click="quitarVariante(idx)"
                                             class="text-rose-600 hover:text-rose-800" title="Eliminar">
@@ -1084,6 +1095,11 @@ const matrizDisenos = ref([]);
                     {{ form.variantes.length }} variante(s) · se guardan al pulsar
                     <strong>Guardar</strong> arriba, en la misma transacción que el producto.
                 </p>
+                <a v-if="producto?.id && form.variantes.some(v => v.id)"
+                   :href="`/catalogo/etiquetas-lote?productos[]=${producto.id}`" target="_blank"
+                   class="btn btn-secondary text-xs inline-flex items-center gap-1">
+                    <Printer class="w-4 h-4"/> Imprimir etiquetas de todas las variantes
+                </a>
             </div>
 
             <!-- PESTAÑA 3: COMERCIAL -->

@@ -5,9 +5,10 @@ namespace App\Http\Controllers\Catalogo;
 use App\Http\Controllers\Controller;
 use App\Modules\Dropi\Models\Producto;
 use App\Modules\Dropi\Models\ProductoVariante;
+use App\Support\Code128;
 use Barryvdh\DomPDF\Facade\Pdf;
-use Chillerlan\QRCode\QRCode;
-use Chillerlan\QRCode\QROptions;
+use chillerlan\QRCode\QRCode;
+use chillerlan\QRCode\QROptions;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -36,13 +37,16 @@ class EtiquetasMasivasController extends Controller
             'imageBase64' => true,
         ]);
         $qrCache = [];
+        $barras = [];
         foreach ($variantes as $v) {
             $qrCache[$v->id] = (new QRCode($qrOpts))->render($v->codigo_barras);
+            $barras[$v->id] = 'data:image/png;base64,' . base64_encode(Code128::png($v->codigo_barras));
         }
 
         return Pdf::loadView('catalogo.pdf.etiquetas-lote', [
             'variantes' => $variantes,
             'qrs' => $qrCache,
+            'barras' => $barras,
         ])->setPaper('letter', 'portrait')
           ->stream('etiquetas-lote-' . now()->format('Ymd-His') . '.pdf');
     }
