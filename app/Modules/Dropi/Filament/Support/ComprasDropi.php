@@ -62,12 +62,27 @@ final class ComprasDropi
             ->firstOrFail();
     }
 
-    /** Las bodegas a donde puede llegar la compra, con la de e-commerce primero. */
+    /**
+     * Las bodegas a donde puede llegar la compra, con la de e-commerce primero.
+     *
+     * Son BODEGAS, no posiciones ni espejos de SIIGO. Esto listaba las 491
+     * ubicaciones activas, así que se podía crear una orden cuyo destino fuera
+     * «Rack 1 · Sección 1 · Nivel 1 · Derecha» o una bodega de otra empresa
+     * del sandbox de SIIGO. Ese id viaja a la recepción y de ahí al kardex: el
+     * contenedor quedaba asentado en un estante, y las posiciones no tienen
+     * oficina ni almacén, así que el par línea de negocio × destino fiscal
+     * tampoco resolvía.
+     *
+     * Es el mismo filtro que ya quedó escrito en el formulario de OC del ERP.
+     */
     public static function bodegas(): array
     {
         $ecommerce = self::bodegaPorDefecto();
 
-        return InventarioUbicacion::query()->where('activa', true)
+        return InventarioUbicacion::query()
+            ->where('activa', true)
+            ->whereNull('bodega_id')
+            ->where('codigo', 'not like', 'SIIGO-%')
             ->orderByRaw('id = ? desc', [$ecommerce ?? 0])->orderBy('nombre')
             ->pluck('nombre', 'id')->all();
     }

@@ -63,6 +63,14 @@ class RecibirMercancia
             $costos = app(CostoImportacion::class);
             $tras = app(TrasRecepcion::class);
 
+            // La bodega contra la que se recibe. Se la pasamos a
+            // `ubicacionNoVendible()` para que la ubicación de averías, si hay
+            // que crearla, herede su sede y su responsable en vez de nacer
+            // huérfana —y por tanto invisible para el jefe de bodega—.
+            $bodegaDeLaRecepcion = $recepcion->bodega_id
+                ? \App\Modules\Dropi\Models\InventarioUbicacion::find($recepcion->bodega_id)
+                : null;
+
             foreach ($recepcion->items as $it) {
                 $cantidadRecibida = (float) $it->cantidad_recibida;
                 if ($cantidadRecibida <= 0) continue;
@@ -138,7 +146,7 @@ class RecibirMercancia
                          */
                         'ubicacion_id' => $clasificacion === 'apto'
                             ? ($it->ubicacion_id ?: $recepcion->bodega_id)
-                            : $tras->ubicacionNoVendible()->id,
+                            : $tras->ubicacionNoVendible($bodegaDeLaRecepcion)->id,
                         'tipo' => $esImportacion ? 'entrada_importacion' : 'entrada_compra',
                         'cantidad' => round($cantidadRecibida, 4),
                         'costo_unit' => $costoUnit,

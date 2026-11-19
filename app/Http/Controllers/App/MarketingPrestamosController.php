@@ -294,6 +294,21 @@ class MarketingPrestamosController extends Controller implements HasMiddleware
         return InventarioUbicacion::query()
             ->where('activa', true)
             ->where('categoria', CategoriaUbicacion::Venta)
+            /*
+             * La mercancía se presta desde una SEDE, no desde un estante.
+             *
+             * Sin esto, quien pedía muestras elegía entre 486 opciones en vez
+             * de media docena de bodegas, y el préstamo podía nacer con origen
+             * en una posición: el traslado MKT- quedaba con un rack de origen y
+             * quien tiene que aprobarlo —el responsable de esa bodega— no
+             * coincidía con nadie.
+             *
+             * Y tampoco desde los espejos del catálogo de SIIGO: esas filas no
+             * guardan nada, son el reflejo de la cuenta ajena. Entre las dos
+             * cosas la lista baja de 483 a las 12 bodegas reales.
+             */
+            ->whereNull('bodega_id')
+            ->where('codigo', 'not like', 'SIIGO-%')
             ->orderBy('codigo');
     }
 

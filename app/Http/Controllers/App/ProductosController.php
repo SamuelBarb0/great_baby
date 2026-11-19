@@ -1401,9 +1401,15 @@ class ProductosController extends Controller implements HasMiddleware
             // Para elegir DONDE entra el stock inicial. Sin esta lista el
             // formulario pedia la cantidad y el kardex la dejaba en la primera
             // ubicacion activa, casi nunca la que la persona tenia en mente.
+            // Sólo BODEGAS. El stock inicial de un producto nuevo entra a la
+            // sede; en qué estante queda se decide después, cuando alguien
+            // ponga la caja ahí y haga el traslado. Dejar las 435 posiciones
+            // acá permitía asentar el stock inicial en «R7-S3-N2-I», una
+            // posición que existe en el sistema y está vacía en la realidad:
+            // el alistador no lo encuentra y el pedido sale con faltante.
             'ubicaciones' => \App\Modules\Dropi\Models\InventarioUbicacion::where('activa', true)
+                ->whereNull('bodega_id')
                 ->where('codigo', 'not like', 'SIIGO-%')
-                ->orderByRaw('bodega_id IS NULL DESC')
                 ->orderBy('codigo')
                 ->get(['id', 'codigo', 'nombre']),
             'marcas' => \App\Modules\Catalogo\Models\Marca::orderBy('nombre')->get(['id', 'nombre']),

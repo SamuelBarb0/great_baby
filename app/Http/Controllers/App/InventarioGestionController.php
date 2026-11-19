@@ -16,6 +16,7 @@ use App\Modules\Marketing\Services\MuestrasMarketing;
 use App\Modules\Inventario\Models\TrasladoItem;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Routing\Controllers\HasMiddleware;
 use Illuminate\Routing\Controllers\Middleware;
@@ -300,7 +301,22 @@ class InventarioGestionController extends Controller implements HasMiddleware
         // Valorización por ubicación: Σ (saldo × costo_prom) por cada SKU en esa ubicación.
         $valorPorUbicacion = $this->calcularValorPorUbicacion($costoPromedios);
 
+        /*
+         * El reporte muestra lo que tiene algo que mostrar.
+         *
+         * Con las 435 posiciones cargadas, esta tabla pasó a 491 renglones de
+         * los cuales 483 eran ceros, con las ocho que importan perdidas entre
+         * ellos. Un reporte que hay que recorrer para encontrar el dato no es
+         * un reporte.
+         *
+         * Se dejan siempre las BODEGAS —aunque estén en cero, saber que una
+         * sede está vacía es información— y de las posiciones sólo las que
+         * tienen saldo o SKUs.
+         */
         $ubicaciones = InventarioUbicacion::where('activa', true)->orderBy('codigo')->get()
+            ->filter(fn ($u) => $u->bodega_id === null
+                || ($saldos->get($u->id)?->total ?? 0) != 0
+                || ($saldos->get($u->id)?->skus ?? 0) > 0)
             ->map(function ($u) use ($saldos, $valorPorUbicacion) {
                 $r = $saldos->get($u->id);
                 return [
@@ -359,7 +375,10 @@ class InventarioGestionController extends Controller implements HasMiddleware
             'ubicaciones' => $ubicaciones->values(),
             'topStock' => $top,
             'kpis' => [
-                'ubicaciones_activas' => $ubicaciones->count(),
+                // Bodegas, no posiciones: decía 491 donde antes decía una
+                // docena, y eso no es «creció el inventario», es que se
+                // cargó el plano de la bodega.
+                'ubicaciones_activas' => InventarioUbicacion::where('activa', true)->whereNull('bodega_id')->count(),
                 'unidades_totales' => (int) $ubicaciones->sum('unidades'),
                 'skus_con_stock' => $topStock->count(),
                 'valor_total_inventario' => (float) $ubicaciones->sum('valor'),
@@ -926,6 +945,17 @@ class InventarioGestionController extends Controller implements HasMiddleware
     public function conteoEliminar(int $id): RedirectResponse
     {
         $toma = TomaFisica::findOrFail($id);
+        /*
+         * El mismo candado de bodega que piden sus hermanas.
+         *
+         * `conteoIniciar`, `conteoCerrar`, `conteoItemGuardar` y
+         * `conteoImportarMasivo` llaman a `autorizarToma()`; estas dos no, y
+         * son las dos que destruyen el trabajo: la anulada ya no se puede
+         * cerrar —así que el ajuste de esa bodega nunca se hace y lo contado
+         * se pierde— y la eliminada desaparece con sus ítems.
+         */
+        $this->autorizarToma($toma);
+
         if ($toma->estado !== 'borrador') {
             return back()->with('flash', [
                 'type' => 'error',
@@ -953,6 +983,16 @@ class InventarioGestionController extends Controller implements HasMiddleware
     {
         $data = $r->validate(['motivo' => ['required', 'string', 'min:10', 'max:300']]);
         $toma = TomaFisica::findOrFail($id);
+        /*
+         * El mismo candado de bodega que piden sus hermanas.
+         *
+         * `conteoIniciar`, `conteoCerrar`, `conteoItemGuardar` y
+         * `conteoImportarMasivo` llaman a `autorizarToma()`; estas dos no, y
+         * son las dos que destruyen el trabajo: la anulada ya no se puede
+         * cerrar —así que el ajuste de esa bodega nunca se hace y lo contado
+         * se pierde— y la eliminada desaparece con sus ítems.
+         */
+        $this->autorizarToma($toma);
 
         // INV-A8 · usar enum en vez de strings sueltos. Si el cast está activo
         // $toma->estado es el enum; comparamos contra los cases para evitar
@@ -1027,8 +1067,12 @@ class InventarioGestionController extends Controller implements HasMiddleware
     public function trasladoCrear(Request $r): RedirectResponse
     {
         $data = $r->validate([
-            'origen_id' => ['required', 'integer', 'exists:inventario_ubicaciones,id'],
-            'destino_id' => ['required', 'integer', 'exists:inventario_ubicaciones,id', 'different:origen_id'],
+            // Tienen que estar ACTIVAS: una ubicación apagada está fuera de
+            // servicio, y mandarle mercancía la deja donde nadie la busca —no
+            // sale en el stock vendible ni en el reporte por bodega—. Sólo
+            // validaba que existieran.
+            'origen_id' => ['required', 'integer', Rule::exists('inventario_ubicaciones', 'id')->where('activa', true)],
+            'destino_id' => ['required', 'integer', 'different:origen_id', Rule::exists('inventario_ubicaciones', 'id')->where('activa', true)],
             'motivo' => ['required', 'string', 'max:200'],
             'observaciones' => ['nullable', 'string', 'max:500'],
         ]);

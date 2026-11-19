@@ -7,6 +7,7 @@ namespace App\Modules\Inventario\Actions;
 use App\Modules\Cartera\Models\MovimientoContable;
 use App\Modules\Contabilidad\Enums\DestinoFiscal;
 use App\Modules\Dropi\Models\InventarioMovimiento;
+use App\Modules\Dropi\Models\InventarioUbicacion;
 use App\Modules\Inventario\Support\BodegaDeSalida;
 use App\Modules\Inventario\Support\CostoPromedio;
 use App\Modules\Portal\Models\PedidoCliente;
@@ -69,7 +70,23 @@ class DescontarStockPorDespacho
 
         // De dónde sale cada ítem. Normalmente es la bodega que el pedido ya
         // trae; si nació sin ruteo, se deduce de dónde está la mercancía.
-        $bodegas = BodegaDeSalida::resolver($sujetos, $pedido->ubicacion_origen_id);
+        /*
+         * Sólo sale mercancía de lo que se puede vender.
+         *
+         * Esta era la única salida de inventario que no pasaba las categorías:
+         * el canal Dropi sí lo hace (SalidaInventarioDropi.php:137). Sin el
+         * filtro, cuando el pedido no trae bodega el sistema deducía de dónde
+         * sacar mirando sólo dónde hay saldo, y ahí entran BAJAS, GARANTÍA y
+         * AVERÍAS: se vendía mercancía chatarrizada o reservada para el
+         * reclamo al proveedor, y la prueba de ese reclamo desaparecía del
+         * kardex. Al mismo tiempo la bodega buena no bajaba, así que el stock
+         * seguía mostrándose disponible.
+         */
+        $bodegas = BodegaDeSalida::resolver(
+            $sujetos,
+            $pedido->ubicacion_origen_id,
+            [\App\Modules\Dropi\Enums\CategoriaUbicacion::Venta->value],
+        );
 
         if (! $bodegas) {
             // Ni el pedido lo dice ni el kardex lo sabe: no hay existencias de
@@ -130,13 +147,14 @@ class DescontarStockPorDespacho
 
             $costoUnit = $costos[$ubicacionId][$clave] ?? 0.0;
 
+            foreach ($this->repartirEgreso($item, $ubicacionId, $cantidad) as $ubi => $cuanto) {
             InventarioMovimiento::create([
                 'variante_id' => $item->variante_id,
                 'producto_id' => $item->producto_id,
-                'ubicacion_id' => $ubicacionId,
+                'ubicacion_id' => $ubi,
                 'tipo' => 'salida_venta',
                 // Negativo: `SUM(cantidad)` es el saldo físico.
-                'cantidad' => -$cantidad,
+                'cantidad' => -$cuanto,
                 // Sin costo el kardex no se puede valorizar ni asentar.
                 'costo_unit' => $costoUnit,
                 'referencia_tipo' => self::REFERENCIA_TIPO,
@@ -146,6 +164,8 @@ class DescontarStockPorDespacho
                     . ($pedido->guia_transportadora ? " · guía {$pedido->guia_transportadora}" : '')
                     . ($esAgregado ? ' · AGREGADO' : ''),
             ]);
+            }
+
             $lineas++;
 
             if ($costoUnit > 0) {
@@ -185,6 +205,87 @@ class DescontarStockPorDespacho
      *
      * @param  array<string, int>  $bodegas  clave `v:{id}`/`p:{id}` => ubicacion_id
      */
+    /**
+     * Donde buscar el saldo de una sede: ella misma y sus posiciones.
+     *
+     * Una bodega y sus racks son el mismo sitio fisico. Si el alistador bajo
+     * la mercancia a `R12-S1-N1`, sigue estando en la bodega principal: solo
+     * que ahora se sabe en que estante.
+     *
+     * Esto importa porque el despacho razonaba SOLO contra la fila de la sede.
+     * El dia que alguien usara las 435 posiciones para lo que son, el saldo de
+     * la sede daba cero y el despacho se trababa con «no hay saldo suficiente»
+     * sobre mercancia que estaba ahi, a tres metros.
+     *
+     * Las posiciones van antes que la sede, igual que en la hoja de picking.
+     *
+     * @return array<int, int>
+     */
+    private function dondeBuscar(int $sedeId): array
+    {
+        $hijas = InventarioUbicacion::query()
+            ->where('bodega_id', $sedeId)
+            ->where('activa', true)
+            ->pluck('id')
+            ->all();
+
+        return [...$hijas, $sedeId];
+    }
+
+    /**
+     * Cuanto baja de cada ubicacion, en el orden en que se recorre la bodega.
+     *
+     * Se toma primero de las posiciones con mas saldo y la sede queda de
+     * ultima. Antes escribia todo contra la sede, y con las posiciones en uso
+     * eso dejaba la sede en negativo y el estante intacto: el sistema seguiria
+     * diciendo que hay 15 unidades en `R12-S1-N1` despues de haberlas
+     * despachado, y nadie se entera hasta el conteo fisico.
+     *
+     * @return array<int, int>  [ubicacion_id => cuanto]
+     */
+    private function repartirEgreso($item, int $sedeId, int $cantidad): array
+    {
+        $ubicaciones = $this->dondeBuscar($sedeId);
+
+        $saldos = InventarioMovimiento::query()
+            ->whereIn('ubicacion_id', $ubicaciones)
+            ->when($item->variante_id,
+                fn ($q) => $q->where('variante_id', $item->variante_id),
+                fn ($q) => $q->where('producto_id', $item->producto_id)->whereNull('variante_id'),
+            )
+            ->groupBy('ubicacion_id')
+            ->selectRaw('ubicacion_id, SUM(cantidad) as saldo')
+            ->pluck('saldo', 'ubicacion_id');
+
+        // Las posiciones de mayor a menor saldo; la sede siempre de ultima,
+        // porque es la que absorbe lo que no estuvo ubicado en ningun estante.
+        $orden = collect($ubicaciones)
+            ->filter(fn ($u) => $u !== $sedeId && (int) ($saldos[$u] ?? 0) > 0)
+            ->sortByDesc(fn ($u) => (int) $saldos[$u])
+            ->push($sedeId)
+            ->values();
+
+        $reparto = [];
+        $falta = $cantidad;
+
+        foreach ($orden as $u) {
+            if ($falta <= 0) {
+                break;
+            }
+
+            $disponible = $u === $sedeId ? $falta : min($falta, (int) ($saldos[$u] ?? 0));
+
+            if ($disponible > 0) {
+                $reparto[$u] = $disponible;
+                $falta -= $disponible;
+            }
+        }
+
+        // Si nada tenia saldo —no deberia pasar, `exigirSaldo` ya corto— el
+        // egreso entero va contra la sede, que es el comportamiento de antes.
+        return $reparto ?: [$sedeId => $cantidad];
+    }
+
     private function exigirSaldo(PedidoCliente $pedido, array $bodegas): void
     {
         $pedidas = [];
@@ -203,7 +304,7 @@ class DescontarStockPorDespacho
         foreach ($pedidas as ['item' => $item, 'ubicacion_id' => $ubicacionId, 'cantidad' => $cantidad]) {
             // Serializa contra un conteo o traslado simultáneo sobre el mismo
             // producto y bodega, igual que hace el egreso de Dropi.
-            $q = InventarioMovimiento::query()->where('ubicacion_id', $ubicacionId);
+            $q = InventarioMovimiento::query()->whereIn('ubicacion_id', $this->dondeBuscar($ubicacionId));
             $item->variante_id
                 ? $q->where('variante_id', $item->variante_id)
                 : $q->where('producto_id', $item->producto_id)->whereNull('variante_id');

@@ -240,3 +240,40 @@ it('lista las etiquetas de la orden, cada producto una vez', function () {
         ->where('lineas_etiqueta.0.tiene_etiqueta', false)
         ->where('puede_etiqueta', true));
 });
+
+/*
+ * El contenedor lo abren dos personas distintas y no ven lo mismo.
+ *
+ * El alistador llega a esta pantalla legitimamente —es donde sabe cuanto falta
+ * para que llegue el contenedor y cual es su siguiente paso— pero quedaba
+ * viendo tambien el FOB, los gastos, la tasa de cambio y el costo final por
+ * linea: la estructura de costos del negocio, en manos de quien descarga.
+ *
+ * Cerrarle la pantalla seria pasarse: le quita a la bodega el unico sitio donde
+ * ve que viene en camino. Asi que se cierra la plata, no la puerta.
+ */
+it('al alistador le muestra el contenedor pero no lo que costo', function () {
+    $orden = ($this->aprobada)();
+    ($this->poner)($orden);
+    $imp = ($this->contenedorDe)($orden);
+
+    ($this->pasoDe)("/app/compras/importacion/{$imp->id}", $this->bodeguero)
+        ->assertInertia(fn (Assert $p) => $p
+            // Lo que SI necesita: cuanto falta y el seguimiento.
+            ->has('importacion.cuanto_falta')
+            ->has('seguimiento')
+            // Lo que NO: gastos, tasa y los costos de cada linea.
+            ->where('importacion.gastos', [])
+            ->where('importacion.total_gastos', null)
+            ->where('importacion.tasa_cambio_liquidacion', null)
+            ->where('puede_editar_seguimiento', false));
+});
+
+it('a Compras si le muestra los numeros del contenedor', function () {
+    $orden = ($this->aprobada)();
+    ($this->poner)($orden);
+    $imp = ($this->contenedorDe)($orden);
+
+    ($this->pasoDe)("/app/compras/importacion/{$imp->id}", $this->jefe)
+        ->assertInertia(fn (Assert $p) => $p->where('puede_editar_seguimiento', true));
+});

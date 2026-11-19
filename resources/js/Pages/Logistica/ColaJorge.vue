@@ -13,6 +13,7 @@ const props = defineProps({
     rol: { type: Object, required: true },
     kpis: { type: Object, required: true },
     sin_bodegas: { type: Boolean, default: false },
+    pedidos_sin_bodega: { type: Number, default: 0 },
     puede_asignarse_bodegas: { type: Boolean, default: false },
 });
 
@@ -154,6 +155,34 @@ const minutosDesde = (hhmm) => {
                 </div>
             </div>
 
+            <!--
+                La otra razón de una cola vacía, y la que va a aparecer el
+                primer día en producción: las reglas de ruteo nacen vacías, así
+                que los pedidos se facturan sin bodega de origen y no entran a
+                ninguna cola. Se dice con número para que se entienda que hay
+                trabajo represado, no que no haya trabajo.
+            -->
+            <div v-if="pedidos_sin_bodega > 0"
+                class="p-4 rounded-lg bg-rose-500/10 border-l-4 border-rose-500 flex gap-3">
+                <AlertTriangle class="h-5 w-5 text-rose-600 shrink-0 mt-0.5"/>
+                <div class="text-sm text-rose-900 dark:text-rose-200">
+                    <strong>
+                        Hay {{ pedidos_sin_bodega }}
+                        {{ pedidos_sin_bodega === 1 ? 'pedido facturado que no entró' : 'pedidos facturados que no entraron' }}
+                        a ninguna cola</strong>
+                    porque no se sabe de qué bodega salen.
+                    <template v-if="puede_asignarse_bodegas">
+                        Eso lo decide la ciudad del cliente en
+                        <Link href="/app/logistica/reglas-ruteo" class="underline font-semibold">Reglas de ruteo</Link>:
+                        mientras no haya una regla que cubra esas ciudades, esos pedidos no le llegan a nadie.
+                    </template>
+                    <template v-else>
+                        Avisale a gerencia que faltan reglas de ruteo: hasta que las configuren,
+                        esos pedidos no le van a aparecer a ningún alistador.
+                    </template>
+                </div>
+            </div>
+
             <div class="flex items-start justify-between gap-4 flex-wrap">
                 <div>
                     <h1 class="text-2xl font-bold flex items-center gap-2">
@@ -218,7 +247,15 @@ const minutosDesde = (hhmm) => {
                                 Encontrado el 2026-10-13 alistando un pedido real.
                             -->
                             <div class="flex flex-col gap-2 pt-1">
-                                <select v-if="rol.puede_reasignar" :disabled="procesando" @change="e => asignar(p.id, e.target.value)" class="w-full min-w-0 text-xs border border-surface-300 rounded px-2 py-1 bg-white dark:bg-surface-900">
+                                <!--
+                                    El control principal de la pantalla: el que
+                                    decide quién alista. No tenía `label` ni
+                                    `aria-label`, así que un lector de pantalla
+                                    sólo decía «lista desplegable». La
+                                    convención ya está en el módulo: Ubicaciones
+                                    y Catálogo de bodega lo hacen así.
+                                -->
+                                <select v-if="rol.puede_reasignar" :disabled="procesando" @change="e => asignar(p.id, e.target.value)" :aria-label="`Asignar el pedido ${p.numero} a un alistador`" class="w-full min-w-0 text-xs border border-surface-300 rounded px-2 py-1 bg-white dark:bg-surface-900">
                                     <option value="">Asignar a…</option>
                                     <option v-for="a in alistadores" :key="a.id" :value="a.id">{{ a.name }}</option>
                                 </select>

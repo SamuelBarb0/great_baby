@@ -551,13 +551,36 @@ class PedidosB2BController extends Controller implements HasMiddleware
 
     public function cambiarEmpresa(Request $r, int $pedido): RedirectResponse
     {
+        /*
+         * Cambiar quién factura cambia el NIT, la resolución DIAN y la cuenta
+         * con la que se emite en SIIGO. No tenía puerta: ni acá ni en la
+         * pantalla, mientras que su vecina `cambiarBodega` —que decide algo
+         * menos delicado— sí la tiene.
+         */
+        abort_unless($this->puedeAprobar($r->user()), 403,
+            'Cambiar quién factura el pedido es decisión de Gerencia o cartera.');
+
         $data = $r->validate([
             'empresa_id' => ['required', 'integer', \Illuminate\Validation\Rule::exists('empresa_config', 'id')->where('activa', true)],
         ]);
 
         $p = PedidoCliente::findOrFail($pedido);
-        abort_if($p->factura_id, 422, 'El pedido ya está facturado: la empresa no se puede cambiar.');
-        abort_if($p->estado === 'rechazado', 422, 'El pedido está rechazado.');
+
+        /*
+         * Los motivos van como error de campo y no con `abort(422)`: en una
+         * petición de Inertia el abort deja un cuerpo que la pantalla no sabe
+         * leer, así que el usuario no ve nada y cree que no pasó nada. Es la
+         * misma razón que ya está escrita en `cambiarBodega`.
+         */
+        $noSePuede = match (true) {
+            (bool) $p->factura_id => 'El pedido ya está facturado: la empresa no se puede cambiar.',
+            $p->estado === 'rechazado' => 'El pedido está rechazado.',
+            default => null,
+        };
+
+        if ($noSePuede) {
+            return back()->withErrors(['empresa_id' => $noSePuede]);
+        }
 
         $p->update(['empresa_id' => (int) $data['empresa_id']]);
 
@@ -746,38 +769,73 @@ class PedidosB2BController extends Controller implements HasMiddleware
             'guia_transportadora' => ['required', 'string', 'max:60'],
             'transportadora' => ['nullable', 'string', 'max:80'],
         ]);
-        DB::transaction(function () use ($pedido, $data, $r) {
+        /*
+         * Los cinco motivos por los que NO se despacha salían con `abort(422)`
+         * y nunca llegaban a la pantalla.
+         *
+         * La pantalla sí los espera: `PedidosB2B/Show.vue` guarda el motivo en
+         * `despachoError` dentro de su `onError`. Pero Inertia no llama a
+         * `onError` cuando la respuesta no es suya, y un `abort` no lo es: el
+         * flujo corta antes. Resultado: el modal se quedaba abierto, sin
+         * mensaje, con el botón habilitado otra vez — y la persona reintenta
+         * sin saber qué pasó. En una bodega eso es alguien parado frente al
+         * transportador sin entender por qué no sale la guía.
+         *
+         * Las comprobaciones siguen DENTRO de la transacción y después del
+         * `lockForUpdate`, que es lo que hace que la idempotencia valga; lo
+         * único que cambia es que el motivo se guarda y se devuelve como error
+         * de campo al salir. Si hay motivo se corta antes de tocar nada, así
+         * que no hay nada que deshacer.
+         */
+        $noSePuede = null;
+
+        DB::transaction(function () use ($pedido, $data, $r, &$noSePuede) {
             $p = PedidoCliente::whereKey($pedido)->with('factura:id,numero,siigo_id,cufe,estado')
                 ->lockForUpdate()->firstOrFail();
-            // Gate duro #1 · estado válido.
-            abort_unless(in_array($p->estado, ['aprobado', 'facturado'], true), 422,
-                'Sólo se despacha un pedido aprobado o facturado.');
-            // Gate duro #2 · raíz del problema: factura emitida en el ERP.
-            // No exigimos siigo_id ni CUFE acá porque la factura ya está impresa y
-            // acompaña físicamente la mercancía — la sync con SIIGO se completa en
-            // segundo plano. Trabar al logístico esperando SIIGO lo hace circular
-            // entre pantallas sin razón.
-            abort_unless($p->factura_id, 422,
-                'No se puede despachar sin factura. Generá la factura antes de entregar al transportador.');
-            // …y que esa factura siga viva. Sólo se validaba que existiera, así
-            // que una factura anulada dejaba salir la mercancía igual.
+
             $estadoFactura = $p->factura?->estado;
             $estadoFactura = is_object($estadoFactura) ? $estadoFactura->value : $estadoFactura;
-            abort_if($estadoFactura === 'anulada', 422,
-                'La factura de este pedido está anulada. Generá una factura nueva antes de despachar.');
-            // Gate duro #3 · idempotencia.
-            abort_if($p->despachado_at, 422, 'Este pedido ya fue despachado.');
-            // Gate duro #4 (LOG-J5-fix) · novedad del alistamiento abierta.
-            //   Si el alistador cerró con faltante/avería/revisión, no sale
-            //   la mercancía hasta que Gerencia/admin de bodega resuelva.
-            //   Esto es la raíz del "inventario negativo + mercancía mala al
-            //   cliente" que Don Jorge reportó: nunca más se despacha algo
-            //   que ya se marcó como incompleto o defectuoso.
-            if ($p->alistado_con_novedad && !$p->novedad_resuelta_at) {
-                abort(422, 'Este pedido tiene una novedad abierta ('
-                    . ($p->alistado_tipo_novedad ?: 'sin tipo')
-                    . '). Resolvela en la Cola de alistamiento antes de despachar.');
+
+            $noSePuede = match (true) {
+                // Gate duro #1 · estado válido.
+                ! in_array($p->estado, ['aprobado', 'facturado'], true)
+                    => 'Sólo se despacha un pedido aprobado o facturado.',
+
+                // Gate duro #2 · raíz del problema: factura emitida en el ERP.
+                // No exigimos siigo_id ni CUFE acá porque la factura ya está
+                // impresa y acompaña físicamente la mercancía — la sync con
+                // SIIGO se completa en segundo plano. Trabar al logístico
+                // esperando SIIGO lo hace circular entre pantallas sin razón.
+                ! $p->factura_id
+                    => 'No se puede despachar sin factura. Generá la factura antes de entregar al transportador.',
+
+                // …y que esa factura siga viva. Sólo se validaba que existiera,
+                // así que una factura anulada dejaba salir la mercancía igual.
+                $estadoFactura === 'anulada'
+                    => 'La factura de este pedido está anulada. Generá una factura nueva antes de despachar.',
+
+                // Gate duro #3 · idempotencia.
+                (bool) $p->despachado_at
+                    => 'Este pedido ya fue despachado.',
+
+                // Gate duro #4 (LOG-J5-fix) · novedad del alistamiento abierta.
+                //   Si el alistador cerró con faltante/avería/revisión, no sale
+                //   la mercancía hasta que Gerencia/admin de bodega resuelva.
+                //   Esto es la raíz del «inventario negativo + mercancía mala
+                //   al cliente» que Don Jorge reportó: nunca más se despacha
+                //   algo que ya se marcó como incompleto o defectuoso.
+                $p->alistado_con_novedad && ! $p->novedad_resuelta_at
+                    => 'Este pedido tiene una novedad abierta ('
+                        .($p->alistado_tipo_novedad ?: 'sin tipo')
+                        .'). Resolvela en la Cola de alistamiento antes de despachar.',
+
+                default => null,
+            };
+
+            if ($noSePuede) {
+                return;
             }
+
             $p->update([
                 'estado' => 'despachado',
                 'despachado_at' => now(),
@@ -792,6 +850,10 @@ class PedidosB2BController extends Controller implements HasMiddleware
             $this->lineasDescontadas = $accion->ejecutar($p, $r->user()->id);
             $this->motivoStock = $accion->motivo;
         });
+
+        if ($noSePuede) {
+            return back()->withErrors(['guia_transportadora' => $noSePuede]);
+        }
 
         $msg = 'Pedido despachado · guía registrada.';
         if (($this->lineasDescontadas ?? 0) > 0) {

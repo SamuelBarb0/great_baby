@@ -503,6 +503,22 @@ class ComprasGestionController extends Controller implements HasMiddleware
 
     public function ocAnular(Request $r, int $orden): RedirectResponse
     {
+        /*
+         * Anular tambien compromete plata, igual que aprobar.
+         *
+         * Esta accion no tenia ninguna puerta: ni aqui ni en la Action, que
+         * solo mira el estado. La puerta de CLASE del controlador es
+         * `esEquipoBodega() || esContable()`, asi que cualquier alistador
+         * podia anular una orden de compra y dejarla a su nombre en
+         * `anulado_por`, tumbando lo que ya estaba comprometido con el
+         * proveedor. Sus dos vecinas —aprobar y recibir— si estan cerradas.
+         */
+        abort_unless(
+            \App\Auth\Permisos::puede($r->user(), 'compras_oc') || $r->user()?->esAracely(),
+            403,
+            'Anular una orden de compra es de Gerencia.'
+        );
+
         $data = $r->validate(['motivo' => ['required', 'string', 'min:10', 'max:300']]);
         $o = \App\Modules\Compras\Actions\AnularOrdenCompra::run(OrdenCompra::findOrFail($orden), $data['motivo']);
         return back()->with('success', "OC {$o->numero} anulada.");
@@ -1218,6 +1234,23 @@ class ComprasGestionController extends Controller implements HasMiddleware
 
     public function importacionShow(int $importacion): Response
     {
+        /*
+         * Esta pantalla la abren dos personas distintas, y no tienen que ver
+         * lo mismo.
+         *
+         * Quien entra al modulo por `compras_recepcion` —el Alistador— llega
+         * aca legitimamente: es donde ve cuanto falta para que llegue el
+         * contenedor y cual es su siguiente paso. Pero quedaba viendo tambien
+         * el FOB, los gastos, la tasa de cambio y el costo final por linea,
+         * que es la estructura de costos del negocio.
+         *
+         * Cerrar la pantalla entera seria pasarse: le quita a la bodega el
+         * unico sitio donde sabe que viene en camino. Asi que se cierra la
+         * PLATA, no la puerta: sin la casilla de importacion la pantalla sigue
+         * abriendo, con el seguimiento y el siguiente paso, y sin numeros.
+         */
+        $veLaPlata = \App\Auth\Permisos::puede(request()->user(), 'compras_importacion');
+
         $imp = Importacion::with(['lineas', 'gastos', 'documentos.autor:id,name'])->findOrFail($importacion);
         $comprobantes = $imp->documentos->whereNotNull('gasto_id')->groupBy('gasto_id');
         $previsto = app(\App\Modules\Compras\Actions\LiquidarImportacion::class)->previsto($imp);
@@ -1239,7 +1272,7 @@ class ComprasGestionController extends Controller implements HasMiddleware
                 'estado' => is_object($imp->estado) ? $imp->estado->value : $imp->estado,
                 'puerto_origen' => $imp->puerto_origen, 'puerto_destino' => $imp->puerto_destino,
                 'incoterm' => $imp->incoterm, 'moneda_origen' => $imp->moneda_origen,
-                'tasa_cambio_liquidacion' => (float) $imp->tasa_cambio_liquidacion,
+                'tasa_cambio_liquidacion' => $veLaPlata ? (float) $imp->tasa_cambio_liquidacion : null,
                 'fecha_zarpe' => $imp->fecha_zarpe?->toDateString(),
                 'eta' => $imp->eta?->toDateString(),
                 // Cuánto falta, ya contado. Es el dato con el que la bodega
@@ -1248,15 +1281,23 @@ class ComprasGestionController extends Controller implements HasMiddleware
                 'fecha_llegada' => $imp->fecha_llegada?->toDateString(),
                 'fecha_liquidacion' => $imp->fecha_liquidacion?->toDateString(),
                 'observaciones' => $imp->observaciones,
-                'lineas' => $imp->lineas->map(fn ($l) => [
+                // Sin la casilla de importacion las lineas van sin costos: se
+                // sabe QUE viene y CUANTO, que es lo que la bodega necesita
+                // para hacer espacio, pero no a que precio se compro.
+                'lineas' => $imp->lineas->map(fn ($l) => $veLaPlata ? [
                     'id' => $l->id,
                     'cantidad' => (float) $l->cantidad,
                     'costo_fob_unit' => (float) $l->costo_fob_unit,
                     'costo_fob_total' => (float) $l->costo_fob_total,
                     'gasto_prorrateado' => (float) $l->gasto_prorrateado,
                     'costo_final_unit' => (float) $l->costo_final_unit,
+                ] : [
+                    'id' => $l->id,
+                    'cantidad' => (float) $l->cantidad,
                 ])->all(),
-                'gastos' => $imp->gastos->map(fn ($g) => [
+                // Los gastos del contenedor —flete, agente, aranceles— son
+                // plata: no viajan sin la casilla de importacion.
+                'gastos' => ($veLaPlata ? $imp->gastos : collect())->map(fn ($g) => [
                     'id' => $g->id, 'concepto' => $g->concepto,
                     'moneda' => $g->moneda, 'monto' => (float) $g->monto,
                     'monto_base' => (float) $g->monto_base,
@@ -1270,7 +1311,7 @@ class ComprasGestionController extends Controller implements HasMiddleware
                     'notas' => $d->notas, 'tamano' => (int) $d->tamano,
                     'subido_por' => $d->autor?->name, 'subido_en' => $d->created_at?->format('Y-m-d H:i'),
                 ])->values()->all(),
-                'total_gastos' => (float) $imp->gastos->sum('monto_base'),
+                'total_gastos' => $veLaPlata ? (float) $imp->gastos->sum('monto_base') : null,
                 'total_fob' => $esPrevisto ? $previsto['fob'] : (float) $imp->lineas->sum('costo_fob_total'),
                 'fob_es_previsto' => $esPrevisto,
                 'fob_sin_recibir' => $previsto['sin_recibir'],

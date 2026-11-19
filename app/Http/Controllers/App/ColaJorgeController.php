@@ -210,6 +210,26 @@ class ColaJorgeController extends Controller implements HasMiddleware
              */
             'sin_bodegas' => $misBodegas === [-1],
             'puede_asignarse_bodegas' => \App\Auth\Permisos::esRoot($u),
+
+            /*
+             * La OTRA razón por la que la cola amanece vacía, y la que va a
+             * pasar en producción el primer día.
+             *
+             * Un pedido entra a la cola por `ubicacion_origen_id`, y ese campo
+             * lo llena la regla de ruteo de la ciudad del cliente. Si las
+             * reglas están vacías —que es como nace la tabla— `resolver()`
+             * devuelve null, el pedido se guarda sin bodega y el `whereIn` de
+             * arriba nunca empareja un NULL. Resultado: se factura todo el día
+             * y la cola sigue en cero, sin que nada en pantalla lo explique.
+             *
+             * Se cuenta y se dice con número, igual que en la pantalla de
+             * Reglas de ruteo: «hay 23 pedidos sin bodega» se entiende;
+             * «configure el ruteo» no.
+             */
+            'pedidos_sin_bodega' => PedidoCliente::whereNull('ubicacion_origen_id')
+                ->where('estado', 'facturado')
+                ->whereNull('despachado_at')
+                ->count(),
             'kpis' => [
                 'total_en_cola' => $enCola->count(),
                 'total_en_curso' => $enAlistamiento->count(),
@@ -301,6 +321,23 @@ class ColaJorgeController extends Controller implements HasMiddleware
             'Sólo se imprime hoja de picking de pedidos aprobados/facturados.');
 
         /*
+         * La sede de la que sale este pedido, con sus posiciones hijas.
+         *
+         * Si el pedido no trae bodega —pasa cuando las reglas de ruteo están
+         * vacías— no se restringe: es mejor imprimir dónde está la mercancía
+         * que imprimir una hoja sin ubicaciones.
+         */
+        $sedeDelPedido = null;
+
+        if ($p->ubicacion_origen_id) {
+            $sedeDelPedido = \App\Modules\Dropi\Models\InventarioUbicacion::query()
+                ->where('id', $p->ubicacion_origen_id)
+                ->orWhere('bodega_id', $p->ubicacion_origen_id)
+                ->pluck('id')
+                ->all();
+        }
+
+        /*
          * Dónde está cada ítem, para que el alistador sepa a qué estante ir.
          *
          * Esto buscaba SÓLO por `variante_id`. Los productos AGREGADOS —los que
@@ -322,6 +359,22 @@ class ColaJorgeController extends Controller implements HasMiddleware
             // variante; si no, se sumaría el stock de sus variantes.
             ->when($campo === 'producto_id', fn ($q) => $q->whereNull('m.variante_id'))
             ->where('u.activa', true)
+            /*
+             * Sólo lo que se puede vender, y sólo de la sede del pedido.
+             *
+             * La hoja mandaba al alistador a buscar en AVERÍAS, BAJAS y
+             * GARANTÍA —mercancía chatarrizada o guardada como prueba del
+             * reclamo al proveedor— y a meterla en el pedido de un cliente.
+             * Y como la consulta no miraba de qué bodega sale el pedido, a un
+             * pedido de Bucaramanga le podía imprimir como primera opción un
+             * estante de la bodega de otra ciudad.
+             *
+             * `bodegasDeLaSede()` devuelve la sede del pedido más sus
+             * posiciones hijas: el rack pertenece a la sede, así que la
+             * mercancía que ya se bajó a estantería sigue encontrándose.
+             */
+            ->where('u.disponible_para_venta', true)
+            ->when($sedeDelPedido, fn ($q) => $q->whereIn('u.id', $sedeDelPedido))
             // `u.pasillo` es el RACK, y de ahi sale la zona operativa: la hoja
             // tiene que decir por que zona se camina y quien responde por ella.
             ->groupBy("m.{$campo}", 'u.id', 'u.codigo', 'u.nombre', 'u.categoria', 'u.pasillo', 'u.responsable_user_id')

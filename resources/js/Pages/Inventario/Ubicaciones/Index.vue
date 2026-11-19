@@ -5,6 +5,7 @@ import { Warehouse, Plus, Pencil, Trash2, Power, PowerOff, Cloud, CloudOff, Uplo
 import AppLayout from '@/Layouts/AppLayout.vue';
 import AppConfirmModal from '@/Components/AppConfirmModal.vue';
 import { mensajeDeError } from '@/composables/useMensajeError';
+import { useEscClose } from '@/composables/useEscClose';
 import axios from 'axios';
 
 const props = defineProps({
@@ -31,9 +32,34 @@ const props = defineProps({
 });
 
 const modal = ref(null);
+
+/*
+ * Escape cierra el modal.
+ *
+ * El composable ya existía y lo usaban las siete modales de Compras; las de
+ * logística no. Quien está con el teclado —contando con una mano— no debería
+ * tener que buscar la X con el mouse. `useEscClose` espera un booleano y éste
+ * guarda 'nueva' | 'editar' | null, así que se traduce.
+ */
+useEscClose(computed({
+    get: () => modal.value !== null,
+    set: (v) => { if (! v) modal.value = null; },
+}));
 const modalConfirm = ref(null);
 const guardando = ref(false);
 const flash = ref(null);
+
+/*
+ * El error de guardar tiene que verse DENTRO del modal.
+ *
+ * Iba al banner de arriba de la página, que no tiene `position` ni `z-index`,
+ * mientras el modal es `fixed inset-0 z-50`: el mensaje se pintaba literalmente
+ * DEBAJO del modal. Y el modal no se cierra cuando falla —a propósito, para no
+ * perder lo escrito—, así que la persona veía el botón volver a habilitarse,
+ * nada más, y reintentaba lo mismo. Pasaba con cada rechazo del servidor:
+ * código repetido, categoría que no vende, responsable sin papel de bodega.
+ */
+const errorModal = ref(null);
 // UBIC-4 · listado reactivo de resoluciones (se refresca sin reload tras sync).
 const resolucionesList = ref([...props.resoluciones]);
 const sincronizandoResol = ref(false);
@@ -70,8 +96,9 @@ const vacio = () => ({
 });
 const form = reactive(vacio());
 
-const abrirNueva = () => { Object.assign(form, vacio()); modal.value = 'nueva'; };
+const abrirNueva = () => { Object.assign(form, vacio()); errorModal.value = null; modal.value = 'nueva'; };
 const abrirEditar = (u) => {
+    errorModal.value = null;
     Object.assign(form, vacio(), {
         id: u.id, codigo: u.codigo, nombre: u.nombre, categoria: u.categoria,
         activa: u.activa, direccion: u.direccion, ciudad: u.ciudad,
@@ -140,7 +167,7 @@ const guardar = async () => {
             router.reload({ only: ['ubicaciones', 'candidatos_admin', 'bodegas', 'sin_sede'] });
         }
     } catch (e) {
-        mostrarFlash('error', mensajeDeError(e, 'No pude guardar la ubicacion'));
+        errorModal.value = mensajeDeError(e, 'No pude guardar la ubicación');
     } finally { guardando.value = false; }
 };
 
@@ -471,7 +498,7 @@ const crearAdminBodega = async () => {
                 </div>
             </div>
 
-            <div v-if="flash" :class="['card p-3 border-l-4', flash.type==='success' ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-rose-500 bg-rose-50 text-rose-700']">
+            <div v-if="flash" role="alert" :class="['card p-3 border-l-4', flash.type==='success' ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-rose-500 bg-rose-50 text-rose-700']">
                 {{ flash.message }}
             </div>
 
@@ -642,9 +669,22 @@ const crearAdminBodega = async () => {
                             </td>
                             <td class="p-2 text-center text-xs text-surface-500">{{ u.movimientos_count || 0 }}</td>
                             <td class="p-2 text-center">
-                                <button v-if="puede_editar_la_ubicacion" @click="toggleActiva(u)">
-                                    <Power v-if="u.activa" class="h-4 w-4 text-emerald-600 inline"/>
-                                    <PowerOff v-else class="h-4 w-4 text-rose-400 inline"/>
+                                <!--
+                                    Un icono de 16 px sin texto ni estado: no se
+                                    sabía qué hacía, ni si estaba prendido, ni se
+                                    acertaba con el dedo. Ahora dice qué hace y a
+                                    qué ubicación, publica su estado, y el botón
+                                    mide 36 px aunque el icono siga igual.
+                                -->
+                                <button v-if="puede_editar_la_ubicacion" @click="toggleActiva(u)"
+                                        type="button"
+                                        role="switch"
+                                        :aria-checked="!!u.activa"
+                                        :aria-label="`${u.activa ? 'Desactivar' : 'Activar'} ${u.nombre || u.codigo}`"
+                                        :title="u.activa ? 'Activa · clic para desactivar' : 'Inactiva · clic para activar'"
+                                        class="inline-flex items-center justify-center h-9 w-9 rounded hover:bg-surface-100 dark:hover:bg-surface-700">
+                                    <Power v-if="u.activa" class="h-4 w-4 text-emerald-600"/>
+                                    <PowerOff v-else class="h-4 w-4 text-rose-400"/>
                                 </button>
                             </td>
                             <td class="p-2 text-right whitespace-nowrap">
@@ -677,14 +717,32 @@ const crearAdminBodega = async () => {
             <!-- Modal crear/editar -->
             <div v-if="modal" class="fixed inset-0 bg-black/50 flex items-start justify-center p-4 z-50 overflow-y-auto"
                  @click.self="modal = null">
-                <div class="bg-white rounded-xl shadow-xl max-w-2xl w-full my-8">
+                <!--
+                    Para un lector de pantalla esto era un trozo más de la
+                    página: sin `role` no se anunciaba como diálogo y sin
+                    `aria-labelledby` no leía de qué era.
+                -->
+                <div class="bg-white rounded-xl shadow-xl max-w-2xl w-full my-8"
+                     role="dialog"
+                     aria-modal="true"
+                     aria-labelledby="ubicacion-modal-titulo">
                     <div class="p-5 border-b flex items-center gap-3">
                         <Warehouse class="h-6 w-6 text-brand-600"/>
-                        <h2 class="text-lg font-bold text-surface-800">
+                        <h2 id="ubicacion-modal-titulo" class="text-lg font-bold text-surface-800">
                             {{ modal === 'nueva' ? 'Nueva ubicación' : `Editar ${form.codigo}` }}
                         </h2>
                     </div>
                     <div class="p-5 space-y-4">
+                        <!--
+                            El motivo del rechazo, donde la persona está
+                            mirando. `role="alert"` para que un lector de
+                            pantalla lo anuncie sin que haya que ir a buscarlo.
+                        -->
+                        <div v-if="errorModal" role="alert"
+                             class="rounded-lg border-l-4 border-rose-500 bg-rose-50 text-rose-800 px-3 py-2 text-sm">
+                            {{ errorModal }}
+                        </div>
+
                         <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
                             <div>
                                 <label class="text-xs font-semibold text-surface-600">Código *</label>

@@ -21,20 +21,46 @@ use Illuminate\Support\Collection;
  */
 class TrasRecepcion
 {
-    /** Donde queda lo que llegó mal. Nunca en una ubicación de venta. */
-    public function ubicacionNoVendible(): InventarioUbicacion
+    /**
+     * Donde queda lo que llegó mal. Nunca en una ubicación de venta.
+     *
+     * Se le pasa la bodega contra la que se está recibiendo para que la
+     * ubicación nueva HEREDE su responsable y su ciudad.
+     *
+     * Sin eso nacía huérfana: `User::bodegasAsignadasIds()` reparte el alcance
+     * por `responsable_user_id`, así que una bodega sin responsable no es de
+     * nadie. Jorge no la veía, y `EjecutarTraslado` le respondía 403 «este
+     * traslado es de otra bodega» cuando intentaba sacar de ahí lo averiado
+     * para devolvérselo al proveedor. La mercancía quedaba contable y
+     * físicamente trabada.
+     */
+    public function ubicacionNoVendible(?InventarioUbicacion $bodega = null): InventarioUbicacion
     {
-        return InventarioUbicacion::query()
+        $existente = InventarioUbicacion::query()
             ->where('categoria', CategoriaUbicacion::AveriaReparar->value)
             ->where('activa', true)
             ->orderBy('id')
-            ->first()
-            ?? InventarioUbicacion::create([
-                'codigo' => 'AVR-RECEPCION',
-                'nombre' => 'Avería · Recibida de proveedor',
-                'categoria' => CategoriaUbicacion::AveriaReparar,
-                'activa' => true,
-            ]);
+            ->first();
+
+        if ($existente) {
+            return $existente;
+        }
+
+        // La sede de la que cuelga: si recibimos contra una posición, su
+        // bodega; si contra una bodega, ella misma.
+        $sede = $bodega?->bodega_id
+            ? InventarioUbicacion::find($bodega->bodega_id)
+            : $bodega;
+
+        return InventarioUbicacion::create([
+            'codigo' => 'AVR-RECEPCION',
+            'nombre' => 'Avería · Recibida de proveedor',
+            'categoria' => CategoriaUbicacion::AveriaReparar,
+            'activa' => true,
+            'bodega_id' => $sede?->id,
+            'responsable_user_id' => $sede?->responsable_user_id,
+            'ciudad' => $sede?->ciudad,
+        ]);
     }
 
     /**

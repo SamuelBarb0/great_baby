@@ -40,11 +40,30 @@
  * llamadores que no piden motivo no cambian en nada.
  */
 import { computed, ref, watch } from 'vue';
+import { useEscClose } from '@/composables/useEscClose';
 
 const props = defineProps({
     cfg: { type: Object, default: null },
 });
 const emit = defineEmits(['cerrar']);
+
+/*
+ * Escape cierra, y el teclado no se escapa al fondo.
+ *
+ * El composable ya existía y lo usaban las siete modales de Compras, pero no
+ * ésta —que es la compartida— ni las de logística. Acá se arregla para todas
+ * las que la usan de una vez: quien está contando con una mano y el teclado
+ * con la otra no debería tener que buscar la X con el mouse.
+ *
+ * `useEscClose` espera un ref booleano y lo pone en false; esta modal se abre
+ * con un objeto `cfg` y se cierra emitiendo, así que se traduce.
+ */
+const abierta = computed({
+    get: () => !!props.cfg,
+    set: (v) => { if (! v) emit('cerrar'); },
+});
+
+useEscClose(abierta);
 
 const motivo = ref('');
 // Cada vez que el modal se abre arranca en blanco: si no, el motivo de la
@@ -85,8 +104,16 @@ const cargando = computed(() => !!props.cfg?.cargando);
     <div v-if="cfg"
          class="fixed inset-0 bg-black/40 flex items-center justify-center z-50"
          @click.self="emit('cerrar')">
-        <div class="bg-white dark:bg-surface-800 rounded-xl shadow-xl max-w-md w-full m-4 p-5 space-y-4">
-            <h2 class="font-bold text-lg" :class="paleta.title">{{ cfg.titulo }}</h2>
+        <!--
+            `role="dialog"` + `aria-modal` para que un lector de pantalla lo
+            anuncie como diálogo y no como un trozo más de la página, y
+            `aria-labelledby` para que lea el título al abrirse.
+        -->
+        <div class="bg-white dark:bg-surface-800 rounded-xl shadow-xl max-w-md w-full m-4 p-5 space-y-4"
+             role="dialog"
+             aria-modal="true"
+             aria-labelledby="confirm-modal-titulo">
+            <h2 id="confirm-modal-titulo" class="font-bold text-lg" :class="paleta.title">{{ cfg.titulo }}</h2>
             <p class="text-sm text-surface-600 whitespace-pre-line">{{ cfg.mensaje }}</p>
 
             <div v-if="cfg.pedirMotivo" class="space-y-1">

@@ -39,15 +39,19 @@ class RegistrarAsientoCompra
              * la recepción acreditara una cuenta y el pago al proveedor
              * debitara otra: el pasivo con proveedores no se cerraba nunca.
              *
-             * `1465` (inventario en tránsito) se queda escrita: es propia de
-             * este asiento —mercancía importada que todavía no nacionaliza— y
-             * no hay regla de empresa para ella.
+             * El inventario en tránsito —mercancía importada que todavía no
+             * nacionaliza— sale de su propia regla. Estaba escrito `1465` acá
+             * adentro, y esa cuenta NO EXISTE en el plan de Great Baby
+             * (comprobado el 19-nov-2026): cada recepción de contenedor dejaba
+             * un asiento contra una cuenta imposible, que SIIGO rechaza y el
+             * balance no cuadra. Cambiarla es del contador, no del
+             * programador.
              */
             $cuentaProveedor = $orden->esImportacion()
                 ? setting('contable.cta_proveedores_exterior')
                 : setting('contable.cta_proveedores_default');
             $cuentaInventario = $orden->esImportacion()
-                ? '1465'
+                ? setting('contable.cta_inventario_transito')
                 : setting('contable.cta_inventario_default');
 
             $totalRecibido = (float) $recepcion->items->sum('subtotal');
@@ -154,7 +158,7 @@ class RegistrarAsientoCompra
 
                 MovimientoContable::create([
                     'fecha' => $fecha,
-                    'cuenta_puc' => '1465',
+                    'cuenta_puc' => setting('contable.cta_inventario_transito'),
                     'tercero_type' => null, 'tercero_id' => null,
                     'debe' => 0, 'haber' => round($costoFob, 2),
                     'origen_type' => Importacion::class, 'origen_id' => $importacion->id,

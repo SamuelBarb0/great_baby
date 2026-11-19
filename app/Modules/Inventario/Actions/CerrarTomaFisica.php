@@ -151,14 +151,24 @@ class CerrarTomaFisica
             $valorAjuste = round($valorAjuste, 2);
             if (abs($valorAjuste) > 0.01) {
                 $abs = abs($valorAjuste);
+                /*
+                 * Las cuentas salen de Reglas, no de acá.
+                 *
+                 * Estaban escritas las cuatro. Comprobado contra el plan real
+                 * de Great Baby el 19-nov-2026: la 5299 no existe, y la 1435 y
+                 * la 4295 existen pero no admiten movimiento. O sea que cada
+                 * toma física cerrada con diferencia dejaba un asiento que
+                 * SIIGO rechaza y que no cuadra contra el PUC. Qué auxiliar
+                 * usar es del contador.
+                 */
+                $ctaInventario = setting('contable.cta_inventario_default');
+
                 if ($valorAjuste > 0) {
-                    $cuentaDebito = '1435'; // sobrante: aumenta inventario
-                    $cuentaCredito = '4295'; // aprovechamientos
+                    $cuentaDebito = $ctaInventario;                              // sobrante: aumenta inventario
+                    $cuentaCredito = setting('contable.cta_sobrante_inventario'); // aprovechamientos
                 } else {
-                    // PATRÓN ε · 5299 (baja de inventario) reemplaza al 5195 incorrecto
-                    // (5195 = "transportes/fletes", nada que ver con faltantes).
-                    $cuentaDebito = '5299'; // pérdida por baja de inventario
-                    $cuentaCredito = '1435';
+                    $cuentaDebito = setting('contable.cta_faltante_inventario');  // pérdida por baja de inventario
+                    $cuentaCredito = $ctaInventario;
                 }
 
                 MovimientoContable::create([

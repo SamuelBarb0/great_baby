@@ -66,7 +66,18 @@ class DropiReportesController extends Controller implements HasMiddleware
             ->limit(200)
             ->get();
 
+        /*
+         * Una columna por BODEGA, no por posición.
+         *
+         * Esta pantalla pinta una matriz variante × ubicación. Con las 435
+         * posiciones cargadas pasó de una docena de columnas a 491, o sea
+         * ~98.000 celdas: deja de abrirse en un tiempo útil y hay que recorrer
+         * 491 columnas de scroll horizontal para encontrar la bodega que tiene
+         * algo. El plano de la bodega se mira en Ubicaciones; acá se mira
+         * cuánto hay y dónde, al nivel de sede.
+         */
         $ubicaciones = InventarioUbicacion::where('activa', true)
+            ->whereNull('bodega_id')
             ->when($filtroCategoria, fn ($q) => $q->where('categoria', $filtroCategoria))
             ->orderBy('codigo')
             ->get(['id', 'codigo', 'nombre', 'categoria']);

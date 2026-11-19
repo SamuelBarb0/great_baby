@@ -145,8 +145,22 @@ class UbicacionesDeLaBodegaSeeder extends Seeder
                 'pasillo' => $pos['rack'],
                 'estante' => $pos['seccion'],
                 'nivel' => $pos['nivel'],
-                'categoria' => CategoriaUbicacion::Venta,
-                'disponible_para_venta' => true,
+                /*
+                 * El parqueadero, Arsutex y el local NO son estantería.
+                 *
+                 * Son donde se descarga un contenedor antes de subirlo a los
+                 * racks. Nacieron como «venta» en el primer sembrado, y eso le
+                 * promete al cliente la carga que está en el piso sin contar ni
+                 * revisar — justo lo que va a pasar el día que llegue un
+                 * contenedor. El stock se sigue viendo en el kardex; lo que no
+                 * se hace es ofrecerlo.
+                 *
+                 * `disponible_para_venta` lo recalcula el modelo a partir de la
+                 * categoría, así que basta con poner la categoría bien.
+                 */
+                'categoria' => $pos['seccion'] === null
+                    ? CategoriaUbicacion::Cuarentena
+                    : CategoriaUbicacion::Venta,
                 'activa' => true,
                 'responsable_user_id' => $deQuienEs[$pos['rack']] ?? null,
                 'ciudad' => $bodega->ciudad,

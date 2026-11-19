@@ -127,8 +127,13 @@ class InventarioEnVivo extends Page
     {
         return InventarioUbicacion::query()
             ->where('activa', true)
+            // Una columna por BODEGA. Con las 435 posiciones cargadas esta
+            // matriz pasaba a 491 columnas y ~98.000 celdas. Es la misma
+            // corrección que en DropiReportesController; son dos copias de la
+            // misma pantalla.
+            ->whereNull('bodega_id')
             ->when($this->filtroCategoria !== '', fn ($q) => $q->where('categoria', $this->filtroCategoria))
-            ->orderByRaw("FIELD(categoria, 'venta','reserva_proveedor','garantia','averia_reparar','averia_baja')")
+            ->orderByRaw("FIELD(categoria, 'venta','reserva_proveedor','garantia','averia_reparar','averia_baja','cuarentena')")
             ->orderBy('codigo')
             ->get();
     }

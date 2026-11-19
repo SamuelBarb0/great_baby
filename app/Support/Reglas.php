@@ -187,6 +187,20 @@ class Reglas
         'contable.cta_iva_compra_default' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '240810', 'etiqueta' => 'Cuenta IVA compra descontable', 'descripcion' => 'PUC Great Baby · 240810 IVA descontable por compras'],
         'contable.cta_costo_default' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '6135', 'etiqueta' => 'Cuenta costo por defecto', 'descripcion' => '⚠ Confirmar subcuenta específica con Silvia (6135xx según categoría)'],
         'contable.cta_inventario_default' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '1435', 'etiqueta' => 'Cuenta inventario por defecto', 'descripcion' => '⚠ Confirmar subcuenta específica con Silvia (1435xx según categoría)'],
+        // ---- Las cuatro que estaban clavadas en el codigo (QA 19-nov-2026) ----
+        //
+        // Comprobado contra el plan real de Great Baby: 1465 y 5299 NO EXISTEN,
+        // y 1435 y 4295 existen pero no admiten movimiento. O sea que cada
+        // recepcion de contenedor y cada toma fisica dejaban asientos contra
+        // cuentas imposibles: el balance no cuadra contra el PUC y SIIGO los
+        // rechaza dejando el error en el log, donde nadie mira.
+        //
+        // Se sacan a Reglas para que el contador ponga las auxiliares que si
+        // admiten movimiento sin esperar un despliegue. Los valores de aqui
+        // son los que el codigo usaba; hay que cambiarlos.
+        'contable.cta_inventario_transito' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '1465', 'etiqueta' => 'Cuenta inventario en tránsito (importaciones)', 'descripcion' => '⚠ La 1465 NO existe en el plan de cuentas de Great Baby. Acá va la mercancía del contenedor mientras viaja y hasta que se liquida; al liquidar pasa a la cuenta de inventario. Pedirle al contador la auxiliar correcta.'],
+        'contable.cta_faltante_inventario' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '5299', 'etiqueta' => 'Cuenta pérdida por faltante de inventario', 'descripcion' => '⚠ La 5299 NO existe en el plan de cuentas. Es el gasto que queda cuando la toma física encuentra menos de lo que decía el sistema.'],
+        'contable.cta_sobrante_inventario' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '4295', 'etiqueta' => 'Cuenta aprovechamiento por sobrante de inventario', 'descripcion' => '⚠ La 4295 existe pero NO admite movimiento: hay que poner su auxiliar. Es el ingreso que queda cuando la toma física encuentra más de lo que decía el sistema.'],
         'contable.cta_devolucion_default' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '4175', 'etiqueta' => 'Cuenta devolución en ventas por defecto', 'descripcion' => '⚠ Confirmar subcuenta específica con Silvia'],
         'contable.cta_descuento_default' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '5305', 'etiqueta' => 'Cuenta descuento comercial por defecto', 'descripcion' => '⚠ Confirmar subcuenta específica con Silvia'],
         /*

@@ -57,6 +57,11 @@ class BodegaDeSalida
         $elegibles = InventarioUbicacion::query()
             ->where('activa', true)
             ->where('codigo', 'not like', 'SIIGO-%')
+            // Una SEDE, nunca un estante. El id que sale de acá se estampa en
+            // `ubicacion_origen_id` del pedido, y la Cola de alistamiento y
+            // las reglas de ruteo filtran por bodegas: un pedido con un rack
+            // ahí adentro no aparece en ninguna de las dos y queda huérfano.
+            ->whereNull('bodega_id')
             ->when($categorias, fn ($q) => $q->whereIn('categoria', $categorias))
             ->pluck('id')->all();
 
