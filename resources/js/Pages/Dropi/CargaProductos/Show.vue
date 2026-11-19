@@ -10,6 +10,9 @@ const props = defineProps({
     operaciones: { type: Array, default: () => [] },
     resumen: { type: Object, default: () => ({}) },
     categorias: { type: Array, default: () => [] },
+    // Para registrar la misma mercancía en el inventario del ERP (CI-) antes de Dropi.
+    motivos: { type: Array, default: () => [] },
+    bodegas_erp: { type: Array, default: () => [] },
 });
 const page = usePage();
 const base = computed(() => `/app/dropi/carga-productos/${props.carga.id}`);
@@ -33,11 +36,13 @@ const rehacer = () => {
 };
 watch(() => props.operaciones, rehacer, { immediate: true });
 
-const cargaForm = reactive({ concepto: props.carga.concepto, modo: props.carga.modo, defaults: { ...props.carga.defaults, categoria_id: props.carga.defaults?.categoria?.id ?? null } });
+const ingresoDe = (c) => ({ activo: false, motivo: null, observacion: '', soporte: '', tercero_id: null, ubicacion_id: props.bodegas_erp.find((b) => b.sede)?.id ?? null, ...(c.ingreso_erp || {}) });
+const cargaForm = reactive({ concepto: props.carga.concepto, modo: props.carga.modo, defaults: { ...props.carga.defaults, categoria_id: props.carga.defaults?.categoria?.id ?? null }, ingreso_erp: ingresoDe(props.carga) });
 watch(() => props.carga, (c) => {
     cargaForm.concepto = c.concepto;
     cargaForm.modo = c.modo;
     cargaForm.defaults = { ...c.defaults, categoria_id: c.defaults?.categoria?.id ?? null };
+    cargaForm.ingreso_erp = ingresoDe(c);
 });
 
 // ── Filtros ──
@@ -96,6 +101,27 @@ const agregarColor = (op) => {
 const quitarColor = (op, i) => borradores[op.id].detalle.variaciones.splice(i, 1);
 
 const guardarCarga = () => router.put(base.value, cargaForm, { preserveScroll: true });
+
+// ── Ingreso al inventario del ERP ──
+const motivoSel = computed(() => props.motivos.find((m) => m.value === cargaForm.ingreso_erp.motivo) || null);
+const terceroTexto = ref('');
+const terceroResultados = ref([]);
+let terceroDeb = null;
+watch(terceroTexto, (q) => {
+    clearTimeout(terceroDeb);
+    if (cargaForm.ingreso_erp.tercero_id || !q || q.trim().length < 2) { terceroResultados.value = []; return; }
+    terceroDeb = setTimeout(async () => {
+        try {
+            terceroResultados.value = (await axios.get('/app/api/contactos/buscar', { params: { q: q.trim() } })).data;
+        } catch { terceroResultados.value = []; }
+    }, 300);
+});
+const elegirTercero = (t) => {
+    cargaForm.ingreso_erp.tercero_id = t.id;
+    terceroTexto.value = `${t.nombre}${t.documento ? ' · ' + t.documento : ''}`;
+    terceroResultados.value = [];
+};
+const quitarTercero = () => { cargaForm.ingreso_erp.tercero_id = null; terceroTexto.value = ''; };
 const confirmando = ref(false);
 const confirmar = () => {
     confirmando.value = true;
@@ -240,11 +266,69 @@ const errores = computed(() => page.props.errors || {});
                         <label class="text-sm inline-flex items-center gap-2"><input v-model="cargaForm.defaults.privado" type="checkbox"/> Crear como privados (solo los ve Great Baby)</label>
                         <p class="text-xs text-surface-500">Las fotos se suben después en Dropi. Las medidas aplican a todos los productos nuevos de esta carga.</p>
                     </div>
+                    <!-- Inventario del ERP: la misma mercancía, primero al kardex y al libro -->
+                    <div class="md:col-span-2 rounded-lg border border-surface-200 dark:border-surface-700 p-4 space-y-3">
+                        <label class="text-sm font-medium inline-flex items-center gap-2">
+                            <input v-model="cargaForm.ingreso_erp.activo" type="checkbox"/>
+                            Registrar también el ingreso en el inventario del ERP (antes de mandar a Dropi)
+                        </label>
+                        <p class="text-xs text-surface-500">
+                            Toda la mercancía del Excel ({{ carga.filas_excel }} filas) entra al kardex del ERP como una carga CI- con su asiento
+                            (1435 contra la cuenta del motivo), con el costo de la columna COSTO. Las referencias que el ERP no tiene se crean y se envían a SIIGO.
+                            Después se manda a Dropi. Si el ingreso falla, no se manda nada.
+                        </p>
+                        <template v-if="cargaForm.ingreso_erp.activo">
+                            <p v-if="cargaForm.modo !== 'sumar'" class="text-sm text-amber-900 dark:text-amber-300">
+                                Para registrar un ingreso las cantidades tienen que ser «lo que entra». Si el Excel dice cuánto debe quedar, es un ajuste de conteo, no un ingreso.
+                            </p>
+                            <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                                <label v-for="m in motivos" :key="m.value" class="flex gap-2 rounded border p-2 cursor-pointer text-xs"
+                                       :class="cargaForm.ingreso_erp.motivo === m.value ? 'border-brand-500 bg-brand-50 dark:bg-brand-900/20' : 'border-surface-200 dark:border-surface-700'">
+                                    <input v-model="cargaForm.ingreso_erp.motivo" type="radio" :value="m.value" class="mt-0.5"/>
+                                    <span><strong>{{ m.label }}</strong> <span class="text-surface-500">· cuenta {{ m.cuenta }}</span><br/>{{ m.ayuda }}</span>
+                                </label>
+                            </div>
+                            <div class="grid md:grid-cols-2 gap-3">
+                                <label class="text-xs">Bodega del ERP donde entra
+                                    <select v-model="cargaForm.ingreso_erp.ubicacion_id" class="input w-full">
+                                        <option :value="null">Elige la bodega…</option>
+                                        <option v-for="b in bodegas_erp" :key="b.id" :value="b.id">{{ b.label }}</option>
+                                    </select>
+                                </label>
+                                <div v-if="motivoSel?.requiere_tercero" class="relative text-xs">
+                                    {{ cargaForm.ingreso_erp.motivo === 'compra' ? 'Proveedor' : 'Socio' }}
+                                    <div class="flex gap-2">
+                                        <input v-model="terceroTexto" type="search" :readonly="!!cargaForm.ingreso_erp.tercero_id" placeholder="Nombre o documento" class="input w-full"/>
+                                        <button v-if="cargaForm.ingreso_erp.tercero_id" type="button" class="btn btn-ghost text-xs" @click="quitarTercero">Cambiar</button>
+                                    </div>
+                                    <ul v-if="terceroResultados.length" class="absolute z-10 mt-1 w-full max-h-48 overflow-y-auto rounded border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 text-sm">
+                                        <li v-for="t in terceroResultados" :key="t.id">
+                                            <button type="button" class="w-full text-left px-3 py-1.5 hover:bg-surface-50 dark:hover:bg-surface-800" @click="elegirTercero(t)">{{ t.nombre }} <span class="text-xs text-surface-500">{{ t.documento }}</span></button>
+                                        </li>
+                                    </ul>
+                                </div>
+                                <label class="text-xs md:col-span-2">Observación: de dónde viene la mercancía
+                                    <textarea v-model="cargaForm.ingreso_erp.observacion" rows="2" maxlength="1000" class="input w-full" placeholder="Ej: Introducción de productos Dropi ERP: inventario recibido en bodega"></textarea>
+                                </label>
+                                <label class="text-xs">Soporte (opcional: factura, acta…)
+                                    <input v-model="cargaForm.ingreso_erp.soporte" type="text" maxlength="60" class="input w-full"/>
+                                </label>
+                            </div>
+                        </template>
+                    </div>
+
                     <div class="md:col-span-2">
                         <button type="submit" class="btn btn-secondary">Guardar concepto y datos</button>
                     </div>
                 </form>
                 <p v-else class="text-sm"><strong>Concepto:</strong> {{ carga.concepto }} · <strong>Modo:</strong> {{ carga.modo === 'sumar' ? 'sumar lo que entra' : 'el Excel dice cuánto debe quedar' }}</p>
+                <p v-if="carga.carga_inventario" class="text-sm rounded bg-emerald-50 dark:bg-emerald-900/20 px-3 py-2">
+                    Inventario del ERP: <Link :href="carga.carga_inventario.url" class="font-mono text-brand-600 hover:underline">{{ carga.carga_inventario.numero }}</Link>
+                    · {{ carga.carga_inventario.total_unidades }} unidades · asiento por {{ new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(carga.carga_inventario.total_valor) }}
+                    <span v-if="carga.ingreso_erp?.resultado" class="text-surface-500">
+                        · {{ carga.ingreso_erp.resultado.creados }} productos creados en el ERP<span v-if="carga.ingreso_erp.resultado.omitidos">, {{ carga.ingreso_erp.resultado.omitidos }} omitidos (granulares)</span><span v-if="carga.ingreso_erp.resultado.sin_costo">, {{ carga.ingreso_erp.resultado.sin_costo }} sin costo</span>
+                    </span>
+                </p>
             </div>
 
             <!-- Lectura del catálogo -->

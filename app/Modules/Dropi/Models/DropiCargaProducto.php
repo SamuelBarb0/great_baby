@@ -33,6 +33,7 @@ class DropiCargaProducto extends Model implements AuditableContract
 
     protected $casts = [
         'defaults_crear' => 'array',
+        'ingreso_erp' => 'array',
         'filas_excel' => 'array',
         'lectura' => 'array',
         'confirmado_at' => 'datetime',
@@ -42,6 +43,12 @@ class DropiCargaProducto extends Model implements AuditableContract
     public function operaciones(): HasMany
     {
         return $this->hasMany(DropiCargaOperacion::class, 'carga_id')->orderBy('fila')->orderBy('id');
+    }
+
+    /** La carga CI- con que esta misma mercancía entró al inventario del ERP. */
+    public function cargaInventario(): BelongsTo
+    {
+        return $this->belongsTo(\App\Modules\Inventario\Models\CargaInventario::class, 'carga_inventario_id');
     }
 
     public function user(): BelongsTo

@@ -41,6 +41,9 @@ class LeerExcelProductosDropi
                 'nombre' => $nombre,
                 'cantidad' => (float) $cantidad,
                 'variaciones' => isset($cols['variaciones']) ? (trim((string) ($fila[$cols['variaciones']] ?? '')) ?: null) : null,
+                // Costo unitario (columna COSTO, no «COSTO TOTAL»): valoriza el
+                // ingreso al inventario del ERP. Vacío o ilegible = sin costo.
+                'costo' => isset($cols['costo']) ? self::costo($fila[$cols['costo']] ?? null) : null,
             ];
         }
 
@@ -49,6 +52,15 @@ class LeerExcelProductosDropi
         }
 
         return $out;
+    }
+
+    private static function costo(mixed $v): ?float
+    {
+        if (is_int($v) || is_float($v)) {
+            return $v > 0 ? round((float) $v, 4) : null;
+        }
+
+        return $v === null ? null : \App\Modules\Inventario\Actions\RegistrarCargaInventario::parsearCosto((string) $v);
     }
 
     /** @return array{0: ?int, 1: array<string, int>} */
@@ -64,6 +76,8 @@ class LeerExcelProductosDropi
                     $cols['cantidad'] = $c;
                 } elseif (str_starts_with($t, 'VARIACION')) {
                     $cols['variaciones'] = $c;
+                } elseif (! isset($cols['costo']) && \App\Modules\Inventario\Actions\RegistrarCargaInventario::esEncabezadoCosto($t)) {
+                    $cols['costo'] = $c;
                 }
             }
             if (isset($cols['producto'], $cols['cantidad'])) {

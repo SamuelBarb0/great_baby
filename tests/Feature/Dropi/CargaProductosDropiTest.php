@@ -5,6 +5,7 @@ use App\Modules\Dropi\Clients\DropiWebClient;
 use App\Modules\Dropi\Models\DropiCargaOperacion as Op;
 use App\Modules\Dropi\Models\DropiCargaProducto as Carga;
 use App\Modules\Dropi\Models\DropiWebSesion;
+use App\Modules\Dropi\Models\InventarioMovimiento;
 use App\Modules\Dropi\Models\Producto;
 use App\Modules\Dropi\Services\DropiWebAuth;
 use App\Modules\Dropi\Services\PlanificarCargaDropi;
@@ -551,4 +552,79 @@ it('el Excel del resultado dice qué se actualizó, qué se creó y qué no, con
         ->and($filas[1][9])->toContain('ENTRADA 8 (432 → 440)')
         ->and($filas[2])->toMatchArray([1 => '557-6', 5 => 'Pendiente: crear', 10 => 'Producto nuevo de importación'])
         ->and($filas[2][6])->toContain('Falta el precio');
+});
+
+// ───────────────────────── primero el inventario del ERP (CI-), luego Dropi ─────────────────────────
+
+function dcBodegaErp(): \App\Modules\Dropi\Models\InventarioUbicacion
+{
+    return \App\Modules\Dropi\Models\InventarioUbicacion::firstOrCreate(['codigo' => 'DC-ERP'], ['nombre' => 'Bodega ERP', 'activa' => true, 'categoria' => 'venta']);
+}
+
+function dcCargaConIngreso(array $filas, string $modo = 'sumar', array $ingreso = []): Carga
+{
+    test()->post('/app/dropi/carga-productos/excel', ['archivo' => dcExcel($filas), 'modo' => $modo, 'concepto' => 'INTRODUCCION DE PRODUCTOS DROPI ERP']);
+    $carga = dcLeer(Carga::latest('id')->first());
+    test()->put("/app/dropi/carga-productos/{$carga->id}", ['concepto' => 'INTRODUCCION DE PRODUCTOS DROPI ERP', 'modo' => $modo, 'ingreso_erp' => $ingreso + [
+        'activo' => true, 'motivo' => 'saldo_inicial', 'observacion' => 'Inventario recibido en bodega', 'ubicacion_id' => dcBodegaErp()->id,
+    ]])->assertSessionHasNoErrors();
+
+    return $carga->refresh();
+}
+
+it('al confirmar registra primero el ingreso al ERP (CI- con kardex, costo y asiento) y después manda a Dropi', function () {
+    \Illuminate\Support\Facades\Queue::fake(); // los productos nuevos se envían a SIIGO por cola
+    $this->actingAs(dcGerente());
+    $existente = Producto::create(['referencia' => '8899-303', 'nombre' => 'Patito Juan', 'desglose_stock' => false, 'precio_proveedor' => 0]);
+
+    $carga = dcCargaConIngreso([
+        ['8899-303 PATITO JUAN', 10, 11661, null, 'NO HAY VARIABLE'],
+        ['NUEVO-1 PRODUCTO QUE EL ERP NO TIENE', 3, 2000, null, 'NO HAY VARIABLE'],
+    ]);
+    expect($this->dropi->puts)->toBe([]);
+
+    $this->post("/app/dropi/carga-productos/{$carga->id}/confirmar")->assertSessionHasNoErrors();
+    $carga->refresh();
+
+    // 1 · el ERP: un CI- con las dos filas, el producto nuevo creado y el costo del Excel
+    $ci = \App\Modules\Inventario\Models\CargaInventario::findOrFail($carga->carga_inventario_id);
+    $nuevo = Producto::where('referencia', 'NUEVO-1')->sole();
+    expect($ci->motivo->value)->toBe('saldo_inicial')
+        ->and($ci->canal)->toBe('dropi')
+        ->and((float) $ci->total_unidades)->toBe(13.0)
+        ->and((float) $ci->total_valor)->toBe(10 * 11661 + 3 * 2000.0)
+        ->and((float) $existente->fresh()->precio_proveedor)->toBe(11661.0) // estaba en 0: lo llena
+        ->and($nuevo->desglose_stock)->toBeFalse()
+        ->and((float) $nuevo->precio_proveedor)->toBe(2000.0)
+        ->and(InventarioMovimiento::where('referencia_tipo', \App\Modules\Inventario\Models\CargaInventario::class)->where('referencia_id', $ci->id)->count())->toBe(2)
+        ->and($carga->ingreso_erp['resultado'])->toMatchArray(['creados' => 1, 'actualizados' => 1, 'movimientos' => 2])
+        ->and($carga->ingreso_erp['resultado']['filas']['NUEVO-1'])->toBe('creado en el ERP');
+    $asiento = \App\Modules\Cartera\Models\MovimientoContable::where('origen_type', \App\Modules\Inventario\Models\CargaInventario::class)->where('origen_id', $ci->id)->get();
+    expect((float) $asiento->sum('debe'))->toBe(122610.0)->and((float) $asiento->sum('haber'))->toBe(122610.0);
+
+    // 2 · después Dropi: el Patito suma sus 10
+    $this->postJson("/app/dropi/carga-productos/{$carga->id}/procesar")->assertOk();
+    expect($this->dropi->stock(100))->toBe(442);
+
+    // Confirmar de nuevo (otra carga) no duplica el ingreso de ésta.
+    expect(fn () => app(\App\Modules\Dropi\Actions\RegistrarIngresoErpDesdeCarga::class)->handle($carga->fresh()))->not->toThrow(Throwable::class);
+    expect(InventarioMovimiento::where('notas', 'like', "{$carga->numero} · Ingreso al ERP%")->count())->toBe(2);
+});
+
+it('no registra ingreso al ERP si el Excel dice cuánto debe quedar, ni manda nada a Dropi', function () {
+    $this->actingAs(dcGerente());
+    $carga = dcCargaConIngreso([['8899-303 PATITO JUAN', 10, 11661, null, 'NO HAY VARIABLE']], 'reemplazar');
+
+    $this->post("/app/dropi/carga-productos/{$carga->id}/confirmar")->assertSessionHasErrors('confirmar');
+
+    expect($carga->fresh()->estado)->toBe(Carga::BORRADOR)
+        ->and($carga->fresh()->carga_inventario_id)->toBeNull()
+        ->and($this->dropi->puts)->toBe([]);
+});
+
+it('una compra al ERP exige el proveedor antes de confirmar', function () {
+    $this->actingAs(dcGerente());
+    $carga = dcCargaConIngreso([['8899-303 PATITO JUAN', 10, 11661, null, 'NO HAY VARIABLE']], 'sumar', ['motivo' => 'compra']);
+
+    $this->post("/app/dropi/carga-productos/{$carga->id}/confirmar")->assertSessionHasErrors(['confirmar' => 'Para registrar el ingreso al inventario del ERP falta: el proveedor.']);
 });

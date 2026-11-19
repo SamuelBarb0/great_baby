@@ -234,7 +234,7 @@ class DropiCargaProductosController extends Controller implements HasMiddleware
 
     public function show(Carga $carga): Response
     {
-        $carga->load(['operaciones', 'user:id,name']);
+        $carga->load(['operaciones', 'user:id,name', 'cargaInventario']);
         $ops = $carga->operaciones;
 
         return Inertia::render('Dropi/CargaProductos/Show', [
@@ -251,6 +251,14 @@ class DropiCargaProductosController extends Controller implements HasMiddleware
                 'filas_excel' => count($carga->filas_excel ?? []),
                 'bodega' => $carga->bodega_dropi_id,
                 'defaults' => $carga->defaults_crear ?? self::defaultsVacios(),
+                'ingreso_erp' => $carga->ingreso_erp ?? ['activo' => false],
+                'carga_inventario' => $carga->cargaInventario ? [
+                    'id' => $carga->cargaInventario->id,
+                    'numero' => $carga->cargaInventario->numero,
+                    'total_valor' => (float) $carga->cargaInventario->total_valor,
+                    'total_unidades' => (float) $carga->cargaInventario->total_unidades,
+                    'url' => "/app/inventario/cargas/{$carga->cargaInventario->id}",
+                ] : null,
                 'usuario' => $carga->user?->name,
                 'fecha' => $carga->created_at?->timezone('America/Bogota')->format('d/m/Y H:i'),
                 'confirmado' => $carga->confirmado_at?->timezone('America/Bogota')->format('d/m/Y H:i'),
@@ -277,6 +285,8 @@ class DropiCargaProductosController extends Controller implements HasMiddleware
             ])->values(),
             'resumen' => $ops->countBy(fn (Op $o) => $o->estado)->all() + ['crear_listos' => $ops->where('tipo', Op::CREAR)->where('estado', Op::LISTO)->count()],
             'categorias' => $carga->editable() ? $this->categorias($carga) : [],
+            'motivos' => $carga->editable() ? \App\Modules\Inventario\Enums\MotivoCargaInventario::opciones() : [],
+            'bodegas_erp' => $carga->editable() ? self::bodegasErp() : [],
         ]);
     }
 
@@ -384,7 +394,7 @@ class DropiCargaProductosController extends Controller implements HasMiddleware
     /** El resultado de la carga en Excel: qué se actualizó, qué se creó y qué no, con su razón. */
     public function exportar(Carga $carga): \Symfony\Component\HttpFoundation\StreamedResponse
     {
-        $libro = app(\App\Modules\Dropi\Services\ExportarCargaDropi::class)->libro($carga->load('operaciones'));
+        $libro = app(\App\Modules\Dropi\Services\ExportarCargaDropi::class)->libro($carga->load(['operaciones', 'cargaInventario']));
         $nombre = "carga-dropi-{$carga->numero}.xlsx";
 
         return response()->streamDownload(function () use ($libro) {
@@ -406,11 +416,26 @@ class DropiCargaProductosController extends Controller implements HasMiddleware
             'defaults.privado' => ['boolean'],
             'defaults.garantia_dias' => ['nullable', 'integer', 'min:10', 'max:365'],
             'defaults.garantia_texto' => ['nullable', 'string', 'max:200'],
+            'ingreso_erp.activo' => ['boolean'],
+            'ingreso_erp.motivo' => ['nullable', Rule::enum(\App\Modules\Inventario\Enums\MotivoCargaInventario::class)],
+            'ingreso_erp.observacion' => ['nullable', 'string', 'max:1000'],
+            'ingreso_erp.soporte' => ['nullable', 'string', 'max:60'],
+            'ingreso_erp.tercero_id' => ['nullable', 'integer', 'exists:contactos,id'],
+            'ingreso_erp.ubicacion_id' => ['nullable', 'integer', 'exists:inventario_ubicaciones,id'],
         ]);
         $def = $data['defaults'] ?? [];
         $categoria = collect($this->categorias($carga))->firstWhere('id', (int) ($def['categoria_id'] ?? 0));
 
+        $ing = $data['ingreso_erp'] ?? [];
         $carga->forceFill([
+            'ingreso_erp' => [
+                'activo' => (bool) ($ing['activo'] ?? false),
+                'motivo' => $ing['motivo'] ?? null,
+                'observacion' => isset($ing['observacion']) ? trim($ing['observacion']) : null,
+                'soporte' => isset($ing['soporte']) ? (trim($ing['soporte']) ?: null) : null,
+                'tercero_id' => isset($ing['tercero_id']) ? (int) $ing['tercero_id'] : null,
+                'ubicacion_id' => isset($ing['ubicacion_id']) ? (int) $ing['ubicacion_id'] : null,
+            ],
             'concepto' => $data['concepto'],
             'modo' => $data['modo'],
             'defaults_crear' => [
@@ -440,9 +465,71 @@ class DropiCargaProductosController extends Controller implements HasMiddleware
             throw ValidationException::withMessages(['confirmar' => "Para crear productos falta: {$falta}."]);
         }
 
+        // Primero la misma mercancía entra al inventario del ERP (CI- con su
+        // asiento); si eso falla no se manda nada a Dropi.
+        $ingreso = $carga->ingreso_erp ?? [];
+        if (! empty($ingreso['activo']) && empty($ingreso['hecho_at'])) {
+            if ($falta = self::faltaEnIngreso($carga)) {
+                throw ValidationException::withMessages(['confirmar' => "Para registrar el ingreso al inventario del ERP falta: {$falta}."]);
+            }
+            try {
+                app(\App\Modules\Dropi\Actions\RegistrarIngresoErpDesdeCarga::class)->handle($carga);
+            } catch (\Throwable $e) {
+                report($e);
+                throw ValidationException::withMessages(['confirmar' => 'No se pudo registrar el ingreso al inventario del ERP, así que no se mandó nada a Dropi: '.$e->getMessage()]);
+            }
+        }
+
         $carga->forceFill(['estado' => Carga::PROCESANDO, 'confirmado_at' => now()])->save();
 
         return back();
+    }
+
+    /** Qué le falta al ingreso al ERP para poder registrarse. */
+    private static function faltaEnIngreso(Carga $carga): ?string
+    {
+        $i = $carga->ingreso_erp ?? [];
+        $falta = [];
+        if ($carga->modo !== 'sumar') {
+            $falta[] = 'el modo «lo que entra» (si el Excel dice cuánto debe quedar no es un ingreso: es un ajuste de conteo)';
+        }
+        $motivo = isset($i['motivo']) ? \App\Modules\Inventario\Enums\MotivoCargaInventario::tryFrom($i['motivo']) : null;
+        if (! $motivo) {
+            $falta[] = 'el motivo';
+        } elseif ($motivo->requiereTercero() && empty($i['tercero_id'])) {
+            $falta[] = $motivo === \App\Modules\Inventario\Enums\MotivoCargaInventario::Compra ? 'el proveedor' : 'el socio';
+        }
+        if (mb_strlen(trim((string) ($i['observacion'] ?? ''))) < 5) {
+            $falta[] = 'la observación (de dónde viene la mercancía)';
+        }
+        if (empty($i['ubicacion_id'])) {
+            $falta[] = 'la bodega del ERP';
+        }
+
+        return $falta ? implode(', ', $falta) : null;
+    }
+
+    /**
+     * Bodegas del ERP para el ingreso, con las sedes de Great Baby primero
+     * (mismo criterio que la carga de inventario: el catálogo de SIIGO trae
+     * bodegas de otras empresas y la primera alfabética era ajena).
+     */
+    private static function bodegasErp(): array
+    {
+        $sede = fn ($b) => $b->bodega_id === null && $b->responsable_user_id !== null;
+
+        return \App\Modules\Dropi\Models\InventarioUbicacion::query()
+            ->where(fn ($q) => $q->where('activa', true)->orWhereNull('activa'))
+            ->orderBy('nombre')
+            ->get(['id', 'nombre', 'codigo', 'bodega_id', 'pasillo', 'estante', 'nivel', 'responsable_user_id'])
+            ->filter(fn ($b) => $b->esBodega())
+            ->sortBy([
+                fn ($a, $b) => ($sede($b) ? 1 : 0) <=> ($sede($a) ? 1 : 0),
+                fn ($a, $b) => strcasecmp($a->nombre, $b->nombre),
+            ])
+            ->values()
+            ->map(fn ($b) => ['id' => $b->id, 'label' => "{$b->nombre} ({$b->codigo})", 'sede' => $sede($b)])
+            ->all();
     }
 
     /** Procesa la siguiente tanda. La pantalla lo llama en bucle hasta que no queden. */

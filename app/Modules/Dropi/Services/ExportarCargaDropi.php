@@ -31,7 +31,7 @@ class ExportarCargaDropi
         $hoja = $libro->getActiveSheet();
         $hoja->setTitle('Productos');
         $encabezado = ['Fila Excel', 'Referencia', 'Producto (Excel)', 'Cantidad Excel', 'Variaciones Excel', 'Resultado',
-            'Qué falta / por qué', 'Id Dropi', 'Producto en Dropi', 'Qué se movió en Dropi', 'Razón', 'Razón que quedó en Dropi'];
+            'Qué falta / por qué', 'Id Dropi', 'Producto en Dropi', 'Qué se movió en Dropi', 'Razón', 'Razón que quedó en Dropi', 'Inventario del ERP'];
         $hoja->fromArray($encabezado, null, 'A1');
         $hoja->fromArray($filas->map(fn ($f) => array_values($f))->all(), null, 'A2');
 
@@ -42,12 +42,12 @@ class ExportarCargaDropi
                 $hoja->getStyle('F' . ($i + 2))->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB($color);
             }
         }
-        foreach (['A' => 9, 'B' => 18, 'C' => 34, 'D' => 10, 'E' => 32, 'F' => 18, 'G' => 50, 'H' => 10, 'I' => 34, 'J' => 50, 'K' => 34, 'L' => 40] as $col => $w) {
+        foreach (['A' => 9, 'B' => 18, 'C' => 34, 'D' => 10, 'E' => 32, 'F' => 18, 'G' => 50, 'H' => 10, 'I' => 34, 'J' => 50, 'K' => 34, 'L' => 40, 'M' => 34] as $col => $w) {
             $hoja->getColumnDimension($col)->setWidth($w);
         }
-        $hoja->getStyle('A1:L1')->getFont()->setBold(true);
-        $hoja->getStyle("A2:L{$ultima}")->getAlignment()->setWrapText(true)->setVertical(Alignment::VERTICAL_TOP);
-        $hoja->setAutoFilter("A1:L{$ultima}");
+        $hoja->getStyle('A1:M1')->getFont()->setBold(true);
+        $hoja->getStyle("A2:M{$ultima}")->getAlignment()->setWrapText(true)->setVertical(Alignment::VERTICAL_TOP);
+        $hoja->setAutoFilter("A1:M{$ultima}");
         $hoja->freezePane('A2');
 
         $resumen = $libro->createSheet(0);
@@ -60,6 +60,10 @@ class ExportarCargaDropi
             ['Archivo', $carga->archivo_nombre ?? '—'],
             ['Fecha', $carga->created_at?->timezone('America/Bogota')->format('d/m/Y H:i')],
             ['Terminada', $carga->terminado_at?->timezone('America/Bogota')->format('d/m/Y H:i') ?? 'No'],
+            ['Inventario del ERP', $carga->cargaInventario
+                ? "{$carga->cargaInventario->numero} · " . (float) $carga->cargaInventario->total_unidades . ' unidades · asiento por $' . number_format((float) $carga->cargaInventario->total_valor, 0, ',', '.')
+                    . ' · ' . (int) ($carga->ingreso_erp['resultado']['creados'] ?? 0) . ' productos creados en el ERP'
+                : (! empty($carga->ingreso_erp['activo']) ? 'Pendiente: se registra al confirmar' : 'No se registró (solo Dropi)')],
             [],
             ['Resultado', 'Filas'],
         ];
@@ -74,8 +78,8 @@ class ExportarCargaDropi
         $resumen->fromArray($datos, null, 'A1');
         $resumen->getColumnDimension('A')->setWidth(28);
         $resumen->getColumnDimension('B')->setWidth(70);
-        $resumen->getStyle('A1:A6')->getFont()->setBold(true);
-        $resumen->getStyle('A8:B8')->getFont()->setBold(true);
+        $resumen->getStyle('A1:A7')->getFont()->setBold(true);
+        $resumen->getStyle('A9:B9')->getFont()->setBold(true);
         $libro->setActiveSheetIndex(0);
 
         return $libro;
@@ -120,6 +124,7 @@ class ExportarCargaDropi
             'movido' => $movido,
             'razon' => EjecutarOperacionDropi::razon($carga, $o),
             'razon_enviada' => $o->razon_enviada,
+            'erp' => $carga->ingreso_erp['resultado']['filas'][$o->ref_excel] ?? '',
         ];
     }
 }
