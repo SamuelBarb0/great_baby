@@ -194,9 +194,17 @@ class OleadaDeAlistamiento
     /**
      * Las paradas en el orden en que se camina la bodega.
      *
-     * Zona, después rack, después el código —que ya trae sección y nivel en
-     * orden—. El respaldo de surtido y lo que no se ubicó van al final: no son
-     * parte del recorrido, son excepciones que se atienden aparte.
+     * Zona, después el PUESTO DEL RACK EN EL RECORRIDO —no su número— y
+     * después el código, que ya trae sección y nivel en orden.
+     *
+     * Lo del puesto importa: el área pidió para la zona 3 un recorrido que no
+     * es ascendente ni descendente —local, parqueadero, 15, 14, 13, arsutex,
+     * 12, 11— porque se arranca por el fondo y se vuelve hacia la zona de
+     * alistamiento, recogiendo las zonas sueltas al pasar. Ordenando por
+     * número se caminaba al revés.
+     *
+     * El respaldo de surtido y lo que no se ubicó van al final: no son parte
+     * del recorrido, son excepciones que se atienden aparte.
      */
     private function enOrdenDeBodega(array $paradas): array
     {
@@ -210,9 +218,7 @@ class OleadaDeAlistamiento
             $peso = fn ($p) => [
                 $p['codigo'] === 'SIN UBICAR' ? 2 : ($p['es_respaldo'] ? 1 : 0),
                 $p['zona'] ?? 'ZZZ',
-                // El rack puede ser «6.5»: se compara como número para que el 2
-                // no quede después del 10.
-                is_numeric($p['rack'] ?? null) ? (float) $p['rack'] : INF,
+                \App\Modules\Logistica\Support\ZonaDeLaBodega::ordenEnElRecorrido($p['rack'] ?? null),
                 (string) ($p['rack'] ?? ''),
                 $p['codigo'],
             ];

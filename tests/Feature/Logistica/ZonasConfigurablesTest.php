@@ -124,8 +124,10 @@ it('no le inventa zona a un rack que nadie repartió', function () {
 it('si alguien deja la regla en basura, la bodega no se queda sin zonas', function () {
     reparto(['A' => [], '  ' => ['9'], 'B' => 'esto no es una lista']);
 
+    // El reparto de fábrica es el que el área rotuló en el piso: zonas 1, 2 y 3.
     expect(Zona::mapa())->toBe(Zona::POR_DEFECTO)
-        ->and(Zona::deRack('6.5'))->toBe('B');
+        ->and(Zona::deRack('6.5'))->toBe('2')
+        ->and(Zona::deRack('LOCAL'))->toBe('3');
 });
 
 it('lee el rack con espacios y en minúscula, que es como se escribe a mano', function () {
