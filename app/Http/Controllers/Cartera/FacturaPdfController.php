@@ -112,7 +112,8 @@ class FacturaPdfController extends Controller
     private function render(FacturaVenta $factura, bool $publica = false): Response
     {
         $factura->load(['contacto', 'items.variante.producto', 'pagos']);
-        $empresa = EmpresaConfig::current();
+        // Multiempresa · el encabezado es el de la razón social que facturó.
+        $empresa = EmpresaConfig::porId($factura->empresa_id);
 
         $qrSvg = '';
         if ($factura->cufe) {
@@ -122,7 +123,9 @@ class FacturaPdfController extends Controller
         // Task #46: usar plantilla WYSIWYG si hay una configurada; sino fallback a la clásica.
         $plantilla = \App\Modules\Plantillas\Models\PlantillaDocumento::paraTipo('factura');
         $vista = $plantilla ? 'cartera.pdf.factura-plantilla' : 'cartera.pdf.factura';
-        $cfg = $plantilla ? $plantilla->configEfectiva() : \App\Modules\Plantillas\Models\PlantillaDocumento::defaults();
+        $cfg = \App\Modules\Plantillas\Models\PlantillaDocumento::configParaPdf(
+            $plantilla ? $plantilla->configEfectiva() : \App\Modules\Plantillas\Models\PlantillaDocumento::defaults()
+        );
 
         return Pdf::loadView($vista, [
             'factura' => $factura,

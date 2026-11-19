@@ -133,6 +133,18 @@ class VendedorPedidoController extends Controller implements HasMiddleware
                 'inicio' => $ini->format('Y-m-d'),
                 'fin' => $fin->format('Y-m-d'),
             ],
+            /*
+             * Contra qué se mide.
+             *
+             * El panel mostraba lo vendido y nada más, así que «$4.120.000 este
+             * mes» no decía si iba bien o mal: el vendedor se enteraba en la
+             * reunión de fin de mes, cuando ya no se puede hacer nada.
+             *
+             * La meta es SIEMPRE del mes corriente, aunque el panel esté
+             * mirando otro período: una meta mensual comparada contra un
+             * trimestre o contra un año daría un cumplimiento sin sentido.
+             */
+            'meta' => $esSuper ? null : \App\Modules\Crm\Actions\CumplimientoDeMeta::run((int) $vendedorId),
             'resumen' => $comparativa['actual'],
             'anterior' => $comparativa['anterior'],
             'variacion' => $comparativa['variacion'],
@@ -248,7 +260,8 @@ class VendedorPedidoController extends Controller implements HasMiddleware
             ->with(['producto' => fn ($q) => $q->select('id', 'referencia', 'nombre', 'impuesto_id')
                 ->with('impuesto:id,porcentaje')])
             ->whereIn('id', $precios->keys())
-            ->whereHas('producto', fn ($q) => $q->where('activo', true))
+            // MKT-1 · activo y publicado: lo que Marketing ocultó no se ofrece.
+            ->whereHas('producto', fn ($q) => $q->visibleParaVentas())
             ->orderBy('id')
             ->get(['id', 'producto_id', 'codigo_barras', 'color_nombre', 'talla'])
             ->map(fn ($v) => [
@@ -275,7 +288,7 @@ class VendedorPedidoController extends Controller implements HasMiddleware
             ->vigentes()
             ->with(['producto' => fn ($q) => $q->select('id', 'referencia', 'nombre', 'impuesto_id', 'activo', 'desglose_stock')
                 ->with('impuesto:id,porcentaje')])
-            ->whereHas('producto', fn ($q) => $q->where('activo', true)->where('desglose_stock', false))
+            ->whereHas('producto', fn ($q) => $q->visibleParaVentas()->where('desglose_stock', false))
             ->get()
             ->map(fn ($pp) => [
                 'variante_id' => null,
@@ -291,6 +304,27 @@ class VendedorPedidoController extends Controller implements HasMiddleware
             ->values();
 
         $variantes = $variantes->concat($agregados)->values();
+
+        /*
+         * Cuántas unidades hay de verdad.
+         *
+         * El catálogo del vendedor NO traía existencias: se podían prometer 999
+         * unidades de algo que tiene 35 y la pantalla no decía nada, ni al
+         * escribir la cantidad ni al enviar el pedido. Comprobado el 2026-10-13
+         * levantando un pedido real por $24.875.100 sobre 35 unidades de stock.
+         * El problema aparecía recién en bodega, con el cliente ya avisado y la
+         * factura en camino.
+         *
+         * No se bloquea —un pedido contra contenedor que viene en camino es
+         * legítimo— pero tiene que verse antes de prometerlo.
+         */
+        $saldos = $this->disponiblePorSujeto($variantes);
+
+        $variantes = $variantes->map(function ($v) use ($saldos) {
+            $v['disponible'] = (int) ($saldos[$v['variante_id'] ? 'v:'.$v['variante_id'] : 'p:'.$v['producto_id']] ?? 0);
+
+            return $v;
+        })->values();
 
         // Semáforo rápido · para que el vendedor sepa en terreno si el pedido
         //   del cliente va a quedar retenido antes de armarlo.
@@ -313,7 +347,61 @@ class VendedorPedidoController extends Controller implements HasMiddleware
                 'cupo' => (float) ($credito['cupo'] ?? 0),
                 'dias_mora_max' => (int) ($credito['dias_mora_max'] ?? 0),
             ],
+            // Multiempresa · con quién se factura. La primera es la principal.
+            'empresas' => \App\Models\EmpresaConfig::activas()
+                ->map(fn ($e) => ['id' => $e->id, 'nombre' => $e->nombreCorto()])->values(),
         ]);
+    }
+
+    /**
+     * Saldo disponible de cada ítem del catálogo, en dos consultas.
+     *
+     * Sólo cuentan las bodegas de venta activas: lo que está en avería, en
+     * garantía o reservado no se le puede prometer a nadie.
+     *
+     * @return array<string,int>  clave `v:{id}` o `p:{id}` => unidades
+     */
+    private function disponiblePorSujeto(\Illuminate\Support\Collection $items): array
+    {
+        $ubicaciones = \App\Modules\Dropi\Models\InventarioUbicacion::query()
+            ->where('activa', true)
+            ->where('disponible_para_venta', true)
+            ->pluck('id');
+
+        if ($ubicaciones->isEmpty()) {
+            return [];
+        }
+
+        $out = [];
+
+        $variantes = $items->pluck('variante_id')->filter()->values();
+        if ($variantes->isNotEmpty()) {
+            \App\Modules\Dropi\Models\InventarioMovimiento::query()
+                ->whereIn('variante_id', $variantes)
+                ->whereIn('ubicacion_id', $ubicaciones)
+                ->selectRaw('variante_id, SUM(cantidad) as saldo')
+                ->groupBy('variante_id')->get()
+                // `fn` captura por valor: con una arrow function `$out` se
+                // escribía sobre una copia y volvía siempre vacío.
+                ->each(function ($r) use (&$out) {
+                    $out['v:'.$r->variante_id] = (int) $r->saldo;
+                });
+        }
+
+        $productos = $items->where('variante_id', null)->pluck('producto_id')->filter()->values();
+        if ($productos->isNotEmpty()) {
+            \App\Modules\Dropi\Models\InventarioMovimiento::query()
+                ->whereIn('producto_id', $productos)
+                ->whereNull('variante_id')
+                ->whereIn('ubicacion_id', $ubicaciones)
+                ->selectRaw('producto_id, SUM(cantidad) as saldo')
+                ->groupBy('producto_id')->get()
+                ->each(function ($r) use (&$out) {
+                    $out['p:'.$r->producto_id] = (int) $r->saldo;
+                });
+        }
+
+        return $out;
     }
 
     public function confirmar(Request $r, int $contactoId): RedirectResponse
@@ -327,6 +415,8 @@ class VendedorPedidoController extends Controller implements HasMiddleware
             'items.*.producto_id' => ['nullable', 'integer', 'exists:productos,id', 'required_without:items.*.variante_id'],
             'items.*.cantidad' => ['required', 'integer', 'min:1', 'max:9999'],
             'notas' => ['nullable', 'string', 'max:1000'],
+            // Multiempresa · sólo una razón social activa; sin elegir, la principal.
+            'empresa_id' => ['nullable', 'integer', \Illuminate\Validation\Rule::exists('empresa_config', 'id')->where('activa', true)],
         ]);
 
         $cliente = Contacto::whereKey($contactoId)->whereNotNull('lista_precios_id')->firstOrFail();
@@ -346,6 +436,7 @@ class VendedorPedidoController extends Controller implements HasMiddleware
             items: $data['items'],
             notas: $data['notas'] ?? null,
             vendedorId: $r->user()->id,
+            empresaId: $data['empresa_id'] ?? null,
         );
 
         return redirect()->route('app.vendedor.index')->with(
@@ -377,7 +468,11 @@ class VendedorPedidoController extends Controller implements HasMiddleware
         $prefijo = 'PB-' . now()->format('ymd') . '-';
         $ultimo = PedidoCliente::where('numero', 'like', $prefijo . '%')
             ->lockForUpdate()->orderByDesc('id')->value('numero');
-        $sig = $ultimo ? ((int) substr($ultimo, -4)) + 1 : 1;
+        // Se lee DESPUÉS del prefijo, no por los últimos cuatro: `str_pad`
+        // rellena pero no recorta, así que pasado el 9999 el consecutivo crece
+        // a cinco dígitos y `substr(-4)` volvía a leer 0001 contra un `numero`
+        // que es único.
+        $sig = $ultimo ? ((int) substr($ultimo, strlen($prefijo))) + 1 : 1;
         return $prefijo . str_pad((string) $sig, 4, '0', STR_PAD_LEFT);
     }
 }

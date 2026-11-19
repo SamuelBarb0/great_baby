@@ -172,11 +172,83 @@ class CrearProductoEnSiigo
             }
         }
 
+        // El padre también, para poder facturarlo. Ver crearPadreFacturable().
+        $padre = $this->crearPadreFacturable($p);
+        if (! empty($padre['siigo_id'])) {
+            $creados++;
+        } elseif (! empty($padre['error'])) {
+            $errores++;
+        }
+        $detalle['padre'] = $padre;
+
         $this->log($p, 'crear-granular', $errores === 0 ? 'exitoso' : 'parcial', 200,
             "creados={$creados} reconciliados={$reconciliados} errores={$errores} skipped={$skipped}",
             ['modo' => 'granular'], ['variantes' => $detalle], $t0);
 
         return compact('creados', 'reconciliados', 'errores', 'skipped', 'detalle');
+    }
+
+    /**
+     * El producto padre de un granular, creado en SIIGO sólo para facturarlo.
+     *
+     * Hasta el 2026-11-05 un producto con variantes ponía en SIIGO SÓLO sus
+     * variantes, nunca el padre. Y la factura B2B vende el padre: 19 de las 21
+     * líneas del sistema traen `producto_id` y `variante_id` en NULL, porque
+     * se vende «Set bodys x5 · pack niña» como unidad y la talla es asunto de
+     * bodega.
+     *
+     * Resultado: el emisor buscaba `producto->siigo_id`, lo encontraba vacío y
+     * tiraba «el producto todavía no está en SIIGO: sincronizalo». Pero ya
+     * estaba — como variantes. Sincronizar de nuevo no arreglaba nada y la
+     * factura no salía NUNCA. En desarrollo eran los 28 productos activos sin
+     * `siigo_id`, los 28 con sus variantes ya allá.
+     *
+     * Se crea con `stock_control = false` a propósito: el inventario lo
+     * llevan las variantes, y si el padre también lo controlara, SIIGO
+     * contaría dos veces la misma mercancía. El padre existe allá para que
+     * haya qué facturar, no para tener saldo.
+     *
+     * @return array{siigo_id?:string,error?:string,skipped?:bool}
+     */
+    private function crearPadreFacturable(Producto $p): array
+    {
+        $p->refresh();
+        if ($p->siigo_id) {
+            return ['skipped' => true, 'siigo_id' => $p->siigo_id];
+        }
+
+        try {
+            $payload = $this->builder->paraProducto($p);
+            $payload['stock_control'] = false;
+
+            $response = $this->client->request('POST', '/v1/products', $payload);
+
+            // Si ya existía con ese code, se adopta en vez de duplicar.
+            if ($response->failed() && $this->esAlreadyExists($response->json())) {
+                // Devuelve ['id'=>…,'code'=>…], y sólo si el match fue único.
+                $recuperado = $this->recuperarPorCode($payload['code'])['id'] ?? null;
+                if ($recuperado) {
+                    $p->forceFill(['siigo_id' => $recuperado])->saveQuietly();
+
+                    return ['siigo_id' => $recuperado, 'reconciliado' => true];
+                }
+            }
+
+            if ($response->failed()) {
+                return ['error' => 'HTTP '.$response->status().' '.mb_substr((string) $response->body(), 0, 160)];
+            }
+
+            $siigoId = $response->json('id');
+            if (! $siigoId) {
+                return ['error' => 'SIIGO respondió sin id'];
+            }
+
+            $p->forceFill(['siigo_id' => $siigoId])->saveQuietly();
+
+            return ['siigo_id' => $siigoId];
+        } catch (\Throwable $e) {
+            return ['error' => mb_substr($e->getMessage(), 0, 160)];
+        }
     }
 
     /**

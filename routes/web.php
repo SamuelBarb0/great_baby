@@ -32,6 +32,13 @@ Route::middleware(['web', 'auth'])->get('/set-canal/{canal}', function (string $
 Route::middleware(['web', 'guest'])->prefix('app')->group(function () {
     Route::get('/login', [\App\Http\Controllers\App\AuthController::class, 'showLogin'])->name('app.login');
     Route::post('/login', [\App\Http\Controllers\App\AuthController::class, 'login'])->middleware('throttle:8,1');
+
+    // F7 · El empleado pone su contraseña por primera vez. Va acá y no en el
+    //      grupo de `auth` porque justamente todavía no tiene sesión: el
+    //      enlace se lo manda Gestión Humana por WhatsApp.
+    Route::get('/activar-portal', [\App\Http\Controllers\App\PortalColaboradorController::class, 'mostrarActivacion'])->name('app.portal.activar');
+    Route::post('/activar-portal', [\App\Http\Controllers\App\PortalColaboradorController::class, 'activar'])
+        ->middleware('throttle:10,60');
 });
 
 // App (auth)
@@ -42,8 +49,10 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     Route::get('/cosas-del-dia', \App\Http\Controllers\App\CosasDelDiaController::class)->name('app.cosas');
     Route::post('/copiloto', [\App\Http\Controllers\App\CopilotoController::class, 'preguntar'])->name('app.copiloto');
     Route::get('/notificaciones', \App\Http\Controllers\App\NotificacionesController::class)->name('app.notificaciones');
+    Route::post('/notificaciones/leidas', [\App\Http\Controllers\App\NotificacionesController::class, 'marcarLeidas'])->name('app.notificaciones.leidas');
     Route::get('/mapa-colombia', \App\Http\Controllers\App\MapaColombiaController::class)->name('app.mapa');
     Route::post('/logout', [\App\Http\Controllers\App\AuthController::class, 'logout'])->name('app.logout');
+
 
     // Reglas de Negocio (admin)
     Route::get('/reglas', [\App\Http\Controllers\App\ReglasController::class, 'index'])->name('app.reglas');
@@ -54,7 +63,18 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
 
     // Cartera · Facturas
     Route::get('/facturas', [\App\Http\Controllers\App\FacturasController::class, 'index'])->name('app.facturas.index');
+    /*
+     * F2b · las dos puertas para crear facturas que no vienen de un pedido.
+     * Van ANTES de `/facturas/{factura}`: si quedaran despues, «plantilla-excel»
+     * entraria por el route-model binding y moriria en un 404.
+     */
+    Route::get('/facturas/plantilla-excel', [\App\Http\Controllers\App\FacturasController::class, 'plantillaExcel'])->middleware('throttle:20,1')->name('app.facturas.plantilla');
+    Route::post('/facturas/manual', [\App\Http\Controllers\App\FacturasController::class, 'guardarManual'])->middleware('throttle:30,1')->name('app.facturas.manual');
+    Route::post('/facturas/importar-excel/previa', [\App\Http\Controllers\App\FacturasController::class, 'previsualizarExcel'])->middleware('throttle:20,1')->name('app.facturas.importar.previa');
+    Route::post('/facturas/importar-excel', [\App\Http\Controllers\App\FacturasController::class, 'importarExcel'])->middleware('throttle:10,1')->name('app.facturas.importar');
     Route::get('/facturas/{factura}', [\App\Http\Controllers\App\FacturasController::class, 'show'])->name('app.facturas.show');
+    // F2 · cambiar el destino fiscal de una factura o de varias desde el listado.
+    Route::post('/facturas/destino', [\App\Http\Controllers\App\FacturasController::class, 'cambiarDestino'])->middleware('throttle:30,1')->name('app.facturas.destino');
 
     // Rol Facturador · bandeja de pedidos listos para facturar en SIIGO.
     Route::get('/facturacion/bandeja', [\App\Http\Controllers\App\FacturacionController::class, 'bandeja'])->middleware('throttle:30,1')->name('app.facturacion.bandeja');
@@ -63,6 +83,9 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
 
     // Acciones SIIGO sobre facturas (anular/mail/PDF/XML/errores DIAN).
     Route::post('/facturas/{factura}/siigo/anular', [\App\Http\Controllers\App\FacturasSiigoAccionesController::class, 'anular'])->middleware('throttle:10,1')->name('app.facturas.siigo.anular');
+    // Reencolar la factura a SIIGO. Lo tenian las otras siete entidades que
+    //   viajan y no la factura de venta, que es la unica con plazo legal.
+    Route::post('/facturas/{factura}/reenviar-siigo', [\App\Http\Controllers\App\FacturasSiigoAccionesController::class, 'reenviarSiigo'])->middleware('throttle:20,1')->name('app.facturas.siigo.reenviar');
     Route::post('/facturas/{factura}/siigo/reenviar-mail', [\App\Http\Controllers\App\FacturasSiigoAccionesController::class, 'reenviarMail'])->middleware('throttle:20,1')->name('app.facturas.siigo.reenviar-mail');
     Route::get('/facturas/{factura}/siigo/pdf', [\App\Http\Controllers\App\FacturasSiigoAccionesController::class, 'pdf'])->middleware('throttle:30,1')->name('app.facturas.siigo.pdf');
     Route::get('/facturas/{factura}/siigo/xml', [\App\Http\Controllers\App\FacturasSiigoAccionesController::class, 'xml'])->middleware('throttle:30,1')->name('app.facturas.siigo.xml');
@@ -98,6 +121,7 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     Route::delete('/cartera/comisiones/config/{config}', [\App\Http\Controllers\App\ComisionesController::class, 'eliminarConfig'])->name('app.comisiones.config.eliminar');
 
     Route::get('/pagos', [\App\Http\Controllers\App\PagosController::class, 'index'])->name('app.pagos.index');
+    Route::get('/pagos/csv', [\App\Http\Controllers\App\PagosController::class, 'exportar'])->middleware('throttle:10,1')->name('app.pagos.csv');
     // Registrar plata entrando · antes sólo existía en el panel Filament.
     Route::get('/pagos/facturas-pendientes', [\App\Http\Controllers\App\PagosController::class, 'facturasPendientes'])
         ->middleware('throttle:60,1')->name('app.pagos.facturas');
@@ -113,13 +137,26 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     Route::post('/cartera/solicitudes/{solicitud}/resolver', [\App\Http\Controllers\App\CarteraExtrasController::class, 'solicitudResolver'])->name('app.cartera.solicitud.resolver');
     // Re-audit M5 R4 SEG-M4 · throttle en agregados pesados.
     Route::get('/cartera/movimientos', [\App\Http\Controllers\App\CarteraExtrasController::class, 'movimientos'])->middleware('throttle:30,1')->name('app.cartera.movimientos');
+    // F2c · el export se lleva EL MISMO filtro que pinto la tabla.
+    Route::get('/cartera/movimientos/csv', [\App\Http\Controllers\App\CarteraExtrasController::class, 'movimientosCsv'])->middleware('throttle:10,1')->name('app.cartera.movimientos.csv');
 
     // Compras / Inventario / Contabilidad
     Route::get('/compras', [\App\Http\Controllers\App\ComprasController::class, 'index'])->name('app.compras.index');
+    Route::get('/compras/csv', [\App\Http\Controllers\App\ComprasController::class, 'exportar'])->middleware('throttle:10,1')->name('app.compras.csv');
+    // Si una compra se declara o no. Se decide en la orden y la arrastran
+    // las recepciones que todavia no viajaron a SIIGO.
+    Route::post('/compras/destino', [\App\Http\Controllers\App\ComprasController::class, 'cambiarDestino'])->middleware('throttle:30,1')->name('app.compras.destino');
     // Re-audit M2 R3 PATRÓN R (SEG-A5) · throttle en agregados/mutaciones.
     Route::get('/compras/reporte', [\App\Http\Controllers\App\ComprasGestionController::class, 'reporte'])->middleware('throttle:30,1')->name('app.compras.reporte');
     Route::get('/compras/oc/nueva', [\App\Http\Controllers\App\ComprasGestionController::class, 'ocForm'])->name('app.compras.oc.nueva');
     Route::post('/compras/oc', [\App\Http\Controllers\App\ComprasGestionController::class, 'ocCrear'])->middleware('throttle:60,1')->name('app.compras.oc.crear');
+    // Compras slice 1 · orden de importación desde el Excel de Alejandro + pre-liquidación.
+    // Crear el proveedor desde la orden nueva, sin abrir Contactos (que también muestra clientes).
+    Route::post('/compras/proveedor', [\App\Http\Controllers\App\ComprasGestionController::class, 'proveedorCrear'])->middleware('throttle:20,1')->name('app.compras.proveedor.crear');
+    Route::post('/compras/oc/leer-excel', [\App\Http\Controllers\App\ComprasGestionController::class, 'ocLeerExcel'])->middleware('throttle:20,1')->name('app.compras.oc.leer-excel');
+    Route::post('/compras/oc/{orden}/parametros', [\App\Http\Controllers\App\ComprasGestionController::class, 'ocParametros'])->middleware('throttle:60,1')->name('app.compras.oc.parametros');
+    Route::get('/compras/calculadora', [\App\Http\Controllers\App\ComprasGestionController::class, 'calculadora'])->name('app.compras.calculadora');
+    Route::post('/compras/calculadora', [\App\Http\Controllers\App\ComprasGestionController::class, 'calcular'])->middleware('throttle:120,1')->name('app.compras.calcular');
     Route::get('/compras/oc/{orden}', [\App\Http\Controllers\App\ComprasGestionController::class, 'ocShow'])->name('app.compras.oc.show');
     Route::post('/compras/oc/{orden}/aprobar', [\App\Http\Controllers\App\ComprasGestionController::class, 'ocAprobar'])->middleware('throttle:60,1')->name('app.compras.oc.aprobar');
     Route::post('/compras/oc/{orden}/anular', [\App\Http\Controllers\App\ComprasGestionController::class, 'ocAnular'])->middleware('throttle:20,1')->name('app.compras.oc.anular');
@@ -140,6 +177,20 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     // podian vender.
     Route::put('/catalogo/productos/{producto}/precios', [\App\Http\Controllers\App\ProductosController::class, 'guardarPrecios'])->name('app.catalogo.productos.precios');
     Route::delete('/catalogo/productos/{producto}', [\App\Http\Controllers\App\ProductosController::class, 'eliminar'])->name('app.catalogo.productos.eliminar');
+
+    /*
+     * Listas de precios de a lista entera.
+     *
+     * El precio sólo se podia cargar producto por producto, entrando a la ficha
+     * de cada uno. Con ochenta variantes son ochenta pantallas, asi que no lo
+     * hizo nadie: el 2026-11-07, en produccion, las cuatro listas de Great Baby
+     * figuraban «sin precios cargados» — y sin precios el vendedor abre su
+     * panel, busca un cliente y no le aparece nada.
+     */
+    Route::get('/catalogo/listas-precios', [\App\Http\Controllers\App\ListasPreciosController::class, 'index'])->name('app.catalogo.listas-precios');
+    Route::get('/catalogo/listas-precios/{lista}', [\App\Http\Controllers\App\ListasPreciosController::class, 'show'])->name('app.catalogo.listas-precios.show');
+    Route::put('/catalogo/listas-precios/{lista}', [\App\Http\Controllers\App\ListasPreciosController::class, 'guardar'])->middleware('throttle:30,1');
+    Route::post('/catalogo/listas-precios/{lista}/previsualizar', [\App\Http\Controllers\App\ListasPreciosController::class, 'previsualizar'])->middleware('throttle:60,1');
     // FASE C · CRUD robusto
     Route::post('/catalogo/productos/{producto}/clonar', [\App\Http\Controllers\App\ProductosController::class, 'clonar'])->middleware('throttle:10,1')->name('app.catalogo.productos.clonar');
     // FASE F3.A17 · bulk-edit throttle: 10/min · opera sobre lote de hasta 1000
@@ -179,6 +230,8 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     // Sprint 4 · B.3 · CRUD Retenciones (Retefuente/Reteica/Reteiva).
     Route::get('/cartera/retenciones', [\App\Http\Controllers\App\RetencionesController::class, 'index'])->name('app.cartera.retenciones');
     Route::post('/cartera/retenciones', [\App\Http\Controllers\App\RetencionesController::class, 'guardar']);
+    // El interruptor de la lista: prender y apagar sin abrir el formulario.
+    Route::post('/cartera/retenciones/{regla}/activa', [\App\Http\Controllers\App\RetencionesController::class, 'alternar']);
     Route::delete('/cartera/retenciones/{regla}', [\App\Http\Controllers\App\RetencionesController::class, 'eliminar']);
     // Sprint 4 · B.1 · Notas crédito manuales.
     Route::get('/cartera/notas-credito', [\App\Http\Controllers\App\NotasCreditoController::class, 'index'])->name('app.cartera.notas-credito');
@@ -192,6 +245,49 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     Route::get('/contabilidad/asientos-manuales', [\App\Http\Controllers\App\AsientosManualesController::class, 'index'])->name('app.contabilidad.asientos-manuales');
     Route::post('/contabilidad/asientos-manuales', [\App\Http\Controllers\App\AsientosManualesController::class, 'crear'])->middleware('throttle:20,1');
     Route::post('/contabilidad/asientos-manuales/{asientoManual}/aprobar', [\App\Http\Controllers\App\AsientosManualesController::class, 'aprobar'])->middleware('throttle:20,1');
+    // Flujo de caja · proyección por área contra el real que calcula el ERP.
+    Route::get('/tesoreria/flujo-de-caja', [\App\Http\Controllers\App\FlujoDeCajaController::class, 'index'])->name('app.tesoreria.flujo');
+    Route::post('/tesoreria/flujo-de-caja/proyeccion', [\App\Http\Controllers\App\FlujoDeCajaController::class, 'guardarProyeccion'])->middleware('throttle:60,1');
+    Route::post('/tesoreria/flujo-de-caja/concepto', [\App\Http\Controllers\App\FlujoDeCajaController::class, 'guardarConcepto'])->middleware('throttle:20,1');
+
+    // Cuentas por pagar con datos del ERP · la otra lee de la API de SIIGO.
+    Route::get('/compras/cuentas-por-pagar', [\App\Http\Controllers\App\CuentasPorPagarController::class, 'index'])->name('app.compras.cuentas-por-pagar');
+
+    // Programación de pagos · qué se paga, cuándo y con la firma de quién.
+    Route::get('/compras/programacion-pagos', [\App\Http\Controllers\App\ProgramacionPagosController::class, 'index'])->name('app.compras.programacion-pagos');
+    Route::post('/compras/programacion-pagos', [\App\Http\Controllers\App\ProgramacionPagosController::class, 'guardar'])->middleware('throttle:20,1');
+    Route::post('/compras/programacion-pagos/{programacion}/autorizar', [\App\Http\Controllers\App\ProgramacionPagosController::class, 'autorizar'])->middleware('throttle:20,1');
+    Route::post('/compras/programacion-pagos/{programacion}/anular', [\App\Http\Controllers\App\ProgramacionPagosController::class, 'anular'])->middleware('throttle:20,1');
+
+    // Cajas y bancos · dónde está la plata y quién responde por ella.
+    /*
+     * Conciliacion bancaria contra el extracto.
+     *
+     * `conciliaciones_bancarias` existia desde septiembre y NINGUN controlador
+     * la nombraba: no habia ruta por donde llegarle. Y aun enganchada habria
+     * servido a medias, porque guardaba un saldo escrito a mano y la resta
+     * contra el sistema —eso dice cuanto sobra, no CUAL movimiento sobra.
+     */
+    Route::get('/contabilidad/conciliacion-bancaria', [\App\Http\Controllers\App\ConciliacionBancariaController::class, 'index'])->name('app.contabilidad.conciliacion-bancaria');
+    Route::post('/contabilidad/conciliacion-bancaria/previsualizar', [\App\Http\Controllers\App\ConciliacionBancariaController::class, 'previsualizar'])->middleware('throttle:30,1');
+    Route::post('/contabilidad/conciliacion-bancaria', [\App\Http\Controllers\App\ConciliacionBancariaController::class, 'guardar'])->middleware('throttle:20,1');
+    Route::get('/contabilidad/conciliacion-bancaria/{conciliacion}', [\App\Http\Controllers\App\ConciliacionBancariaController::class, 'show'])->name('app.contabilidad.conciliacion-bancaria.show');
+    Route::post('/contabilidad/conciliacion-bancaria/{conciliacion}/lineas/{linea}', [\App\Http\Controllers\App\ConciliacionBancariaController::class, 'marcarLinea'])->middleware('throttle:60,1');
+
+    Route::get('/contabilidad/cajas', [\App\Http\Controllers\App\CajasController::class, 'index'])->name('app.contabilidad.cajas');
+    Route::post('/contabilidad/cajas', [\App\Http\Controllers\App\CajasController::class, 'guardar'])->middleware('throttle:20,1');
+    Route::post('/contabilidad/cajas/{caja}/activa', [\App\Http\Controllers\App\CajasController::class, 'alternar'])->middleware('throttle:30,1');
+
+    // El día de una caja: ingresos, gastos y el arqueo con conteo físico.
+    Route::get('/contabilidad/cajas/{caja}/dia', [\App\Http\Controllers\App\ArqueoCajaController::class, 'index'])->name('app.contabilidad.caja.dia');
+    Route::post('/contabilidad/cajas/{caja}/movimientos', [\App\Http\Controllers\App\ArqueoCajaController::class, 'agregarMovimiento'])->middleware('throttle:60,1');
+    Route::post('/contabilidad/cajas/{caja}/movimientos/{movimiento}/quitar', [\App\Http\Controllers\App\ArqueoCajaController::class, 'quitarMovimiento'])->middleware('throttle:60,1');
+    Route::post('/contabilidad/cajas/{caja}/cerrar', [\App\Http\Controllers\App\ArqueoCajaController::class, 'cerrar'])->middleware('throttle:20,1');
+    // Pasar plata a otra caja: deja las dos puntas amarradas.
+    Route::post('/contabilidad/cajas/{caja}/trasladar', [\App\Http\Controllers\App\ArqueoCajaController::class, 'trasladar'])->middleware('throttle:30,1');
+
+    // Anular un asiento equivocado. Exige motivo; no aplica si ya está en SIIGO.
+    Route::post('/contabilidad/asientos-manuales/{asientoManual}/anular', [\App\Http\Controllers\App\AsientosManualesController::class, 'anular'])->middleware('throttle:20,1');
     Route::post('/contabilidad/asientos-manuales/{asientoManual}/reenviar-siigo', [\App\Http\Controllers\App\AsientosManualesController::class, 'reenviarSiigo'])->middleware('throttle:20,1');
     // Sprint 4 · B.3+ · Pagos a proveedor (con retenciones aplicadas).
     Route::get('/cartera/pagos-proveedor', [\App\Http\Controllers\App\PagosProveedorController::class, 'index'])->name('app.cartera.pagos-proveedor');
@@ -205,11 +301,47 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     Route::get('/compras/recepcion/nueva', [\App\Http\Controllers\App\ComprasGestionController::class, 'recepcionForm'])->name('app.compras.recepcion.nueva');
     Route::post('/compras/recepcion', [\App\Http\Controllers\App\ComprasGestionController::class, 'recepcionCrear'])->middleware('throttle:60,1')->name('app.compras.recepcion.crear');
     Route::get('/compras/recepcion/{recepcion}', [\App\Http\Controllers\App\ComprasGestionController::class, 'recepcionShow'])->name('app.compras.recepcion.show');
+    Route::post('/compras/recepcion/{recepcion}/reclasificar', [\App\Http\Controllers\App\ComprasGestionController::class, 'recepcionReclasificar'])->middleware('throttle:60,1')->name('app.compras.recepcion.reclasificar');
     Route::get('/compras/importacion', [\App\Http\Controllers\App\ComprasGestionController::class, 'importacionIndex'])->name('app.compras.importacion');
     Route::get('/compras/importacion/nueva', [\App\Http\Controllers\App\ComprasGestionController::class, 'importacionForm'])->name('app.compras.importacion.nueva');
     Route::get('/compras/importacion/{importacion}', [\App\Http\Controllers\App\ComprasGestionController::class, 'importacionShow'])->name('app.compras.importacion.show');
     Route::post('/compras/importacion', [\App\Http\Controllers\App\ComprasGestionController::class, 'importacionCrear'])->middleware('throttle:60,1')->name('app.compras.importacion.crear');
     Route::post('/compras/importacion/{importacion}/gasto', [\App\Http\Controllers\App\ComprasGestionController::class, 'importacionGastoAgregar'])->middleware('throttle:60,1')->name('app.compras.importacion.gasto');
+    // Documentos del contenedor (BL, listas de empaque, DUTA…) y comprobantes de gasto.
+    Route::post('/compras/importacion/{importacion}/documento', [\App\Http\Controllers\App\ImportacionDocumentosController::class, 'subir'])->middleware('throttle:60,1')->name('app.compras.importacion.documento');
+    Route::get('/compras/importacion/documento/{documento}', [\App\Http\Controllers\App\ImportacionDocumentosController::class, 'descargar'])->name('app.compras.importacion.documento.ver');
+    Route::delete('/compras/importacion/documento/{documento}', [\App\Http\Controllers\App\ImportacionDocumentosController::class, 'eliminar'])->name('app.compras.importacion.documento.quitar');
+    // Lo que Alejandro hace en Excel: sugerido, archivo para China, etiquetas y lista de empaque.
+    Route::get('/compras/sugerido', [\App\Http\Controllers\App\HerramientasComprasController::class, 'sugerido'])->middleware('throttle:60,1')->name('app.compras.sugerido');
+    Route::post('/compras/sugerido/{producto}/de-linea', [\App\Http\Controllers\App\HerramientasComprasController::class, 'deLinea'])->middleware('throttle:60,1')->name('app.compras.sugerido.de-linea');
+    Route::get('/compras/orden/{orden}/excel', [\App\Http\Controllers\App\HerramientasComprasController::class, 'excel'])->middleware('throttle:20,1')->name('app.compras.orden.excel');
+    Route::get('/compras/orden/{orden}/etiquetas', [\App\Http\Controllers\App\HerramientasComprasController::class, 'etiquetasPdf'])->middleware('throttle:20,1')->name('app.compras.orden.etiquetas');
+    Route::post('/catalogo/producto/{producto}/etiqueta', [\App\Http\Controllers\App\HerramientasComprasController::class, 'subirEtiqueta'])->middleware('throttle:30,1')->name('app.catalogo.etiqueta');
+    Route::delete('/catalogo/producto/{producto}/etiqueta', [\App\Http\Controllers\App\HerramientasComprasController::class, 'quitarEtiqueta'])->middleware('throttle:30,1')->name('app.catalogo.etiqueta.quitar');
+    Route::post('/catalogo/producto/{producto}/referencia', [\App\Http\Controllers\App\HerramientasComprasController::class, 'agregarReferencia'])->middleware('throttle:30,1')->name('app.catalogo.referencia');
+    Route::delete('/catalogo/referencia/{referencia}', [\App\Http\Controllers\App\HerramientasComprasController::class, 'quitarReferencia'])->middleware('throttle:30,1')->name('app.catalogo.referencia.quitar');
+    Route::get('/compras/importacion/{importacion}/documento/{documento}/comparar', [\App\Http\Controllers\App\HerramientasComprasController::class, 'comparacion'])->middleware('throttle:30,1')->name('app.compras.importacion.comparar');
+    Route::post('/compras/importacion/{importacion}/empaque/motivo', [\App\Http\Controllers\App\HerramientasComprasController::class, 'guardarMotivo'])->middleware('throttle:60,1')->name('app.compras.importacion.empaque.motivo');
+    Route::post('/compras/importacion/{importacion}/empaque/motivos', [\App\Http\Controllers\App\HerramientasComprasController::class, 'guardarMotivos'])->middleware('throttle:60,1')->name('app.compras.importacion.empaque.motivos');
+    Route::post('/compras/importacion/{importacion}/empaque/vincular', [\App\Http\Controllers\App\HerramientasComprasController::class, 'vincularReferencia'])->middleware('throttle:30,1')->name('app.compras.importacion.empaque.vincular');
+    // Pagos a China: vencimientos, seguimiento y lo que hay que tener listo cada semana.
+    Route::get('/compras/pagos-exterior', [\App\Http\Controllers\App\PagosExteriorController::class, 'index'])->name('app.compras.pagos-exterior');
+    Route::post('/compras/pagos-exterior/{compromiso}/seguimiento', [\App\Http\Controllers\App\PagosExteriorController::class, 'seguimiento'])->middleware('throttle:60,1')->name('app.compras.pagos-exterior.seguimiento');
+    Route::post('/compras/pagos-exterior/{compromiso}/pagado', [\App\Http\Controllers\App\PagosExteriorController::class, 'pagado'])->middleware('throttle:60,1')->name('app.compras.pagos-exterior.pagado');
+    Route::post('/compras/orden/{orden}/plan-pago', [\App\Http\Controllers\App\PagosExteriorController::class, 'plan'])->middleware('throttle:60,1')->name('app.compras.orden.plan-pago');
+    Route::post('/compras/orden/{orden}/productos', [\App\Http\Controllers\App\ImportacionSeguimientoController::class, 'crearProductos'])->middleware('throttle:30,1')->name('app.compras.orden.productos');
+    // Armar y seguir el contenedor: sus órdenes, etapas, declaraciones e inspecciones.
+    Route::put('/compras/importacion/{importacion}/datos', [\App\Http\Controllers\App\ImportacionSeguimientoController::class, 'actualizar'])->middleware('throttle:60,1')->name('app.compras.importacion.datos');
+    Route::post('/compras/orden/{orden}/contenedor', [\App\Http\Controllers\App\ImportacionSeguimientoController::class, 'ponerEnContenedor'])->middleware('throttle:60,1')->name('app.compras.orden.contenedor');
+    Route::post('/compras/importacion/{importacion}/orden', [\App\Http\Controllers\App\ImportacionSeguimientoController::class, 'ligarOrden'])->middleware('throttle:60,1')->name('app.compras.importacion.orden');
+    Route::delete('/compras/importacion/{importacion}/orden/{orden}', [\App\Http\Controllers\App\ImportacionSeguimientoController::class, 'soltarOrden'])->middleware('throttle:60,1')->name('app.compras.importacion.orden.soltar');
+    Route::post('/compras/importacion/{importacion}/etapa', [\App\Http\Controllers\App\ImportacionSeguimientoController::class, 'marcarEtapa'])->middleware('throttle:60,1')->name('app.compras.importacion.etapa');
+    Route::delete('/compras/importacion/{importacion}/etapa/{etapa}', [\App\Http\Controllers\App\ImportacionSeguimientoController::class, 'quitarEtapa'])->middleware('throttle:60,1')->name('app.compras.importacion.etapa.quitar');
+    Route::post('/compras/importacion/{importacion}/declaracion', [\App\Http\Controllers\App\ImportacionSeguimientoController::class, 'guardarDeclaracion'])->middleware('throttle:60,1')->name('app.compras.importacion.declaracion');
+    Route::put('/compras/importacion/{importacion}/declaracion/{declaracion}', [\App\Http\Controllers\App\ImportacionSeguimientoController::class, 'guardarDeclaracion'])->middleware('throttle:60,1')->name('app.compras.importacion.declaracion.editar');
+    Route::delete('/compras/importacion/{importacion}/declaracion/{declaracion}', [\App\Http\Controllers\App\ImportacionSeguimientoController::class, 'quitarDeclaracion'])->middleware('throttle:60,1')->name('app.compras.importacion.declaracion.quitar');
+    Route::post('/compras/importacion/{importacion}/inspeccion', [\App\Http\Controllers\App\ImportacionSeguimientoController::class, 'registrarInspeccion'])->middleware('throttle:60,1')->name('app.compras.importacion.inspeccion');
+    Route::post('/compras/importacion/{importacion}/inspeccion/{inspeccion}/resolver', [\App\Http\Controllers\App\ImportacionSeguimientoController::class, 'resolverInspeccion'])->middleware('throttle:60,1')->name('app.compras.importacion.inspeccion.resolver');
     Route::post('/compras/importacion/{importacion}/liquidar', [\App\Http\Controllers\App\ComprasGestionController::class, 'importacionLiquidar'])->middleware('throttle:20,1')->name('app.compras.importacion.liquidar');
     Route::get('/inventario', [\App\Http\Controllers\App\InventarioController::class, 'index'])->name('app.inventario.index');
     // Importador Excel del cliente Aracely (formato REPORTE · productos agregados)
@@ -233,6 +365,7 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     Route::post('/inventario/traslados/{id}/enviar', [\App\Http\Controllers\App\InventarioGestionController::class, 'trasladoEnviar'])->middleware('throttle:30,1')->name('app.inventario.traslado.enviar');
     Route::post('/inventario/traslados/{id}/recibir', [\App\Http\Controllers\App\InventarioGestionController::class, 'trasladoRecibir'])->middleware('throttle:30,1')->name('app.inventario.traslado.recibir');
     Route::post('/inventario/traslados/{id}/anular', [\App\Http\Controllers\App\InventarioGestionController::class, 'trasladoAnular'])->middleware('throttle:30,1')->name('app.inventario.traslado.anular');
+    Route::post('/inventario/traslados/{id}/aprobar', [\App\Http\Controllers\App\InventarioGestionController::class, 'trasladoAprobar'])->middleware('throttle:30,1')->name('app.inventario.traslado.aprobar');
     // PATRÓN α · UI captura conteo físico (Show + iniciar + guardar item + cerrar).
     Route::get('/inventario/conteos/{id}', [\App\Http\Controllers\App\InventarioGestionController::class, 'conteoShow'])->middleware('throttle:60,1')->name('app.inventario.conteo.show');
     Route::post('/inventario/conteos/{id}/iniciar', [\App\Http\Controllers\App\InventarioGestionController::class, 'conteoIniciar'])->middleware('throttle:20,1')->name('app.inventario.conteo.iniciar');
@@ -373,6 +506,9 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     Route::get('/catalogo', [\App\Http\Controllers\App\CatalogoController::class, 'index'])->name('app.catalogo.index');
     Route::get('/empresa', [\App\Http\Controllers\App\EmpresaController::class, 'index'])->name('app.empresa.index');
     Route::post('/empresa', [\App\Http\Controllers\App\EmpresaController::class, 'guardar'])->name('app.empresa.guardar');
+    // Multiempresa · cuenta de SIIGO de cada razón social que no es la principal.
+    Route::post('/empresa/{empresa}/siigo', [\App\Http\Controllers\App\EmpresaController::class, 'guardarSiigo'])->name('app.empresa.siigo');
+    Route::post('/empresa/{empresa}/siigo/probar', [\App\Http\Controllers\App\EmpresaController::class, 'probarSiigo'])->middleware('throttle:10,1')->name('app.empresa.siigo.probar');
     Route::get('/siigo', [\App\Http\Controllers\App\SiigoController::class, 'index'])->name('app.siigo.index');
     // F8 · panel de control del sync SIIGO
     Route::post('/siigo/kill-switch', [\App\Http\Controllers\App\SiigoController::class, 'toggleKillSwitch'])->name('app.siigo.kill-switch');
@@ -429,17 +565,189 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     Route::post('/gastos', [\App\Http\Controllers\App\GastosController::class, 'crear'])->name('app.gastos.crear');
     Route::post('/gastos/{gasto}/aprobar', [\App\Http\Controllers\App\GastosController::class, 'aprobar'])->name('app.gastos.aprobar');
     Route::post('/gastos/{gasto}/rechazar', [\App\Http\Controllers\App\GastosController::class, 'rechazar'])->name('app.gastos.rechazar');
+    // Lo que el contador decide: contra que cuenta va el gasto y si se declara.
+    Route::post('/gastos/{gasto}/contabilizar', [\App\Http\Controllers\App\GastosController::class, 'contabilizar'])->middleware('throttle:30,1')->name('app.gastos.contabilizar');
     Route::post('/gastos/{gasto}/pagado', [\App\Http\Controllers\App\GastosController::class, 'marcarPagado'])->name('app.gastos.pagado');
 
     // M9 · Gestión Humana
+    // F1 · Requisiciones. Van primero porque son el arranque del proceso, y
+    //      con su propio permiso: el líder de área entra acá sin ver el resto
+    //      de Gestión Humana (salarios y hojas de vida de toda la empresa).
+    Route::get('/rrhh/requisiciones', [\App\Http\Controllers\App\RequisicionesController::class, 'index'])->name('app.rrhh.requisiciones');
+    Route::post('/rrhh/requisiciones', [\App\Http\Controllers\App\RequisicionesController::class, 'store'])->name('app.rrhh.requisicion.crear');
+    Route::get('/rrhh/requisiciones/{requisicion}', [\App\Http\Controllers\App\RequisicionesController::class, 'show'])->name('app.rrhh.requisicion.show');
+    Route::put('/rrhh/requisiciones/{requisicion}', [\App\Http\Controllers\App\RequisicionesController::class, 'update'])->name('app.rrhh.requisicion.actualizar');
+    // El formato impreso · era el único de los doce sin PDF.
+    Route::get('/rrhh/requisiciones/{requisicion}/pdf', [\App\Http\Controllers\App\RequisicionesController::class, 'pdf'])->name('app.rrhh.requisicion.pdf');
+    Route::post('/rrhh/requisiciones/{requisicion}/enviar', [\App\Http\Controllers\App\RequisicionesController::class, 'enviar'])->name('app.rrhh.requisicion.enviar');
+    Route::post('/rrhh/requisiciones/{requisicion}/aprobar', [\App\Http\Controllers\App\RequisicionesController::class, 'aprobar'])->name('app.rrhh.requisicion.aprobar');
+    Route::post('/rrhh/requisiciones/{requisicion}/rechazar', [\App\Http\Controllers\App\RequisicionesController::class, 'rechazar'])->name('app.rrhh.requisicion.rechazar');
+    Route::post('/rrhh/requisiciones/{requisicion}/vacante', [\App\Http\Controllers\App\RequisicionesController::class, 'abrirVacante'])->name('app.rrhh.requisicion.vacante');
+    // F2 · El jefe elige de la terna desde SU pantalla, sin entrar a Gestión Humana.
+    Route::post('/rrhh/candidatos/{candidato}/elegir', [\App\Http\Controllers\App\RequisicionesController::class, 'elegirDeLaTerna'])->name('app.rrhh.candidato.elegir');
+
     Route::get('/rrhh/vacantes', [\App\Http\Controllers\App\RrhhController::class, 'vacantesIndex'])->name('app.rrhh.vacantes');
     Route::post('/rrhh/vacantes', [\App\Http\Controllers\App\RrhhController::class, 'vacanteCrear'])->name('app.rrhh.vacante.crear');
-    Route::get('/rrhh/vacantes/{vacante}', [\App\Http\Controllers\App\RrhhController::class, 'vacanteShow'])->name('app.rrhh.vacante.show');
-    Route::post('/rrhh/vacantes/{vacante}/candidatos', [\App\Http\Controllers\App\RrhhController::class, 'candidatoCrear'])->name('app.rrhh.candidato.crear');
-    Route::put('/rrhh/candidatos/{candidato}', [\App\Http\Controllers\App\RrhhController::class, 'candidatoActualizar'])->name('app.rrhh.candidato.actualizar');
+    // Una vacante abierta lo quedaba para siempre: el enum tenía «cerrada»
+    // desde el principio y no había con qué escribirla.
+    Route::post('/rrhh/vacantes/{vacante}/cerrar', [\App\Http\Controllers\App\RrhhController::class, 'vacanteCerrar'])->whereNumber('vacante')->name('app.rrhh.vacante.cerrar');
+    Route::post('/rrhh/vacantes/{vacante}/reabrir', [\App\Http\Controllers\App\RrhhController::class, 'vacanteReabrir'])->whereNumber('vacante')->name('app.rrhh.vacante.reabrir');
+    // F2 · La vacante se abre directo en su tablero de selección: la pantalla
+    //      vieja escribía etapas que ya no existen y rompía al leerlas.
+    Route::get('/rrhh/vacantes/{vacante}', [\App\Http\Controllers\App\SeleccionController::class, 'tablero'])->name('app.rrhh.vacante.show');
+    Route::post('/rrhh/vacantes/{vacante}/candidatos', [\App\Http\Controllers\App\SeleccionController::class, 'crear'])->name('app.rrhh.candidato.crear');
+    Route::post('/rrhh/candidatos/{candidato}/mover', [\App\Http\Controllers\App\SeleccionController::class, 'mover'])->name('app.rrhh.candidato.mover');
+    Route::post('/rrhh/candidatos/{candidato}/descartar', [\App\Http\Controllers\App\SeleccionController::class, 'descartar'])->name('app.rrhh.candidato.descartar');
+    Route::post('/rrhh/candidatos/{candidato}/antecedentes', [\App\Http\Controllers\App\SeleccionController::class, 'antecedentes'])->name('app.rrhh.candidato.antecedentes');
+    Route::post('/rrhh/candidatos/{candidato}/valorar', [\App\Http\Controllers\App\SeleccionController::class, 'valorar'])->name('app.rrhh.candidato.valorar');
+    Route::get('/rrhh/candidatos/{candidato}/hoja-de-vida', [\App\Http\Controllers\App\SeleccionController::class, 'verHojaDeVida'])->name('app.rrhh.candidato.hv');
+
+    /*
+     * Las preguntas que agrega el jefe del área a SU vacante.
+     *
+     * Las del formato son ejemplos de lo que se puede preguntar; éstas
+     * las pone quien sabe qué hay que preguntarle a alguien para este
+     * cargo. No se borran: se desactivan.
+     */
+    Route::post('/rrhh/vacantes/{vacante}/preguntas', [\App\Http\Controllers\App\SeleccionController::class, 'agregarPregunta'])->name('app.rrhh.vacante.pregunta');
+    Route::post('/rrhh/preguntas/{pregunta}/alternar', [\App\Http\Controllers\App\SeleccionController::class, 'alternarPregunta'])->name('app.rrhh.pregunta.alternar');
+    // El certificado de antecedentes, por controlador y no por URL pública:
+    // lleva el nombre y el documento de alguien que todavía no trabaja acá.
+    Route::get('/rrhh/candidatos/{candidato}/antecedentes/soporte', [\App\Http\Controllers\App\SeleccionController::class, 'verAntecedentes'])->name('app.rrhh.candidato.antecedentes.soporte');
     Route::get('/rrhh/empleados', [\App\Http\Controllers\App\RrhhController::class, 'empleadosIndex'])->name('app.rrhh.empleados');
     Route::post('/rrhh/empleados', [\App\Http\Controllers\App\RrhhController::class, 'empleadoCrear'])->name('app.rrhh.empleado.crear');
-    Route::put('/rrhh/empleados/{empleado}/induccion', [\App\Http\Controllers\App\RrhhController::class, 'empleadoInduccion'])->name('app.rrhh.empleado.induccion');
+
+    // F7 · «Mi espacio»: lo que el empleado ve de sí mismo.
+    Route::get('/mi-espacio', [\App\Http\Controllers\App\PortalColaboradorController::class, 'miEspacio'])->name('app.miespacio');
+    Route::post('/mi-espacio/asignaciones/{asignacion}/reportar', [\App\Http\Controllers\App\PortalColaboradorController::class, 'reportarNovedad'])->name('app.miespacio.reportar');
+    Route::get('/mi-espacio/documentos/{documento}', [\App\Http\Controllers\App\PortalColaboradorController::class, 'miDocumento'])->name('app.miespacio.documento');
+    Route::post('/rrhh/empleados/{empleado}/acceso', [\App\Http\Controllers\App\EmpleadoController::class, 'crearAcceso'])->name('app.rrhh.empleado.acceso');
+
+    // F9 · Dotación y herramientas: qué tiene cada quien.
+    Route::get('/rrhh/asignaciones', [\App\Http\Controllers\App\AsignacionesController::class, 'index'])->name('app.rrhh.asignaciones');
+    Route::post('/rrhh/asignaciones', [\App\Http\Controllers\App\AsignacionesController::class, 'entregar'])->name('app.rrhh.asignacion.entregar');
+    Route::post('/rrhh/asignaciones/{asignacion}/devolver', [\App\Http\Controllers\App\AsignacionesController::class, 'devolver'])->name('app.rrhh.asignacion.devolver');
+    Route::post('/rrhh/reportes/{reporte}/atender', [\App\Http\Controllers\App\AsignacionesController::class, 'atenderReporte'])->name('app.rrhh.reporte.atender');
+
+    // F11 · Los indicadores que se le presentan a la Junta Directiva.
+    // Fase B · El cuadro de novedades que se le manda al contador cada mes.
+    //   De acá sale el ausentismo de los indicadores: antes de esto el
+    //   indicador existía pero devolvía «no disponible».
+    Route::get('/rrhh/novedades', [\App\Http\Controllers\App\NovedadesController::class, 'index'])->name('app.rrhh.novedades');
+    Route::post('/rrhh/novedades', [\App\Http\Controllers\App\NovedadesController::class, 'store'])->name('app.rrhh.novedad.crear');
+    Route::put('/rrhh/novedades/{novedad}', [\App\Http\Controllers\App\NovedadesController::class, 'update'])->name('app.rrhh.novedad.actualizar');
+    Route::delete('/rrhh/novedades/{novedad}', [\App\Http\Controllers\App\NovedadesController::class, 'destroy'])->name('app.rrhh.novedad.eliminar');
+    Route::get('/rrhh/novedades/exportar', [\App\Http\Controllers\App\NovedadesController::class, 'exportar'])->name('app.rrhh.novedades.exportar');
+    Route::get('/rrhh/novedades/{novedad}/soporte', [\App\Http\Controllers\App\NovedadesController::class, 'verSoporte'])->name('app.rrhh.novedad.soporte');
+
+    Route::get('/rrhh/indicadores', [\App\Http\Controllers\App\IndicadoresRrhhController::class, 'index'])->name('app.rrhh.indicadores');
+    Route::get('/rrhh/indicadores/pdf', [\App\Http\Controllers\App\IndicadoresRrhhController::class, 'pdf'])->name('app.rrhh.indicadores.pdf');
+    Route::get('/rrhh/indicadores/retiros', [\App\Http\Controllers\App\IndicadoresRrhhController::class, 'retirosExcel'])->name('app.rrhh.indicadores.retiros');
+    Route::post('/rrhh/empleados/{empleado}/retiro', [\App\Http\Controllers\App\IndicadoresRrhhController::class, 'registrarRetiro'])->name('app.rrhh.empleado.retiro');
+
+    // F6 · Sacar la información: PDF para la carpeta física (que la norma
+    //      exige) y CSV para abrir en Excel, masivo y de a uno.
+    Route::get('/rrhh/empleados/{empleado}/pdf', [\App\Http\Controllers\App\ExportacionRrhhController::class, 'historiaLaboral'])->name('app.rrhh.empleado.pdf');
+    Route::get('/rrhh/candidatos/{candidato}/pdf', [\App\Http\Controllers\App\ExportacionRrhhController::class, 'procesoCandidato'])->name('app.rrhh.candidato.pdf');
+    Route::get('/rrhh/exportar/empleados', [\App\Http\Controllers\App\ExportacionRrhhController::class, 'empleadosExcel'])->name('app.rrhh.exportar.empleados');
+    Route::get('/rrhh/exportar/vacantes/{vacante}/candidatos', [\App\Http\Controllers\App\ExportacionRrhhController::class, 'candidatosExcel'])->name('app.rrhh.exportar.candidatos');
+    Route::get('/rrhh/exportar/requisiciones', [\App\Http\Controllers\App\ExportacionRrhhController::class, 'requisicionesExcel'])->name('app.rrhh.exportar.requisiciones');
+
+    // F8 · La inducción con temario. Antes era un campo de texto libre que
+    //      de siete personas llenó una.
+    Route::post('/rrhh/empleados/{empleado}/induccion-temario', [\App\Http\Controllers\App\InduccionController::class, 'guardar'])->name('app.rrhh.induccion.guardar');
+    Route::get('/rrhh/empleados/{empleado}/induccion-temario/pdf', [\App\Http\Controllers\App\InduccionController::class, 'pdf'])->name('app.rrhh.induccion.pdf');
+
+    // F10 · La liquidación definitiva del contrato. Vive en la ficha de la
+    //       persona, al lado de la entrevista de retiro y la entrega de
+    //       cargo: las tres son lo que pasa cuando alguien sale.
+    Route::post('/rrhh/empleados/{empleado}/liquidacion', [\App\Http\Controllers\App\LiquidacionController::class, 'calcular'])->name('app.rrhh.liquidacion.calcular');
+    Route::post('/rrhh/empleados/{empleado}/liquidacion/aprobar', [\App\Http\Controllers\App\LiquidacionController::class, 'aprobar'])->name('app.rrhh.liquidacion.aprobar');
+    Route::post('/rrhh/empleados/{empleado}/liquidacion/pagar', [\App\Http\Controllers\App\LiquidacionController::class, 'pagar'])->name('app.rrhh.liquidacion.pagar');
+    Route::get('/rrhh/empleados/{empleado}/liquidacion/pdf', [\App\Http\Controllers\App\LiquidacionController::class, 'pdf'])->name('app.rrhh.liquidacion.pdf');
+
+    // La bandeja de tesorería: su mano de los tres flujos. Los botones
+    //   vivían en pantallas que piden , que el Contador no tiene, así
+    //   que en la práctica los apretaba otro por ella.
+    Route::get('/rrhh/tesoreria', [\App\Http\Controllers\App\TesoreriaRrhhController::class, 'index'])->name('app.rrhh.tesoreria');
+
+    // Nómina · tres manos: Gestión Humana liquida, gerencia aprueba,
+    //          tesorería paga. Quien calcula lo que se paga no autoriza pagarlo.
+    Route::get('/rrhh/nomina', [\App\Http\Controllers\App\NominaController::class, 'index'])->name('app.rrhh.nomina');
+    Route::post('/rrhh/nomina/liquidar', [\App\Http\Controllers\App\NominaController::class, 'liquidar'])->name('app.rrhh.nomina.liquidar');
+    Route::post('/rrhh/nomina/{nomina}/aprobar', [\App\Http\Controllers\App\NominaController::class, 'aprobar'])->name('app.rrhh.nomina.aprobar');
+    Route::post('/rrhh/nomina/{nomina}/pagar', [\App\Http\Controllers\App\NominaController::class, 'pagar'])->name('app.rrhh.nomina.pagar');
+    Route::get('/rrhh/nomina/{nomina}/exportar', [\App\Http\Controllers\App\NominaController::class, 'exportar'])->name('app.rrhh.nomina.exportar');
+    Route::get('/rrhh/nomina/linea/{linea}/desprendible', [\App\Http\Controllers\App\NominaController::class, 'desprendible'])->name('app.rrhh.nomina.desprendible');
+
+    // Fase C · Las dos entrevistas del proceso: saber hacer y psicológica.
+    //          El tablero movía la tarjeta de etapa sin guardar una palabra
+    //          de lo que se preguntó.
+    Route::post('/rrhh/candidatos/{candidato}/entrevista', [\App\Http\Controllers\App\EntrevistaCandidatoController::class, 'guardar'])->name('app.rrhh.candidato.entrevista');
+    Route::get('/rrhh/entrevistas/{entrevista}/pdf', [\App\Http\Controllers\App\EntrevistaCandidatoController::class, 'pdf'])->name('app.rrhh.entrevista.pdf');
+
+    // Fase C · Las psicotécnicas del proceso de selección. Se guarda el
+    //          concepto del profesional y el informe firmado, NUNCA las
+    //          respuestas (dato sensible de salud · Ley 1581/2012).
+    Route::post('/rrhh/candidatos/{candidato}/psicotecnica', [\App\Http\Controllers\App\PruebaPsicotecnicaController::class, 'guardar'])->name('app.rrhh.candidato.psicotecnica');
+    Route::get('/rrhh/psicotecnicas/{prueba}/informe', [\App\Http\Controllers\App\PruebaPsicotecnicaController::class, 'verInforme'])->name('app.rrhh.psicotecnica.informe');
+
+    // Fase G · El listado maestro de formatos. El código, la versión y la
+    //          fecha del recuadro de control de cada impreso, que antes
+    //          estaban escritos dentro de las plantillas.
+    Route::get('/rrhh/formatos', [\App\Http\Controllers\App\FormatoControladoController::class, 'index'])->name('app.rrhh.formatos');
+    Route::put('/rrhh/formatos/{formato}', [\App\Http\Controllers\App\FormatoControladoController::class, 'actualizar'])->name('app.rrhh.formato.actualizar');
+
+    // F5a · La orden de contratación que autoriza la Junta Directiva.
+    //       Es el control entre «el jefe eligió» y «arranca la contratación».
+    Route::get('/rrhh/ordenes', [\App\Http\Controllers\App\OrdenContratacionController::class, 'index'])->name('app.rrhh.ordenes');
+    Route::post('/rrhh/candidatos/{candidato}/orden', [\App\Http\Controllers\App\OrdenContratacionController::class, 'solicitar'])->name('app.rrhh.orden.solicitar');
+    // Fase D1 · completar e imprimir el formato GH-F-018.
+    Route::put('/rrhh/ordenes/{orden}', [\App\Http\Controllers\App\OrdenContratacionController::class, 'actualizar'])->name('app.rrhh.orden.actualizar');
+    Route::get('/rrhh/ordenes/{orden}/pdf', [\App\Http\Controllers\App\OrdenContratacionController::class, 'pdf'])->name('app.rrhh.orden.pdf');
+    Route::post('/rrhh/ordenes/{orden}/autorizar', [\App\Http\Controllers\App\OrdenContratacionController::class, 'autorizar'])->name('app.rrhh.orden.autorizar');
+    Route::post('/rrhh/ordenes/{orden}/negar', [\App\Http\Controllers\App\OrdenContratacionController::class, 'negar'])->name('app.rrhh.orden.negar');
+
+    // F5b · El jefe de área y SU gente (concepto de período de prueba).
+    Route::get('/rrhh/mi-equipo', [\App\Http\Controllers\App\MiEquipoController::class, 'index'])->name('app.rrhh.miequipo');
+    Route::post('/rrhh/mi-equipo/{empleado}/concepto', [\App\Http\Controllers\App\MiEquipoController::class, 'conceptoDePrueba'])->name('app.rrhh.miequipo.concepto');
+
+    // F3 · Contratación: de «lo elegimos» a «ya trabaja acá».
+    Route::get('/rrhh/contrataciones', [\App\Http\Controllers\App\ContratacionController::class, 'index'])->name('app.rrhh.contrataciones');
+    Route::post('/rrhh/candidatos/{candidato}/contratar', [\App\Http\Controllers\App\ContratacionController::class, 'abrir'])->name('app.rrhh.contratacion.abrir');
+    Route::get('/rrhh/contrataciones/{contratacion}', [\App\Http\Controllers\App\ContratacionController::class, 'show'])->name('app.rrhh.contratacion.show');
+    Route::post('/rrhh/contrataciones/{contratacion}/acuerdo', [\App\Http\Controllers\App\ContratacionController::class, 'acuerdo'])->name('app.rrhh.contratacion.acuerdo');
+    Route::post('/rrhh/contrataciones/{contratacion}/examen', [\App\Http\Controllers\App\ContratacionController::class, 'examen'])->name('app.rrhh.contratacion.examen');
+    // Fase D2 · la carta SST-F-001 que la persona lleva a la IPS.
+    Route::get('/rrhh/contrataciones/{contratacion}/emo', [\App\Http\Controllers\App\OrdenExamenMedicoController::class, 'paraContratacion'])->name('app.rrhh.contratacion.emo');
+    // Fase D3 · la carta GH-F-007 con los papeles que debe traer el aspirante.
+    Route::get('/rrhh/contrataciones/{contratacion}/documentos-solicitud', [\App\Http\Controllers\App\ContratacionController::class, 'solicitudDocumentos'])->name('app.rrhh.contratacion.documentos.solicitud');
+    Route::post('/rrhh/contrataciones/{contratacion}/firmar', [\App\Http\Controllers\App\ContratacionController::class, 'firmarContrato'])->name('app.rrhh.contratacion.firmar');
+    Route::post('/rrhh/contrataciones/{contratacion}/afiliacion', [\App\Http\Controllers\App\ContratacionController::class, 'afiliacion'])->name('app.rrhh.contratacion.afiliacion');
+    Route::post('/rrhh/contrataciones/{contratacion}/documento', [\App\Http\Controllers\App\ContratacionController::class, 'subirDocumento'])->name('app.rrhh.contratacion.documento');
+    Route::post('/rrhh/contrataciones/{contratacion}/completar', [\App\Http\Controllers\App\ContratacionController::class, 'completar'])->name('app.rrhh.contratacion.completar');
+    Route::post('/rrhh/contrataciones/{contratacion}/cancelar', [\App\Http\Controllers\App\ContratacionController::class, 'cancelar'])->name('app.rrhh.contratacion.cancelar');
+    Route::get('/rrhh/documentos/{documento}', [\App\Http\Controllers\App\ContratacionController::class, 'verDocumento'])->name('app.rrhh.documento.ver');
+
+    // F3 + F4 · La ficha del empleado: historia laboral, inducción y prueba.
+    Route::get('/rrhh/empleados/{empleado}', [\App\Http\Controllers\App\EmpleadoController::class, 'show'])->name('app.rrhh.empleado.show');
+    // Fase A · los datos laborales que pide el cuadro de novedades.
+    Route::put('/rrhh/empleados/{empleado}/ficha', [\App\Http\Controllers\App\EmpleadoController::class, 'fichaLaboral'])->name('app.rrhh.empleado.ficha');
+    // El periódico, el de egreso y los demás, para quien ya trabaja acá.
+    Route::get('/rrhh/empleados/{empleado}/emo', [\App\Http\Controllers\App\OrdenExamenMedicoController::class, 'paraEmpleado'])->name('app.rrhh.empleado.emo');
+    Route::post('/rrhh/empleados/{empleado}/induccion', [\App\Http\Controllers\App\EmpleadoController::class, 'induccion'])->name('app.rrhh.empleado.induccion');
+    Route::post('/rrhh/empleados/{empleado}/prueba', [\App\Http\Controllers\App\EmpleadoController::class, 'periodoDePrueba'])->name('app.rrhh.empleado.prueba');
+    Route::post('/rrhh/empleados/{empleado}/prueba/evaluar', [\App\Http\Controllers\App\EmpleadoController::class, 'evaluarPrueba'])->name('app.rrhh.empleado.prueba.evaluar');
+    // Fase E · el formato GH-F-015 de una evaluación concreta.
+    Route::get('/rrhh/empleados/{empleado}/prueba/{evaluacion}/pdf', [\App\Http\Controllers\App\EmpleadoController::class, 'evaluacionPruebaPdf'])->name('app.rrhh.empleado.prueba.pdf');
+    // Fase F1 · entrevista de retiro.
+    Route::post('/rrhh/empleados/{empleado}/entrevista-retiro', [\App\Http\Controllers\App\EntrevistaRetiroController::class, 'guardar'])->name('app.rrhh.empleado.entrevista-retiro');
+    Route::get('/rrhh/empleados/{empleado}/entrevista-retiro/pdf', [\App\Http\Controllers\App\EntrevistaRetiroController::class, 'pdf'])->name('app.rrhh.empleado.entrevista-retiro.pdf');
+    // Fase F2 · entrega de cargo y paz y salvo · tres áreas, tres firmas.
+    Route::post('/rrhh/empleados/{empleado}/entrega-cargo', [\App\Http\Controllers\App\EntregaCargoController::class, 'guardar'])->name('app.rrhh.empleado.entrega-cargo');
+    Route::post('/rrhh/empleados/{empleado}/entrega-cargo/{area}/confirmar', [\App\Http\Controllers\App\EntregaCargoController::class, 'confirmar'])->name('app.rrhh.empleado.entrega-cargo.confirmar');
+    Route::get('/rrhh/empleados/{empleado}/entrega-cargo/pdf', [\App\Http\Controllers\App\EntregaCargoController::class, 'pdf'])->name('app.rrhh.empleado.entrega-cargo.pdf');
+    Route::post('/rrhh/empleados/{empleado}/documento', [\App\Http\Controllers\App\EmpleadoController::class, 'subirDocumento'])->name('app.rrhh.empleado.documento');
 
     // LOG-J9 · Marketing (préstamos de productos a bodega)
     Route::get('/marketing', [\App\Http\Controllers\App\MarketingPrestamosController::class, 'index'])->name('app.marketing.index');
@@ -456,15 +764,52 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     Route::delete('/marketing/parrilla/{post}', [\App\Http\Controllers\App\MarketingController::class, 'postEliminar'])->name('app.marketing.post.eliminar');
     Route::get('/marketing/producto/{producto}/ficha', [\App\Http\Controllers\App\MarketingController::class, 'fichaEditar'])->name('app.marketing.ficha');
     Route::match(['put', 'post'], '/marketing/producto/{producto}/ficha', [\App\Http\Controllers\App\MarketingController::class, 'fichaGuardar'])->name('app.marketing.ficha.guardar');
+    // MKT-1 a MKT-4 · publicación, piezas, tablero por contenedor y producción
+    Route::post('/marketing/producto/{producto}/publicar', [\App\Http\Controllers\App\MarketingController::class, 'publicar'])->name('app.marketing.publicar');
+    Route::put('/marketing/producto/{producto}/piezas', [\App\Http\Controllers\App\MarketingController::class, 'piezas'])->name('app.marketing.piezas');
+    Route::get('/marketing/tablero', [\App\Http\Controllers\App\MarketingController::class, 'tablero'])->name('app.marketing.tablero');
+    Route::post('/marketing/parrilla/{post}/etapa', [\App\Http\Controllers\App\MarketingController::class, 'postEtapa'])->name('app.marketing.post.etapa');
+    // Tablero de lanzamiento por contenedor (TABLERO GREAT BABY.pdf, 30-oct).
+    Route::get('/marketing/lanzamientos', [\App\Http\Controllers\App\MarketingLanzamientosController::class, 'index'])->name('app.marketing.lanzamientos');
+    Route::post('/marketing/lanzamientos', [\App\Http\Controllers\App\MarketingLanzamientosController::class, 'crear'])->name('app.marketing.lanzamiento.crear');
+    Route::get('/marketing/lanzamientos/{lanzamiento}', [\App\Http\Controllers\App\MarketingLanzamientosController::class, 'show'])->name('app.marketing.lanzamiento');
+    Route::post('/marketing/lanzamientos/tarjeta/{tarjeta}/mover', [\App\Http\Controllers\App\MarketingLanzamientosController::class, 'mover'])->middleware('throttle:120,1')->name('app.marketing.lanzamiento.mover');
+    Route::post('/marketing/lanzamientos/tarjeta/{tarjeta}/aprobar', [\App\Http\Controllers\App\MarketingLanzamientosController::class, 'aprobar'])->name('app.marketing.lanzamiento.aprobar');
+    Route::post('/marketing/lanzamientos/tarjeta/{tarjeta}/devolver', [\App\Http\Controllers\App\MarketingLanzamientosController::class, 'devolver'])->name('app.marketing.lanzamiento.devolver');
+    Route::put('/marketing/lanzamientos/tarjeta/{tarjeta}', [\App\Http\Controllers\App\MarketingLanzamientosController::class, 'actualizar'])->name('app.marketing.lanzamiento.actualizar');
+    Route::post('/marketing/lanzamientos/tarjeta/{tarjeta}/comentario', [\App\Http\Controllers\App\MarketingLanzamientosController::class, 'comentar'])->middleware('throttle:60,1')->name('app.marketing.lanzamiento.comentar');
+    Route::post('/marketing/lanzamientos/item/{item}', [\App\Http\Controllers\App\MarketingLanzamientosController::class, 'marcar'])->middleware('throttle:240,1')->name('app.marketing.lanzamiento.marcar');
+    Route::get('/marketing/creativos', [\App\Http\Controllers\App\MarketingCreativosController::class, 'index'])->name('app.marketing.creativos');
+    Route::post('/marketing/creativos', [\App\Http\Controllers\App\MarketingCreativosController::class, 'subir'])->middleware('throttle:60,1')->name('app.marketing.creativo.subir');
+    Route::put('/marketing/creativos/{creativo}', [\App\Http\Controllers\App\MarketingCreativosController::class, 'actualizar'])->name('app.marketing.creativo.actualizar');
+    Route::delete('/marketing/creativos/{creativo}', [\App\Http\Controllers\App\MarketingCreativosController::class, 'eliminar'])->name('app.marketing.creativo.eliminar');
+    Route::get('/marketing/creativos/{creativo}/ver', [\App\Http\Controllers\App\MarketingCreativosController::class, 'ver'])->name('app.marketing.creativo.ver');
+    Route::get('/marketing/creativos/{creativo}/descargar', [\App\Http\Controllers\App\MarketingCreativosController::class, 'descargar'])->name('app.marketing.creativo.descargar');
 
     // M7 · Garantías
     Route::get('/garantias', [\App\Http\Controllers\App\GarantiasController::class, 'index'])->name('app.garantias.index');
     Route::get('/garantias/nueva', [\App\Http\Controllers\App\GarantiasController::class, 'form'])->name('app.garantias.nueva');
+    /*
+     * El buscador del formulario. Va ANTES de `/garantias/{ticket}`, que no
+     * tiene restricción numérica y se comería la palabra.
+     *
+     * No reusa `/app/inventario/buscar-variantes`: ese está cerrado a
+     * Aracely, alistador y admin de bodega, y quien atiende garantías
+     * —ServicioCliente— recibía 403.
+     */
+    Route::get('/garantias/buscar-producto', [\App\Http\Controllers\App\GarantiasController::class, 'buscarProducto'])->middleware('throttle:60,1')->name('app.garantias.buscar-producto');
     Route::post('/garantias', [\App\Http\Controllers\App\GarantiasController::class, 'crear'])->name('app.garantias.crear');
-    Route::get('/garantias/{ticket}', [\App\Http\Controllers\App\GarantiasController::class, 'show'])->name('app.garantias.show');
+    Route::get('/garantias/{ticket}', [\App\Http\Controllers\App\GarantiasController::class, 'show'])->where('ticket', '[0-9]+')->name('app.garantias.show');
     Route::post('/garantias/{ticket}/decidir', [\App\Http\Controllers\App\GarantiasController::class, 'decidir'])->name('app.garantias.decidir');
     Route::post('/garantias/{ticket}/reposicion', [\App\Http\Controllers\App\GarantiasController::class, 'iniciarReposicion'])->name('app.garantias.reposicion');
     Route::post('/garantias/{ticket}/cerrar', [\App\Http\Controllers\App\GarantiasController::class, 'cerrar'])->name('app.garantias.cerrar');
+    /*
+     * El costo va aparte del cierre a proposito: el flete llega facturado
+     * semanas despues, y exigirlo para cerrar solo lograria que cierren con
+     * ceros. El ticket guardaba `valor_reposicion` —lo que paga el CLIENTE, que
+     * en garantia es cero— y nada de lo que le cuesta a la empresa.
+     */
+    Route::post('/garantias/{ticket}/costo', [\App\Http\Controllers\App\GarantiasController::class, 'cargarCosto'])->middleware('throttle:30,1')->name('app.garantias.costo');
 
     // Pedidos B2B (recibidos del portal)
     Route::get('/pedidos-b2b', [\App\Http\Controllers\App\PedidosB2BController::class, 'index'])->name('app.pedidos-b2b.index');
@@ -472,10 +817,14 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     Route::post('/pedidos-b2b/{pedido}/aprobar', [\App\Http\Controllers\App\PedidosB2BController::class, 'aprobar'])->name('app.pedidos-b2b.aprobar');
     Route::post('/pedidos-b2b/{pedido}/rechazar', [\App\Http\Controllers\App\PedidosB2BController::class, 'rechazar'])->name('app.pedidos-b2b.rechazar');
     Route::post('/pedidos-b2b/{pedido}/facturar', [\App\Http\Controllers\App\PedidosB2BController::class, 'facturar'])->name('app.pedidos-b2b.facturar');
+    Route::post('/pedidos-b2b/{pedido}/empresa', [\App\Http\Controllers\App\PedidosB2BController::class, 'cambiarEmpresa'])->name('app.pedidos-b2b.empresa');
     // LOG-J7 · gate duro: no se despacha sin factura (raíz inventario negativo que reportó Don Jorge).
     Route::post('/pedidos-b2b/{pedido}/despachar', [\App\Http\Controllers\App\PedidosB2BController::class, 'despachar'])->middleware('throttle:30,1')->name('app.pedidos-b2b.despachar');
 
     // LOG-J5 · Cola Don Jorge · reemplaza el Excel manual de alistamiento.
+    // Seguimiento de guías · dónde está lo que ya salió de bodega.
+    Route::get('/logistica/guias', [\App\Http\Controllers\App\SeguimientoGuiasController::class, 'index'])->name('app.guias.index');
+    Route::post('/logistica/guias/{pedido}/entregar', [\App\Http\Controllers\App\SeguimientoGuiasController::class, 'entregar'])->middleware('throttle:60,1')->name('app.guias.entregar');
     Route::get('/logistica/cola-jorge', [\App\Http\Controllers\App\ColaJorgeController::class, 'index'])->name('app.cola-jorge.index');
     Route::post('/logistica/cola-jorge/{pedido}/asignar', [\App\Http\Controllers\App\ColaJorgeController::class, 'asignar'])->middleware('throttle:60,1')->name('app.cola-jorge.asignar');
     Route::post('/logistica/cola-jorge/{pedido}/iniciar', [\App\Http\Controllers\App\ColaJorgeController::class, 'iniciar'])->middleware('throttle:60,1')->name('app.cola-jorge.iniciar');
@@ -490,7 +839,35 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     Route::get('/vendedor/ventas-por-cliente', [\App\Http\Controllers\App\VendedorPedidoController::class, 'ventasPorCliente'])->name('app.vendedor.ventas-por-cliente');
     Route::get('/vendedor/contado-credito', [\App\Http\Controllers\App\VendedorPedidoController::class, 'contadoCredito'])->name('app.vendedor.contado-credito');
     Route::get('/vendedor/seguimiento', [\App\Http\Controllers\App\VendedorPedidoController::class, 'seguimiento'])->name('app.vendedor.seguimiento');
+    /*
+     * Cotizaciones. El ERP solo sabia levantar pedidos, y un cliente B2B casi
+     * nunca compra en la primera conversacion: pide precios, compara y vuelve a
+     * la semana. Ese paso se hacia por WhatsApp y se transcribia a mano.
+     *
+     * La cotizacion se ARMA en la pantalla del vendedor (misma ruta de pedido
+     * nuevo, otro boton): el carrito y los precios son los mismos, lo unico que
+     * cambia es a donde va.
+     */
+    /*
+     * Metas del equipo comercial. El panel del vendedor mostraba lo vendido y
+     * nada contra que compararlo: «$4.120.000 este mes» no dice si va bien o
+     * mal, y el vendedor se enteraba en la reunion de fin de mes.
+     *
+     * Van ANTES de `/vendedor/{...}` no haria falta, pero quedan juntas con lo
+     * comercial a proposito. Ponerlas es de Gerencia; verlas, de cada quien.
+     */
+    Route::get('/vendedor/metas', [\App\Http\Controllers\App\MetasVendedorController::class, 'index'])->name('app.vendedor.metas');
+    Route::post('/vendedor/metas', [\App\Http\Controllers\App\MetasVendedorController::class, 'guardar'])->middleware('throttle:30,1');
+    Route::post('/vendedor/metas/copiar', [\App\Http\Controllers\App\MetasVendedorController::class, 'copiarDelMesAnterior'])->middleware('throttle:20,1');
+
+    Route::get('/cotizaciones', [\App\Http\Controllers\App\CotizacionesController::class, 'index'])->name('app.cotizaciones.index');
+    Route::get('/cotizaciones/{cotizacion}', [\App\Http\Controllers\App\CotizacionesController::class, 'show'])->name('app.cotizaciones.show');
+    Route::post('/cotizaciones/{cotizacion}/enviar', [\App\Http\Controllers\App\CotizacionesController::class, 'enviar'])->middleware('throttle:30,1');
+    Route::post('/cotizaciones/{cotizacion}/responder', [\App\Http\Controllers\App\CotizacionesController::class, 'responder'])->middleware('throttle:30,1');
+    Route::post('/cotizaciones/{cotizacion}/convertir', [\App\Http\Controllers\App\CotizacionesController::class, 'convertir'])->middleware('throttle:20,1');
+
     Route::get('/vendedor/pedido-nuevo/{contactoId}', [\App\Http\Controllers\App\VendedorPedidoController::class, 'nuevo'])->name('app.vendedor.nuevo');
+    Route::post('/vendedor/cotizacion-nueva/{contactoId}', [\App\Http\Controllers\App\CotizacionesController::class, 'crear'])->middleware('throttle:30,1')->name('app.vendedor.cotizar');
     Route::post('/vendedor/pedido-nuevo/{contactoId}', [\App\Http\Controllers\App\VendedorPedidoController::class, 'confirmar'])->middleware('throttle:30,1')->name('app.vendedor.confirmar');
 
     // CRM
@@ -638,6 +1015,9 @@ Route::middleware(['web', 'auth'])->group(function () {
         ->middleware('throttle:60,1')->name('dropi.escaner.analizar');
     Route::post('/dropi/escaner/despachar', [EscanerController::class, 'despachar'])
         ->middleware('throttle:30,1')->name('dropi.escaner.despachar');
+    // 4.6 · escanear guía → facturar el pedido despachado que quedó sin factura.
+    Route::post('/dropi/escaner/facturar', [EscanerController::class, 'facturar'])
+        ->middleware('throttle:30,1')->name('dropi.escaner.facturar');
 
     // Re-audit SEG C1 · rate-limit para bloquear enumeración de estados de cuenta.
     Route::get('/cartera/estado-cuenta/{contacto}', [EstadoCuentaController::class, 'pdf'])
@@ -653,12 +1033,16 @@ Route::middleware(['web', 'auth'])->group(function () {
     Route::get('/catalogo/variante/{variante}/etiqueta', [CodigoBarrasController::class, 'etiqueta'])->name('catalogo.variante.etiqueta');
     Route::get('/catalogo/etiquetas-lote', [EtiquetasMasivasController::class, 'pdf'])->name('catalogo.etiquetas.lote');
 
-    // Compras: sólo Aracely/Gerencia (fix auditor #19 — antes cualquier autenticado veía costos de proveedor)
+    // PDF de Compras: los abre quien tiene la sección de esa pantalla, que ya ve esos costos.
+    // Cada controlador lo revisa (fix auditor #19: antes los veía cualquier autenticado).
+    // Re-audit M2 R3 PATRÓN R (SEG-A6) · throttle en PDFs (DomPDF es CPU-heavy).
+    Route::get('/compras/orden/{orden}/pdf', [OrdenCompraPdfController::class, 'pdf'])->middleware('throttle:20,1')->name('compras.orden.pdf');
+    Route::get('/compras/orden/{orden}/preliquidacion/pdf', [OrdenCompraPdfController::class, 'preliquidacion'])->middleware('throttle:20,1')->name('compras.orden.preliquidacion.pdf');
+    Route::get('/compras/recepcion/{recepcion}/pdf', [RecepcionPdfController::class, 'pdf'])->middleware('throttle:20,1')->name('compras.recepcion.pdf');
+    Route::get('/compras/importacion/{importacion}/pdf', [ImportacionPdfController::class, 'pdf'])->middleware('throttle:20,1')->name('compras.importacion.pdf');
+
+    // Compras: sólo Aracely/Gerencia
     Route::middleware(['auth', \App\Http\Middleware\SoloAracely::class])->group(function () {
-        // Re-audit M2 R3 PATRÓN R (SEG-A6) · throttle en PDFs (DomPDF es CPU-heavy).
-        Route::get('/compras/orden/{orden}/pdf', [OrdenCompraPdfController::class, 'pdf'])->middleware('throttle:20,1')->name('compras.orden.pdf');
-        Route::get('/compras/recepcion/{recepcion}/pdf', [RecepcionPdfController::class, 'pdf'])->middleware('throttle:20,1')->name('compras.recepcion.pdf');
-        Route::get('/compras/importacion/{importacion}/pdf', [ImportacionPdfController::class, 'pdf'])->middleware('throttle:20,1')->name('compras.importacion.pdf');
         Route::get('/compras/plantilla/oc', [PlantillaImportOCController::class, 'descargar'])->name('compras.plantilla.oc');
         Route::post('/compras/import/oc', [ImportOCController::class, 'importar'])->middleware('throttle:10,1')->name('compras.import.oc');
     });

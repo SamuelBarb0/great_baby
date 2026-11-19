@@ -6,6 +6,7 @@ use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
 use Filament\Http\Middleware\DisableBladeIconComponents;
 use Filament\Http\Middleware\DispatchServingFilamentEvent;
+use Filament\Navigation\NavigationItem;
 use App\Modules\Dropi\Filament\Pages\DashboardDropi;
 use Filament\Pages\Dashboard;
 use Filament\Panel;
@@ -24,6 +25,9 @@ use Illuminate\View\Middleware\ShareErrorsFromSession;
 
 class AdminPanelProvider extends PanelProvider
 {
+    /** La lista (carga masiva), crear (`/add`) y editar (`/edit?id=`) cuelgan de aquí. */
+    private const PREFIJO_PRODUCTOS_DROPI = 'https://app.dropi.co/dashboard/products';
+
     public function panel(Panel $panel): Panel
     {
         return $panel
@@ -54,11 +58,41 @@ class AdminPanelProvider extends PanelProvider
             //  circulación y se borra cuando la clienta confirme.
             // ──────────────────────────────────────────────────────────────
             ->discoverResources(in: app_path('Modules/Dropi/Filament/Resources'), for: 'App\Modules\Dropi\Filament\Resources')
+            // Organizado el 6-nov por lo que la persona va a hacer: despachar,
+            // productos, plata y configuración (antes todo colgaba de «Dropi»).
             ->navigationGroups([
                 'Operación',
-                'Dropi',
-                'Catálogo',
+                'Productos',
+                'Dinero',
+                'Compras',
+                'Contabilidad',
+                'Configuración',
             ])
+            // «Importar productos» (Excel al catálogo del ERP) salió del panel
+            //   el 17-nov: en un panel sólo de Dropi, cargar productos es
+            //   cargarlos EN Dropi.
+            // Este enlace abría la lista de productos de Dropi para usar su
+            //   «Carga masiva» / «Actualización masiva» con plantilla, pero esas
+            //   plantillas no aplican los cambios (18-nov-2026: «cargó con
+            //   errores» y 0 de 89 cambios, sin dejar reintentar). Ahora va a la
+            //   carga del ERP, que crea productos y mueve stock en Dropi fila por
+            //   fila y verifica cada una.
+            ->navigationItems([
+                NavigationItem::make('Cargar productos y stock a Dropi')
+                    ->url('/app/dropi/carga-productos')
+                    ->icon('heroicon-o-arrow-up-tray')
+                    ->group('Productos')
+                    ->sort(5)
+                    ->visible(fn (): bool => \App\Auth\Permisos::puede(auth()->user(), 'dropi_productos')),
+            ])
+            // «Compras» y «Contabilidad» son de la línea Dropi, separadas de las
+            //   otras empresas (7-nov): ver Dropi\Filament\Support\PaginaTablaDropi.
+            // «Crear producto en Dropi» vive como botón dentro de «Mis productos
+            // en Dropi» (7-nov); este script lo abre en una ventana aparte.
+            ->renderHook(
+                PanelsRenderHook::BODY_END,
+                fn (): string => self::scriptVentanaDropi(),
+            )
             ->discoverPages(in: app_path('Modules/Dropi/Filament/Pages'), for: 'App\Modules\Dropi\Filament\Pages')
             ->discoverWidgets(in: app_path('Modules/Dropi/Filament/Widgets'), for: 'App\Modules\Dropi\Filament\Widgets')
             ->pages([
@@ -123,5 +157,33 @@ class AdminPanelProvider extends PanelProvider
                         .'<div style="position:fixed;bottom:16px;right:16px;z-index:99999;background:#0f8fa6;color:#fff;padding:.45rem .9rem;border-radius:999px;font-size:.75rem;font-weight:800;letter-spacing:.03em;box-shadow:0 6px 18px rgba(0,0,0,.35);display:flex;align-items:center;gap:.4rem;">📦 MODO DROPI</div>';
                 },
             );
+    }
+
+    /**
+     * Abre «Crear producto en Dropi» y los «Editar en Dropi» de «Mis productos
+     * en Dropi» en una ventana a la derecha de la pantalla en vez de una
+     * pestaña: así se ve el panel y Dropi a la vez. Atrapa todo enlace al
+     * formulario de productos de Dropi.
+     *
+     * Dropi no deja embeberse: responde `X-Frame-Options: SAMEORIGIN` y el
+     * navegador muestra el iframe bloqueado (probado el 6-nov). La ventana usa
+     * la sesión de Dropi que la persona ya tiene. Sin JavaScript abre pestaña.
+     */
+    private static function scriptVentanaDropi(): string
+    {
+        $prefijo = json_encode(self::PREFIJO_PRODUCTOS_DROPI);
+
+        return <<<HTML
+<script>
+document.addEventListener('click', function (e) {
+    var a = e.target.closest ? e.target.closest('a[href^=' + JSON.stringify({$prefijo}) + ']') : null;
+    if (!a || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    e.preventDefault();
+    var ancho = Math.min(1200, Math.round(screen.availWidth * 0.6));
+    var w = window.open(a.href, 'gb_dropi_crear', 'popup,width=' + ancho + ',height=' + Math.round(screen.availHeight * 0.9) + ',left=' + (screen.availWidth - ancho) + ',top=0');
+    if (w) { w.focus(); } else { window.open(a.href, '_blank'); }
+}, true);
+</script>
+HTML;
     }
 }

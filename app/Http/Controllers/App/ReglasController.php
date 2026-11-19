@@ -13,23 +13,75 @@ use Inertia\Response;
 
 class ReglasController extends Controller implements HasMiddleware
 {
+    /**
+     * El grupo que puede tocar quien entra por `reglas_contables`.
+     *
+     * Se compara contra el prefijo de la clave (`contable.cta_bancos_default`
+     * → `contable`). Está acá y no en la pantalla porque el filtro de verdad
+     * tiene que estar del lado del servidor: esconder un campo en el front no
+     * impide que alguien mande la clave a mano.
+     */
+    private const GRUPO_CONTABLE = 'contable';
+
     public static function middleware(): array
     {
         return [
             new Middleware(function (Request $r, \Closure $next) {
-                abort_unless($r->user()?->esAracely(), 403, 'Solo administración puede editar reglas.');
+                $u = $r->user();
+
+                abort_unless(
+                    $u?->esAracely() || \App\Auth\Permisos::puede($u, 'reglas_contables'),
+                    403,
+                    'Solo administración puede editar reglas.',
+                );
+
                 return $next($r);
             }),
         ];
     }
 
-    public function index(): Response
+    /** ¿Entra a todo, o sólo al grupo contable? */
+    private function veTodo(Request $r): bool
+    {
+        return (bool) $r->user()?->esAracely();
+    }
+
+    public function index(Request $r): Response
     {
         // Sembrar cualquier regla nueva del código que aún no esté en BD.
         Reglas::seedDefaults();
 
+        $grupos = Reglas::porGrupo();
+
+        /*
+         * Al contador se le muestra exactamente lo que va a poder guardar.
+         *
+         * `porGrupo()` agrupa por la columna `grupo`, no por el prefijo de la
+         * clave, y dentro de «Contabilidad» hay dos reglas que NO son
+         * `contable.*`: `compras.permitir_auto_aprobar` y
+         * `contabilidad.permitir_auto_aprobar_asiento`. Son los candados de
+         * doble aprobación —si quien crea una OC o un asiento puede aprobarlo
+         * solo—, o sea separación de funciones, y eso no lo ajusta quien queda
+         * controlado por ellos.
+         *
+         * Así que se filtra por la CLAVE, no por el grupo. Si se filtrara por
+         * grupo, la pantalla mostraría dos campos que el servidor después
+         * rechaza, que es justo el defecto que este ERP arrastra en otras
+         * pantallas: ofrecer algo y después negarlo.
+         */
+        if (! $this->veTodo($r)) {
+            $grupos = collect($grupos)
+                ->map(fn (array $reglas) => array_values(array_filter(
+                    $reglas,
+                    fn (array $x) => str_starts_with($x['clave'], self::GRUPO_CONTABLE.'.'),
+                )))
+                ->filter(fn (array $reglas) => $reglas !== [])
+                ->all();
+        }
+
         return Inertia::render('Reglas', [
-            'grupos' => Reglas::porGrupo(),
+            'grupos' => $grupos,
+            'soloContable' => ! $this->veTodo($r),
             'gruposLabels' => [
                 'empaque' => '📦 Estación de Empaque',
                 'dashboard' => '📊 Torre de Control',
@@ -38,6 +90,10 @@ class ReglasController extends Controller implements HasMiddleware
                 'catalogo' => '🏷️ Catálogo',
                 'crm' => '👥 CRM',
                 'contable' => '📚 Contabilidad',
+                'rrhh' => '🧑‍💼 Gestión Humana · novedades',
+                'logistica' => '🚚 Logística · guías y entregas',
+                'notificaciones' => '🔔 Avisos · campana y correo',
+                'garantias' => '🛠 Garantías · plazos',
                 // Faltaba: las 24 reglas de SIIGO se pintaban bajo el título
                 // crudo «siigo», que es justo el grupo donde están los tipos de
                 // documento sin los cuales no sale ni una nota crédito.
@@ -74,9 +130,21 @@ class ReglasController extends Controller implements HasMiddleware
             'reglas.*.valor' => ['nullable'],
         ]);
 
+        $soloContable = ! $this->veTodo($request);
+
         $actualizadas = 0;
         $errores = [];
         foreach ($data['reglas'] as $r) {
+            /*
+             * El candado real. Quien entra por `reglas_contables` sólo escribe
+             * `contable.*`, aunque mande otra clave a mano: la pantalla filtra
+             * por comodidad, esto filtra por seguridad.
+             */
+            if ($soloContable && ! str_starts_with($r['clave'], self::GRUPO_CONTABLE.'.')) {
+                $errores[] = $r['clave'].': sólo administración cambia reglas fuera de Contabilidad.';
+                continue;
+            }
+
             try {
                 Reglas::set($r['clave'], $r['valor'] ?? '');
                 $actualizadas++;

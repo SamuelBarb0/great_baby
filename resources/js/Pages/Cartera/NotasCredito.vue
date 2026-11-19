@@ -3,14 +3,24 @@ import { ref, reactive } from 'vue';
 import { Head, router } from '@inertiajs/vue3';
 import { FileMinus, Plus, Search, Cloud, CloudOff, RefreshCw, X } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
+import Paginacion from '@/Components/Paginacion.vue';
+import { useDestacar } from '@/composables/useDestacar';
+import PestanasSeccion from '@/Components/PestanasSeccion.vue';
+import { pestanasNotas } from '@/composables/usePestanasContables';
 import { useMoney } from '@/composables/useMoney';
 import AppConfirmModal from '@/Components/AppConfirmModal.vue';
+import FiltroEjes from '@/Components/FiltroEjes.vue';
 
 const props = defineProps({
     filtros: { type: Object, required: true },
     notas: { type: Object, required: true },
     kpis: { type: Object, required: true },
+    opcionesEjes: { type: Object, default: () => ({ lineas: [], destinos: [] }) },
 });
+
+// La Torre SIIGO enlaza aca con `?destacar=<id>` cuando el documento no tiene
+// pantalla de detalle propia. Senala la fila en vez de dar un 404.
+const { clasesDe } = useDestacar();
 
 // Confirmaciones con el modal propio: el confirm() nativo queda bloqueado
 // dentro del iframe de la app de escritorio y en celular ignora el diseno.
@@ -19,6 +29,9 @@ const modalConfirm = ref(null);
 const { money } = useMoney();
 const q = ref(props.filtros.q);
 const sinSiigo = ref(!!props.filtros.sin_siigo);
+// Línea de negocio y destino de la factura: «Dropi» = las notas del e-commerce.
+const linea = ref(props.filtros.linea || 'todas');
+const destino = ref(props.filtros.destino || 'todas');
 
 let debounce;
 const filtrar = () => {
@@ -27,6 +40,8 @@ const filtrar = () => {
         router.get('/app/cartera/notas-credito', {
             q: q.value || null,
             sin_siigo: sinSiigo.value ? 1 : null,
+            linea: linea.value !== 'todas' ? linea.value : null,
+            destino: destino.value !== 'todas' ? destino.value : null,
         }, { preserveScroll: true, preserveState: true, replace: true });
     }, 300);
 };
@@ -96,6 +111,8 @@ const reenviar = (nc) => {
     <Head title="Notas crédito · manuales + SIIGO"/>
     <AppLayout>
         <div class="space-y-4 max-w-7xl">
+            <PestanasSeccion :pestanas="pestanasNotas"/>
+
             <div class="flex items-start justify-between gap-3 flex-wrap">
                 <div>
                     <h1 class="text-2xl font-bold flex items-center gap-2">
@@ -134,6 +151,8 @@ const reenviar = (nc) => {
                     <label class="flex items-center gap-1 text-xs whitespace-nowrap">
                         <input type="checkbox" v-model="sinSiigo" @change="filtrar" class="rounded"/> Solo sin SIIGO
                     </label>
+                    <FiltroEjes v-model:linea="linea" v-model:destino="destino" :opciones="opcionesEjes"
+                                @update:linea="filtrar" @update:destino="filtrar"/>
                 </div>
             </div>
 
@@ -154,7 +173,7 @@ const reenviar = (nc) => {
                         </tr>
                     </thead>
                     <tbody class="divide-y">
-                        <tr v-for="n in notas.data" :key="n.id" class="hover:bg-surface-50">
+                        <tr v-for="n in notas.data" :key="n.id" :class="['hover:bg-surface-50', clasesDe(n.id)]">
                             <td class="p-2 font-mono font-bold text-brand-600">{{ n.numero }}</td>
                             <td class="p-2 font-mono text-xs">{{ n.factura_numero }}</td>
                             <td class="p-2 text-xs">{{ n.cliente }}</td>
@@ -181,6 +200,7 @@ const reenviar = (nc) => {
                     </tbody>
                 </table>
             </div>
+            <Paginacion :pagina="notas" etiqueta="notas credito"/>
 
             <!-- Modal crear NC -->
             <div v-if="modal" @click.self="modal = false" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">

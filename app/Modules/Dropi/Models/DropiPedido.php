@@ -36,6 +36,8 @@ class DropiPedido extends Model implements AuditableContract
         'entregado_at' => 'datetime',
         'devuelto_at' => 'datetime',
         'pagado_at' => 'datetime',
+        'dropi_creado_at' => 'datetime',
+        'alertas_enviadas' => 'array',
         'ari_enviado_at' => 'datetime',
         'notificado_despacho_at' => 'datetime',
         'requiere_factura_b2b' => 'boolean',

@@ -1,8 +1,11 @@
 <script setup>
 import { ref, reactive, computed } from 'vue';
+import { useBogotaDate } from '@/composables/useBogotaDate';
 import { Head, router } from '@inertiajs/vue3';
 import { CreditCard, Plus, Search, X, Calculator } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
+import Paginacion from '@/Components/Paginacion.vue';
+import { useDestacar } from '@/composables/useDestacar';
 import { useMoney } from '@/composables/useMoney';
 import AppConfirmModal from '@/Components/AppConfirmModal.vue';
 
@@ -10,7 +13,13 @@ const props = defineProps({
     filtros: { type: Object, required: true },
     pagos: { type: Object, required: true },
     kpis: { type: Object, required: true },
+    // Conceptos de retención con tarifa y base · salen de las reglas activas.
+    conceptos: { type: Array, default: () => [] },
 });
+
+// La Torre SIIGO enlaza aca con `?destacar=<id>` cuando el documento no tiene
+// pantalla de detalle propia. Senala la fila en vez de dar un 404.
+const { clasesDe } = useDestacar();
 
 // Confirmaciones con el modal propio: el confirm() nativo queda bloqueado
 // dentro del iframe de la app de escritorio y en celular ignora el diseno.
@@ -31,53 +40,71 @@ const filtrar = () => {
 const modal = ref(false);
 const proc = ref(false);
 
-// COMP-B5 · acciones por fila. Usamos fetch directo porque los endpoints
-// confirmar/anular/reenviar devuelven back() con flash, igual que Inertia espera.
+/*
+ * COMP-B5 · acciones por fila, por Inertia y no por `fetch` crudo.
+ *
+ * Antes iban con un `fetch` a mano y después un `router.reload()`. El fetch
+ * seguía el 302 de `back()` por su cuenta, renderizaba la página en una
+ * respuesta que se tiraba a la basura y ahí se consumía el flash: para cuando
+ * el reload llegaba, el mensaje ya no existía. Así que confirmar, anular y
+ * reenviar NUNCA mostraron su resultado — ni el bueno ni el malo.
+ *
+ * Se notó al probar el control de cuatro ojos: el pago correctamente no se
+ * confirmaba y la pantalla no decía nada, que es la peor manera de negar algo.
+ * `router.post` maneja el redirect y el flash como corresponde.
+ */
 const trabajando = ref(null);
-const postConCsrf = (url) => fetch(url, {
-    method: 'POST',
-    headers: {
-        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '',
-        'X-Requested-With': 'XMLHttpRequest',
-        'Accept': 'application/json',
-    },
-    credentials: 'same-origin',
-});
+const accionDeFila = (id, url, datos = {}) => {
+    trabajando.value = id;
+    router.post(url, datos, {
+        preserveScroll: true,
+        onFinish: () => (trabajando.value = null),
+    });
+};
 const confirmar = async (p) => {
     modalConfirm.value = {
         titulo: `¿Confirmar el pago #${p.id}?`,
         mensaje: `Se registra por $${p.monto_neto.toLocaleString()} y se envía a SIIGO.`,
         color: 'emerald',
         textoConfirmar: 'Confirmar pago',
-        onConfirmar: async () => {
+        onConfirmar: () => {
             modalConfirm.value = null;
-            trabajando.value = p.id;
-            try { await postConCsrf(`/app/cartera/pagos-proveedor/${p.id}/confirmar`); }
-            finally { trabajando.value = null; setTimeout(() => router.reload({ preserveScroll: true }), 400); }
+            accionDeFila(p.id, `/app/cartera/pagos-proveedor/${p.id}/confirmar`);
         },
     };
 };
 const anular = async (p) => {
     modalConfirm.value = {
         titulo: `¿Anular el pago #${p.id}?`,
-        mensaje: 'No vas a poder volver atrás.',
+        // Si estaba confirmado, anularlo además revierte su asiento: la
+        // cancelación del pasivo, la salida de banco y las retenciones.
+        mensaje: p.estado === 'confirmado'
+            ? 'No vas a poder volver atrás. También se revierten las líneas que este pago escribió en el libro, incluidas las retenciones.'
+            : 'No vas a poder volver atrás.',
         color: 'rose',
         textoConfirmar: 'Anular',
-        onConfirmar: async () => {
+        pedirMotivo: { etiqueta: '¿Por qué se anula?', minimo: 5 },
+        onConfirmar: (motivo) => {
             modalConfirm.value = null;
-            trabajando.value = p.id;
-            try { await postConCsrf(`/app/cartera/pagos-proveedor/${p.id}/anular`); }
-            finally { trabajando.value = null; setTimeout(() => router.reload({ preserveScroll: true }), 400); }
+            accionDeFila(p.id, `/app/cartera/pagos-proveedor/${p.id}/anular`, { motivo });
         },
     };
 };
-const reenviar = async (p) => {
-    trabajando.value = p.id;
-    try { await postConCsrf(`/app/cartera/pagos-proveedor/${p.id}/reenviar-siigo`); }
-    finally { trabajando.value = null; setTimeout(() => router.reload({ preserveScroll: true }), 400); }
-};
+const reenviar = (p) => accionDeFila(p.id, `/app/cartera/pagos-proveedor/${p.id}/reenviar-siigo`);
+/*
+ * Va ARRIBA de `form`, que la usa para la fecha por defecto.
+ *
+ * Estaba declarada 86 lineas mas abajo, asi que `form` llamaba a
+ * `hoyBogota()` antes de que existiera y el componente entero reventaba al
+ * montar con «Cannot access before initialization». La pantalla de pagos a
+ * proveedor quedaba EN BLANCO: no se podia registrar ni un pago desde la
+ * interfaz, y como el error vive en la consola del navegador, desde afuera
+ * parecia una pagina que no cargaba y ya.
+ */
+const { hoy: hoyBogota } = useBogotaDate();
+
 const form = reactive({
-    fecha: new Date().toISOString().slice(0, 10),
+    fecha: hoyBogota(),
     contacto_id: null,
     monto_bruto: 0,
     iva: 0,
@@ -88,6 +115,15 @@ const form = reactive({
     cuenta_puc_egreso: '', // QA-FIX #10 · backend resuelve default desde settings
     observaciones: '',
 });
+
+/**
+ * El concepto elegido, para mostrar su tarifa debajo del desplegable.
+ *
+ * Funcion y no `computed`: en este componente el `computed` reventaba con un
+ * «Cannot access before initialization» al montar. Una funcion se resuelve
+ * cuando la plantilla la llama y no depende del orden de las declaraciones.
+ */
+const conceptoElegido = () => props.conceptos.find((c) => c.valor === form.concepto_retencion);
 const buscar = ref('');
 const encontrados = ref([]);
 
@@ -101,18 +137,38 @@ const buscarProv = () => {
     }, 300);
 };
 
+// Lo informa la ficha del proveedor: si es autorretenedor no se le practica
+// retefuente, y conviene verlo ANTES de guardar.
+const autorretenedor = ref(false);
+
 const seleccionarProv = (p) => {
     form.contacto_id = p.id;
+
+    /*
+     * La ciudad decide el ReteICA. El buscador NO la devolvia —ignoraba el
+     * `rol=proveedor` y mandaba solo id/nombre/documento— asi que el formulario
+     * se quedaba con «Bogota» fijo y se le retenia ReteICA de Bogota a
+     * cualquier proveedor del pais.
+     */
     if (p.ciudad) form.ciudad = p.ciudad;
-    if (p.gran_contribuyente !== undefined) form.gran_contribuyente = !!p.gran_contribuyente;
+
+    /*
+     * «Gran contribuyente» NO viene del contacto: no existe esa columna. Es una
+     * casilla que marca quien registra el pago. Antes esta linea leia
+     * `p.gran_contribuyente`, que siempre era undefined — parecia que se
+     * autollenaba y nunca lo hizo.
+     */
+    autorretenedor.value = !! p.es_autorretenedor;
+
     buscar.value = `${p.nombre || p.nombre_completo} · NIT ${p.documento || '—'}`;
     encontrados.value = [];
 };
 
+
 const abrir = () => {
     modal.value = true;
     Object.assign(form, {
-        fecha: new Date().toISOString().slice(0, 10),
+        fecha: hoyBogota(),
         contacto_id: null, monto_bruto: 0, iva: 0,
         concepto_retencion: 'compras_generales', ciudad: 'Bogotá',
         gran_contribuyente: false, metodo: 'transferencia',
@@ -124,6 +180,15 @@ const abrir = () => {
 // QA-FIX #11 · preview desde motor REAL vía API (evita hardcodes que mienten
 // si Aracely edita las reglas de retenciones).
 import { watch } from 'vue';
+
+/*
+ * La fecha de HOY en Colombia, no en UTC.
+ *
+ * `new Date().toISOString().slice(0,10)` convierte a UTC antes de
+ * recortar: entre las 19:00 y la medianoche hora Bogotá devuelve el día
+ * siguiente. Acá eso no era un filtro incómodo sino la fecha que queda
+ * escrita en el documento.
+ */
 const preview = ref({ lineas: [], total: 0, neto: 0, es_autorretenedor: false });
 let debPreview;
 const cargarPreview = () => {
@@ -241,7 +306,7 @@ const guardar = () => {
                         </tr>
                     </thead>
                     <tbody class="divide-y">
-                        <tr v-for="p in pagos.data" :key="p.id" class="hover:bg-surface-50">
+                        <tr v-for="p in pagos.data" :key="p.id" :class="['hover:bg-surface-50', clasesDe(p.id)]">
                             <td class="p-2 text-xs">{{ p.fecha }}</td>
                             <td class="p-2 text-xs">{{ p.proveedor }} <span class="text-surface-400">· {{ p.ciudad }}</span></td>
                             <td class="p-2 text-right font-mono">{{ money(p.monto_bruto) }}</td>
@@ -271,28 +336,38 @@ const guardar = () => {
                                 </span>
                             </td>
                             <td class="p-2 whitespace-nowrap">
-                                <!-- COMP-B5 · botones solo visibles cuando aún no está confirmado -->
-                                <template v-if="p.estado === 'pendiente'">
-                                    <button @click="confirmar(p)" :disabled="trabajando === p.id"
-                                            class="px-2 py-1 text-[11px] rounded bg-emerald-600 text-white font-bold hover:bg-emerald-700 disabled:opacity-50">
-                                        {{ trabajando === p.id ? '…' : '✓ Confirmar y enviar a SIIGO' }}
-                                    </button>
-                                    <button @click="anular(p)" :disabled="trabajando === p.id"
-                                            class="ml-1 px-2 py-1 text-[11px] rounded bg-red-100 text-red-700 hover:bg-red-200 disabled:opacity-50">
-                                        Anular
-                                    </button>
-                                </template>
-                                <button v-else-if="!p.siigo_voucher_id && p.estado === 'confirmado'" @click="reenviar(p)"
+                                <button v-if="p.estado === 'pendiente'" @click="confirmar(p)" :disabled="trabajando === p.id"
+                                        class="px-2 py-1 text-[11px] rounded bg-emerald-600 text-white font-bold hover:bg-emerald-700 disabled:opacity-50">
+                                    {{ trabajando === p.id ? '…' : '✓ Confirmar y enviar a SIIGO' }}
+                                </button>
+                                <button v-if="p.estado === 'confirmado' && !p.siigo_voucher_id" @click="reenviar(p)"
                                         class="px-2 py-1 text-[11px] rounded bg-amber-100 text-amber-700 hover:bg-amber-200">
                                     Reenviar
                                 </button>
-                                <span v-else class="text-[10px] text-surface-400">—</span>
+                                <!--
+                                    Anular también cuando ya está confirmado.
+
+                                    Sólo salía en los pendientes, y un pendiente
+                                    todavía no escribió nada: el caso que de
+                                    verdad hay que poder deshacer —el pago
+                                    confirmado por error, que ya canceló el
+                                    pasivo y registró retenciones— no tenía
+                                    botón. El corte real es haber llegado a
+                                    SIIGO: de ahí en adelante se arregla allá
+                                    con nota de ajuste, y el servidor lo frena.
+                                -->
+                                <button v-if="!p.siigo_voucher_id && p.estado !== 'anulado'" @click="anular(p)" :disabled="trabajando === p.id"
+                                        class="ml-1 px-2 py-1 text-[11px] rounded bg-red-100 text-red-700 hover:bg-red-200 disabled:opacity-50">
+                                    Anular
+                                </button>
+                                <span v-if="p.siigo_voucher_id || p.estado === 'anulado'" class="text-[10px] text-surface-400">—</span>
                             </td>
                         </tr>
                         <tr v-if="!pagos.data.length"><td colspan="10" class="p-6 text-center text-surface-500 text-sm">Sin pagos.</td></tr>
                     </tbody>
                 </table>
             </div>
+            <Paginacion :pagina="pagos" etiqueta="pagos"/>
 
             <div v-if="modal" @click.self="modal = false" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
                 <div class="card p-5 w-full max-w-2xl space-y-3 max-h-[90vh] overflow-y-auto">
@@ -332,16 +407,27 @@ const guardar = () => {
                             <div>
                                 <label class="text-xs font-semibold">Concepto retención *</label>
                                 <select v-model="form.concepto_retencion" required class="input w-full text-sm">
-                                    <option value="compras_generales">Compras generales</option>
-                                    <option value="servicios_generales">Servicios generales</option>
-                                    <option value="honorarios">Honorarios</option>
-                                    <option value="arrendamientos">Arrendamientos</option>
-                                    <option value="transporte_carga">Transporte carga</option>
+                                    <option v-for="c in conceptos" :key="c.valor" :value="c.valor">
+                                        {{ c.etiqueta }}
+                                    </option>
                                 </select>
+                                <!--
+                                    Se muestra la tarifa y la base: quien paga
+                                    tiene que poder ver por qué le retuvo eso,
+                                    o por qué no le retuvo nada.
+                                -->
+                                <p v-if="conceptoElegido()" class="text-[11px] text-surface-500 mt-1">
+                                    {{ conceptoElegido().tarifa }} % desde {{ money(conceptoElegido().base) }}
+                                </p>
                             </div>
                             <div>
                                 <label class="text-xs font-semibold">Ciudad</label>
                                 <input v-model="form.ciudad" placeholder="Bogotá" class="input w-full text-sm"/>
+                                <!-- La ciudad decide el ReteICA: se trae de la
+                                     ficha del proveedor, no se asume Bogotá. -->
+                                <p v-if="autorretenedor" class="text-[11px] text-amber-600 mt-1">
+                                    Este proveedor es autorretenedor: no se le practica retefuente.
+                                </p>
                             </div>
                             <div>
                                 <label class="text-xs font-semibold">Método *</label>

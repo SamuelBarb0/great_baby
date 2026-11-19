@@ -35,9 +35,9 @@ class InventarioUbicacionResource extends Resource
 
     protected static ?string $pluralModelLabel = 'Ubicaciones de inventario';
 
-    protected static string|\UnitEnum|null $navigationGroup = 'Catálogo';
+    protected static string|\UnitEnum|null $navigationGroup = 'Productos';
 
-    protected static ?int $navigationSort = 3;
+    protected static ?int $navigationSort = 7;
 
     protected static ?string $slug = 'ubicaciones';
 

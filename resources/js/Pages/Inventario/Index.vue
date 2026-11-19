@@ -45,7 +45,8 @@ const badgeEstado = (e) => ({
             </div>
 
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                <KpiCard label="Unidades en stock" :value="kpis.unidades_stock" color="emerald" :icon="Package"/>
+                <KpiCard label="Unidades vendibles" :value="kpis.unidades_stock" color="emerald" :icon="Package"
+                         :subtitle="kpis.unidades_no_vendibles ? `+ ${kpis.unidades_no_vendibles.toLocaleString('es-CO')} en avería o garantía` : ''"/>
                 <KpiCard label="Alertas activas" :value="kpis.alertas_activas" color="red" :icon="AlertCircle"/>
                 <KpiCard label="Traslados en tránsito" :value="kpis.traslados_transito" color="blue" :icon="ArrowRightLeft"/>
                 <KpiCard label="Reservas activas" :value="kpis.reservas_activas" color="amber" :icon="ClipboardCheck"/>

@@ -11,10 +11,14 @@ import { ref, computed } from 'vue';
 import { Head, Link, router } from '@inertiajs/vue3';
 import { TrendingUp, FileText } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
+import FiltroEjes from '@/Components/FiltroEjes.vue';
+import PestanasSeccion from '@/Components/PestanasSeccion.vue';
+import { pestanasReportes } from '@/composables/usePestanasContables';
 import { useMoney } from '@/composables/useMoney';
 
 const props = defineProps({
     filtros: { type: Object, required: true },
+    opcionesEjes: { type: Object, default: () => ({ lineas: [], destinos: [] }) },
     ingresos: { type: Object, required: true },
     costo_ventas: { type: Object, required: true },
     costos_produccion: { type: Object, required: true },
@@ -31,7 +35,16 @@ const desde = ref(props.filtros.desde);
 const hasta = ref(props.filtros.hasta);
 const incluirAnulados = ref(!!props.filtros.incluir_anulados);
 
+/*
+ * Los dos ejes. Sin esto no habia forma de sacar el balance FISCAL —el que
+ * tiene que cuadrar contra SIIGO— desde ninguna pantalla: el libro diario si
+ * filtraba y este no, asi que daban numeros distintos del mismo mes.
+ */
+const linea = ref(props.filtros.linea || 'todas');
+const destino = ref(props.filtros.destino || 'todas');
+
 const consultar = () => router.get('/app/contabilidad/estado-resultados', {
+    linea: linea.value, destino: destino.value,
     desde: desde.value,
     hasta: hasta.value,
     incluir_anulados: incluirAnulados.value ? 1 : 0,
@@ -51,6 +64,8 @@ const bloques = computed(() => [
     <Head title="Estado de resultados"/>
     <AppLayout>
         <div class="space-y-5 max-w-5xl">
+            <PestanasSeccion :pestanas="pestanasReportes"/>
+
             <div>
                 <h1 class="text-2xl font-bold flex items-center gap-2">
                     <TrendingUp class="h-6 w-6 text-brand-600"/> Estado de resultados
@@ -74,6 +89,9 @@ const bloques = computed(() => [
                            class="h-5 w-5 rounded border-surface-300 text-brand-600 focus:ring-brand-500"/>
                     Incluir anulados
                 </label>
+                <!-- Los dos ejes: sin esto el balance FISCAL no se podia sacar de
+                     ninguna pantalla, aunque es el que cuadra contra SIIGO. -->
+                <FiltroEjes v-model:linea="linea" v-model:destino="destino" :opciones="opcionesEjes"/>
                 <button @click="consultar" class="btn-primary min-h-[44px] sm:min-h-0">Ver resultado</button>
             </div>
 

@@ -8,6 +8,8 @@ use App\Modules\Cartera\Models\FacturaVenta;
 use App\Modules\Cartera\Models\MovimientoContable;
 use App\Modules\Cartera\Models\PagoVenta;
 use App\Modules\Cartera\Models\SolicitudCredito;
+use App\Modules\Contabilidad\Support\FiltroEjes;
+use App\Support\ExportadorCsv;
 use Illuminate\Http\Request;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Routing\Controllers\HasMiddleware;
@@ -30,23 +32,35 @@ class CarteraExtrasController extends Controller implements HasMiddleware
         return [new Middleware(function (Request $r, \Closure $next) {
             $u = $r->user();
             // A1 FIX #10 · 'Cobrador' removido · nunca estuvo seeded, era shadow role.
-            abort_unless($u && $u->esContable(), 403);
+            /*
+             * Tres pantallas con tres casillas distintas: cobranzas, excepciones
+             * de credito y libro diario. La puerta de clase deja entrar con
+             * cualquiera; cada metodo exige la suya mas abajo.
+             */
+            abort_unless(\App\Auth\Permisos::tieneAlguno($u, [
+                'cobranzas', 'excepciones_credito', 'libro_diario', 'cartera_dashboard',
+            ]), 403);
             return $next($r);
         })];
     }
 
     // ---------- REPORTES CARTERA ----------
-    public function reportes(): Response
+    public function reportes(Request $request): Response
     {
+        // Línea de negocio y destino: `?linea=dropi` = la cartera del e-commerce.
+        $ejes = FiltroEjes::deRequest($request);
+        $fac = fn () => $ejes->aplicar(FacturaVenta::query());
+        $pag = fn () => $ejes->aplicarPor(PagoVenta::query(), 'factura');   // el pago lleva los ejes de su factura
+
         $hoy = today('America/Bogota');
         $desde30 = $hoy->copy()->subDays(30);
 
-        $totalCartera = (float) FacturaVenta::whereIn('estado', ['pendiente','abonada','vencida'])
+        $totalCartera = (float) $fac()->whereIn('estado', ['pendiente','abonada','vencida'])
             ->whereNull('deleted_at')->sum('saldo');
 
         // Edad saldos (0-30, 31-60, 61-90, 91-120, 120+)
         $edades = ['0-30' => 0, '31-60' => 0, '61-90' => 0, '91-120' => 0, '120+' => 0];
-        $vencidas = FacturaVenta::whereIn('estado', ['pendiente','abonada','vencida'])
+        $vencidas = $fac()->whereIn('estado', ['pendiente','abonada','vencida'])
             ->whereNull('deleted_at')->get(['saldo', 'fecha_vencimiento']);
         foreach ($vencidas as $f) {
             $dias = $hoy->diffInDays($f->fecha_vencimiento, absolute: false);
@@ -61,6 +75,7 @@ class CarteraExtrasController extends Controller implements HasMiddleware
 
         $topMorosos = DB::table('facturas_venta as f')
             ->join('contactos as c', 'c.id', '=', 'f.contacto_id')
+            ->tap(fn ($q) => $ejes->aplicar($q, 'f'))
             ->whereNull('f.deleted_at')->whereNull('c.deleted_at')
             ->whereNotIn('f.estado', ['pagada','anulada'])
             ->where('f.fecha_vencimiento', '<', $hoy)
@@ -68,15 +83,17 @@ class CarteraExtrasController extends Controller implements HasMiddleware
             ->groupBy('c.id','c.nombre_completo','c.razon_social','c.telefono')
             ->orderByDesc('saldo')->limit(20)->get();
 
-        $consignaciones = PagoVenta::whereBetween('fecha', [$desde30, $hoy])
+        $consignaciones = $pag()->whereBetween('fecha', [$desde30, $hoy])
             ->selectRaw('medio_pago, COUNT(*) as n, SUM(monto_aplicado) as total')
             ->groupBy('medio_pago')->orderByDesc('total')->get();
 
         return Inertia::render('Cartera/Reportes', [
+            'filtros' => $ejes->aParametros(),
+            'opcionesEjes' => FiltroEjes::opciones(),
             'kpis' => [
                 'total_cartera' => $totalCartera,
-                'vencidas_count' => FacturaVenta::where('estado','vencida')->whereNull('deleted_at')->count(),
-                'cobrado_30d' => (float) PagoVenta::whereBetween('fecha', [$desde30, $hoy])->sum('monto_aplicado'),
+                'vencidas_count' => $fac()->where('estado','vencida')->whereNull('deleted_at')->count(),
+                'cobrado_30d' => (float) $pag()->whereBetween('fecha', [$desde30, $hoy])->sum('monto_aplicado'),
             ],
             'edades' => $edades,
             'topMorosos' => $topMorosos->map(fn ($r) => [
@@ -93,6 +110,7 @@ class CarteraExtrasController extends Controller implements HasMiddleware
     }
 
     // ---------- COBRANZA REGISTRO ----------
+    /** Casilla: Cobranzas. */
     public function cobranzasIndex(Request $request): Response
     {
         $cobros = CobranzaRegistro::with(['factura:id,numero', 'gestor:id,name'])
@@ -131,6 +149,7 @@ class CarteraExtrasController extends Controller implements HasMiddleware
     }
 
     // ---------- SOLICITUD CRÉDITO ----------
+    /** Casilla: Excepciones de credito. */
     public function solicitudesIndex(Request $request): Response
     {
         $estado = (string) $request->input('estado', '');
@@ -201,6 +220,7 @@ class CarteraExtrasController extends Controller implements HasMiddleware
     }
 
     // ---------- MOVIMIENTO CONTABLE ----------
+    /** Casilla: Libro diario. */
     public function movimientos(Request $request): Response
     {
         // Re-audit M5 SEG-A3 + R2 SEG-M1 · regex numérico BLOQUEA inyección LIKE.
@@ -213,6 +233,10 @@ class CarteraExtrasController extends Controller implements HasMiddleware
             'cuenta' => ['nullable', 'string', 'regex:/^[0-9]{1,10}$/'],
             'cuentas' => ['nullable', 'string', 'regex:/^[0-9]{1,10}(,[0-9]{1,10}){0,20}$/'],
             'incluir_anulados' => ['nullable', 'boolean'],
+            // F2c · los dos ejes. Se validan sueltos y `FiltroEjes` los
+            // normaliza: cualquier basura cae en «todas».
+            'linea' => ['nullable', 'string', 'max:20'],
+            'destino' => ['nullable', 'string', 'max:20'],
         ]);
 
         $desde = $data['desde'] ?? now('America/Bogota')->startOfMonth()->toDateString();
@@ -246,8 +270,11 @@ class CarteraExtrasController extends Controller implements HasMiddleware
                 ]);
         }
 
+        $ejes = FiltroEjes::deRequest($request);
+
         $base = MovimientoContable::query()
             ->when($incluirAnulados, fn ($q) => $q->withTrashed())
+            ->tap(fn ($q) => $ejes->aplicar($q))
             ->whereBetween('fecha', [$desde, $hasta])
             ->when($scopeCartera, fn ($q) => $q->where('cuenta_puc', 'like', '13%'))
             // Re-audit R2 DATOS-A2 · whereIn cuando son códigos exactos (aprovecha
@@ -287,8 +314,18 @@ class CarteraExtrasController extends Controller implements HasMiddleware
                     ? \App\Modules\Contabilidad\Support\OrigenContable::etiqueta($m->origen_type) . ' #' . $m->origen_id
                     : '—',
                 'origen_url' => \App\Modules\Contabilidad\Support\OrigenContable::urlAsiento($m->origen_type, $m->origen_id),
+                // Hasta hoy los dos ejes existían en la fila pero no se veían
+                // en ningún lado, así que no había forma de revisar a mano si
+                // un asiento había quedado del lado correcto.
+                'linea' => $m->linea_negocio?->label() ?? '—',
+                'destino' => $m->destino_fiscal?->label() ?? '—',
+                'destino_color' => $m->destino_fiscal?->color() ?? 'gray',
             ]),
-            'filtros' => ['desde' => $desde, 'hasta' => $hasta, 'cuenta' => $cuenta ?: null, 'cuentas' => $cuentasMulti->isNotEmpty() ? $cuentasMulti->join(',') : null, 'incluir_anulados' => $incluirAnulados],
+            'filtros' => array_merge(
+                ['desde' => $desde, 'hasta' => $hasta, 'cuenta' => $cuenta ?: null, 'cuentas' => $cuentasMulti->isNotEmpty() ? $cuentasMulti->join(',') : null, 'incluir_anulados' => $incluirAnulados],
+                $ejes->aParametros(),
+            ),
+            'opcionesEjes' => FiltroEjes::opciones(),
             'totales' => [
                 'suma_debe' => (float) ($totales->suma_debe ?? 0),
                 'suma_haber' => (float) ($totales->suma_haber ?? 0),
@@ -296,5 +333,107 @@ class CarteraExtrasController extends Controller implements HasMiddleware
                 'total_filas' => (int) ($totales->total_filas ?? 0),
             ],
         ]);
+    }
+
+    /**
+     * F2c · Bajar el libro tal como se está viendo.
+     *
+     * Rearma la MISMA consulta que `movimientos()`, filtros incluidos. Antes no
+     * había export acá: para conciliar un mes había que copiar la tabla a mano,
+     * página por página, y la paginación es de 100 filas.
+     */
+    public function movimientosCsv(Request $request): \Symfony\Component\HttpFoundation\StreamedResponse
+    {
+        $data = $request->validate([
+            'desde' => ['nullable', 'date'],
+            'hasta' => ['nullable', 'date', 'after_or_equal:desde'],
+            'cuenta' => ['nullable', 'string', 'regex:/^[0-9]{1,10}$/'],
+            'cuentas' => ['nullable', 'string', 'regex:/^[0-9]{1,10}(,[0-9]{1,10}){0,20}$/'],
+            'incluir_anulados' => ['nullable', 'boolean'],
+            'linea' => ['nullable', 'string', 'max:20'],
+            'destino' => ['nullable', 'string', 'max:20'],
+        ]);
+
+        $desde = $data['desde'] ?? now('America/Bogota')->startOfMonth()->toDateString();
+        $hasta = $data['hasta'] ?? now('America/Bogota')->endOfMonth()->toDateString();
+        $cuenta = trim((string) ($data['cuenta'] ?? ''));
+        $incluirAnulados = (bool) ($data['incluir_anulados'] ?? false);
+
+        $cuentasMulti = collect(explode(',', (string) ($data['cuentas'] ?? '')))
+            ->map(fn ($c) => trim($c))->filter()->values();
+
+        // El mismo scope de cuenta que la pantalla: un Cobrador que exporta no
+        // puede llevarse el PUC completo por la puerta de atrás.
+        $scopeCartera = ! ($request->user()?->esContable() ?? false);
+
+        $ejes = FiltroEjes::deRequest($request);
+
+        /*
+         * Bajar el libro deja rastro.
+         *
+         * El otro export del libro —`/app/contabilidad/reportes/exportar-csv`—
+         * exige `esRoot` y escribe en la bitacora, con el argumento de que el
+         * Contador puede VER el libro pero no llevarselo. Este export pide solo
+         * `esContable`, asi que hoy ese control tiene una puerta de atras.
+         *
+         * Igualar las dos puertas es una decision de negocio (si el Contador
+         * puede o no exportar), asi que no la tomo yo. Lo que si corresponde es
+         * que quede registrado quien se llevo que.
+         */
+        \Illuminate\Support\Facades\Log::channel(config('logging.channels.audit') ? 'audit' : 'stack')
+            ->info('cartera.movimientos.export_csv', [
+                'user_id' => $request->user()?->id,
+                'rango' => [$desde, $hasta],
+                'cuenta' => $cuenta ?: null,
+                'filtro_ejes' => $ejes->descripcion(),
+                'incluye_anulados' => $incluirAnulados,
+            ]);
+
+        $consulta = MovimientoContable::query()
+            ->when($incluirAnulados, fn ($q) => $q->withTrashed())
+            ->tap(fn ($q) => $ejes->aplicar($q))
+            ->whereBetween('fecha', [$desde, $hasta])
+            ->when($scopeCartera, fn ($q) => $q->where('cuenta_puc', 'like', '13%'))
+            ->when($cuenta, fn ($q) => $q->where('cuenta_puc', 'like', $cuenta.'%'))
+            ->when($cuentasMulti->isNotEmpty(), function ($q) use ($cuentasMulti) {
+                $q->where(function ($qq) use ($cuentasMulti) {
+                    foreach ($cuentasMulti as $c) {
+                        $qq->orWhere('cuenta_puc', 'like', $c.'%');
+                    }
+                });
+            })
+            ->orderBy('fecha')->orderBy('id');
+
+        $totales = (clone $consulta)->reorder()
+            ->selectRaw('COALESCE(SUM(debe),0) d, COALESCE(SUM(haber),0) h, COUNT(*) n')->first();
+
+        return ExportadorCsv::descargar(
+            'libro-movimientos',
+            ['Fecha', 'Cuenta PUC', 'Débito', 'Crédito', 'Línea', 'Destino', 'Descripción', 'Origen', 'Tercero'],
+            $consulta,
+            fn ($m) => [
+                $m->fecha instanceof \Carbon\Carbon ? $m->fecha->toDateString() : $m->fecha,
+                $m->cuenta_puc,
+                (float) $m->debe,
+                (float) $m->haber,
+                $m->linea_negocio?->label(),
+                $m->destino_fiscal?->label(),
+                $m->descripcion,
+                $m->origen_type ? class_basename($m->origen_type).'#'.$m->origen_id : null,
+                $m->tercero_id ? class_basename((string) $m->tercero_type).'#'.$m->tercero_id : null,
+            ],
+            [
+                '',
+                "Rango: {$desde} a {$hasta}",
+                'Filtro: '.$ejes->descripcion()
+                    .($cuenta !== '' ? " · cuenta {$cuenta}" : '')
+                    .($cuentasMulti->isNotEmpty() ? ' · cuentas '.$cuentasMulti->join(', ') : '')
+                    .($incluirAnulados ? ' · incluye anulados' : ''),
+                'Débito: '.number_format((float) ($totales->d ?? 0), 2, ',', '.'),
+                'Crédito: '.number_format((float) ($totales->h ?? 0), 2, ',', '.'),
+                'Diferencia: '.number_format((float) (($totales->d ?? 0) - ($totales->h ?? 0)), 2, ',', '.'),
+                'Filas: '.number_format((int) ($totales->n ?? 0), 0, ',', '.'),
+            ],
+        );
     }
 }

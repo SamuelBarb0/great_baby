@@ -7,16 +7,27 @@ return [
     | Driver activo
     |--------------------------------------------------------------------------
     | mock: usa fixtures locales (dev y CI)
-    | api : usa la API real de Dropi (requiere url + key)
+    | api : API oficial de integraciones (token de una tienda de la cuenta en
+    |       Dropi → My Shop, en el encabezado `dropi-integration-key`). Lee los
+    |       pedidos por ahí; wallet, etiquetas y cambio de estatus siguen por la
+    |       sesión del driver web porque la API de integraciones no los expone.
     | web : usa la API interna de app.dropi.co con la sesión de una cuenta
     |       (se conecta desde Dropi → Conexión Dropi)
     */
     'driver' => env('DROPI_DRIVER', 'mock'),
 
     'api' => [
-        'url' => env('DROPI_API_URL', ''),
+        'url' => env('DROPI_API_URL', 'https://api.dropi.co/integrations/'),
         'key' => env('DROPI_API_KEY', ''),
-        'timeout' => (int) env('DROPI_API_TIMEOUT', 15),
+        'timeout' => (int) env('DROPI_API_TIMEOUT', 30),
+        // El catálogo de productos se lee en segundo plano y Dropi puede tardar
+        // más de 30 s por página (visto el 6-nov): plazo aparte.
+        'timeout_catalogo' => (int) env('DROPI_API_TIMEOUT_CATALOGO', 120),
+        // Catálogo propio para «Traer productos de Dropi»: la bodega de Great
+        // Baby en Dropi y el id de la cuenta dueña de los productos (los demás
+        // proveedores de esa bodega, si los hubiera, se ignoran).
+        'bodega_id' => env('DROPI_BODEGA_ID') ? (int) env('DROPI_BODEGA_ID') : null,
+        'proveedor_id' => env('DROPI_PROVEEDOR_ID') ? (int) env('DROPI_PROVEEDOR_ID') : null,
     ],
 
     'web' => [

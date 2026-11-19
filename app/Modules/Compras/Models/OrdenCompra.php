@@ -9,6 +9,7 @@ use App\Modules\Compras\Enums\EstadoOrdenCompra;
 use App\Modules\Dropi\Models\InventarioUbicacion;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use OwenIt\Auditing\Auditable;
@@ -29,12 +30,17 @@ class OrdenCompra extends Model implements AuditableContract
     protected $guarded = ['id'];
 
     protected $casts = [
+        // Los dos ejes. Sin el cast vuelven como string y cualquier
+        // `->label()` revienta con «Call to a member function label() on string».
+        'linea_negocio' => \App\Modules\Contabilidad\Enums\LineaNegocio::class,
+        'destino_fiscal' => \App\Modules\Contabilidad\Enums\DestinoFiscal::class,
         'fecha_emision' => 'date',
         'fecha_esperada' => 'date',
         'aprobado_at' => 'datetime',
         'anulado_at' => 'datetime',
         'estado' => EstadoOrdenCompra::class,
         'meta' => 'array',
+        'parametros_preliquidacion' => 'array',
         'tasa_cambio' => 'decimal:6',
         'subtotal' => 'decimal:2',
         'descuento' => 'decimal:2',
@@ -137,6 +143,17 @@ class OrdenCompra extends Model implements AuditableContract
         };
     }
 
+    public function compromisosPago(): HasMany
+    {
+        return $this->hasMany(CompromisoPago::class, 'orden_id');
+    }
+
+    /** El contenedor en que viaja. Es una lista por cómo es la tabla, pero va en uno. */
+    public function importaciones(): BelongsToMany
+    {
+        return $this->belongsToMany(Importacion::class, 'compras_importacion_ordenes', 'orden_id', 'importacion_id');
+    }
+
     public function proveedor(): BelongsTo
     {
         return $this->belongsTo(Contacto::class, 'proveedor_id');
@@ -154,7 +171,8 @@ class OrdenCompra extends Model implements AuditableContract
 
     public function items(): HasMany
     {
-        return $this->hasMany(OrdenCompraItem::class, 'orden_id');
+        // En el orden en que se escribieron: sin esto la base las devuelve como quiera.
+        return $this->hasMany(OrdenCompraItem::class, 'orden_id')->orderBy('id');
     }
 
     public function recepciones(): HasMany

@@ -30,7 +30,10 @@ const colorEdad = (horas) => {
                     Bandeja de facturación
                 </h1>
                 <p class="text-sm text-surface-500 mt-1">
-                    Pedidos aprobados + alistados listos para emitir a SIIGO.
+                    <!-- Decía «aprobados + alistados» y no era cierto: se factura
+                         ANTES de alistar, porque la factura acompaña la mercancía. -->
+                    Pedidos aprobados listos para facturar. La factura sale primero y
+                    después bodega alista con ella.
                 </p>
             </div>
 

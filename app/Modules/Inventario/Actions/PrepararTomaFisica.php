@@ -129,9 +129,37 @@ class PrepararTomaFisica
      */
     protected function prepararAgregados(TomaFisica $toma): int
     {
+        /*
+         * Lo que manda es el KARDEX, no la bandera.
+         *
+         * Esto pedía `desglose_stock = false`, o sea «los que el catálogo
+         * declara agregados». Pero la bandera dice cómo se PIENSA manejar el
+         * producto y el kardex dice cómo entró de verdad, y los dos se
+         * separan: un producto marcado granular al que le cargaron el saldo
+         * sin variante quedaba fuera de los dos bloques —el de variantes no lo
+         * encuentra porque sus movimientos tienen `variante_id` nulo, y éste
+         * lo excluía por la bandera—. Sus unidades no existían para el conteo.
+         *
+         * Medido el 29-oct en BOG-DEMO: 20 de 39 unidades invisibles. Y un
+         * conteo que omite saldo es peor que no contar, porque devuelve una
+         * diferencia inventada y alguien ajusta el inventario con ella.
+         *
+         * Ahora entra todo lo que tenga movimientos sin variante en ESTA
+         * ubicación, lo diga la bandera o no, más los declarados agregados
+         * (que en una toma total hay que listar aunque estén en cero).
+         */
+        $conSaldoAgregado = InventarioMovimiento::query()
+            ->whereNull('variante_id')
+            ->whereNotNull('producto_id')
+            ->where('ubicacion_id', $toma->ubicacion_id)
+            ->distinct()
+            ->pluck('producto_id');
+
         $productosQ = Producto::query()
             ->where('activo', true)
-            ->where('desglose_stock', false);
+            ->where(fn ($q) => $q
+                ->where('desglose_stock', false)
+                ->orWhereIn('id', $conSaldoAgregado));
 
         if ($toma->alcance && preg_match('/^(marca|categoria):(\d+)$/', $toma->alcance, $m)) {
             $columna = $m[1] === 'marca' ? 'marca_id' : 'categoria_id';

@@ -32,11 +32,30 @@ class SiigoEmpujarPendientesCommand extends Command
 
     /**
      * tipo => [tabla, columna que prueba que llegó, job, condición extra]
+     *
+     * Pública porque el Panel contable lee de acá qué documentos DEBERÍAN
+     * estar en SIIGO para pintar su semáforo. Una sola lista: si mañana se
+     * agrega un tipo, el panel lo cuenta sin que haya que acordarse.
      */
-    private const FUENTES = [
+    public const FUENTES = [
+        /*
+         * Por DESTINO FISCAL, no por `es_electronica`.
+         *
+         * `es_electronica` se escribe una vez, al crear la factura, y hasta
+         * el 2026-11-05 se escribía mirando si SIIGO estaba vivo en ese
+         * segundo. En producción SIIGO estaba en 401, así que las 20 facturas
+         * fiscales nacieron con la marca en 0 y este barrido las saltaba —
+         * para siempre, porque nadie la vuelve a evaluar. Resultado: 20
+         * facturas marcadas «Fiscal», ninguna en SIIGO, y la bandeja de
+         * pendientes diciendo 0.
+         *
+         * `destino_fiscal` es lo que eligió una persona y no se mueve solo.
+         * Filtrar por él hace que una factura fiscal sin enviar aparezca,
+         * aunque haya nacido mal marcada: el barrido se cura solo.
+         */
         'facturas' => [
             'facturas_venta', 'siigo_id', \App\Jobs\ReintentarEmisionDian::class,
-            "es_electronica = 1 AND estado <> 'anulada'",
+            "destino_fiscal IN ('siigo','reparto') AND estado <> 'anulada'",
         ],
         'notas-credito' => [
             'notas_credito', 'siigo_id', \App\Modules\Siigo\Jobs\PushNotaCreditoASiigo::class,
@@ -48,9 +67,16 @@ class SiigoEmpujarPendientesCommand extends Command
             'notas_debito', 'siigo_id', \App\Modules\Siigo\Jobs\PushNotaDebitoASiigo::class,
             "estado <> 'borrador'",
         ],
+        /*
+          * Las compras marcadas INTERNAS no se declaran: ese es el sentido del
+          * destino fiscal. Sin esta condicion se reencolaban todas las noches
+          * para volver a no enviarse, y de paso llenaban la pantalla de
+          * pendientes con documentos que nadie iba a resolver nunca.
+          */
         'recepciones' => [
             'compras_recepciones', 'siigo_id', \App\Modules\Siigo\Jobs\PushRecepcionASiigo::class,
-            "estado = 'confirmada'",
+            "estado = 'confirmada' AND orden_id NOT IN "
+                ."(SELECT id FROM compras_ordenes WHERE destino_fiscal = 'interno')",
         ],
         // Sólo los pagos cuya factura ya está en SIIGO. Sin esa condición, un
         // recibo de una factura no electrónica —que nunca va a subir— se
@@ -64,7 +90,9 @@ class SiigoEmpujarPendientesCommand extends Command
         ],
         'pagos-proveedor' => [
             'pagos_proveedor', 'siigo_voucher_id', \App\Modules\Siigo\Jobs\PushPagoProveedorASiigo::class,
-            "estado = 'confirmado'",
+            "estado = 'confirmado' AND (recepcion_id IS NULL OR recepcion_id NOT IN "
+                ."(SELECT id FROM compras_recepciones WHERE orden_id IN "
+                ."(SELECT id FROM compras_ordenes WHERE destino_fiscal = 'interno')))",
         ],
         'asientos' => [
             'asientos_manuales', 'siigo_journal_id', \App\Modules\Siigo\Jobs\PushAsientoManualASiigo::class,
@@ -85,7 +113,9 @@ class SiigoEmpujarPendientesCommand extends Command
         ],
         'devoluciones' => [
             'devoluciones_proveedor', 'siigo_id', \App\Modules\Siigo\Jobs\PushDevolucionProveedorASiigo::class,
-            "estado = 'confirmada'",
+            "estado = 'confirmada' AND (recepcion_id IS NULL OR recepcion_id NOT IN "
+                ."(SELECT id FROM compras_recepciones WHERE orden_id IN "
+                ."(SELECT id FROM compras_ordenes WHERE destino_fiscal = 'interno')))",
         ],
     ];
 
@@ -193,8 +223,11 @@ class SiigoEmpujarPendientesCommand extends Command
      * no hay devolución.
      *
      * Un granular está en SIIGO cuando lo están sus variantes —cada una viaja
-     * como producto propio—, así que cuenta como pendiente si le falta el id
-     * a él o a cualquiera de ellas.
+     * como producto propio— y el PADRE no sube nunca: no tiene por qué tener
+     * id propio. Preguntar por el id del padre «o» el de sus variantes metía
+     * a los 28 granulares en la lista de pendientes para siempre, y los
+     * reencolaba cada noche para que volvieran a fallar, tapando con 28
+     * alarmas falsas las que eran de verdad.
      *
      * @return array{0: string, 1: string, 2: int|string, 3: int|string, 4: string}
      */
@@ -209,7 +242,11 @@ class SiigoEmpujarPendientesCommand extends Command
         $ids = \App\Modules\Dropi\Models\Producto::query()
             ->where('activo', true)
             ->where(fn ($q) => $q
-                ->whereNull('siigo_id')->orWhere('siigo_id', '')
+                // Sin variantes: sube él, así que pendiente si le falta su id.
+                ->where(fn ($solo) => $solo
+                    ->whereDoesntHave('variantes')
+                    ->where(fn ($i) => $i->whereNull('siigo_id')->orWhere('siigo_id', '')))
+                // Con variantes: suben ellas. Pendiente si a alguna le falta.
                 ->orWhereHas('variantes', fn ($v) => $v->whereNull('siigo_id')->orWhere('siigo_id', '')))
             ->orderBy('id')
             ->limit($limite)

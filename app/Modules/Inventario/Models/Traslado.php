@@ -27,8 +27,48 @@ class Traslado extends Model implements AuditableContract
         'fecha_envio' => 'datetime',
         'fecha_ejecucion' => 'datetime',
         'anulado_at' => 'datetime',
+        'aprobado_at' => 'datetime',
         'estado' => EstadoTraslado::class,
     ];
+
+    /** MKT-5 · cómo puede venir la mercancía al entregarla o devolverla. */
+    public const ESTADOS_MERCANCIA = [
+        'completo' => 'Completa y en buen estado',
+        'incompleto' => 'Incompleta',
+        'con_novedad' => 'Con daños o novedad',
+    ];
+
+    /**
+     * MKT-5 · préstamo o devolución de muestras de Marketing: una de las dos
+     * puntas es un almacén `MKT-` (el mismo criterio del panel de Marketing).
+     */
+    public function esMuestra(): bool
+    {
+        return $this->motivo === 'prestamo'
+            && ($this->esPrestamoMarketing() || str_starts_with((string) $this->origen?->codigo, 'MKT-'));
+    }
+
+    /** Sale de bodega hacia Marketing: es la que necesita aprobación. */
+    public function esPrestamoMarketing(): bool
+    {
+        return $this->motivo === 'prestamo' && str_starts_with((string) $this->destino?->codigo, 'MKT-');
+    }
+
+    /**
+     * ¿Le toca a esta persona, que responde por bodegas? Pide las dos puntas,
+     * salvo a quien administra la bodega en las muestras de Marketing: el almacén
+     * MKT- es de Marketing, no suyo, y es a él a quien `MuestrasMarketing::aprobadores`
+     * le avisa por responder de la bodega. Pedirle las dos lo dejaba con el aviso
+     * en la mano y un 403 al abrirlo.
+     */
+    public function loOperaEnBodega(\App\Models\User $u): bool
+    {
+        $puntas = $this->esMuestra() && $u->esAdminBodega()
+            ? [(int) ($this->esPrestamoMarketing() ? $this->origen_id : $this->destino_id)]
+            : [(int) $this->origen_id, (int) $this->destino_id];
+
+        return array_diff($puntas, $u->bodegasAsignadasIds()) === [];
+    }
 
     /**
      * Re-audit M3 PATRÓN γ · state machine formal para traslados:
@@ -81,6 +121,27 @@ class Traslado extends Model implements AuditableContract
     public function ejecutor(): BelongsTo
     {
         return $this->belongsTo(User::class, 'ejecutado_por');
+    }
+
+    public function aprobador(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'aprobado_por');
+    }
+
+    public function enviador(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'enviado_por');
+    }
+
+    public function recogedor(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'recogido_por');
+    }
+
+    /** En una devolución de Marketing, el préstamo que cierra. */
+    public function prestamo(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'prestamo_id');
     }
 
     public function items(): HasMany

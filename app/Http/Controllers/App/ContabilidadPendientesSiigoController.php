@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\App;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Cartera\Models\FacturaVenta;
 use App\Modules\Cartera\Models\NotaCredito;
 use App\Modules\Cartera\Models\NotaDebito;
 use App\Modules\Cartera\Models\PagoProveedor;
@@ -44,7 +45,39 @@ class ContabilidadPendientesSiigoController extends Controller implements HasMid
 
     public function index(): Response
     {
+        /*
+         * Las facturas de venta, que faltaban.
+         *
+         * Este tablero listaba recepciones, devoluciones, pagos a proveedor,
+         * notas crédito, notas débito y asientos manuales —las seis cosas que
+         * mueven plata hacia afuera— y NO listaba lo único que la empresa está
+         * obligada a reportarle a la DIAN. Resultado: 25 de 25 facturas sin
+         * llegar a SIIGO desde el 21 de octubre y ninguna pantalla donde se
+         * notara. La única forma de verlo era mirar la tabla `jobs` a mano.
+         *
+         * Van primero en el listado porque son las que tienen plazo legal.
+         */
+        $facturas = FacturaVenta::query()
+            ->whereNull('siigo_id')
+            // Por destino fiscal y no por `es_electronica`: esa marca se
+            // escribe al crear la factura y en produccion quedo en 0 para
+            // las 20 fiscales, que asi desaparecian de esta bandeja.
+            ->whereIn('destino_fiscal', ['siigo', 'reparto'])
+            ->where('estado', '<>', 'anulada')
+            ->orderByDesc('fecha_emision')
+            ->limit(200)
+            ->get(['id', 'numero', 'fecha_emision', 'total'])
+            ->map(fn ($f) => $this->toRow('factura', $f->id, $f->numero, $f->fecha_emision, (float) $f->total,
+                "/app/facturas/{$f->id}", "/app/facturas/{$f->id}/reenviar-siigo"));
+
+        /*
+         * `declarable()`: una compra marcada INTERNA no va a SIIGO nunca, y
+         * sin este filtro se quedaba en esta lista para siempre, pidiendo un
+         * envio que por diseno no se va a hacer. Eran 2 de las 4 recepciones
+         * pendientes.
+         */
         $recepciones = RecepcionCompra::query()
+            ->declarable()
             ->whereNull('siigo_id')
             ->where('estado', 'confirmada')
             ->orderByDesc('fecha_recepcion')
@@ -54,6 +87,7 @@ class ContabilidadPendientesSiigoController extends Controller implements HasMid
                 "/app/compras/recepcion/{$r->id}", "/app/compras/recepcion/{$r->id}/reenviar-siigo"));
 
         $devoluciones = DevolucionProveedor::query()
+            ->declarable()
             ->whereNull('siigo_id')
             ->where('estado', 'confirmada')
             ->orderByDesc('fecha')
@@ -62,13 +96,21 @@ class ContabilidadPendientesSiigoController extends Controller implements HasMid
             ->map(fn ($d) => $this->toRow('devolucion', $d->id, $d->numero, $d->fecha, (float) $d->total,
                 "/app/compras/devoluciones/{$d->id}", "/app/compras/devoluciones/{$d->id}/reenviar-siigo"));
 
+        /*
+         * Solo los CONFIRMADOS. La pantalla no miraba el estado, asi que un
+         * pago anulado figuraba como «pendiente de SIIGO» —y mandarlo seria
+         * justo lo que no hay que hacer—. La tarea nocturna si lo filtraba,
+         * de modo que los dos numeros nunca coincidian.
+         */
         $pagos = PagoProveedor::query()
+            ->declarable()
+            ->where('estado', 'confirmado')
             ->whereNull('siigo_voucher_id')
             ->orderByDesc('fecha')
             ->limit(200)
             ->get(['id', 'fecha', 'monto_neto', 'contacto_id'])
             ->map(fn ($p) => $this->toRow('pago_proveedor', $p->id, "PP-{$p->id}", $p->fecha, (float) $p->monto_neto,
-                "/app/cartera/pagos-proveedor/{$p->id}", "/app/cartera/pagos-proveedor/{$p->id}/reenviar-siigo"));
+                "/app/cartera/pagos-proveedor?destacar={$p->id}", "/app/cartera/pagos-proveedor/{$p->id}/reenviar-siigo"));
 
         $notasCredito = NotaCredito::query()
             ->whereNull('siigo_id')
@@ -77,7 +119,7 @@ class ContabilidadPendientesSiigoController extends Controller implements HasMid
             ->limit(200)
             ->get(['id', 'prefijo', 'numero', 'emitida_at', 'valor'])
             ->map(fn ($n) => $this->toRow('nota_credito', $n->id, "{$n->prefijo}-{$n->numero}", $n->emitida_at, (float) $n->valor,
-                "/app/cartera/notas-credito/{$n->id}", "/app/cartera/notas-credito/{$n->id}/reenviar-siigo"));
+                "/app/cartera/notas-credito?destacar={$n->id}", "/app/cartera/notas-credito/{$n->id}/reenviar-siigo"));
 
         $notasDebito = NotaDebito::query()
             ->whereNull('siigo_id')
@@ -86,7 +128,7 @@ class ContabilidadPendientesSiigoController extends Controller implements HasMid
             ->limit(200)
             ->get(['id', 'prefijo', 'numero', 'emitida_at', 'valor'])
             ->map(fn ($n) => $this->toRow('nota_debito', $n->id, "{$n->prefijo}-{$n->numero}", $n->emitida_at, (float) $n->valor,
-                "/app/cartera/notas-debito/{$n->id}", "/app/cartera/notas-debito/{$n->id}/reenviar-siigo"));
+                "/app/cartera/notas-debito?destacar={$n->id}", "/app/cartera/notas-debito/{$n->id}/reenviar-siigo"));
 
         $asientos = AsientoManual::query()
             ->whereNull('siigo_journal_id')
@@ -95,7 +137,7 @@ class ContabilidadPendientesSiigoController extends Controller implements HasMid
             ->limit(200)
             ->get(['id', 'fecha', 'glosa', 'valor_total'])
             ->map(fn ($a) => $this->toRow('asiento_manual', $a->id, "AM-{$a->id}", $a->fecha, (float) $a->valor_total,
-                "/app/contabilidad/asientos-manuales/{$a->id}", "/app/contabilidad/asientos-manuales/{$a->id}/reenviar-siigo"));
+                "/app/contabilidad/asientos-manuales?destacar={$a->id}", "/app/contabilidad/asientos-manuales/{$a->id}/reenviar-siigo"));
 
         // Último error + conteo de fallos por recurso+id leído desde siigo_sync_log.
         $errores = $this->ultimosErrores();
@@ -117,6 +159,7 @@ class ContabilidadPendientesSiigoController extends Controller implements HasMid
         };
 
         $todos = collect()
+            ->concat($facturas)
             ->concat($recepciones)->concat($devoluciones)->concat($pagos)
             ->concat($notasCredito)->concat($notasDebito)->concat($asientos)
             ->map($enrich)
@@ -128,6 +171,7 @@ class ContabilidadPendientesSiigoController extends Controller implements HasMid
 
         return Inertia::render('Contabilidad/PendientesSiigo', [
             'resumen' => [
+                'facturas' => $facturas->count(),
                 'recepciones' => $recepciones->count(),
                 'devoluciones' => $devoluciones->count(),
                 'pagos' => $pagos->count(),
@@ -141,6 +185,13 @@ class ContabilidadPendientesSiigoController extends Controller implements HasMid
         ]);
     }
 
+    /*
+     * Los cuatro documentos que NO tienen pantalla de detalle —pagos a
+     * proveedor, notas credito, notas debito y asientos manuales— enlazan al
+     * LISTADO con `?destacar=<id>`, que la pantalla usa para señalar la fila.
+     * Antes apuntaban a un `show` inexistente y daban 404: justo en la
+     * pantalla que existe para destrabar lo que no llego a SIIGO.
+     */
     private function toRow(string $tipo, int $id, string $numero, $fecha, float $monto, string $urlVer, string $urlReenviar): array
     {
         return [

@@ -1,14 +1,31 @@
 <script setup>
-import { ref } from 'vue';
+import { ref, reactive, computed } from 'vue';
 import { Head, Link, router } from '@inertiajs/vue3';
-import { ArrowLeft, CheckCircle, XCircle, Truck, ShoppingCart, AlertTriangle, Cloud, CloudOff, CloudCog, RefreshCw } from 'lucide-vue-next';
+import { ArrowLeft, CheckCircle, XCircle, Truck, ShoppingCart, AlertTriangle, Cloud, CloudOff, CloudCog, RefreshCw, Container } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import { useMoney } from '@/composables/useMoney';
 import { fechaCorta } from '@/composables/useFecha';
 import { useEscClose } from '@/composables/useEscClose';
 import AppConfirmModal from '@/Components/AppConfirmModal.vue';
 
-const props = defineProps({ orden: { type: Object, required: true } });
+import LineasSinProducto from '../Importacion/LineasSinProducto.vue';
+import SiguientePaso from '../SiguientePaso.vue';
+import EtiquetasDeLaOrden from './EtiquetasDeLaOrden.vue';
+
+const props = defineProps({
+    orden: { type: Object, required: true },
+    // El impreso lleva costos de proveedor y es sólo de gerencia.
+    puede_pdf: { type: Boolean, default: false },
+    puede_aprobar: { type: Boolean, default: false },
+    lineas_sin_producto: { type: Array, default: () => [] },
+    puede_excel: { type: Boolean, default: false },
+    etiquetas: { type: Object, default: null },
+    paso: { type: Object, default: null },
+    contenedor: { type: Object, default: null },
+    contenedores_abiertos: { type: Array, default: () => [] },
+    lineas_etiqueta: { type: Array, default: () => [] },
+    puede_etiqueta: { type: Boolean, default: false },
+});
 
 const modalAnular = ref(false);
 const modalAprobar = ref(false);
@@ -19,10 +36,37 @@ const procesando = ref(false);
 
 // Re-audit M2 UX-C2 · useMoney (paridad con Cartera/Contabilidad).
 const { money } = useMoney();
+// La orden va en la moneda del proveedor: 173.202 CNY no son 173.202 pesos.
+const enMoneda = (n) => (props.orden.moneda === 'COP'
+    ? money(n)
+    : `${Number(n || 0).toLocaleString('es-CO', { maximumFractionDigits: 2 })} ${props.orden.moneda}`);
+
+const badgeDestino = (color) => ({
+    success: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200',
+    info: 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200',
+    warning: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200',
+}[color] || 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200');
 
 // Re-audit M2 UX-C4 · modal propio en lugar de confirm() nativo (consistencia
 // con Anular). Muestra el monto que se compromete al aprobar.
 const abrirAprobar = () => { modalAprobar.value = true; };
+// «Lo que sigue» en la orden.
+const modalContenedor = ref(false);
+useEscClose(modalContenedor);
+const contenedorForm = reactive({ importacion_id: '', contenedor: '' });
+const ponerEnContenedor = () => {
+    if (procesando.value) return;
+    procesando.value = true;
+    router.post(`/app/compras/orden/${props.orden.id}/contenedor`, {
+        importacion_id: contenedorForm.importacion_id || null,
+        contenedor: contenedorForm.contenedor || null,
+    }, { onFinish: () => procesando.value = false });
+};
+const hacer = (accion) => {
+    if (accion === 'aprobar') abrirAprobar();
+    else if (accion === 'contenedor') modalContenedor.value = true;
+    else if (accion === 'ir-productos') document.getElementById('crear-productos')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+};
 const confirmarAprobar = () => {
     if (procesando.value) return;
     procesando.value = true;
@@ -52,6 +96,36 @@ const badge = (e) => ({
     cerrada: 'bg-surface-200 text-surface-600 dark:bg-surface-800 dark:text-surface-400',
     anulada: 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200',
 }[e] || 'bg-surface-100 dark:bg-surface-800');
+
+/*
+ * Pre-liquidación (sólo OC de importación): costo por unidad puesto en
+ * Colombia con la fórmula del Excel de Alejandro. Los parámetros se pueden
+ * corregir mientras la OC es borrador; después quedan fijos.
+ */
+const pre = computed(() => props.orden.preliquidacion);
+const parametros = reactive(pre.value ? { ...pre.value.parametros, tasa_cambio: pre.value.tasa_cambio } : {});
+const camposParametros = [
+    ['tasa_cambio', 'Tasa (COP por unidad de moneda)', '0.01'],
+    ['comision_pct', 'Comisión %', '0.01'],
+    ['flete_m3', 'Flete por m³', '1'],
+    ['gasto_colombia_m3', 'Gasto Colombia por m³', '1'],
+    ['arancel_pct', 'Arancel %', '0.01'],
+    ['iva_pct', 'IVA %', '0.01'],
+    ['divisor_precio_1', 'Divisor precio 1', '0.01'],
+    ['divisor_precio_2', 'Divisor precio 2', '0.01'],
+    ['capacidad_m3', 'Capacidad (m³)', '0.01'],
+    ['valor_minimo', 'Valor mínimo (0 = no revisar)', '0.01'],
+];
+const recalculando = ref(false);
+const recalcular = () => {
+    if (recalculando.value) return;
+    recalculando.value = true;
+    router.post(`/app/compras/oc/${props.orden.id}/parametros`, parametros, {
+        preserveScroll: true,
+        onFinish: () => recalculando.value = false,
+    });
+};
+const fmt = (n, d = 2) => Number(n || 0).toLocaleString('es-CO', { minimumFractionDigits: d, maximumFractionDigits: d });
 
 // COMP-B6 · semáforo SIIGO agregado de la OC.
 const siigoBadge = (e) => ({
@@ -107,6 +181,9 @@ const reenviarRecepcion = (rec) => {
             <div v-if="$page.props.flash?.success" class="p-3 rounded-lg bg-emerald-500/15 border-l-4 border-emerald-500 text-emerald-700 text-sm">
                 {{ $page.props.flash.success }}
             </div>
+            <div v-if="$page.props.flash?.error" class="p-3 rounded-lg bg-red-500/15 border-l-4 border-red-500 text-red-700 dark:text-red-300 text-sm">
+                {{ $page.props.flash.error }}
+            </div>
 
             <div class="card p-5">
                 <div class="flex items-start justify-between mb-3 flex-wrap gap-3">
@@ -114,27 +191,40 @@ const reenviarRecepcion = (rec) => {
                         <div class="text-xs text-surface-500 uppercase">Orden de compra</div>
                         <h1 class="text-2xl font-bold font-mono">{{ orden.numero }}</h1>
                         <div class="text-xs text-surface-500 mt-1">{{ orden.proveedor }} · {{ orden.tipo }} · {{ orden.moneda }} @ {{ orden.tasa_cambio }}</div>
+                        <Link v-if="contenedor" :href="`/app/compras/importacion/${contenedor.id}`" class="text-sm text-brand-600 hover:underline inline-flex items-center gap-1 mt-1"><Container class="h-3.5 w-3.5"/> Contenedor {{ contenedor.nombre }}</Link>
                     </div>
                     <div class="text-right">
                         <div class="text-xs text-surface-500 uppercase">Total</div>
-                        <div class="text-2xl font-bold text-brand-600">{{ money(orden.total) }}</div>
+                        <div class="text-2xl font-bold text-brand-600">{{ enMoneda(orden.total) }}</div>
+                        <div v-if="orden.moneda !== 'COP' && orden.tasa_cambio > 1" class="text-xs text-surface-500">Unos {{ money(orden.total * orden.tasa_cambio) }}</div>
                         <span :class="['inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase', badge(orden.estado)]">{{ orden.estado }}</span>
                     </div>
                 </div>
 
                 <div class="flex items-center gap-2 border-t border-surface-200 dark:border-surface-800 pt-3 flex-wrap">
-                    <button v-if="orden.estado === 'borrador' || orden.estado === 'enviada'" @click="abrirAprobar" :disabled="procesando" class="btn-primary">
+                    <button v-if="!paso && puede_aprobar && (orden.estado === 'borrador' || orden.estado === 'enviada')" @click="abrirAprobar" :disabled="procesando" class="btn-primary">
                         <CheckCircle class="h-4 w-4"/> Aprobar
                     </button>
-                    <Link v-if="['aprobada','parcial'].includes(orden.estado)" :href="`/app/compras/recepcion/nueva?oc=${orden.id}`" class="btn-primary bg-emerald-600 hover:bg-emerald-700">
+                    <Link v-if="['aprobada','parcial'].includes(orden.estado) && (!paso || contenedor)" :href="`/app/compras/recepcion/nueva?oc=${orden.id}`" class="btn-primary bg-emerald-600 hover:bg-emerald-700">
                         <Truck class="h-4 w-4"/> Recibir mercancía
                     </Link>
                     <button v-if="!['recibida','cerrada','anulada'].includes(orden.estado)" @click="modalAnular = true" class="btn-ghost text-red-600 border border-red-300">
                         <XCircle class="h-4 w-4"/> Anular
                     </button>
-                    <a :href="`/compras/orden/${orden.id}/pdf`" target="_blank" rel="noopener" class="btn-ghost">PDF</a>
+                    <a v-if="etiquetas && puede_excel" :href="`/app/compras/orden/${orden.id}/excel`" class="btn-ghost">Excel para China</a>
+                    <a v-if="etiquetas" :href="`/app/compras/orden/${orden.id}/etiquetas`" target="_blank" rel="noopener" class="btn-ghost"
+                       :title="`${etiquetas.con} con etiqueta, ${etiquetas.sin} sin etiqueta`">PDF de etiquetas</a>
+                    <a v-if="puede_pdf" :href="`/compras/orden/${orden.id}/pdf`" target="_blank" rel="noopener"
+                        class="btn-ghost">PDF</a>
+                    <a v-if="puede_pdf && orden.preliquidacion" :href="`/compras/orden/${orden.id}/preliquidacion/pdf`" target="_blank" rel="noopener" class="btn-ghost">PDF pre-liquidación</a>
                 </div>
             </div>
+
+            <SiguientePaso v-if="paso" :paso="paso" @accion="hacer"/>
+
+            <div id="crear-productos"><LineasSinProducto :orden-id="orden.id" :lineas="lineas_sin_producto"/></div>
+
+            <EtiquetasDeLaOrden :lineas="lineas_etiqueta" :puede-subir="puede_etiqueta"/>
 
             <div class="card p-4">
                 <div class="text-xs uppercase tracking-widest font-bold text-brand-600 mb-3">Ítems ({{ orden.items.length }})</div>
@@ -152,20 +242,146 @@ const reenviarRecepcion = (rec) => {
                         </thead>
                         <tbody class="divide-y">
                             <tr v-for="it in orden.items" :key="it.id">
-                                <td class="p-2">{{ it.descripcion }}</td>
+                                <td class="p-2">
+                                    {{ it.descripcion }}
+                                    <span v-if="it.color_nombre" class="block text-[11px] text-surface-500">Color: {{ it.color_nombre }}</span>
+                                    <span v-if="it.tipo_linea === 'componente'" class="block text-[11px] text-sky-700 dark:text-sky-400 font-semibold">Componente · no sube al inventario</span>
+                                </td>
                                 <td class="p-2 text-right">{{ it.cantidad }}</td>
                                 <td class="p-2 text-right" :class="it.cantidad_recibida < it.cantidad ? 'text-amber-600' : 'text-emerald-600'">{{ it.cantidad_recibida }}</td>
-                                <td class="p-2 text-right">{{ money(it.precio_unit) }}</td>
-                                <td class="p-2 text-right">{{ money(it.subtotal) }}</td>
-                                <td class="p-2 text-right font-bold">{{ money(it.total) }}</td>
+                                <td class="p-2 text-right">{{ enMoneda(it.precio_unit) }}</td>
+                                <td class="p-2 text-right">{{ enMoneda(it.subtotal) }}</td>
+                                <td class="p-2 text-right font-bold">{{ enMoneda(it.total) }}</td>
                             </tr>
                         </tbody>
                     </table>
                 </div>
             </div>
 
+            <div v-if="pre" class="card p-4 space-y-3">
+                <div class="flex items-start justify-between flex-wrap gap-3">
+                    <div class="flex items-center gap-2">
+                        <Container class="h-5 w-5 text-brand-600"/>
+                        <div>
+                            <div class="text-xs uppercase tracking-widest font-bold text-brand-600">Pre-liquidación</div>
+                            <div class="text-xs text-surface-500">
+                                Costo estimado puesto en Colombia, antes de pedir
+                                <template v-if="orden.modelo_compra"> · {{ orden.modelo_compra === 'fabrica' ? 'Fábrica directa' : 'Trading' }}</template>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="text-right">
+                        <div class="text-xs text-surface-500 uppercase">Costo total</div>
+                        <div class="text-xl font-bold text-brand-600">{{ money(pre.totales.costo_total) }}</div>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                    <div><div class="text-[10px] uppercase text-surface-500">Cajas</div><b>{{ fmt(pre.totales.cajas, 0) }}</b></div>
+                    <div><div class="text-[10px] uppercase text-surface-500">Unidades</div><b>{{ fmt(pre.totales.unidades, 0) }}</b></div>
+                    <div>
+                        <div class="text-[10px] uppercase text-surface-500">Volumen</div>
+                        <b :class="pre.totales.ocupacion_pct > 100 ? 'text-red-600' : ''">{{ fmt(pre.totales.cbm) }} m³</b>
+                        <span class="text-surface-500"> de {{ fmt(pre.totales.capacidad_m3) }} ({{ fmt(pre.totales.ocupacion_pct, 1) }} %)</span>
+                    </div>
+                    <div><div class="text-[10px] uppercase text-surface-500">Valor</div><b>{{ orden.moneda }} {{ fmt(pre.totales.valor_moneda) }}</b></div>
+                </div>
+                <div class="h-2 rounded bg-surface-200 dark:bg-surface-800 overflow-hidden">
+                    <div class="h-full" :class="pre.totales.ocupacion_pct > 100 ? 'bg-red-500' : 'bg-emerald-500'"
+                         :style="{ width: Math.min(pre.totales.ocupacion_pct || 0, 100) + '%' }"></div>
+                </div>
+                <div class="text-xs text-surface-500">
+                    <span v-for="(d, i) in pre.por_destino" :key="d.empresa_id"><template v-if="i"> · </template><b>{{ d.nombre }}</b> {{ fmt(d.cajas, 0) }} cajas, {{ fmt(d.cbm) }} m³</span>
+                </div>
+                <div v-for="(a, i) in pre.avisos" :key="i" class="p-2 rounded bg-amber-50 dark:bg-amber-950/40 border-l-4 border-amber-500 text-xs text-amber-800 dark:text-amber-200">
+                    {{ a }}
+                </div>
+
+                <details class="text-sm" :open="orden.estado === 'borrador'">
+                    <summary class="cursor-pointer text-xs font-semibold text-surface-600 dark:text-surface-300">
+                        Parámetros {{ orden.estado === 'borrador' ? '(se pueden corregir mientras es borrador)' : '(fijos: la OC ya no es borrador)' }}
+                    </summary>
+                    <div class="grid grid-cols-2 md:grid-cols-5 gap-2 mt-2">
+                        <div v-for="[clave, etiqueta, paso] in camposParametros" :key="clave">
+                            <label class="text-[10px] font-semibold">{{ etiqueta }}</label>
+                            <input type="number" :step="paso" v-model.number="parametros[clave]" :disabled="orden.estado !== 'borrador'" class="input w-full text-sm"/>
+                        </div>
+                    </div>
+                    <div v-if="orden.estado === 'borrador'" class="flex justify-end mt-2">
+                        <button @click="recalcular" :disabled="recalculando" class="btn-primary text-sm">
+                            {{ recalculando ? 'Recalculando…' : 'Recalcular' }}
+                        </button>
+                    </div>
+                </details>
+
+                <div class="overflow-x-auto">
+                    <table v-tabla-movil class="w-full text-xs">
+                        <thead class="text-[10px] text-surface-500 uppercase border-b">
+                            <tr>
+                                <th class="text-left p-1">Referencia</th>
+                                <th class="text-right p-1">Cajas</th>
+                                <th class="text-right p-1">Uds/caja</th>
+                                <th class="text-right p-1">CBM caja</th>
+                                <th class="text-right p-1">China c/com.</th>
+                                <th class="text-right p-1">Flete</th>
+                                <th class="text-right p-1">Arancel</th>
+                                <th class="text-right p-1">IVA</th>
+                                <th class="text-right p-1">Gasto Col.</th>
+                                <th class="text-right p-1">Costo</th>
+                                <th class="text-right p-1">Precio {{ pre.parametros.divisor_precio_1 }}</th>
+                                <th class="text-right p-1">Precio {{ pre.parametros.divisor_precio_2 }}</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y">
+                            <tr v-for="l in pre.lineas" :key="l.id">
+                                <td class="p-1">
+                                    {{ l.descripcion }}
+                                    <span v-if="l.es_componente" class="block text-[10px] text-sky-700 dark:text-sky-400 font-semibold">Componente · su costo va al producto</span>
+                                    <span v-if="l.costo_con_componentes" class="block text-[10px] text-sky-700 dark:text-sky-400 font-semibold">Con sus componentes: {{ money(l.costo_con_componentes) }} por unidad</span>
+                                </td>
+                                <td class="p-1 text-right">{{ fmt(l.cajas, 0) }}</td>
+                                <td class="p-1 text-right">{{ fmt(l.unidades_por_caja, 0) }}</td>
+                                <td class="p-1 text-right">{{ fmt(l.cbm_caja, 4) }}</td>
+                                <template v-if="l.unidad">
+                                    <td class="p-1 text-right">{{ money(l.unidad.costo_china_comision) }}</td>
+                                    <td class="p-1 text-right">{{ money(l.unidad.flete) }}</td>
+                                    <td class="p-1 text-right" :title="l.arancel_del_producto ? `Arancel del producto: ${l.arancel_pct} %` : `Arancel de la orden: ${l.arancel_pct} %`">
+                                        {{ money(l.unidad.arancel) }}<span v-if="l.arancel_del_producto" class="block text-[10px] text-brand-600">{{ l.arancel_pct }} % del producto</span>
+                                    </td>
+                                    <td class="p-1 text-right">{{ money(l.unidad.iva) }}</td>
+                                    <td class="p-1 text-right">{{ money(l.unidad.gasto_colombia) }}</td>
+                                    <td class="p-1 text-right font-bold">{{ money(l.unidad.costo) }}</td>
+                                    <td class="p-1 text-right">{{ money(l.unidad.precio_1) }}</td>
+                                    <td class="p-1 text-right">{{ money(l.unidad.precio_2) }}</td>
+                                </template>
+                                <td v-else colspan="8" class="p-1 text-amber-600">Sin unidades por caja o sin CBM</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!--
+                Si la compra no se declara, no hay nada que mandar a SIIGO: el
+                bloque entero sobra. Antes el boton existia igual y el envio
+                reventaba despues, que es la peor forma de enterarse.
+            -->
+            <div v-if="orden.va_a_siigo === false" class="card p-4">
+                <div class="flex items-center gap-2 flex-wrap">
+                    <span :class="['px-3 py-1 rounded-full text-xs font-bold uppercase', badgeDestino(orden.destino_color)]">
+                        {{ orden.destino_label }}
+                    </span>
+                    <span class="text-sm text-surface-600 dark:text-surface-300">
+                        Esta compra no se declara: no viaja a SIIGO y su IVA no se descuenta.
+                    </span>
+                </div>
+                <p v-if="orden.motivo_destino" class="text-xs text-surface-500 mt-2">
+                    Motivo: {{ orden.motivo_destino }}
+                </p>
+            </div>
+
             <!-- COMP-B6 · Semáforo SIIGO + recepciones asociadas (+ reenvío manual COMP-B8). -->
-            <div v-if="orden.siigo" class="card p-4">
+            <div v-else-if="orden.siigo" class="card p-4">
                 <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
                     <div class="flex items-center gap-2">
                         <component :is="siigoBadge(orden.siigo.estado).icon" class="h-5 w-5"/>
@@ -257,6 +473,27 @@ const reenviarRecepcion = (rec) => {
                 </div>
             </div>
         </div>
+        <div v-if="modalContenedor" @click.self="modalContenedor = false" class="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+            <div class="card p-6 max-w-md w-full space-y-3">
+                <h3 class="text-lg font-bold">Poner la orden en un contenedor</h3>
+                <div>
+                    <label class="text-xs font-semibold" for="contenedor-elegido">¿En cuál?</label>
+                    <select id="contenedor-elegido" v-model="contenedorForm.importacion_id" class="input w-full">
+                        <option value="">Un contenedor nuevo</option>
+                        <option v-for="c in contenedores_abiertos" :key="c.id" :value="c.id">{{ c.nombre }}</option>
+                    </select>
+                </div>
+                <div v-if="!contenedorForm.importacion_id">
+                    <label class="text-xs font-semibold" for="contenedor-numero">Número del contenedor (si ya lo tiene)</label>
+                    <input id="contenedor-numero" v-model="contenedorForm.contenedor" maxlength="50" class="input w-full"/>
+                </div>
+                <div class="flex justify-end gap-2">
+                    <button @click="modalContenedor = false" class="btn-ghost" :disabled="procesando">Cancelar</button>
+                    <button @click="ponerEnContenedor" :disabled="procesando" class="btn-primary">{{ procesando ? 'Guardando…' : 'Listo' }}</button>
+                </div>
+            </div>
+        </div>
+
         <AppConfirmModal :cfg="modalConfirm" @cerrar="modalConfirm = null"/>
     </AppLayout>
 </template>

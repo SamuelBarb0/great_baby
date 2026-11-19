@@ -63,7 +63,7 @@ class EjecutarTraslado
         //   Antes: la única autorización estaba en el controller/Filament, así
         //   que cualquier job/artisan/listener podía disparar movimientos de
         //   stock. Ahora el propio Action lo pide.
-        $this->autorizarSobreBodegas($traslado->origen_id, $traslado->destino_id);
+        $this->autorizarSobreBodegas($traslado);
 
         return DB::transaction(function () use ($traslado) {
             $traslado = Traslado::query()->whereKey($traslado->id)->lockForUpdate()->first();
@@ -76,6 +76,12 @@ class EjecutarTraslado
             }
             if ($traslado->origen_id === $traslado->destino_id) {
                 throw new InvalidArgumentException('Origen y destino no pueden ser la misma bodega.');
+            }
+            // MKT-5 · las muestras para Marketing salen de bodega sólo aprobadas.
+            if ($traslado->esPrestamoMarketing() && ! $traslado->aprobado_at) {
+                throw new InvalidArgumentException(
+                    "Traslado {$traslado->numero}: la solicitud de muestras de Marketing todavía no está aprobada."
+                );
             }
 
             $items = $traslado->items()->orderBy('id')->get();
@@ -163,7 +169,7 @@ class EjecutarTraslado
     public function recibir(Traslado $traslado): Traslado
     {
         // C-F2 R2 · Guard temporal REMOVIDO — se soportan items agregados.
-        $this->autorizarSobreBodegas($traslado->origen_id, $traslado->destino_id);
+        $this->autorizarSobreBodegas($traslado);
 
         return DB::transaction(function () use ($traslado) {
             $traslado = Traslado::query()->whereKey($traslado->id)->lockForUpdate()->first();
@@ -233,7 +239,7 @@ class EjecutarTraslado
     public function anular(Traslado $traslado, string $motivo): Traslado
     {
         // C-F2 R2 · Guard temporal REMOVIDO — anular ya soporta agregados.
-        $this->autorizarSobreBodegas($traslado->origen_id, $traslado->destino_id);
+        $this->autorizarSobreBodegas($traslado);
 
         return DB::transaction(function () use ($traslado, $motivo) {
             $traslado = Traslado::query()->whereKey($traslado->id)->lockForUpdate()->first();
@@ -359,8 +365,10 @@ class EjecutarTraslado
      *     (fallback: si el modelo User no expone el helper, no se le permite
      *     tocar traslados vía Action — evita escalación silenciosa).
      */
-    protected function autorizarSobreBodegas(int $origenId, int $destinoId): void
+    protected function autorizarSobreBodegas(Traslado $traslado): void
     {
+        $origenId = (int) $traslado->origen_id;
+        $destinoId = (int) $traslado->destino_id;
         $u = auth()->user();
         abort_unless($u, 403, 'No autenticado.');
 
@@ -372,6 +380,15 @@ class EjecutarTraslado
         //   Cualquier rol autorizado por matriz pasa; los roles scoped por
         //   bodega (Alistador) mantienen el guard territorial.
         if (\App\Auth\Permisos::esRoot($u)) return;
+
+        // UBIC-8 · el admin de bodega no está en `traslados`: opera con el scope
+        //   de lo que tiene a cargo. La pantalla lo dejaba crear y alistar, y al
+        //   enviar o recibir esta acción le respondía 403.
+        if ($u->esAdminBodega()) {
+            abort_unless($traslado->loOperaEnBodega($u), 403, 'Este traslado es de otra bodega.');
+
+            return;
+        }
 
         if (! \App\Auth\Permisos::puede($u, 'traslados')) {
             abort(403, 'No autorizado para operar traslados de inventario.');

@@ -14,8 +14,8 @@ use Lorisleiva\Actions\Concerns\AsAction;
  *
  *   4175 (Devoluciones en ventas)   DÉBITO  = valor (por-item)
  *   1305 (CxC del vendedor Dropi)   HABER   = valor total    ← con tercero_id
- *   1435 (Inventario)               DÉBITO  = valor (si reingresa)
- *   6135 (Costo mercancía vendida)  HABER   = valor (si reingresa)
+ *   1435 (Inventario)               DÉBITO  = costo de salida (si reingresa)
+ *   6135 (Costo mercancía vendida)  HABER   = costo de salida (si reingresa)
  *
  * Re-audit fixes:
  *   DATOS C6 · si `totalPeso <= 0` (items sin cantidad/precio) → skip completo
@@ -122,18 +122,25 @@ class ContabilizarDevolucionDropi
             }
         }
 
+        // Costo con que salió cada ítem (egreso del empaque). El reverso del
+        // costo va a ESE valor: antes se reversaba al precio de venta, y como
+        // la venta Dropi nunca había causado costo, cada devolución dejaba el
+        // 6135 en negativo y el inventario inflado por el margen.
+        $costos = \App\Modules\Dropi\Services\SalidaInventarioDropi::costosDeSalida($pedido->id);
+
         // ---------- Armar líneas ----------
         $lineas = [];
         $totalReingresado = 0.0;
+        $quedan = [];
         foreach ($items as $idx => $item) {
             $porcion = $porciones[$idx] ?? 0.0;
             if ($porcion <= 0) continue;
 
             // Fix H-3 · fallback polimórfico item agregado (sin variante).
             $producto = $item->variante?->producto ?? $item->producto;
-            $ctaDev = $producto?->cta('devolucion') ?? setting('contable.cta_devolucion_default', '4175');
-            $ctaInv = $producto?->cta('inventario') ?? setting('contable.cta_inventario_default', '1435');
-            $ctaCosto = $producto?->cta('costo') ?? setting('contable.cta_costo_default', '6135');
+            $ctaDev = $producto?->cta('devolucion') ?? setting('contable.cta_devolucion_default');
+            $ctaInv = $producto?->cta('inventario') ?? setting('contable.cta_inventario_default');
+            $ctaCosto = $producto?->cta('costo') ?? setting('contable.cta_costo_default');
             $cc = $producto?->centroCosto();
             $desc = "Dev guía {$pedido->guia} · " . ($producto?->referencia ?? 'sin-ref') . ($cc ? " [CC:{$cc}]" : '');
 
@@ -144,27 +151,41 @@ class ContabilizarDevolucionDropi
                 'descripcion' => $desc, 'user_id' => $userId,
             ];
 
-            if ($devolucion->destino_inventario === 'reingreso') {
+            // Se reversa el costo sólo de lo que volvió al kardex: lo escaneado
+            // al recibir (5.4), repartido entre las líneas del mismo producto,
+            // y sólo si ese costo de verdad se causó al salir.
+            $clave = \App\Modules\Inventario\Support\CostoPromedio::clave($item->variante_id, $item->producto_id);
+            $vuelven = 0;
+            if ($item->variante_id || $item->producto_id) {
+                $quedan[$clave] ??= is_array($devolucion->recibidos)
+                    ? (int) ($devolucion->recibidos[$clave] ?? 0)
+                    : PHP_INT_MAX;
+                $vuelven = min((int) ($item->cantidad ?? 1), $quedan[$clave]);
+                $quedan[$clave] -= $vuelven;
+            }
+            $costoItem = round(($costos[$clave] ?? 0) * $vuelven, 2);
+
+            if ($devolucion->destino_inventario === 'reingreso' && $costoItem > 0) {
                 $lineas[] = [
                     'fecha' => $fecha, 'cuenta_puc' => $ctaInv,
-                    'debe' => $porcion, 'haber' => 0,
+                    'debe' => $costoItem, 'haber' => 0,
                     'origen_type' => $origenType, 'origen_id' => $origenId,
                     'descripcion' => "Reingreso inv " . ($producto?->referencia ?? '—') . " · {$pedido->guia}",
                     'user_id' => $userId,
                 ];
                 $lineas[] = [
                     'fecha' => $fecha, 'cuenta_puc' => $ctaCosto,
-                    'debe' => 0, 'haber' => $porcion,
+                    'debe' => 0, 'haber' => $costoItem,
                     'origen_type' => $origenType, 'origen_id' => $origenId,
                     'descripcion' => "Reverso costo " . ($producto?->referencia ?? '—') . " · {$pedido->guia}",
                     'user_id' => $userId,
                 ];
-                $totalReingresado += $porcion;
+                $totalReingresado += $costoItem;
             }
         }
 
         // Contrapartida CxC (FUNC C3 · con tercero_id).
-        $ctaCxC = setting('contable.cta_cxc_default', '1305');
+        $ctaCxC = setting('contable.cta_cxc_default');
         $lineas[] = [
             'fecha' => $fecha, 'cuenta_puc' => $ctaCxC,
             'tercero_type' => $terceroId ? $terceroTipo : null, 'tercero_id' => $terceroId,

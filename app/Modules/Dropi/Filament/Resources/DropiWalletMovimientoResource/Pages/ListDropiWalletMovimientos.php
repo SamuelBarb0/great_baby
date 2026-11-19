@@ -3,6 +3,8 @@
 namespace App\Modules\Dropi\Filament\Resources\DropiWalletMovimientoResource\Pages;
 
 use App\Modules\Dropi\Actions\ConciliarWalletDropi;
+use App\Modules\Dropi\Filament\Pages\CruceWalletPedidos;
+use App\Modules\Dropi\Filament\Pages\LibroContableDropi;
 use App\Modules\Dropi\Filament\Resources\DropiWalletMovimientoResource;
 use Carbon\CarbonImmutable;
 use Filament\Actions\Action;
@@ -17,6 +19,17 @@ class ListDropiWalletMovimientos extends ListRecords
     protected function getHeaderActions(): array
     {
         return [
+            Action::make('libro')
+                ->label('Ver en el libro contable')
+                ->icon('heroicon-o-book-open')
+                ->color('gray')
+                ->url(LibroContableDropi::urlDeWallet())
+                ->visible(fn () => LibroContableDropi::canAccess()),
+            Action::make('cruce')
+                ->label('Cruce con pedidos')
+                ->icon('heroicon-o-arrows-right-left')
+                ->color('gray')
+                ->url(fn () => CruceWalletPedidos::getUrl()),
             Action::make('conciliar')
                 ->label('Conciliar wallet Dropi')
                 ->icon('heroicon-o-arrows-right-left')

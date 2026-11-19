@@ -5,6 +5,7 @@ namespace App\Modules\Compras\Models;
 use App\Models\User;
 use App\Modules\Dropi\Models\InventarioUbicacion;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
@@ -23,6 +24,10 @@ class RecepcionCompra extends Model implements AuditableContract
     protected $guarded = ['id'];
 
     protected $casts = [
+        // Los dos ejes. Sin el cast vuelven como string y cualquier
+        // `->label()` revienta con «Call to a member function label() on string».
+        'linea_negocio' => \App\Modules\Contabilidad\Enums\LineaNegocio::class,
+        'destino_fiscal' => \App\Modules\Contabilidad\Enums\DestinoFiscal::class,
         'fecha_recepcion' => 'date',
         'confirmada_at' => 'datetime',
         'total_recibido' => 'decimal:2',
@@ -38,6 +43,32 @@ class RecepcionCompra extends Model implements AuditableContract
      */
     protected static function booted(): void
     {
+        /*
+         * La recepcion hereda los dos ejes de su orden. Se decide al comprar
+         * —que es cuando se sabe si el proveedor va a facturar— y la recepcion
+         * lo arrastra sin que nadie tenga que acordarse de copiarlo.
+         *
+         * Importa que quede EN LA FILA y no se deduzca al consultar, porque
+         * `RecepcionCompra` es el `origen` de los asientos de compra: el
+         * estampado de `MovimientoContable` lo lee de aca.
+         *
+         * Si alguien ya los puso a mano, se respetan.
+         */
+        static::creating(function (RecepcionCompra $rc) {
+            if ($rc->linea_negocio !== null && $rc->destino_fiscal !== null) {
+                return;
+            }
+
+            $orden = $rc->orden_id ? OrdenCompra::find($rc->orden_id) : null;
+            if (! $orden) {
+                return;
+            }
+
+            $rc->linea_negocio ??= $orden->linea_negocio;
+            $rc->destino_fiscal ??= $orden->destino_fiscal;
+            $rc->motivo_destino ??= $orden->motivo_destino;
+        });
+
         static::saving(function (RecepcionCompra $rc) {
             if (! $rc->exists) return;
             if ($rc->getOriginal('estado') !== 'confirmada') return;
@@ -49,9 +80,14 @@ class RecepcionCompra extends Model implements AuditableContract
             // job la reintentaba para siempre, con riesgo de duplicarla allá.
             // No tocan importes ni estado, así que no abren la puerta que este
             // guard vino a cerrar.
+            // La decision fiscal se puede corregir despues de confirmar: la
+            // factura del proveedor a veces aparece tarde. No toca importes ni
+            // estado, y quien la cambia rehace el asiento, asi que no abre la
+            // puerta que este guard vino a cerrar.
             $mutables = [
                 'observaciones', 'updated_at',
                 'siigo_id', 'siigo_number', 'siigo_sync_at', 'siigo_response', 'siigo_error',
+                'destino_fiscal', 'motivo_destino', 'linea_negocio',
             ];
             foreach ($rc->getDirty() as $campo => $_) {
                 if (! in_array($campo, $mutables, true)) {
@@ -62,6 +98,27 @@ class RecepcionCompra extends Model implements AuditableContract
                 }
             }
         });
+    }
+
+    /**
+     * Las que de verdad tienen que llegar a SIIGO.
+     *
+     * Una compra marcada INTERNA no se declara: ese es justamente el sentido
+     * del destino fiscal. Pero «pendiente de SIIGO» se estaba definiendo como
+     * «confirmada y sin siigo_id», sin mirar el destino, asi que las compras
+     * internas quedaban en la lista de pendientes PARA SIEMPRE y la tarea
+     * nocturna las reencolaba todas las noches para que volvieran a no
+     * enviarse. El 2026-11-03 eran 2 de las 4 pendientes.
+     *
+     * Sin orden —o sin destino escrito— cuenta como declarable: el default
+     * del sistema es fiscal, y dejar de enviar algo por omision seria peor
+     * que enviarlo de mas.
+     */
+    public function scopeDeclarable(Builder $q): Builder
+    {
+        return $q->whereDoesntHave('orden', fn (Builder $o) => $o->where(
+            'destino_fiscal', \App\Modules\Contabilidad\Enums\DestinoFiscal::Interno->value,
+        ));
     }
 
     public function orden(): BelongsTo

@@ -39,6 +39,26 @@ class PagosProveedorController extends Controller implements HasMiddleware
 
         return Inertia::render('Cartera/PagosProveedor', [
             'filtros' => ['q' => $r->query('q', '')],
+            /*
+             * Los conceptos salen de las reglas activas, no escritos en la
+             * pantalla.
+             *
+             * Estaban escritos a mano —cinco opciones fijas— y el motor busca
+             * la regla por ese mismo texto. De las cinco, solo «compras
+             * generales» tenia regla: las otras cuatro devolvian retencion
+             * CERO en silencio, y quien pagaba no tenia como notarlo. Leyendo
+             * de la tabla, una opcion solo existe si hay una regla detras.
+             */
+            'conceptos' => \DB::table('retenciones_config')
+                ->where('tipo', 'retefuente')->where('activa', true)
+                ->orderBy('concepto')
+                ->get(['concepto', 'tarifa_pct', 'base_minima', 'notas'])
+                ->map(fn ($c) => [
+                    'valor' => $c->concepto,
+                    'etiqueta' => $c->notas ?: $c->concepto,
+                    'tarifa' => (float) $c->tarifa_pct,
+                    'base' => (float) $c->base_minima,
+                ]),
             'pagos' => $q->orderByDesc('fecha')->orderByDesc('id')->paginate(25)->through(fn ($p) => [
                 'id' => $p->id,
                 'fecha' => $p->fecha->format('Y-m-d'),
@@ -104,31 +124,59 @@ class PagosProveedorController extends Controller implements HasMiddleware
     // que un typo del operador se replique al libro contable del cliente.
     public function confirmar(PagoProveedor $pagoProveedor, Request $r): RedirectResponse
     {
-        if ($pagoProveedor->estado === 'confirmado') {
-            return back()->with('flash', ['type' => 'info', 'message' => "Pago #{$pagoProveedor->id} ya estaba confirmado."]);
+        // Cuatro ojos, asiento y SIIGO: ver ConfirmarPagoProveedor (7-nov, también
+        //   lo usa el panel de Dropi).
+        try {
+            \App\Modules\Cartera\Actions\ConfirmarPagoProveedor::run($pagoProveedor, $r->user());
+        } catch (\App\Support\PasoNoPermitido $e) {
+            return back()->with('flash', ['type' => $e->tipo, 'message' => $e->getMessage()]);
         }
-        if ($pagoProveedor->estado === 'anulado') {
-            return back()->with('flash', ['type' => 'error', 'message' => "Pago #{$pagoProveedor->id} está anulado · no se puede confirmar."]);
-        }
-        $pagoProveedor->forceFill([
-            'estado' => 'confirmado',
-            'confirmado_at' => now(),
-            'confirmado_por' => $r->user()->id,
-        ])->save();
-        PushPagoProveedorASiigo::dispatchManual($pagoProveedor->id);
+
         return back()->with('flash', [
             'type' => 'success',
             'message' => "Pago #{$pagoProveedor->id} confirmado y encolado a SIIGO.",
         ]);
     }
 
-    public function anular(PagoProveedor $pagoProveedor): RedirectResponse
+    /**
+     * Anular deja el libro como estaba, no sólo la casilla.
+     *
+     * Antes ponía `estado = 'anulado'` y se iba. Si el pago estaba confirmado
+     * —y sólo se anula lo que se confirmó por error— su asiento seguía vivo:
+     * el pasivo con el proveedor cancelado, la plata salida del banco y las
+     * retenciones practicadas, todo en el libro, respaldando un pago que ya no
+     * existe. Las retenciones son lo grave: son la base de la declaración
+     * mensual ante la DIAN, y quedaban declarando una retención que nunca se
+     * le hizo a nadie.
+     *
+     * Se borran las líneas en vez de contra-asentar, que es lo que ya hace la
+     * anulación de factura en este mismo sistema. El rastro de quién lo hizo y
+     * por qué queda en el pago.
+     */
+    public function anular(PagoProveedor $pagoProveedor, Request $r): RedirectResponse
     {
-        if ($pagoProveedor->siigo_voucher_id) {
-            return back()->with('flash', ['type' => 'error', 'message' => "Pago #{$pagoProveedor->id} ya está en SIIGO · usar nota de ajuste allá."]);
+        // Los dos chequeos van antes de validar, como antes: un pago en SIIGO o
+        //   ya anulado responde su aviso aunque no venga el motivo.
+        try {
+            \App\Modules\Cartera\Actions\AnularPagoProveedor::verificar($pagoProveedor);
+        } catch (\App\Support\PasoNoPermitido $e) {
+            return back()->with('flash', ['type' => $e->tipo, 'message' => $e->getMessage()]);
         }
-        $pagoProveedor->update(['estado' => 'anulado']);
-        return back()->with('flash', ['type' => 'success', 'message' => "Pago #{$pagoProveedor->id} anulado."]);
+
+        $data = $r->validate(
+            ['motivo' => ['required', 'string', 'min:5', 'max:500']],
+            [],
+            ['motivo' => 'motivo'],
+        );
+
+        // Borra las líneas del asiento y deja el rastro en el pago: ver AnularPagoProveedor.
+        $borradas = \App\Modules\Cartera\Actions\AnularPagoProveedor::run($pagoProveedor, $r->user(), $data['motivo']);
+
+        return back()->with('flash', [
+            'type' => 'success',
+            'message' => "Pago #{$pagoProveedor->id} anulado."
+                .($borradas > 0 ? " Se revirtieron {$borradas} línea(s) del libro." : ''),
+        ]);
     }
 
     // QA-FIX #7 · reenviar manualmente si el push automático falló.

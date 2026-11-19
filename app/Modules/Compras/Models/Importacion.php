@@ -31,6 +31,8 @@ class Importacion extends Model implements AuditableContract
         'fecha_nacionalizacion' => 'date',
         'fecha_liquidacion' => 'date',
         'estado' => EstadoImportacion::class,
+        // De quién es el contenedor: su liquidación va al libro de esa línea.
+        'linea_negocio' => \App\Modules\Contabilidad\Enums\LineaNegocio::class,
         'tasa_cambio_liquidacion' => 'decimal:6',
         'valor_fob' => 'decimal:2',
         'valor_gastos' => 'decimal:2',
@@ -91,6 +93,26 @@ class Importacion extends Model implements AuditableContract
         return $this->hasMany(GastoImportacion::class, 'importacion_id');
     }
 
+    public function documentos(): HasMany
+    {
+        return $this->hasMany(ImportacionDocumento::class)->latest('id');
+    }
+
+    public function etapas(): HasMany
+    {
+        return $this->hasMany(ImportacionEtapa::class);
+    }
+
+    public function declaraciones(): HasMany
+    {
+        return $this->hasMany(ImportacionDeclaracion::class)->orderBy('id');
+    }
+
+    public function inspecciones(): HasMany
+    {
+        return $this->hasMany(ImportacionInspeccion::class)->latest('fecha');
+    }
+
     public function lineas(): HasMany
     {
         return $this->hasMany(ImportacionLinea::class, 'importacion_id');
@@ -131,6 +153,8 @@ class Importacion extends Model implements AuditableContract
         }
         $fin = $this->fecha_llegada ?? now();
 
-        return $this->fecha_zarpe->diffInDays($fin);
+        // Entero: `diffInDays` es flotante en Carbon 3 y el contenedor en
+        // tránsito se mostraba con decimales («12.7083 días»).
+        return (int) round($this->fecha_zarpe->diffInDays($fin));
     }
 }

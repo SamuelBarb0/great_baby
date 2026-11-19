@@ -188,7 +188,7 @@ it('la liquidación de importación ingresa al kardex un producto agregado', fun
         'bodega_id' => $this->destino->id,
         'estado' => 'aprobada',
         'fecha_emision' => now()->toDateString(),
-        'es_importacion' => true,
+        'tipo' => 'importacion',
     ]);
 
     App\Modules\Compras\Models\OrdenCompraItem::create([
@@ -221,6 +221,17 @@ it('la liquidación de importación ingresa al kardex un producto agregado', fun
         'fecha' => now()->toDateString(),
     ]);
 
+    // El stock entra cuando bodega lo acepta; liquidar sólo le corrige el costo.
+    $recepcion = App\Modules\Compras\Models\RecepcionCompra::create([
+        'numero' => 'REC-AGR-001', 'orden_id' => $orden->id, 'bodega_id' => $this->destino->id,
+        'estado' => 'borrador', 'fecha_recepcion' => now(),
+    ]);
+    $recepcion->items()->create([
+        'orden_item_id' => $orden->items()->first()->id, 'producto_id' => $this->producto->id,
+        'cantidad_recibida' => 30, 'costo_unit' => 8000, 'clasificacion' => 'apto',
+    ]);
+    App\Modules\Compras\Actions\RecibirMercancia::run($recepcion);
+
     app(App\Modules\Compras\Actions\LiquidarImportacion::class)->handle($imp->fresh());
 
     expect(saldoAgregado($this->producto->id, $this->destino->id))->toBe(30.0);
@@ -232,4 +243,88 @@ it('la liquidación de importación ingresa al kardex un producto agregado', fun
     // Costo final = FOB 8.000 + los 60.000 de flete repartidos en 30 unidades.
     expect($mov->variante_id)->toBeNull()
         ->and((float) $mov->costo_unit)->toBe(10000.0);
+});
+
+// ── Por la RUTA, no por el Action ────────────────────────────────────────────
+//
+// Las pruebas de arriba llaman a los Actions directamente, y por eso el
+// defecto sobrevivió: los Actions aceptaban el producto agregado desde
+// INV-A7, el formulario nunca lo mandó. El bodeguero escribía la referencia,
+// el desplegable le mostraba «todas las presentaciones», la clickeaba… y el
+// botón «Agregar» se quedaba gris para siempre, sin un solo mensaje.
+
+it('agrega un producto agregado al traslado por la ruta que usa la pantalla', function () {
+    $traslado = Traslado::create([
+        'numero' => 'TRA-AGR-RUTA',
+        'origen_id' => $this->origen->id,
+        'destino_id' => $this->destino->id,
+        'estado' => 'borrador',
+        'motivo' => 'reposicion',
+        'fecha_solicitud' => now()->toDateString(),
+    ]);
+
+    $this->post("/app/inventario/traslados/{$traslado->id}/items", [
+        'producto_id' => $this->producto->id,
+        'variante_id' => null,
+        'cantidad' => 12,
+    ])->assertRedirect()->assertSessionHasNoErrors();
+
+    $item = TrasladoItem::where('traslado_id', $traslado->id)->firstOrFail();
+
+    expect($item->producto_id)->toBe($this->producto->id)
+        ->and($item->variante_id)->toBeNull()
+        ->and((float) $item->cantidad_solicitada)->toBe(12.0);
+});
+
+it('no deja mandar variante Y producto al mismo tiempo', function () {
+    /*
+     * El servidor valida XOR. La pantalla manda uno de los dos en null porque
+     * el buscador devuelve uno u otro, pero si algún día se cruzan, acá se
+     * nota.
+     */
+    $traslado = Traslado::create([
+        'numero' => 'TRA-AGR-XOR',
+        'origen_id' => $this->origen->id,
+        'destino_id' => $this->destino->id,
+        'estado' => 'borrador',
+        'motivo' => 'reposicion',
+        'fecha_solicitud' => now()->toDateString(),
+    ]);
+
+    $this->post("/app/inventario/traslados/{$traslado->id}/items", [
+        'producto_id' => $this->producto->id,
+        'variante_id' => null,
+        'cantidad' => 0,
+    ])->assertSessionHasErrors('cantidad');
+
+    expect(TrasladoItem::where('traslado_id', $traslado->id)->count())->toBe(0);
+});
+
+it('configura una alerta de stock sobre un producto agregado, y la tabla no la deja en blanco', function () {
+    /*
+     * El backend lo acepta desde INV-A5 y el panel de Filament lo rotula
+     * «AGREGADO». La pantalla de Vue mandaba sólo la variante, y además
+     * resolvía el nombre y el SKU únicamente por ella: una alerta de agregado
+     * —las que entran por el Excel masivo— salía con las dos columnas vacías.
+     */
+    $this->post('/app/inventario/alertas', [
+        'producto_id' => $this->producto->id,
+        'variante_id' => null,
+        'stock_minimo' => 5,
+        'notificar_email' => true,
+        'notificar_whatsapp' => false,
+        'activa' => true,
+    ])->assertRedirect()->assertSessionHasNoErrors();
+
+    $this->get('/app/inventario/alertas')
+        ->assertOk()
+        ->assertInertia(function ($p) {
+            $fila = collect($p->toArray()['props']['alertas']['data'])->first();
+
+            expect($fila['producto_id'])->toBe($this->producto->id)
+                ->and($fila['es_agregado'])->toBeTrue()
+                // Lo que antes salía vacío.
+                ->and($fila['producto'])->toBe('Pañal recién nacido x40')
+                ->and($fila['sku'])->toBe('AGR-001');
+        });
 });

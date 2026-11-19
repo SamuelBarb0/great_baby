@@ -6,7 +6,9 @@ import { ArrowLeft, ShieldCheck, Lock, Users, Search, Save } from 'lucide-vue-ne
 
 const props = defineProps({
     rol: Object,         // null = rol nuevo
-    catalogo: Object,    // { grupo: [{seccion, permiso, etiqueta}] }
+    catalogo: Object,    // { grupo: [{seccion, permiso, etiqueta, acciones}] }
+    // Las cuatro columnas de la grilla: ver, crear, editar, eliminar.
+    acciones: { type: Array, default: () => [] },
     usuarios: Array,
 });
 
@@ -23,20 +25,77 @@ const esProtegido = props.rol?.protegido ?? false;
 
 const tiene = (p) => permisos.value.includes(p);
 
-const alternar = (p) => {
+const poner = (p) => { if (! tiene(p)) permisos.value.push(p); };
+const quitar = (p) => {
     const i = permisos.value.indexOf(p);
-    i === -1 ? permisos.value.push(p) : permisos.value.splice(i, 1);
+    if (i !== -1) permisos.value.splice(i, 1);
 };
+
+/*
+ * «Ver» es la puerta.
+ *
+ * Quitar el ver de una sección se lleva sus otras acciones: dejar marcado
+ * «editar» sobre algo que la persona no puede abrir es una casilla que miente
+ * —el servidor la rechaza igual— y al revisar la pantalla parecería que tiene
+ * un permiso que no sirve.
+ *
+ * Y marcar cualquier acción enciende el ver, porque nadie marca «eliminar»
+ * queriendo decir «pero que no lo vea».
+ */
+const alternar = (p, fila = null) => {
+    const esVer = fila && p === fila.permiso;
+
+    if (tiene(p)) {
+        quitar(p);
+        if (esVer) fila.acciones.forEach(a => quitar(a.permiso));
+        return;
+    }
+
+    poner(p);
+    if (! esVer && fila) poner(fila.permiso);
+};
+
+/** Cuántas acciones tiene marcadas una sección, para el resumen de la fila. */
+const accionesDe = (fila) => fila.acciones.filter(a => tiene(a.permiso)).length;
+
+/*
+ * Las columnas después de «Ver».
+ *
+ * Desde que cada fila trae sólo las acciones que su pantalla cumple (y el ver
+ * aparte), pintar las cuatro del encabezado corría las casillas a la columna
+ * equivocada: el «Editar» de Pedidos quedaba debajo de «Ver». Acá van sólo
+ * las acciones que alguna pantalla ofrece —«Eliminar» no la ofrece ninguna:
+ * borrar es de Aracely y Gerencia— y cada fila busca la suya por nombre.
+ */
+const columnas = computed(() => {
+    const ofrecidas = new Set(Object.values(props.catalogo).flat()
+        .flatMap(i => i.acciones.map(a => a.accion)));
+    return props.acciones.filter(a => a.accion !== 'ver' && ofrecidas.has(a.accion));
+});
+
+const accionDeFila = (fila, accion) => fila.acciones.find(a => a.accion === accion) ?? null;
 
 const grupoCompleto = (items) => items.every(i => tiene(i.permiso));
 
 const alternarGrupo = (items) => {
     if (grupoCompleto(items)) {
-        permisos.value = permisos.value.filter(p => ! items.some(i => i.permiso === p));
+        // Quitar el grupo se lleva todo lo suyo, acciones incluidas.
+        items.forEach(i => {
+            quitar(i.permiso);
+            i.acciones.forEach(a => quitar(a.permiso));
+        });
     } else {
-        items.forEach(i => { if (! tiene(i.permiso)) permisos.value.push(i.permiso); });
+        // Marcar todo da acceso completo, que es lo que se espera del botón.
+        items.forEach(i => {
+            poner(i.permiso);
+            i.acciones.forEach(a => poner(a.permiso));
+        });
     }
 };
+
+/** Sólo las secciones marcadas, para el contador de arriba. */
+const seccionesMarcadas = computed(() =>
+    permisos.value.filter(p => p.startsWith('ver.')).length);
 
 const usuariosFiltrados = computed(() => {
     const q = buscar.value.trim().toLowerCase();
@@ -100,7 +159,9 @@ const guardar = () => {
                 <div class="px-4 py-3 border-b border-surface-200 dark:border-surface-800">
                     <h3 class="font-semibold">¿Qué puede ver y hacer?</h3>
                     <p class="text-xs text-surface-500 mt-0.5">
-                        {{ permisos.length }} accesos marcados.
+                        {{ seccionesMarcadas }} sección(es) marcada(s).
+                        <strong>Ver</strong> abre la pantalla; las otras columnas dicen qué más puede hacer adentro.
+                        Un guion significa que esa pantalla no tiene esa acción: con <strong>Ver</strong> ya la usa entera.
                     </p>
                 </div>
 
@@ -113,14 +174,46 @@ const guardar = () => {
                                 {{ grupoCompleto(items) ? 'Quitar todo' : 'Marcar todo' }}
                             </button>
                         </div>
-                        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                            <label v-for="i in items" :key="i.permiso"
-                                   class="flex items-center gap-2 p-2 rounded border border-surface-200 dark:border-surface-700 cursor-pointer hover:bg-brand-50/50 dark:hover:bg-brand-950/20 text-sm">
-                                <input type="checkbox" :checked="tiene(i.permiso)" @change="alternar(i.permiso)"
-                                       class="h-4 w-4 rounded shrink-0"/>
-                                <span>{{ i.etiqueta }}</span>
-                            </label>
-                        </div>
+                        <table class="w-full text-sm">
+                            <thead>
+                                <tr class="text-[10px] uppercase text-surface-400">
+                                    <th class="text-left font-semibold pb-1">Sección</th>
+                                    <th class="w-16 pb-1 font-semibold">Ver</th>
+                                    <th v-for="a in columnas" :key="a.accion" class="w-16 pb-1 font-semibold">
+                                        {{ a.texto }}
+                                    </th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-surface-100 dark:divide-surface-800">
+                                <tr v-for="i in items" :key="i.permiso"
+                                    :class="tiene(i.permiso) ? '' : 'opacity-60'">
+                                    <td class="py-1.5 pr-2">
+                                        {{ i.etiqueta }}
+                                        <span v-if="tiene(i.permiso) && i.acciones.length && accionesDe(i) === 0"
+                                              class="ml-1 text-[10px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-700">
+                                            sólo lectura
+                                        </span>
+                                    </td>
+                                    <td class="text-center py-1.5">
+                                        <input type="checkbox"
+                                               :checked="tiene(i.permiso)"
+                                               :title="'Ver: abre ' + i.etiqueta"
+                                               @change="alternar(i.permiso, i)"
+                                               class="h-4 w-4 rounded"/>
+                                    </td>
+                                    <td v-for="c in columnas" :key="c.accion" class="text-center py-1.5">
+                                        <input v-if="accionDeFila(i, c.accion)" type="checkbox"
+                                               :checked="tiene(accionDeFila(i, c.accion).permiso)"
+                                               :disabled="! tiene(i.permiso)"
+                                               :title="! tiene(i.permiso) ? 'Primero hay que marcar Ver' : c.texto"
+                                               @change="alternar(accionDeFila(i, c.accion).permiso, i)"
+                                               class="h-4 w-4 rounded disabled:opacity-30"/>
+                                        <span v-else class="text-surface-300"
+                                              title="Esta pantalla no tiene esta acción: con Ver ya la usa entera.">—</span>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             </div>

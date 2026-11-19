@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\App;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Dropi\Enums\CategoriaUbicacion;
 use App\Modules\Inventario\Models\AlertaStockDisparada;
 use App\Modules\Inventario\Models\ReservaInventario;
 use App\Modules\Inventario\Models\TomaFisica;
@@ -48,18 +49,46 @@ class InventarioController extends Controller implements HasMiddleware
         // -X sin entrada +X todavía) e inflaba el número con reversas. Ahora
         // agrupamos por (sujeto, ubicacion) y descartamos buckets negativos:
         // el stock físico es la suma de todas las posiciones con saldo > 0.
-        $stockTotal = 0;
+        // INV-A5 · el número de arriba es lo VENDIBLE, no todo lo que hay.
+        //   La ubicación dice para qué sirve la mercancía, no sólo dónde está:
+        //   avería por reparar, baja total y lo reservado a garantías no se le
+        //   puede vender a nadie. Sumarlo todo daba, en producción, 21.645
+        //   unidades cuando lo vendible eran 13.091 — 8.554 de ellas dadas de
+        //   baja y valoradas en $0. Gerencia leía un inventario 65% más grande
+        //   del que existe.
+        //   No se esconde: lo excluido viaja aparte y la tarjeta lo dice.
+        //
+        // INV-A6 · y un movimiento ANULADO no es stock.
+        //   `InventarioMovimiento` fuerza borrado suave a propósito: el kardex
+        //   no se borra, se anula. Pero estas consultas son `DB::table()`, que
+        //   no sabe de `deleted_at`, así que seguían sumando lo anulado. Es lo
+        //   que dejó sin efecto a `inventario:reparar-kardex`, que el 8-oct
+        //   anuló 144 movimientos de productos borrados —8.958 unidades de
+        //   stock fantasma— y el tablero siguió contándolas igual.
+        $vendibles = array_map(
+            fn (CategoriaUbicacion $c) => $c->value,
+            array_filter(CategoriaUbicacion::cases(), fn ($c) => $c->disponibleParaVenta()),
+        );
+
+        $stockVendible = 0;
+        $stockNoVendible = 0;
         if (Schema::hasTable('inventario_movimientos')) {
-            $saldos = DB::table('inventario_movimientos')
-                ->selectRaw('COALESCE(variante_id, 0) as v, COALESCE(producto_id, 0) as p, ubicacion_id, SUM(cantidad) as saldo')
-                ->groupBy('v', 'p', 'ubicacion_id')
-                ->havingRaw('SUM(cantidad) > 0')
-                ->pluck('saldo');
-            $stockTotal = (int) $saldos->sum();
+            // El join no pierde filas: `ubicacion_id` es NOT NULL con FK.
+            $saldos = DB::table('inventario_movimientos as m')
+                ->join('inventario_ubicaciones as u', 'u.id', '=', 'm.ubicacion_id')
+                ->whereNull('m.deleted_at')
+                ->selectRaw('u.categoria as categoria, COALESCE(m.variante_id, 0) as v, COALESCE(m.producto_id, 0) as p, m.ubicacion_id, SUM(m.cantidad) as saldo')
+                ->groupBy('u.categoria', 'v', 'p', 'm.ubicacion_id')
+                ->havingRaw('SUM(m.cantidad) > 0')
+                ->get();
+
+            $stockVendible = (int) $saldos->whereIn('categoria', $vendibles)->sum('saldo');
+            $stockNoVendible = (int) $saldos->whereNotIn('categoria', $vendibles)->sum('saldo');
         }
 
         return [
-            'unidades_stock' => $stockTotal,
+            'unidades_stock' => $stockVendible,
+            'unidades_no_vendibles' => $stockNoVendible,
             'alertas_activas' => AlertaStockDisparada::where('resuelta', false)->count(),
             'traslados_transito' => Traslado::where('estado', 'en_transito')->count(),
             'reservas_activas' => ReservaInventario::where('activa', true)->count(),
@@ -77,6 +106,7 @@ class InventarioController extends Controller implements HasMiddleware
             ->join('producto_variantes as v', 'v.id', '=', 'm.variante_id')
             ->join('productos as p', 'p.id', '=', 'v.producto_id')
             ->join('inventario_ubicaciones as u', 'u.id', '=', 'm.ubicacion_id')
+            ->whereNull('m.deleted_at')
             ->selectRaw('
                 p.referencia,
                 p.nombre,
@@ -94,6 +124,7 @@ class InventarioController extends Controller implements HasMiddleware
             ->join('productos as p', 'p.id', '=', 'm.producto_id')
             ->join('inventario_ubicaciones as u', 'u.id', '=', 'm.ubicacion_id')
             ->whereNull('m.variante_id')
+            ->whereNull('m.deleted_at')
             ->selectRaw('
                 p.referencia,
                 p.nombre,

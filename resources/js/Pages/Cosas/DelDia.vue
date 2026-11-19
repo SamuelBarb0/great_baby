@@ -1,7 +1,7 @@
 <script setup>
 import { computed } from 'vue';
 import { Head, Link, usePage } from '@inertiajs/vue3';
-import { Sunrise, Package, ShieldCheck, AlertCircle, UserX, Ghost, Boxes, Wallet } from 'lucide-vue-next';
+import { Sunrise, Package, ShieldCheck, AlertCircle, UserX, Ghost, Boxes, Wallet, Stamp } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
 
 const props = defineProps({
@@ -13,6 +13,12 @@ const props = defineProps({
     fantasma: Array,
     criticos: Array,
     wallet: Object,
+    /*
+     * Lo que espera una firma. Estaba repartido en cinco pantallas —Compras,
+     * Contabilidad, Gastos, Cartera y CRM— y para saber que habia frenado
+     * habia que abrir las cinco y acordarse de las cinco.
+     */
+    aprobaciones: { type: Object, default: () => ({ grupos: [], total: 0, monto: 0 }) },
 });
 
 // LOG · El AdminBodega entra a Cosas del día pero NO maneja Dropi · así que
@@ -30,6 +36,7 @@ const totalItems = computed(() =>
     + props.clientesDormidos.length
     + props.criticos.length
     + (puedeVerDropi.value ? props.fantasma.length + (props.wallet.sin_cobro > 0 ? 1 : 0) : 0)
+    + (props.aprobaciones?.grupos?.length || 0)
 );
 </script>
 
@@ -50,6 +57,40 @@ const totalItems = computed(() =>
                 </div>
                 <div v-else class="px-4 py-2 rounded-lg bg-amber-500/15 text-amber-800 dark:text-amber-300 text-sm font-bold">
                     {{ totalItems }} cosas para revisar
+                </div>
+            </div>
+
+            <!--
+                Lo que espera firma, antes que nada.
+
+                Va en una fila propia y arriba de la grilla porque lo de aca no
+                es una alerta sino un bloqueo: una orden de compra sin aprobar
+                es mercancia que no se pidio, y una solicitud de credito sin
+                responder es una venta detenida con un cliente esperando.
+            -->
+            <div v-if="aprobaciones.grupos.length" class="card p-4 border-l-4 border-brand-500">
+                <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+                    <div class="flex items-center gap-2">
+                        <Stamp class="h-5 w-5 text-brand-600"/>
+                        <span class="font-bold">Esperando tu firma</span>
+                        <span class="text-xs text-surface-500">
+                            {{ aprobaciones.total }} documento(s) por {{ money(aprobaciones.monto) }}
+                        </span>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+                    <Link v-for="g in aprobaciones.grupos" :key="g.clave" :href="g.url"
+                          class="block p-3 rounded-lg border border-surface-200 dark:border-surface-800 hover:border-brand-500 transition-colors">
+                        <div class="flex items-baseline justify-between gap-2">
+                            <span class="text-sm font-medium">{{ g.titulo }}</span>
+                            <span class="text-xl font-black tabular-nums text-brand-600">{{ g.cantidad }}</span>
+                        </div>
+                        <div class="text-sm tabular-nums font-semibold mt-0.5">{{ money(g.monto) }}</div>
+                        <!-- «3 pendientes» no dice si son tres gastos de taxi o
+                             tres ordenes de importacion. -->
+                        <div class="text-[11px] text-surface-500 mt-1">{{ g.detalle }}</div>
+                    </Link>
                 </div>
             </div>
 

@@ -2,6 +2,7 @@
 
 namespace App\Modules\Dropi\Filament\Pages;
 
+use App\Auth\Permisos;
 use App\Modules\Dropi\Enums\EstadoPedidoDropi;
 use App\Modules\Dropi\Events\PedidoDespachado;
 use App\Modules\Dropi\Jobs\NotificarClienteDespachoJob;
@@ -30,16 +31,18 @@ class EscannerCamara extends Page
 
     protected static ?string $title = 'Escáner de guías por cámara';
 
-    protected static string|\UnitEnum|null $navigationGroup = 'Dropi';
+    protected static string|\UnitEnum|null $navigationGroup = 'Operación';
 
-    protected static ?int $navigationSort = 6;
+    protected static ?int $navigationSort = 3;
 
     protected string $view = 'dropi.pages.escanner-camara';
 
     public static function canAccess(): bool
     {
-        $u = auth()->user();
-        return $u ? ($u->esAlistador() || $u->esAracely()) : false;
+        // Antes preguntaba por la casilla de la Vista del alistador
+        //   (`esAlistador()`): «Escáner con cámara» tiene la suya, y es la que
+        //   ya usa la búsqueda global de /app para esta misma pantalla.
+        return Permisos::puede(auth()->user(), 'escanner_camara');
     }
 
     /**

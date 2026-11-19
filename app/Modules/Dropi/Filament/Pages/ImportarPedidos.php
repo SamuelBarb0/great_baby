@@ -2,6 +2,7 @@
 
 namespace App\Modules\Dropi\Filament\Pages;
 
+use App\Auth\Permisos;
 use App\Modules\Dropi\Actions\ImportarPedidosDropiExcel;
 use BackedEnum;
 use Filament\Actions\Action;
@@ -24,9 +25,9 @@ class ImportarPedidos extends Page implements HasForms
 
     protected static ?string $navigationLabel = 'Importar pedidos (Excel)';
 
-    protected static string|\UnitEnum|null $navigationGroup = 'Dropi';
+    protected static string|\UnitEnum|null $navigationGroup = 'Configuración';
 
-    protected static ?int $navigationSort = 9;
+    protected static ?int $navigationSort = 2;
 
     protected static ?string $title = 'Importar pedidos de Dropi (Excel)';
 
@@ -39,7 +40,15 @@ class ImportarPedidos extends Page implements HasForms
 
     public static function canAccess(): bool
     {
-        return auth()->user()?->esAracely() ?? false;
+        // Antes era `esAracely()`: importar era una puerta que la pantalla de
+        //   Roles no podía abrir. Ahora es la casilla.
+        return Permisos::puede(auth()->user(), 'dropi_importar_pedidos');
+    }
+
+    /** Ver la explicación es una cosa; subir el Excel es otra. */
+    public function getPuedeEditarProperty(): bool
+    {
+        return Permisos::puedeAccion(auth()->user(), 'dropi_importar_pedidos', 'editar');
     }
 
     public function mount(): void
@@ -64,6 +73,8 @@ class ImportarPedidos extends Page implements HasForms
 
     public function procesar(): void
     {
+        abort_unless($this->puedeEditar, 403, 'Importar pedidos necesita permiso de edición.');
+
         $data = $this->form->getState();
         $rel = $data['archivo'] ?? null;
         if (! $rel) {

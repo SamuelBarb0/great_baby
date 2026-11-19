@@ -256,8 +256,21 @@ describe('ReservarStock polimórfico', function () {
         $origen = InventarioMovimiento::first(); // cualquier modelo como origen
         $reserva = ReservarStock::run($v->id, $this->bodega->id, 10, $origen);
 
+        /*
+         * La reserva de una variante TAMBIÉN guarda su producto.
+         *
+         * Antes este test exigía que `producto_id` quedara nulo, y ese era el
+         * defecto: la disponibilidad masiva del portal suma kardex y reservas
+         * con el MISMO filtro por `producto_id`, así que encontraba el físico y
+         * no encontraba lo reservado. El portal ofrecía mercancía que ya estaba
+         * apartada para otro pedido.
+         *
+         * A quién pertenece la reserva lo sigue decidiendo `variante_id`: los
+         * candados y la búsqueda de reserva existente filtran por ahí. Esto es
+         * el mismo dato denormalizado, igual que lo hace el kardex.
+         */
         expect($reserva->variante_id)->toBe($v->id)
-            ->and($reserva->producto_id)->toBeNull()
+            ->and($reserva->producto_id)->toBe($p->id)
             ->and($reserva->cantidad)->toBe(10);
     });
 

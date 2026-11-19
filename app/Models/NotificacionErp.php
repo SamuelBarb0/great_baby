@@ -27,10 +27,39 @@ class NotificacionErp extends Model
      */
     public static function crear(array $data): self
     {
-        return static::create(array_merge([
+        $aviso = static::create(array_merge([
             'color' => 'gray',
             'icono' => 'heroicon-o-bell',
         ], $data));
+
+        if (self::vaTambienPorCorreo($aviso->tipo)) {
+            \App\Jobs\EnviarAvisoPorCorreo::dispatch($aviso->id);
+        }
+
+        return $aviso;
+    }
+
+    /**
+     * ¿Este aviso además se manda por correo?
+     *
+     * Dos condiciones, y las dos las decide Gerencia desde Reglas: que el
+     * correo esté prendido —hoy el servidor manda al log, así que nace
+     * apagado— y que el tipo esté en la lista.
+     *
+     * La lista es explícita a propósito. Mandar por correo todo lo que pasa
+     * por la campana es la forma más rápida de que la gente lo mande a spam y
+     * deje de leer también lo importante.
+     */
+    private static function vaTambienPorCorreo(?string $tipo): bool
+    {
+        if (! $tipo || ! setting('notificaciones.correo_activo')) {
+            return false;
+        }
+
+        $crudo = setting('notificaciones.tipos_por_correo');
+        $tipos = is_array($crudo) ? $crudo : (json_decode((string) $crudo, true) ?: []);
+
+        return in_array($tipo, $tipos, true);
     }
 
     public static function noLeidasPara(int $userId): int

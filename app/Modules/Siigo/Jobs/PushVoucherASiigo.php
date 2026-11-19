@@ -121,6 +121,10 @@ class PushVoucherASiigo implements ShouldQueue
             // seguridad lo reencolaba para que muriera igual. Queda como
             // omitido, que es lo que de verdad pasó.
             $this->log('omitido', 0, "[sin-factura-electronica] {$e->getMessage()}");
+        } catch (\App\Modules\Siigo\Exceptions\PagoTotalmenteInterno $e) {
+            // El abono no toca la parte declarada del reparto: en SIIGO esa
+            // factura ya esta pagada. No hay nada que mandar ni que reintentar.
+            $this->log('omitido', 0, "[pago-interno-de-reparto] {$e->getMessage()}");
         }
     }
 

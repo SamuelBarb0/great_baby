@@ -1,0 +1,590 @@
+<?php
+
+namespace App\Http\Controllers\App;
+
+use App\Auth\Permisos;
+use App\Http\Controllers\Controller;
+use App\Models\NotificacionErp;
+use App\Modules\Rrhh\Enums\EtapaCandidato;
+use App\Modules\Rrhh\Enums\ValoracionCandidato;
+use App\Modules\Rrhh\Models\Candidato;
+use App\Modules\Rrhh\Models\EntrevistaCandidato;
+use App\Modules\Rrhh\Models\OrdenContratacion;
+use App\Modules\Rrhh\Models\PreguntaEntrevista;
+use App\Modules\Rrhh\Models\Vacante;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
+use Illuminate\Routing\Controllers\HasMiddleware;
+use Illuminate\Routing\Controllers\Middleware;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\Rule;
+use Symfony\Component\HttpFoundation\StreamedResponse;
+
+/**
+ * F2 · El proceso de selección, desde que llega la hoja de vida.
+ *
+ * Es el tramo que Elena lleva hoy en su cabeza y en carpetas: recibe hojas de
+ * vida por varios lados, revisa antecedentes, cita a la entrevista con el jefe
+ * y a la de psicología, hace pruebas, valida referencias y arma la terna que
+ * le presenta al jefe que pidió el personal.
+ *
+ * Dos reglas del proceso quedan en el código y no en la memoria de nadie:
+ * no se cita a entrevista sin haber revisado antecedentes, y una terna es de
+ * tres.
+ */
+class SeleccionController extends Controller implements HasMiddleware
+{
+    public static function middleware(): array
+    {
+        return [
+            /*
+             * Casi todo acá es de Gestión Humana, que es quien entrevista.
+             *
+             * Las dos excepciones son las preguntas: son del JEFE DEL ÁREA, y
+             * él no tiene `rrhh_seleccion` ni debería —no le corresponde ver
+             * las hojas de vida ni los conceptos psicológicos de nadie—. Si la
+             * puerta de la clase se le cierra, el permiso del método nunca
+             * llega a correr y queda pidiéndole a Gestión Humana que teclee
+             * las preguntas que él escribió aparte, que es justo lo que este
+             * cambio vino a quitar.
+             *
+             * `autorizarPreguntas()` hace la revisión fina: Gestión Humana, o
+             * quien pidió ESE personal. Nadie más.
+             */
+            (new Middleware(function (Request $r, \Closure $next) {
+                abort_unless(Permisos::puede($r->user(), 'rrhh_seleccion'), 403);
+
+                return $next($r);
+            }))->except(['agregarPregunta', 'alternarPregunta']),
+        ];
+    }
+
+    /** El tablero de una vacante: en qué columna va cada candidato. */
+    public function tablero(Request $r, int $vacante)
+    {
+        $v = Vacante::with('requisicion:id,numero,solicitante_id')->findOrFail($vacante);
+
+        // La bitácora viaja con su autor en la misma consulta: sin esto
+        // serían dos más por cada candidato del tablero.
+        $candidatos = Candidato::with(['pruebasPsicotecnicas', 'entrevistas', 'bitacora.usuario:id,name'])
+            ->where('vacante_id', $v->id)
+            ->orderByDesc('id')->get();
+
+        /*
+         * El estado de la orden de la Junta, por candidato seleccionado.
+         *
+         * Sin esto el tablero ofrecía «Abrir contratación» a secas y el
+         * servidor lo rebotaba: un botón que falla siempre es peor que no
+         * tenerlo. Ahora la tarjeta dice qué toca —pedir la orden, esperar a
+         * la Junta, o contratar—.
+         */
+        $ordenes = OrdenContratacion::whereIn('candidato_id', $candidatos->pluck('id'))
+            ->get()->keyBy('candidato_id');
+
+        // Y en qué va la contratación, si ya arrancó. Sin esto el tablero le
+        // ofrecía «Pedir orden a la Junta» a alguien que ya estaba contratado.
+        $contrataciones = \App\Modules\Rrhh\Models\Contratacion::whereIn('candidato_id', $candidatos->pluck('id'))
+            ->get(['id', 'candidato_id', 'estado', 'empleado_id'])->keyBy('candidato_id');
+
+        return \Inertia\Inertia::render('Rrhh/Seleccion/Tablero', [
+            'vacante' => [
+                'id' => $v->id,
+                'titulo' => $v->titulo,
+                'area' => $v->area,
+                'estado' => $v->estado,
+                'fuente' => $v->fuente,
+                'requisicion' => $v->requisicion
+                    ? ['id' => $v->requisicion->id, 'numero' => $v->requisicion->numero]
+                    : null,
+            ],
+            // Las columnas se arman desde el enum: agregar una etapa no exige
+            // tocar la pantalla.
+            'columnas' => collect(EtapaCandidato::delTablero())->map(fn ($e) => [
+                'valor' => $e->value,
+                'label' => $e->label(),
+                'color' => $e->color(),
+                'responsable' => $e->responsable(),
+                'exige_antecedentes' => $e->exigeAntecedentes(),
+            ])->values(),
+            'candidatos' => $candidatos->map(fn ($c) => $this->ficha(
+                $c, $ordenes->get($c->id), $contrataciones->get($c->id)
+            ))->values(),
+            'descartados' => $candidatos->where('etapa', EtapaCandidato::Descartado)->count(),
+            'fuentes' => collect(Vacante::FUENTES)->map(fn ($l, $k) => ['valor' => $k, 'label' => $l])->values(),
+            'valoraciones' => collect(ValoracionCandidato::cases())->map(fn ($v) => [
+                'valor' => $v->value,
+                'label' => $v->label(),
+                'exige_observacion' => $v->exigeObservacion(),
+            ])->values(),
+            'terna_llena' => $candidatos->where('etapa', EtapaCandidato::Terna)->count() >= Candidato::TAMANO_TERNA,
+            // Fase C · los catálogos de las psicotécnicas, armados desde los
+            // enums para que agregar un instrumento no exija tocar la pantalla.
+            'instrumentos' => \App\Modules\Rrhh\Enums\InstrumentoPsicotecnico::catalogo(),
+            // Los dos cuestionarios, armados desde el modelo: cambiar una
+            // pregunta es editar una constante, no la pantalla.
+            'cuestionarios' => [
+                'saber_hacer' => \App\Modules\Rrhh\Models\EntrevistaCandidato::SABER_HACER_BLOQUES,
+                'items' => \App\Modules\Rrhh\Models\EntrevistaCandidato::SABER_HACER_ITEMS,
+                // Los seis de la entrevista del ser. Van por separado de
+                // `items` porque preguntan otra cosa: aquéllos si la
+                // persona SIRVE para el cargo, éstos CÓMO ES.
+                'ser' => \App\Modules\Rrhh\Models\EntrevistaCandidato::SER_ITEMS,
+                'psicologica' => \App\Modules\Rrhh\Models\EntrevistaCandidato::PSICOLOGICA_BLOQUES,
+                'niveles' => \App\Modules\Rrhh\Models\EntrevistaCandidato::NIVELES_EDUCATIVOS,
+            ],
+            'conceptos' => \App\Modules\Rrhh\Enums\ConceptoPsicotecnico::catalogo(),
+            // Para que la pantalla muestre la banda mientras se califica,
+            // con los mismos textos que el impreso.
+            'bandas' => \App\Modules\Rrhh\Enums\BandaValoracion::catalogo(),
+            /*
+             * Las preguntas del jefe, aparte de las del formato a propósito.
+             *
+             * En la pantalla y en el impreso se ven separadas: nadie
+             * confunde lo que el formato sugiere preguntar con lo que
+             * preguntó quien pidió el personal.
+             */
+            'preguntas_extra' => [
+                'saber_hacer' => PreguntaEntrevista::paraEntrevistar($v->id, EntrevistaCandidato::SABER_HACER),
+                'psicologica' => PreguntaEntrevista::paraEntrevistar($v->id, EntrevistaCandidato::PSICOLOGICA),
+            ],
+            // Gestión Humana, o el jefe que pidió el personal.
+            'puede_preguntas' => Permisos::puede($r->user(), 'rrhh_seleccion')
+                || $v->requisicion?->solicitante_id === $r->user()->id,
+        ]);
+    }
+
+    public function crear(Request $r, int $vacante): RedirectResponse
+    {
+        $v = Vacante::findOrFail($vacante);
+
+        // Cerrar una vacante no significa nada si se le siguen cargando hojas
+        // de vida: la persona quedaría en un proceso que ya terminó, esperando
+        // una llamada que no va a llegar.
+        abort_if($v->estado === 'cerrada', 422,
+            "La vacante «{$v->titulo}» está cerrada. Reabrila si vas a seguir recibiendo candidatos.");
+
+        $data = $r->validate([
+            'nombre' => ['required', 'string', 'max:150'],
+            'documento' => ['nullable', 'string', 'max:20'],
+            'email' => ['nullable', 'email', 'max:150'],
+            'telefono' => ['nullable', 'string', 'max:30'],
+            'fuente' => ['nullable', 'string', 'max:60'],
+            'notas' => ['nullable', 'string', 'max:2000'],
+            // La hoja de vida: PDF o imagen, hasta 8 MB. No se guarda en el
+            // disco público porque lleva datos personales — ver `verHojaDeVida`.
+            'cv' => ['nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:8192'],
+        ], [], ['cv' => 'hoja de vida']);
+
+        $c = DB::transaction(function () use ($data, $v, $r) {
+            $c = Candidato::create([
+                ...collect($data)->except('cv')->all(),
+                'vacante_id' => $v->id,
+                'etapa' => EtapaCandidato::Recibido->value,
+            ]);
+
+            if ($r->hasFile('cv')) {
+                $c->cv_path = $r->file('cv')->store("rrhh/hojas-de-vida/{$v->id}");
+                $c->save();
+            }
+
+            $fuente = $data['fuente'] ?? null;
+            $c->anotar('recibido', 'Hoja de vida recibida'.(
+                $fuente ? ' · '.(Vacante::FUENTES[$fuente] ?? $fuente) : ''
+            ));
+
+            return $c;
+        });
+
+        return back()->with('success', "{$c->nombre} quedó registrado. Revisá los antecedentes antes de citarlo.");
+    }
+
+    /**
+     * Mueve a un candidato de etapa.
+     *
+     * Las reglas viven en el modelo, no acá: así el tablero, un botón suelto o
+     * lo que venga después no pueden saltárselas por caminos distintos.
+     */
+    public function mover(Request $r, int $candidato): RedirectResponse
+    {
+        $data = $r->validate([
+            'etapa' => ['required', new \Illuminate\Validation\Rules\Enum(EtapaCandidato::class)],
+            'nota' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        $c = Candidato::with('vacante.requisicion')->findOrFail($candidato);
+        $destino = EtapaCandidato::from($data['etapa']);
+
+        if ($motivo = $c->porQueNoPuedeIrA($destino)) {
+            return back()->withErrors(['etapa' => $motivo]);
+        }
+
+        DB::transaction(function () use ($c, $destino, $data) {
+            // `validate()` NO devuelve las claves que no vinieron en la
+            // petición, así que un campo opcional se lee siempre con `??`.
+            if (! $c->moverA($destino, ($data['nota'] ?? null) ?: "Pasó a {$destino->label()}")) {
+                return;
+            }
+
+            // Cuando hay alguien en la terna, el jefe tiene que enterarse: es
+            // su turno de decidir y hoy se entera por una llamada.
+            if ($destino === EtapaCandidato::Terna) {
+                $this->avisarAlJefeDeLaTerna($c);
+            }
+        });
+
+        return back()->with('success', "{$c->nombre} pasó a {$destino->label()}.");
+    }
+
+    /** Lo saca del proceso, diciendo por qué. */
+    public function descartar(Request $r, int $candidato): RedirectResponse
+    {
+        // Sin motivo, dentro de tres meses nadie sabe si a esta persona se la
+        // puede volver a llamar para otra vacante.
+        $data = $r->validate([
+            'motivo' => ['required', 'string', 'min:5', 'max:500'],
+        ], [], ['motivo' => 'motivo del descarte']);
+
+        $c = Candidato::findOrFail($candidato);
+
+        /*
+         * Antes frenaba con `esFinal()`, que mete en la misma bolsa a
+         * `descartado` y a `seleccionado`. Lo segundo era un error: estar
+         * seleccionado no es haber salido del proceso, es estar en el último
+         * tramo. Y dejaba sin salida a quien el jefe eligió pero la Junta no
+         * autorizó: no se podía contratar —la orden no autoriza— ni descartar
+         * —«ya salió del proceso»—, así que la persona quedaba ahí para
+         * siempre, ocupando el puesto de elegido de una vacante que seguía
+         * abierta. Lo mismo pasa con quien se arrepiente o no contesta más.
+         *
+         * Lo que de verdad cierra la puerta es haber empezado la contratación:
+         * si ya hay un contrato en curso, esto no se deshace descartando a la
+         * persona.
+         */
+        abort_if($c->etapa === EtapaCandidato::Descartado, 422,
+            "{$c->nombre} ya estaba descartado.");
+
+        abort_if(
+            \App\Modules\Rrhh\Models\Contratacion::where('candidato_id', $c->id)->exists(),
+            422,
+            "{$c->nombre} ya tiene una contratación abierta: no se descarta desde acá.",
+        );
+
+        $c->motivo_descarte = $data['motivo'];
+        $c->moverA(EtapaCandidato::Descartado, "Descartado: {$data['motivo']}");
+
+        return back()->with('success', "{$c->nombre} quedó descartado.");
+    }
+
+    /**
+     * Deja escrito que se revisaron los antecedentes judiciales y qué salió.
+     *
+     * Y guarda el certificado, que antes se quedaba en el correo de quien lo
+     * consultó. Cuando seis meses después alguien pregunta con qué se contrató
+     * a esta persona, la respuesta era la palabra de alguien.
+     *
+     * El archivo es opcional a propósito: hay consultas que se hacen en
+     * pantalla y no dejan PDF, y obligarlo llevaría a adjuntar cualquier cosa
+     * con tal de poder seguir. Lo que no es opcional es decir qué salió.
+     */
+    public function antecedentes(Request $r, int $candidato): RedirectResponse
+    {
+        $data = $r->validate([
+            'resultado' => ['required', 'string', 'max:300'],
+            // Igual que la hoja de vida: al disco PRIVADO, nunca al público.
+            // Un certificado judicial es dato sensible — ver `verAntecedentes`.
+            'soporte' => ['nullable', 'file', 'mimes:pdf,jpg,jpeg,png', 'max:8192'],
+        ], [], [
+            'resultado' => 'resultado de la consulta',
+            'soporte' => 'certificado',
+        ]);
+
+        $c = Candidato::findOrFail($candidato);
+
+        $cambios = [
+            'antecedentes_revisados' => true,
+            'antecedentes_resultado' => $data['resultado'],
+        ];
+
+        if ($r->hasFile('soporte')) {
+            $cambios['antecedentes_archivo_path'] = $r->file('soporte')
+                ->store("rrhh/antecedentes/{$c->vacante_id}");
+        }
+
+        $c->update($cambios);
+
+        $c->anotar('antecedentes', "Antecedentes revisados: {$data['resultado']}"
+            .($r->hasFile('soporte') ? ' · con certificado adjunto' : ''));
+
+        return back()->with('success', 'Antecedentes registrados. Ya se puede citar a entrevista.');
+    }
+
+    /**
+     * El certificado de antecedentes, servido sólo a quien puede verlo.
+     *
+     * No va por URL pública como las fotos de producto: lleva el nombre y el
+     * documento de alguien que todavía no trabaja acá, y puede decir que tiene
+     * un proceso. El permiso lo revisa el middleware de la clase.
+     */
+    public function verAntecedentes(int $candidato): StreamedResponse
+    {
+        $c = Candidato::findOrFail($candidato);
+
+        abort_unless(
+            $c->antecedentes_archivo_path && Storage::exists($c->antecedentes_archivo_path),
+            404,
+            'Este candidato no tiene certificado de antecedentes cargado.'
+        );
+
+        return Storage::response(
+            $c->antecedentes_archivo_path,
+            'ANTECEDENTES-'.str($c->nombre)->slug().'.'.pathinfo($c->antecedentes_archivo_path, PATHINFO_EXTENSION),
+            ['Content-Disposition' => 'inline'],
+        );
+    }
+
+    /** El dictamen de Gestión Humana sobre el candidato. */
+    public function valorar(Request $r, int $candidato): RedirectResponse
+    {
+        $data = $r->validate([
+            'valoracion' => ['required', new \Illuminate\Validation\Rules\Enum(ValoracionCandidato::class)],
+            'observacion' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        $valoracion = ValoracionCandidato::from($data['valoracion']);
+        $observacion = $data['observacion'] ?? null;
+
+        // «Apto con restricción» sin decir cuál no le sirve al jefe que elige.
+        if ($valoracion->exigeObservacion() && blank($observacion)) {
+            return back()->withErrors([
+                'observacion' => "«{$valoracion->label()}» necesita que expliques por qué.",
+            ]);
+        }
+
+        $c = Candidato::findOrFail($candidato);
+        $c->update([
+            'valoracion' => $valoracion->value,
+            'valoracion_observacion' => $observacion,
+        ]);
+        $c->anotar('valoracion', trim($valoracion->label().' · '.$observacion, ' ·'));
+
+        return back()->with('success', 'Valoración registrada.');
+    }
+
+    /**
+     * La hoja de vida, servida sólo a quien puede verla.
+     *
+     * No va en el disco público —como sí van las fotos de producto— porque
+     * lleva cédula, dirección y teléfono de alguien que ni siquiera trabaja
+     * acá. En el disco público bastaría con tener el enlace.
+     */
+    public function verHojaDeVida(int $candidato): StreamedResponse
+    {
+        $c = Candidato::findOrFail($candidato);
+
+        abort_unless($c->cv_path && Storage::exists($c->cv_path), 404, 'Este candidato no tiene hoja de vida cargada.');
+
+        return Storage::response(
+            $c->cv_path,
+            'HV-'.str($c->nombre)->slug().'.'.pathinfo($c->cv_path, PATHINFO_EXTENSION),
+            ['Content-Disposition' => 'inline'],
+        );
+    }
+
+    /**
+     * El jefe del área agrega una pregunta a la entrevista de su vacante.
+     *
+     * Las quince del formato son EJEMPLOS de lo que se puede preguntar; quien
+     * sabe qué hay que preguntarle a alguien para este cargo es quien pidió el
+     * personal. Por eso puede agregarlas él, y no sólo Gestión Humana.
+     */
+    public function agregarPregunta(Request $r, int $vacante): RedirectResponse
+    {
+        $v = Vacante::with('requisicion')->findOrFail($vacante);
+        $this->autorizarPreguntas($r, $v);
+
+        $data = $r->validate([
+            'tipo' => ['required', Rule::in([
+                EntrevistaCandidato::SABER_HACER,
+                EntrevistaCandidato::PSICOLOGICA,
+            ])],
+            'pregunta' => ['required', 'string', 'max:400'],
+        ], [], ['pregunta' => 'pregunta']);
+
+        PreguntaEntrevista::create([
+            'vacante_id' => $v->id,
+            'tipo' => $data['tipo'],
+            'pregunta' => trim($data['pregunta']),
+            // Al final de las que ya hay, no mezclada entre ellas.
+            'orden' => (int) PreguntaEntrevista::where('vacante_id', $v->id)
+                ->where('tipo', $data['tipo'])->max('orden') + 1,
+            'creada_por_id' => $r->user()->id,
+        ]);
+
+        return back()->with('success', 'Pregunta agregada. Va a aparecer en las entrevistas de esta vacante.');
+    }
+
+    /**
+     * Deja de preguntarla, sin borrarla.
+     *
+     * Borrarla dejaría una respuesta sin enunciado en una entrevista que
+     * alguien ya firmó. Desactivada sale de las nuevas y se queda en las
+     * viejas, que es lo que pidió el área.
+     */
+    public function alternarPregunta(Request $r, int $pregunta): RedirectResponse
+    {
+        $p = PreguntaEntrevista::with('vacante.requisicion')->findOrFail($pregunta);
+        $this->autorizarPreguntas($r, $p->vacante);
+
+        $p->activa = ! $p->activa;
+        $p->save();
+
+        return back()->with('success', $p->activa
+            ? 'La pregunta vuelve a hacerse.'
+            : 'Ya no se va a preguntar. Las entrevistas que la respondieron la conservan.');
+    }
+
+    /**
+     * Quién manda sobre las preguntas de una vacante.
+     *
+     * Gestión Humana, porque es quien entrevista, y el jefe que pidió el
+     * personal, porque las preguntas son suyas.
+     */
+    private function autorizarPreguntas(Request $r, Vacante $v): void
+    {
+        abort_unless(
+            Permisos::puede($r->user(), 'rrhh_seleccion')
+                || $v->requisicion?->solicitante_id === $r->user()->id,
+            403,
+            'Las preguntas las maneja Gestión Humana o quien pidió el personal.'
+        );
+    }
+
+    // ───────────────────────────── internos ─────────────────────────────
+
+    /**
+     * Le avisa al jefe que ya hay gente esperando su decisión.
+     *
+     * Avisa con el PRIMERO que entra a la terna, no al llegar a tres. Dos
+     * razones, las dos vistas en pantalla:
+     *
+     *   · Una vacante puede cerrarse con dos finalistas, o con uno. Avisar
+     *     sólo al llegar a tres dejaba a esos procesos sin aviso nunca, que es
+     *     exactamente el problema que el módulo vino a resolver.
+     *   · Y avisar por cada uno que entra sería ruido. Por eso se manda una
+     *     sola vez: cuando el de la terna es el primero.
+     */
+    private function avisarAlJefeDeLaTerna(Candidato $c): void
+    {
+        $jefe = $c->vacante?->requisicion?->solicitante_id;
+        if (! $jefe) {
+            return;
+        }
+
+        $enTerna = Candidato::where('vacante_id', $c->vacante_id)->deLaTerna()->count();
+        if ($enTerna !== 1) {
+            return;
+        }
+
+        NotificacionErp::crear([
+            'user_id' => $jefe,
+            'tipo' => 'rrhh_terna',
+            'titulo' => 'Hay candidatos para que elijas · '.$c->vacante->titulo,
+            'mensaje' => 'Ya podés ver la terna y elegir a quién se contrata.',
+            'url' => "/app/rrhh/requisiciones/{$c->vacante->requisicion->id}",
+            'icono' => 'heroicon-o-user-group',
+            'color' => 'success',
+        ]);
+    }
+
+    private function ficha(
+        Candidato $c,
+        ?OrdenContratacion $orden = null,
+        ?\App\Modules\Rrhh\Models\Contratacion $contratacion = null,
+    ): array {
+        return [
+            'contratacion' => $contratacion ? [
+                'id' => $contratacion->id,
+                'estado' => $contratacion->estado,
+                'empleado_id' => $contratacion->empleado_id,
+            ] : null,
+            'orden' => $orden ? [
+                'numero' => $orden->numero,
+                'estado' => $orden->estado,
+                'label' => $orden->etiquetaEstado(),
+                'color' => $orden->colorEstado(),
+                'autoriza' => $orden->autoriza(),
+                'motivo' => $orden->motivo_decision,
+            ] : null,
+            'id' => $c->id,
+            'nombre' => $c->nombre,
+            'documento' => $c->documento,
+            'email' => $c->email,
+            'telefono' => $c->telefono,
+            'fuente' => $c->fuente ? (Vacante::FUENTES[$c->fuente] ?? $c->fuente) : null,
+            'etapa' => $c->etapa->value,
+            'etapa_label' => $c->etapa->label(),
+            'tiene_hv' => (bool) $c->cv_path,
+            'notas' => $c->notas,
+            'calificacion' => $c->calificacion,
+            'valoracion' => $c->valoracion?->value,
+            'valoracion_label' => $c->valoracion?->label(),
+            'valoracion_color' => $c->valoracion?->color(),
+            'valoracion_observacion' => $c->valoracion_observacion,
+            'antecedentes_revisados' => (bool) $c->antecedentes_revisados,
+            'antecedentes_resultado' => $c->antecedentes_resultado,
+            'tiene_soporte_antecedentes' => (bool) $c->antecedentes_archivo_path,
+            'motivo_descarte' => $c->motivo_descarte,
+            'elegido' => (bool) $c->elegido_at,
+            'desde' => $c->created_at?->format('Y-m-d'),
+            /*
+             * Toda la miga de pan del candidato.
+             *
+             * La bitácora se escribía desde el primer día —cada paso la
+             * anota sola, por el trait— pero sólo se veía en la
+             * requisición. En el tablero, que es donde pasa el proceso,
+             * la tarjeta mostraba el estado y no cómo se llegó a él:
+             * quién lo movió, cuándo, y qué escribió al hacerlo.
+             *
+             * Es justo lo que hace falta cuando alguien pregunta tres
+             * meses después por qué se contrató a esta persona y no a
+             * la otra.
+             */
+            'bitacora' => $c->bitacora->map(fn ($b) => [
+                'resumen' => $b->resumen,
+                'usuario' => $b->usuario?->name ?? 'Sistema',
+                'cuando' => $b->created_at?->format('Y-m-d H:i'),
+            ])->values(),
+            /*
+             * Fase C · Las psicotécnicas.
+             *
+             * Va el CONCEPTO, no el contenido: el informe se abre aparte, por
+             * una ruta que revisa permiso y anota quién lo leyó. Mandar el
+             * texto del informe en el payload del tablero sería repartirlo a
+             * todo el que abra la pantalla.
+             */
+            /*
+             * Fase C · Las entrevistas.
+             *
+             * Va el resumen —tipo, fecha, quién entrevistó y el total—, no
+             * las respuestas: el tablero es una lista de tarjetas y mandar
+             * veinte respuestas de texto por candidato lo volvería lento sin
+             * que nadie las lea desde ahí. El detalle se abre aparte.
+             */
+            'entrevistas' => $c->entrevistas->map(fn ($x) => $x->paraElTablero() + ['id' => $x->id])->values(),
+            'psicotecnicas' => $c->pruebasPsicotecnicas->map(fn ($p) => [
+                'id' => $p->id,
+                'instrumento' => $p->instrumento->value,
+                'prueba' => $p->comoSeLlama(),
+                'concepto' => $p->concepto->value,
+                'concepto_label' => $p->concepto->label(),
+                'color' => $p->concepto->color(),
+                'fecha' => $p->fecha_aplicacion?->toDateString(),
+                'firma' => $p->quienFirma(),
+                'observaciones' => $p->observaciones,
+                'tiene_informe' => $p->tieneSoporte(),
+                'falta' => $p->loQueFalta(),
+            ])->values(),
+        ];
+    }
+}

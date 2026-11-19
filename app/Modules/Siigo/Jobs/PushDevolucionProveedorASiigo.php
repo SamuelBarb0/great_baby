@@ -8,6 +8,7 @@ use App\Modules\Siigo\Clients\SiigoClient;
 use App\Modules\Siigo\Exceptions\SiigoRateLimitedException;
 use App\Modules\Siigo\Models\SiigoConfig;
 use App\Modules\Siigo\Models\SiigoSyncLog;
+use App\Modules\Siigo\Support\ClaveIdempotencia;
 use App\Modules\Siigo\Support\CuentasSiigo;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Bus\Queueable;
@@ -244,7 +245,7 @@ class PushDevolucionProveedorASiigo implements ShouldQueue
 
             // Idempotency: SIIGO devuelve el journal previo si repetimos la misma
             // clave en un reintento, en vez de duplicar el asiento.
-            $resp = $client->request('POST', '/v1/journals', $payload, 1, "dev:{$d->id}");
+            $resp = $client->request('POST', '/v1/journals', $payload, 1, ClaveIdempotencia::para('dev', $d));
             if (! $resp->ok()) {
                 throw new RuntimeException("SIIGO rechazó journal: HTTP {$resp->status()} · ".mb_substr((string) $resp->body(), 0, 400));
             }

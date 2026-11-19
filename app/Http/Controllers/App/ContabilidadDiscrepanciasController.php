@@ -123,11 +123,21 @@ class ContabilidadDiscrepanciasController extends Controller implements HasMiddl
             ->filter(fn ($x) => $x['asiento_id'] !== null)
             ->values();
 
-        // KPIs semáforo (reutilizados también en Panel · CONT-C6).
-        $totalAprobados = AsientoManual::where('estado', 'aprobado')->count();
-        $sincronizados = AsientoManual::where('estado', 'aprobado')->whereNotNull('siigo_journal_id')->count();
-        $pctSync = $totalAprobados > 0 ? round(($sincronizados / $totalAprobados) * 100, 1) : 100;
-        $semaforo = $pctSync >= 95 ? 'verde' : ($pctSync >= 80 ? 'amarillo' : 'rojo');
+        /*
+         * El semáforo cuenta las diez familias de documento, no sólo los
+         * asientos manuales.
+         *
+         * Miraba `asientos_manuales` y devolvía 100 cuando no había ninguno
+         * aprobado. Como casi nadie hace asientos a mano, la cuenta daba 0/0 y
+         * la pantalla pintaba VERDE · 100 % — en producción, el 2026-11-05, con
+         * 21 facturas, una nómina y una liquidación sin llegar nunca a SIIGO, y
+         * con el panel contable diciendo 0 % sobre los mismos datos.
+         *
+         * Las listas de huérfanos, deltas y fallidos de más abajo SÍ siguen
+         * siendo de asientos manuales: son otra cosa —el cuadre fino contra el
+         * journal de SIIGO— y ahí la pregunta sí es por asiento.
+         */
+        $cobertura = \App\Modules\Contabilidad\Support\CoberturaSiigo::calcular();
 
         return Inertia::render('Contabilidad/DiscrepanciasSiigo', [
             'rango' => ['desde' => $desde->toDateString(), 'hasta' => $hasta->toDateString()],
@@ -135,10 +145,11 @@ class ContabilidadDiscrepanciasController extends Controller implements HasMiddl
             'deltas' => $deltas,
             'fallidos' => $fallidos,
             'kpis' => [
-                'total_aprobados' => $totalAprobados,
-                'sincronizados' => $sincronizados,
-                'pct_sync' => $pctSync,
-                'semaforo' => $semaforo,
+                'total_aprobados' => $cobertura['deberian'],
+                'sincronizados' => $cobertura['estan'],
+                'pct_sync' => $cobertura['pct'],
+                'semaforo' => $cobertura['semaforo'],
+                'etiqueta_cobertura' => $cobertura['etiqueta'],
                 'huerfanos' => $huerfanos->count(),
                 'con_delta' => $deltas->count(),
                 'fallidos_14d' => $fallidos->count(),

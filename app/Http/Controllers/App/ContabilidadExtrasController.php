@@ -4,6 +4,7 @@ namespace App\Http\Controllers\App;
 
 use App\Http\Controllers\Controller;
 use App\Modules\Cartera\Models\MovimientoContable;
+use App\Modules\Contabilidad\Support\FiltroEjes;
 use App\Modules\Contabilidad\Models\AsientoManual;
 use App\Modules\Contabilidad\Support\OrigenContable;
 use Illuminate\Http\Request;
@@ -27,7 +28,10 @@ class ContabilidadExtrasController extends Controller implements HasMiddleware
     public static function middleware(): array
     {
         return [new Middleware(function (Request $r, \Closure $next) {
-            abort_unless($r->user()?->esContable(), 403);
+            // La casilla manda. Antes la puerta preguntaba por el rol y la
+            //   casilla de /app/roles no la consultaba nadie: el admin creia
+            //   repartir accesos y solo movia lo que se ve en el menu.
+            abort_unless(\App\Auth\Permisos::puede($r->user(), 'reportes_contables'), 403);
             return $next($r);
         })];
     }
@@ -90,7 +94,12 @@ class ContabilidadExtrasController extends Controller implements HasMiddleware
             'desde' => ['nullable', 'date'],
             'hasta' => ['nullable', 'date', 'after_or_equal:desde'],
             'incluir_anulados' => ['nullable', 'boolean'],
+            'linea' => ['nullable', 'string', 'max:20'],
+            'destino' => ['nullable', 'string', 'max:20'],
         ]);
+        // Los dos ejes, como el libro y los reportes: así el panel del
+        // e-commerce es este mismo con `linea=dropi`, no una copia.
+        $ejes = FiltroEjes::deRequest($request);
 
         // Re-audit M5 UX-C4 · defaults unificados con Index (`hasta = hoy`).
         // Antes Panel usaba `endOfMonth` y en el mismo período los totales
@@ -110,6 +119,7 @@ class ContabilidadExtrasController extends Controller implements HasMiddleware
         // KPI 1-query.
         $kpiRow = MovimientoContable::query()
             ->when($incluirAnulados, fn ($q) => $q->withTrashed())
+            ->tap(fn ($q) => $ejes->aplicar($q))
             ->whereBetween('fecha', [$desde, $hasta])
             ->selectRaw('COALESCE(SUM(debe),0) d, COALESCE(SUM(haber),0) h, COUNT(*) n')
             ->first();
@@ -118,6 +128,7 @@ class ContabilidadExtrasController extends Controller implements HasMiddleware
 
         $topCuentas = MovimientoContable::query()
             ->when($incluirAnulados, fn ($q) => $q->withTrashed())
+            ->tap(fn ($q) => $ejes->aplicar($q))
             ->whereBetween('fecha', [$desde, $hasta])
             ->selectRaw('cuenta_puc, SUM(debe) as debe, SUM(haber) as haber, COUNT(*) as movs')
             ->groupBy('cuenta_puc')->orderByRaw('SUM(debe) + SUM(haber) DESC')->limit(10)->get();
@@ -133,21 +144,30 @@ class ContabilidadExtrasController extends Controller implements HasMiddleware
         //   `volumen` usa CASE para netear.
         $porOrigen = MovimientoContable::query()
             ->when($incluirAnulados, fn ($q) => $q->withTrashed())
+            ->tap(fn ($q) => $ejes->aplicar($q))
             ->whereBetween('fecha', [$desde, $hasta])
             ->whereNotNull('origen_type')
             ->whereNotNull('origen_id')
             ->selectRaw('origen_type, COUNT(DISTINCT origen_id) as docs, SUM(CASE WHEN deleted_at IS NULL THEN COALESCE(debe,0) ELSE 0 END) as volumen')
             ->groupBy('origen_type')->orderByDesc('volumen')->get();
 
+        $nombresCuenta = \App\Modules\Contabilidad\Support\NombresDeCuenta::para(
+            $topCuentas->pluck('cuenta_puc')
+        );
+
         // CONT-C6 · Semáforo SIIGO del panel.
-        $siigoAprobados = AsientoManual::where('estado', 'aprobado')->count();
-        $siigoEnSiigo = AsientoManual::where('estado', 'aprobado')->whereNotNull('siigo_journal_id')->count();
-        $siigoPct = $siigoAprobados > 0 ? round(($siigoEnSiigo / $siigoAprobados) * 100, 1) : 100;
-        $siigoSemaforo = $siigoPct >= 95 ? 'verde' : ($siigoPct >= 80 ? 'amarillo' : 'rojo');
+        $siigo = $this->coberturaSiigo($desde, $hasta);
+        $siigoAprobados = $siigo['deberian'];
+        $siigoEnSiigo = $siigo['estan'];
+        $siigoPct = $siigo['pct'];
+        $siigoSemaforo = $siigo['semaforo'];
 
         return Inertia::render('Contabilidad/Panel', [
             'periodo' => ['desde' => $desde, 'hasta' => $hasta, 'incluir_anulados' => $incluirAnulados],
+            'filtros' => $ejes->aParametros(),
+            'opcionesEjes' => FiltroEjes::opciones(),
             'kpis' => [
+                'siigo_etiqueta' => $siigo['etiqueta'],
                 'total_debe' => $totalDebe,
                 'total_haber' => $totalHaber,
                 'balance' => round($totalDebe - $totalHaber, 2),
@@ -158,8 +178,11 @@ class ContabilidadExtrasController extends Controller implements HasMiddleware
                 'siigo_pct' => $siigoPct,
                 'siigo_semaforo' => $siigoSemaforo,
             ],
+            // El nombre sale del plan de cuentas, no del diccionario de apodos:
+            // por prefijo, 41350104 y 41350110 salían con el mismo texto.
             'topCuentas' => $topCuentas->map(fn ($r) => [
                 'cuenta' => $r->cuenta_puc,
+                'cuenta_nombre' => $nombresCuenta[$r->cuenta_puc] ?? null,
                 'debe' => (float) $r->debe, 'haber' => (float) $r->haber,
                 'movs' => (int) $r->movs,
             ]),
@@ -243,11 +266,18 @@ class ContabilidadExtrasController extends Controller implements HasMiddleware
                 )
                 ->first();
 
-            $movs = (clone $baseMovs)
-                ->orderBy('id')->get()
+            $filasMov = (clone $baseMovs)->orderBy('id')->get();
+            // El nombre real del plan: por prefijo, dos subcuentas distintas de
+            // 4135 salían con el mismo texto, una encima de la otra.
+            $nombresMov = \App\Modules\Contabilidad\Support\NombresDeCuenta::para(
+                $filasMov->pluck('cuenta_puc')
+            );
+
+            $movs = $filasMov
                 ->map(fn ($m) => [
                     'id' => $m->id,
                     'cuenta' => $m->cuenta_puc,
+                    'cuenta_nombre' => $nombresMov[$m->cuenta_puc] ?? null,
                     'debe' => (float) $m->debe, 'haber' => (float) $m->haber,
                     'descripcion' => $m->descripcion,
                     'fecha' => $m->fecha instanceof \Carbon\Carbon ? $m->fecha->toDateString() : $m->fecha,
@@ -281,26 +311,20 @@ class ContabilidadExtrasController extends Controller implements HasMiddleware
      *
      * @return \Illuminate\Support\Collection<int, array{codigo:string, nombre:string, debe:float, haber:float}>
      */
-    private function saldosPorCuenta(?string $desde, string $hasta, bool $incluirAnulados): \Illuminate\Support\Collection
+    /**
+     * Los saldos por cuenta, opcionalmente de un solo libro.
+     *
+     * Antes no aceptaba los ejes, y este metodo alimenta el Balance general Y
+     * el Estado de resultados: **no habia forma de sacar el balance fiscal**,
+     * que es justo lo que tiene que cuadrar contra SIIGO. Medido el 26-oct:
+     * activo total 23.677.750 contra 18.453.050 del lado fiscal — 5.224.700 de
+     * diferencia sin pantalla que la mostrara. El libro diario si filtraba, asi
+     * que dos pantallas daban numeros distintos del mismo mes.
+     */
+    /** Ver App\Modules\Contabilidad\Support\EstadosFinancieros (mismo cálculo que «Contabilidad Dropi»). */
+    private function saldosPorCuenta(?string $desde, string $hasta, bool $incluirAnulados, ?FiltroEjes $ejes = null): \Illuminate\Support\Collection
     {
-        $filas = MovimientoContable::query()
-            ->when($incluirAnulados, fn ($q) => $q->withTrashed())
-            ->when($desde, fn ($q) => $q->where('fecha', '>=', $desde))
-            ->where('fecha', '<=', $hasta)
-            ->selectRaw('cuenta_puc, SUM(debe) AS debe, SUM(haber) AS haber')
-            ->groupBy('cuenta_puc')
-            ->get();
-
-        $nombres = \App\Modules\Contabilidad\Models\PlanCuenta::query()
-            ->whereIn('codigo', $filas->pluck('cuenta_puc'))
-            ->pluck('nombre', 'codigo');
-
-        return $filas->map(fn ($f) => [
-            'codigo' => (string) $f->cuenta_puc,
-            'nombre' => $nombres[$f->cuenta_puc] ?? 'Cuenta fuera del plan',
-            'debe' => (float) $f->debe,
-            'haber' => (float) $f->haber,
-        ]);
+        return \App\Modules\Contabilidad\Support\EstadosFinancieros::saldosPorCuenta($desde, $hasta, $incluirAnulados, $ejes);
     }
 
     /**
@@ -313,22 +337,7 @@ class ContabilidadExtrasController extends Controller implements HasMiddleware
      */
     private function agruparClase(\Illuminate\Support\Collection $saldos, string $clase, string $naturaleza): array
     {
-        $cuentas = $saldos
-            ->filter(fn ($c) => str_starts_with($c['codigo'], $clase))
-            ->map(function ($c) use ($naturaleza) {
-                $c['saldo'] = $naturaleza === 'debito'
-                    ? round($c['debe'] - $c['haber'], 2)
-                    : round($c['haber'] - $c['debe'], 2);
-                return $c;
-            })
-            ->filter(fn ($c) => abs($c['saldo']) > 0.009)
-            ->sortBy('codigo')
-            ->values();
-
-        return [
-            'cuentas' => $cuentas->all(),
-            'total' => round($cuentas->sum('saldo'), 2),
-        ];
+        return \App\Modules\Contabilidad\Support\EstadosFinancieros::agruparClase($saldos, $clase, $naturaleza);
     }
 
     /**
@@ -343,11 +352,14 @@ class ContabilidadExtrasController extends Controller implements HasMiddleware
         $data = $r->validate([
             'hasta' => ['nullable', 'date'],
             'incluir_anulados' => ['nullable', 'boolean'],
+            'linea' => ['nullable', 'string', 'max:20'],
+            'destino' => ['nullable', 'string', 'max:20'],
         ]);
         $hasta = $data['hasta'] ?? now('America/Bogota')->toDateString();
         $incluirAnulados = (bool) ($data['incluir_anulados'] ?? false);
+        $ejes = FiltroEjes::deRequest($r);
 
-        $saldos = $this->saldosPorCuenta(null, $hasta, $incluirAnulados);
+        $saldos = $this->saldosPorCuenta(null, $hasta, $incluirAnulados, $ejes);
 
         $activo = $this->agruparClase($saldos, '1', 'debito');
         $pasivo = $this->agruparClase($saldos, '2', 'credito');
@@ -364,7 +376,8 @@ class ContabilidadExtrasController extends Controller implements HasMiddleware
         $descuadre = round($activo['total'] - $pasivo['total'] - $totalPatrimonio, 2);
 
         return Inertia::render('Contabilidad/BalanceGeneral', [
-            'filtros' => ['hasta' => $hasta, 'incluir_anulados' => $incluirAnulados],
+            'filtros' => array_merge(['hasta' => $hasta, 'incluir_anulados' => $incluirAnulados], $ejes->aParametros()),
+            'opcionesEjes' => FiltroEjes::opciones(),
             'activo' => $activo,
             'pasivo' => $pasivo,
             'patrimonio' => $patrimonio,
@@ -391,12 +404,15 @@ class ContabilidadExtrasController extends Controller implements HasMiddleware
             'desde' => ['nullable', 'date'],
             'hasta' => ['nullable', 'date', 'after_or_equal:desde'],
             'incluir_anulados' => ['nullable', 'boolean'],
+            'linea' => ['nullable', 'string', 'max:20'],
+            'destino' => ['nullable', 'string', 'max:20'],
         ]);
         $desde = $data['desde'] ?? now('America/Bogota')->startOfMonth()->toDateString();
         $hasta = $data['hasta'] ?? now('America/Bogota')->toDateString();
         $incluirAnulados = (bool) ($data['incluir_anulados'] ?? false);
+        $ejes = FiltroEjes::deRequest($r);
 
-        $saldos = $this->saldosPorCuenta($desde, $hasta, $incluirAnulados);
+        $saldos = $this->saldosPorCuenta($desde, $hasta, $incluirAnulados, $ejes);
 
         $ingresos = $this->agruparClase($saldos, '4', 'credito');
         $costoVentas = $this->agruparClase($saldos, '6', 'debito');
@@ -410,7 +426,8 @@ class ContabilidadExtrasController extends Controller implements HasMiddleware
             : null;
 
         return Inertia::render('Contabilidad/EstadoResultados', [
-            'filtros' => ['desde' => $desde, 'hasta' => $hasta, 'incluir_anulados' => $incluirAnulados],
+            'filtros' => array_merge(['desde' => $desde, 'hasta' => $hasta, 'incluir_anulados' => $incluirAnulados], $ejes->aParametros()),
+            'opcionesEjes' => FiltroEjes::opciones(),
             'ingresos' => $ingresos,
             'costo_ventas' => $costoVentas,
             'costos_produccion' => $costosProd,
@@ -432,7 +449,7 @@ class ContabilidadExtrasController extends Controller implements HasMiddleware
         $cob = fn (string $tabla, string $col, ?callable $filtro = null) => $this->cobertura($tabla, $col, $filtro);
 
         $deMovimientos = $cob('movimientos_contables', 'siigo_journal_id');
-        $deFacturas = $cob('facturas_venta', 'siigo_id', fn ($q) => $q->where('es_electronica', true));
+        $deFacturas = $cob('facturas_venta', 'siigo_id', fn ($q) => $q->whereIn('destino_fiscal', ['siigo', 'reparto']));
 
         return Inertia::render('Contabilidad/Reportes', [
             'reportes' => [
@@ -566,4 +583,16 @@ class ContabilidadExtrasController extends Controller implements HasMiddleware
         ];
     }
 
+    /**
+     * Cuántos documentos deberían estar en SIIGO y cuántos están de verdad.
+     *
+     * La cuenta vive en `CoberturaSiigo` porque Discrepancias muestra el mismo
+     * indicador y las dos pantallas llegaron a decir cosas opuestas.
+     *
+     * @return array{deberian:int,estan:int,faltan:int,pct:float,semaforo:string,etiqueta:string}
+     */
+    private function coberturaSiigo(string $desde, string $hasta): array
+    {
+        return \App\Modules\Contabilidad\Support\CoberturaSiigo::calcular();
+    }
 }

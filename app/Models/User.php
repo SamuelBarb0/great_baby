@@ -61,6 +61,16 @@ class User extends Authenticatable implements FilamentUser
     }
 
     /**
+     * Quien arma órdenes de compra: la casilla «Órdenes de compra», además de bodega
+     * y contabilidad, que entraban desde antes. Sin ella, marcar la casilla en la
+     * pantalla de Roles no abría ni la lista ni la orden nueva.
+     */
+    public function puedeArmarOrdenes(): bool
+    {
+        return $this->esEquipoBodega() || $this->esContable() || $this->tieneAcceso('compras_oc');
+    }
+
+    /**
      * Puente entre los helpers de perfil y la pantalla de Roles.
      *
      * Estos helpers preguntaban `hasAnyRole([...])` con la lista escrita en
@@ -157,7 +167,39 @@ class User extends Authenticatable implements FilamentUser
             $this->hasRole('Contador') => '/app/cartera',
             $this->esSac()             => '/app/garantias',
             $this->esMarketing()       => '/app/marketing',
+            // Gestión Humana y los líderes de área arrancan por las solicitudes
+            //   de personal: para ella es lo que espera su decisión, y para él
+            //   es lo único suyo acá. Sin esta línea caían en el `default`, que
+            //   es «Cosas del día» y pide perfil de bodega — o sea, entraban al
+            //   sistema directo a un 403, que es exactamente lo que este método
+            //   existe para evitar.
+            // Quien tiene la casilla «Dashboard» de Dropi trabaja en Dropi y
+            //   entra por su panel. Va ANTES del colaborador y del alistador:
+            //   todo el que entra por Gestión Humana es colaborador, y marcar
+            //   «Operación» le enciende la Vista del alistador; con cualquiera
+            //   de las dos el operador caía en «Mi espacio» o en la cola de
+            //   bodega. El alistador de verdad no tiene esta casilla.
+            $this->tieneAcceso('dropi_dashboard') => '/admin',
+            // El colaborador entra a lo suyo y a nada más. Va ANTES que el
+            //   resto porque es el rol más acotado: si alguien fuera las dos
+            //   cosas, manda su trabajo, no su espacio personal.
+            $this->tieneAcceso('portal_colaborador') && ! $this->tieneAcceso('rrhh_requisiciones')
+                => '/app/mi-espacio',
+            $this->tieneAcceso('rrhh_requisiciones') => '/app/rrhh/requisiciones',
             $this->esAdminBodega() || $this->esAlistador() || $this->hasRole('Despachador') => '/app/logistica/cola-jorge',
+            // Dropi se opera en /admin (el panel quedó siendo sólo Dropi). Un
+            //   perfil creado desde la pantalla de Roles, como «Operador
+            //   Dropi», no aparecía en ninguna rama de arriba y caía en el
+            //   `default` — «Cosas del día», que pide perfil de bodega — así
+            //   que su primer pantallazo después del login era un 403. La
+            //   casilla que lo habilita es la misma que abre el panel.
+            // Va ANTES de compras: al operador de Dropi se le abren las
+            //   casillas de Contabilidad y Compras, y si no, el login lo dejaba
+            //   en /app/compras en vez de en su panel.
+            \App\Auth\Permisos::puedeAccederPanel($this) => '/admin',
+            // Compras (y quien sólo tenga órdenes o contenedores) arranca por sus
+            //   órdenes. Va después de bodega: Jorge también ve contenedores.
+            $this->tieneAcceso('compras_oc') || $this->tieneAcceso('compras_importacion') => '/app/compras',
             default                    => '/app/cosas-del-dia',
         };
     }

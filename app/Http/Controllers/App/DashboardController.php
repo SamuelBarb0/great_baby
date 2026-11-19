@@ -23,7 +23,9 @@ class DashboardController extends Controller
         //   Marketing/Facturador directo a un 403.
         if (! $u->esAracely() && ! $u->hasRole('Gerente')) {
             $destino = $u->rutaInicial();
-            return redirect($destino === '/app' ? '/app/cosas-del-dia' : $destino);
+            // `ir()` y no `redirect()`: si el destino es el panel (/admin), un
+            //   redirect común lo dejaba dibujado en una ventana encima de /app.
+            return AuthController::ir($destino === '/app' ? '/app/cosas-del-dia' : $destino);
         }
 
         $kpis = $this->kpis();

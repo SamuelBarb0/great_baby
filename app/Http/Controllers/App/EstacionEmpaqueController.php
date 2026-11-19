@@ -8,6 +8,7 @@ use App\Modules\Dropi\Actions\ProcesarEscaneoEmpaque;
 use App\Modules\Dropi\Enums\EstadoPedidoDropi;
 use App\Modules\Dropi\Models\DropiPedido;
 use App\Modules\Dropi\Models\EmpaqueRegistro;
+use App\Modules\Dropi\Support\Trazabilidad;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controllers\HasMiddleware;
@@ -31,7 +32,10 @@ class EstacionEmpaqueController extends Controller implements HasMiddleware
             new Middleware(function (Request $r, \Closure $next) {
                 $u = $r->user();
                 // A1 FIX · AdminBodega llegaba desde el sidebar y recibía 403.
-                abort_unless($u && ($u->esAracely() || $u->hasAnyRole(['Alistador', 'AdminBodega'])), 403);
+                // La casilla manda. Antes la puerta preguntaba por el rol y la
+                //   casilla de /app/roles no la consultaba nadie: el admin creia
+                //   repartir accesos y solo movia lo que se ve en el menu.
+                abort_unless(\App\Auth\Permisos::puede($u, 'vista_alistador'), 403);
                 return $next($r);
             }),
         ];
@@ -230,8 +234,10 @@ class EstacionEmpaqueController extends Controller implements HasMiddleware
             ]);
         }
 
+        $gps = $request->validate(Trazabilidad::reglas())['gps'] ?? null;
+
         try {
-            $res = ConfirmarEmpaqueYSiguiente::run($pedidoActivoId, $request->user()->id);
+            $res = ConfirmarEmpaqueYSiguiente::run($pedidoActivoId, $request->user()->id, $gps);
             $request->session()->forget('empaque.pedidoActivoId');
 
             $siguiente = $this->colaProximos(null)[0] ?? null;

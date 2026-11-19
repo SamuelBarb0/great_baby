@@ -7,8 +7,10 @@ import {
     FileText, Users, Truck, Settings, Bell, Search, LogOut,
     Menu as MenuIcon, X, ChevronDown, Home, BarChart3, MessageSquare,
     Boxes, Camera, Scissors, Wallet, MapPin, AlertTriangle, Radio, Upload,
-    Undo2, ScanLine, Tag, Layers, CreditCard,
+    Undo2, ScanLine, Tag, Layers, CreditCard, LayoutGrid, Images, Rocket, ClipboardList, RefreshCw,
+    Target,
 } from 'lucide-vue-next';
+import AvisoPagoVencido from '@/Components/AvisoPagoVencido.vue';
 import CommandPalette from '@/Components/CommandPalette.vue';
 import CopilotoChat from '@/Components/CopilotoChat.vue';
 import NotificacionesBell from '@/Components/NotificacionesBell.vue';
@@ -170,6 +172,21 @@ const groups = [
             { name: '👥 Ventas por Cliente', href: '/app/vendedor/ventas-por-cliente', icon: Users, permiso: 'vendedor' },
             { name: '💳 Contado / Crédito', href: '/app/vendedor/contado-credito', icon: Calculator, permiso: 'vendedor' },
             { name: '📋 Seguimiento', href: '/app/vendedor/seguimiento', icon: FileText, permiso: 'vendedor' },
+            /*
+             * Cotizaciones. El ERP sólo sabía levantar pedidos, y un cliente
+             * B2B casi nunca compra en la primera conversación: pide precios,
+             * compara y vuelve a la semana. Ese paso se hacía por WhatsApp y
+             * se transcribía a mano al pedido.
+             */
+            { name: '📄 Cotizaciones', href: '/app/cotizaciones', icon: FileText, permiso: 'vendedor' },
+            /*
+             * Metas. Va en lo comercial porque es de lo que se habla acá, pero
+             * se muestra con el acceso de configuración: ponerlas es de
+             * Gerencia —una meta que se pone uno mismo no es una meta— y el
+             * controlador exige lo mismo. Si se pintara con `vendedor`, los
+             * ocho la verían en el menú y les daría 403 al entrar.
+             */
+            { name: '🎯 Metas del equipo', href: '/app/vendedor/metas', icon: Target, permiso: 'configuracion' },
         ],
     },
     {
@@ -179,48 +196,54 @@ const groups = [
         items: [
             { name: '📦 Cola de alistamiento', href: '/app/logistica/cola-jorge', icon: Package, permiso: 'cola_alistamiento' },
             { name: 'Pedidos B2B', href: '/app/pedidos-b2b', icon: Package, badge: 'pedidosB2BPend', permiso: 'pedidos_b2b' },
+            // Dónde está lo que ya salió. Hasta hoy el pedido moría en
+            // «despachado» y el primero en enterarse de un retraso era el
+            // cliente llamando a reclamar.
+            { name: '🚚 Seguimiento de guías', href: '/app/logistica/guias', icon: Truck, permiso: 'logistica' },
         ],
     },
     {
         // Rol Facturador · segregación de funciones con Contador.
         //   Entre el pedido alistado y la factura SIIGO hay una revisión manual
         //   del Facturador: valida email/NIT/items y decide send_dian/send_mail.
-        key: 'facturacion',
-        label: 'Facturación',
+        /*
+         * F0 · «Ventas y cartera» es TODO lo que el cliente nos debe, de la
+         *   factura al recaudo. Antes esto se llamaba «Cartera y CRM» y tenía
+         *   16 entradas porque se le habían colgado cosas que son contabilidad
+         *   (movimientos, retenciones, notas crédito/débito) y una que es lo
+         *   contrario de cartera (pagos a PROVEEDOR). Cada una se fue a su
+         *   grupo; acá quedó sólo lo que mira al cliente.
+         */
+        key: 'cartera',
+        label: 'Ventas y cartera',
         items: [
+            { name: '📊 Dashboard cartera', href: '/app/cartera', icon: BarChart3, permiso: 'cartera' },
             { name: '🧾 Bandeja facturación', href: '/app/facturacion/bandeja', icon: FileText, permiso: 'facturacion' },
+            { name: 'Facturas de venta', href: '/app/facturas', icon: FileText, permiso: 'cartera' },
+            { name: 'Pagos recibidos', href: '/app/pagos', icon: Calculator, permiso: 'cartera' },
+            {
+                // F2 · tres entradas en una: condiciones de crédito, gestiones
+                //   de cobro enviadas y solicitudes. Es un solo tema.
+                name: 'Crédito y cobranza', href: '/app/credito',
+                rutas: ['/app/cartera/cobranzas', '/app/cartera/solicitudes'],
+                icon: Calculator, permiso: 'cartera',
+            },
+            { name: 'Reportes de cartera', href: '/app/cartera/reportes', icon: BarChart3, permiso: 'cartera' },
+            // CRM lo gatea `esAracely()` en su controller: sólo gerencia.
+            { name: 'CRM · Segmentación', href: '/app/crm', icon: Bell, permiso: 'crm' },
         ],
     },
     {
-        // Cartera y CRM: dashboard de deuda, facturas, pagos, cobranzas, CRM.
-        //   NO es para el Vendedor en terreno · él solo arma pedidos y mira
-        //   su propio panel comercial, no gestiona la cartera de la empresa.
-        key: 'cartera',
-        label: 'Cartera y CRM',
+        /*
+         * F0 · Contactos sale de Cartera y sube a su propio grupo. Lo pidió la
+         *   contadora en la reunión del 21-oct: el maestro de terceros lo usan
+         *   bodega, logística, compras, facturación y contabilidad, no sólo
+         *   cartera. Tenerlo colgado de un área hacía pensar que era de ella.
+         */
+        key: 'directorio',
+        label: 'Directorio',
         items: [
-            { name: 'Dashboard cartera', href: '/app/cartera', icon: BarChart3, permiso: 'cartera' },
-            { name: 'Facturas de venta', href: '/app/facturas', icon: FileText, permiso: 'cartera' },
-            { name: 'Contactos', href: '/app/contactos', icon: Users, permiso: 'cartera' },
-            { name: 'Pagos', href: '/app/pagos', icon: Calculator, permiso: 'cartera' },
-            { name: 'Crédito y cobranza', href: '/app/credito', icon: Calculator, permiso: 'cartera' },
-            // CRM lo gatea `esAracely()` en su controller: sólo gerencia.
-            { name: 'CRM · Segmentación', href: '/app/crm', icon: Bell, permiso: 'crm' },
-            { name: 'Cartera · Reportes', href: '/app/cartera/reportes', icon: BarChart3, permiso: 'cartera' },
-            { name: 'Cobranzas registros', href: '/app/cartera/cobranzas', icon: MessageSquare, permiso: 'cartera' },
-            { name: 'Solicitudes crédito', href: '/app/cartera/solicitudes', icon: FileText, permiso: 'cartera' },
-            { name: 'Movimientos contables', href: '/app/cartera/movimientos', icon: Calculator, permiso: 'cartera' },
-            // Sprint 4 · B.3 · reglas retención tributaria
-            { name: 'Retenciones (Retefuente/Reteica/Reteiva)', href: '/app/cartera/retenciones', icon: Calculator, permiso: 'cartera' },
-            // Sprint 4 · B.1 · NC manuales
-            { name: 'Notas crédito', href: '/app/cartera/notas-credito', icon: FileText, permiso: 'cartera' },
-            // Sprint 4 · B.2 · ND manuales
-            { name: 'Notas débito', href: '/app/cartera/notas-debito', icon: FileText, permiso: 'cartera' },
-            // A3 FIX #7 · 'Asientos manuales' movido al grupo Contabilidad (abajo).
-            // Sprint 4 · B.3+ · Pagos a proveedor con retenciones
-            { name: 'Pagos a proveedor', href: '/app/cartera/pagos-proveedor', icon: FileText, permiso: 'cartera' },
-            // Estas dos sólo existían en el panel Filament, que quedó para Dropi.
-            { name: 'Comisiones de vendedores', href: '/app/cartera/comisiones', icon: Calculator, permiso: 'comisiones' },
-            { name: 'Métodos de pago', href: '/app/cartera/metodos-pago', icon: CreditCard, permiso: 'metodos_pago' },
+            { name: '👥 Contactos · clientes y proveedores', href: '/app/contactos', icon: Users, permiso: 'cartera' },
         ],
     },
     {
@@ -241,10 +264,16 @@ const groups = [
         key: 'marketing',
         label: 'Marketing',
         items: [
-            { name: '🎬 Mi panel marketing', href: '/app/marketing', icon: Package, permiso: 'marketing' },
+            { name: '🎬 Lo que me toca', href: '/app/marketing', icon: Package, permiso: 'marketing' },
             // La parrilla la gatea `esAracely()`: el rol Marketing la veía en el
             // menú y recibía 403 al entrar. Ahora sólo la ve quien puede abrirla.
             { name: 'Parrilla de contenido', href: '/app/marketing/parrilla', icon: BarChart3, permiso: 'marketing_parrilla' },
+            // MKT-4 · dónde va cada producto, de la compra a la publicación.
+            // Tablero de lanzamiento: las 10 tarjetas de cada contenedor.
+            { name: 'Lanzamientos', href: '/app/marketing/lanzamientos', icon: Rocket, permiso: 'marketing_lanzamientos' },
+            { name: 'Productos', href: '/app/marketing/tablero', icon: LayoutGrid, permiso: 'marketing_tablero' },
+            // MKT-2 · lo ven también los vendedores: es el material para vender.
+            { name: 'Creativos', href: '/app/marketing/creativos', icon: Images, permiso: 'marketing_material' },
             // A1 FIX #7 · el CTA "Nuevo préstamo" caía en 403 porque el gate
             //   de InventarioGestionController no acepta rol Marketing. Lo
             //   quitamos y Marketing crea su préstamo desde su propio panel.
@@ -254,8 +283,36 @@ const groups = [
         key: 'rrhh',
         label: 'Gestión Humana',
         items: [
+            // Primero la solicitud: es por donde arranca el proceso, y para el
+            // líder de área es lo ÚNICO que ve de este grupo.
+            { name: 'Solicitudes de personal', href: '/app/rrhh/requisiciones', icon: Users, permiso: 'rrhh_requisiciones' },
+            // El jefe de área ve SU gente acá: período de prueba y poco más.
+            //   No entra a «Empleados», que lleva los salarios de la empresa.
+            { name: 'Mi equipo', href: '/app/rrhh/mi-equipo', icon: Users, permiso: 'rrhh_requisiciones' },
             { name: 'Vacantes', href: '/app/rrhh/vacantes', icon: Users, permiso: 'rrhh' },
+            // La autorización de la Junta Directiva. La ven los dos lados:
+            //   quien la pide (Gestión Humana) y quien decide (la Junta).
+            { name: '✓ Órdenes de contratación', href: '/app/rrhh/ordenes', icon: Users, permiso: 'rrhh_ordenes' },
+            { name: 'Contrataciones', href: '/app/rrhh/contrataciones', icon: Users, permiso: 'rrhh' },
             { name: 'Empleados', href: '/app/rrhh/empleados', icon: Users, permiso: 'rrhh' },
+            { name: 'Dotación y herramientas', href: '/app/rrhh/asignaciones', icon: Package, permiso: 'rrhh_asignaciones' },
+            // El cuadro mensual que se le manda al contador: incapacidades,
+            //   permisos, ausencias y horas extra. De acá sale el ausentismo.
+            { name: '📋 Cuadro de novedades', href: '/app/rrhh/novedades', icon: ClipboardList, permiso: 'rrhh_novedades' },
+            // Lo que Elena lleva a la Junta Directiva.
+            { name: '📊 Indicadores', href: '/app/rrhh/indicadores', icon: BarChart3, permiso: 'rrhh_indicadores' },
+            // La nómina del mes. La liquida Gestión Humana, la aprueba
+            //   gerencia y la paga tesorería: las tres la ven.
+            { name: '💵 Nómina', href: '/app/rrhh/nomina', icon: ClipboardList, permiso: 'rrhh_nomina' },
+            // Lo que espera la firma de tesorería: nóminas y liquidaciones
+            //   aprobadas, y los paz y salvo.
+            { name: '💳 Pendientes de tesorería', href: '/app/rrhh/tesoreria', icon: ClipboardList, permiso: 'rrhh_tesoreria' },
+            // El código, la versión y la fecha que llevan arriba los
+            //   formatos impresos. Antes vivían dentro de las plantillas.
+            { name: '🗂 Listado de formatos', href: '/app/rrhh/formatos', icon: ClipboardList, permiso: 'rrhh' },
+            // El espacio del propio empleado. Es lo ÚNICO que ve un
+            //   Colaborador, así que el grupo entero le queda con una entrada.
+            { name: '👤 Mi espacio', href: '/app/mi-espacio', icon: Users, permiso: 'portal_colaborador' },
         ],
     },
     {
@@ -267,9 +324,21 @@ const groups = [
         items: [
             { name: 'Órdenes de compra', href: '/app/compras', icon: ShoppingCart, permiso: 'compras_lista' },
             { name: '＋ Nueva OC', href: '/app/compras/oc/nueva', icon: ShoppingCart, permiso: 'compras_gestion' },
-            { name: 'Importaciones · contenedores', href: '/app/compras/importacion', icon: ShoppingCart, permiso: 'compras_gestion' },
+            { name: 'Importaciones · contenedores', href: '/app/compras/importacion', icon: ShoppingCart, permiso: 'compras_importacion' },
             { name: 'Devoluciones a proveedor', href: '/app/compras/devoluciones', icon: ShoppingCart, permiso: 'devoluciones_proveedor' },
-            { name: 'Reporte de compras', href: '/app/compras/reporte', icon: BarChart3, permiso: 'compras_gestion' },
+            // F0 · Pagos a proveedor vivía en «Cartera y CRM», que es lo que el
+            //   cliente nos debe. Un pago a proveedor es lo contrario.
+            { name: 'Pagos a proveedor', href: '/app/cartera/pagos-proveedor', icon: FileText, permiso: 'cartera' },
+            // Calculada con datos del ERP. La otra pantalla de cuentas por
+            // pagar lee de la API de SIIGO, así que sin SIIGO no muestra nada.
+            { name: 'Cuentas por pagar', href: '/app/compras/cuentas-por-pagar', icon: FileText, permiso: 'contabilidad' },
+            { name: 'Programación de pagos', href: '/app/compras/programacion-pagos', icon: FileText, permiso: 'contabilidad' },
+            // El flujo abre también para quien tiene renglones a su cargo: el
+            // controlador lo resuelve, el menú sólo lo muestra a contabilidad.
+            { name: 'Flujo de caja', href: '/app/tesoreria/flujo-de-caja', icon: BarChart3, permiso: 'contabilidad' },
+            { name: 'Sugerido de pedido', href: '/app/compras/sugerido', icon: BarChart3, permiso: 'compras_reportes' },
+            { name: 'Pagos al exterior', href: '/app/compras/pagos-exterior', icon: FileText, permiso: 'compras_pagos_exterior' },
+            { name: 'Reporte de compras', href: '/app/compras/reporte', icon: BarChart3, permiso: 'compras_reportes' },
         ],
     },
     {
@@ -281,17 +350,17 @@ const groups = [
         key: 'bodega',
         label: 'Bodega',
         items: [
-            { name: '📥 Recibir mercancía (desde contenedor)', href: '/app/compras/recepcion/nueva', icon: Warehouse, permiso: 'compras_gestion' },
-            // Mismo destino que el ítem de Compras y con el mismo nombre: antes
-            // se llamaba «Devolver a proveedor» acá y «Devoluciones a proveedor»
-            // allá, y parecían dos pantallas distintas.
-            { name: 'Devoluciones a proveedor', href: '/app/compras/devoluciones', icon: Warehouse, permiso: 'devoluciones_proveedor' },
+            { name: '📥 Recibir mercancía (desde contenedor)', href: '/app/compras/recepcion/nueva', icon: Warehouse, permiso: 'compras_recepcion' },
+            // F0 · Acá había un segundo «Devoluciones a proveedor» apuntando a
+            //   la MISMA pantalla que el de Compras. Se quitó: una pantalla, una
+            //   entrada. Quien opera bodega la alcanza desde el grupo Compras,
+            //   que ve igual.
             { name: 'Stock por producto', href: '/app/inventario', icon: Warehouse, permiso: 'bodega' },
             { name: 'Kardex (movimientos)', href: '/app/inventario/kardex', icon: Warehouse, permiso: 'bodega_operativa' },
             { name: 'Conteos físicos', href: '/app/inventario/conteos', icon: Warehouse, permiso: 'bodega_operativa' },
             { name: 'Traslados entre bodegas', href: '/app/inventario/traslados', icon: Warehouse, permiso: 'bodega_operativa' },
             { name: 'Alertas de stock', href: '/app/inventario/alertas', icon: Warehouse, permiso: 'bodega_operativa' },
-            { name: '🏢 Bodegas · ubicaciones (Rack·Sección·Nivel)', href: '/app/inventario/ubicaciones', icon: Warehouse, permiso: 'bodega' },
+            { name: '🏢 Bodegas · ubicaciones (Rack·Sección·Nivel)', href: '/app/inventario/ubicaciones', icon: Warehouse, permiso: 'ubicaciones' },
             { name: 'Reporte de stock por bodega', href: '/app/inventario/reporte-stock', icon: BarChart3, permiso: 'bodega_operativa' },
             { name: '📥 Importar inventario (Excel)', href: '/app/inventario/importar-cliente', icon: Warehouse, permiso: 'bodega' },
         ],
@@ -305,24 +374,135 @@ const groups = [
             { name: 'Productos (ficha SIIGO)', href: '/app/catalogo/productos', icon: Package, permiso: 'catalogo' },
             // Sprint 4 · G.2 · CRUD Línea/Grupo/Subgrupo/Clase.
             { name: 'Jerarquía SIIGO', href: '/app/catalogo/jerarquia-siigo', icon: Tag, permiso: 'catalogo' },
+            /*
+             * Listas de precios. Existían sin pantalla: el precio sólo se podía
+             * cargar producto por producto desde su ficha, así que las cuatro
+             * listas de Great Baby llevaban meses vacías —y una lista vacía deja
+             * al vendedor sin clientes en su panel.
+             */
+            { name: '🏷 Listas de precios', href: '/app/catalogo/listas-precios', icon: Tag, permiso: 'vendedor' },
         ],
     },
     {
-        // Contabilidad: todo lo del contador queda limpio en su propia caja.
+        /*
+         * F0 · El libro. Acá va lo que mueve cuentas, venga de donde venga.
+         *
+         * Balance general y Estado de resultados EXISTÍAN construidos y no
+         *   estaban en el menú: sólo se llegaba escribiendo la URL. Son los dos
+         *   informes básicos de contabilidad y llevaban así desde que se
+         *   hicieron. Comprobado el 21-oct-2026.
+         *
+         * Las cuatro entradas que sonaban igual (Dashboard contable, Panel
+         *   operativo, Reportes (9), Reporte detalle) quedaron con nombres que
+         *   dicen qué es cada una. Fundirlas de verdad es trabajo de pantalla,
+         *   no de menú, y va en la fase siguiente.
+         */
         key: 'contabilidad',
         label: 'Contabilidad',
         items: [
-            { name: 'Dashboard contable', href: '/app/contabilidad', icon: Calculator, permiso: 'contabilidad' },
-            { name: 'Panel operativo', href: '/app/contabilidad/panel', icon: Calculator, permiso: 'contabilidad' },
-            { name: 'Plan de cuentas (PUC)', href: '/app/contabilidad/plan-cuentas', icon: FileText, permiso: 'contabilidad' },
-            { name: 'Reportes (9)', href: '/app/contabilidad/reportes', icon: BarChart3, permiso: 'contabilidad' },
-            { name: 'Reporte detalle', href: '/app/contabilidad/reporte-detalle', icon: FileText, permiso: 'contabilidad' },
-            // A3 FIX #7 · movido desde grupo Cartera (donde no pertenece semánticamente).
-            { name: 'Asientos manuales', href: '/app/contabilidad/asientos-manuales', icon: FileText, permiso: 'contabilidad' },
-            { name: '⚠ Pendientes SIIGO', href: '/app/contabilidad/pendientes-siigo', icon: Bell, permiso: 'contabilidad' },
-            { name: '🔎 Discrepancias SIIGO', href: '/app/contabilidad/discrepancias-siigo', icon: AlertTriangle, permiso: 'contabilidad' },
-            // A3 FIX #7 · ruta CONT-C5 existía pero no estaba en sidebar.
-            { name: '✓ Validación PUC SIIGO', href: '/app/contabilidad/validacion-puc-siigo', icon: FileText, permiso: 'contabilidad' },
+            {
+                name: '📒 Libro contable', href: '/app/cartera/movimientos',
+                rutas: ['/app/contabilidad/asientos-manuales', '/app/contabilidad/conciliacion-bancaria'],
+                icon: Calculator, permiso: 'cartera',
+            },
+            {
+                /*
+                 * Conciliación bancaria. La tabla existía desde septiembre sin
+                 * una ruta que la nombrara, así que no había por dónde llegarle.
+                 * Entra con nombre propio en el menú y no sólo como pestaña del
+                 * libro, porque es trabajo mensual con fecha de corte.
+                 */
+                name: '🏦 Conciliación bancaria', href: '/app/contabilidad/conciliacion-bancaria',
+                icon: Calculator, permiso: 'contabilidad',
+            },
+            {
+                // Los cuatro informes juntos. Balance general y Estado de
+                //   resultados llegaron acá después de estar construidos y
+                //   fuera del menú: seguir siendo pestañas los deja visibles.
+                name: '📊 Reportes contables', href: '/app/contabilidad/balance-general',
+                rutas: [
+                    '/app/contabilidad/estado-resultados',
+                    '/app/contabilidad/reportes',
+                    '/app/contabilidad/reporte-detalle',
+                ],
+                icon: BarChart3, permiso: 'contabilidad',
+            },
+            {
+                /*
+                 * Sólo «Notas crédito».
+                 *
+                 * Great Baby confirmó el 2026-11-03 que las notas débito no
+                 * las usan. La pantalla queda —está construida y probada, y
+                 * se llega por la pestaña de arriba— pero el menú no la
+                 * ofrece: un menú que nombra lo que nadie usa hace más largo
+                 * el camino a lo que sí.
+                 */
+                name: 'Notas crédito', href: '/app/cartera/notas-credito',
+                rutas: ['/app/cartera/notas-debito'],
+                icon: FileText, permiso: 'cartera',
+            },
+            {
+                name: 'Panel contable', href: '/app/contabilidad',
+                rutas: ['/app/contabilidad/panel'],
+                icon: Calculator, permiso: 'contabilidad',
+            },
+            // Gastos y reembolsos NO se trae acá: su permiso es abierto, y un
+            // despachador terminaría viendo un grupo «Contabilidad» con un solo
+            // ítem. Se queda en su propio grupo, más abajo.
+        ],
+    },
+    {
+        /*
+         * F0 · Configuración contable: lo que se toca una vez y se deja quieto.
+         *   Estaba mezclado con la operación diaria de cartera, y por eso el
+         *   grupo se veía interminable.
+         */
+        key: 'config_contable',
+        label: 'Configuración contable',
+        items: [
+            /*
+             * F2 · Una entrada, cuatro pestañas adentro (PUC · Retenciones ·
+             *   Métodos de pago · Comisiones). Las pantallas siguen siendo las
+             *   mismas y cada una con su ruta: lo único que cambió es que se
+             *   navega entre ellas desde arriba y no desde el menú lateral.
+             *   Ver `usePestanasContables.js`.
+             */
+            {
+                name: 'Configuración contable', href: '/app/contabilidad/plan-cuentas',
+                // `rutas` = las de sus pestañas. Sin esto, estando en Retenciones
+                // el menú resaltaba «Dashboard cartera», porque es la única
+                // entrada cuya ruta es prefijo de `/app/cartera/retenciones`.
+                rutas: ['/app/cartera/retenciones', '/app/cartera/metodos-pago', '/app/cartera/comisiones'],
+                icon: FileText, permiso: 'contabilidad',
+            },
+        ],
+    },
+    {
+        /*
+         * F0 · Torre SIIGO: todo lo fiscal junto, en vez de repartido entre
+         *   Contabilidad y rutas sin menú.
+         *
+         * Conciliación ERP↔SIIGO y Cuentas por pagar SIIGO también existían
+         *   construidas y fuera del menú.
+         */
+        key: 'siigo_torre',
+        label: 'SIIGO',
+        items: [
+            /*
+             * F2 · Las cinco pantallas fiscales detrás de una sola entrada, con
+             *   pestañas arriba (Pendientes · Discrepancias · Validación PUC ·
+             *   Conciliación · Cuentas por pagar). Ver `usePestanasContables.js`.
+             */
+            {
+                name: '☁ Torre SIIGO', href: '/app/contabilidad/pendientes-siigo',
+                rutas: [
+                    '/app/contabilidad/discrepancias-siigo',
+                    '/app/contabilidad/validacion-puc-siigo',
+                    '/app/contabilidad/siigo/conciliacion',
+                    '/app/contabilidad/siigo/cuentas-por-pagar',
+                ],
+                icon: Bell, permiso: 'contabilidad',
+            },
         ],
     },
     {
@@ -330,7 +510,18 @@ const groups = [
         label: 'Dropi',
         items: [
             // El módulo Dropi se opera en /admin, que quedó siendo sólo Dropi.
-            { name: '🚚 Abrir módulo Dropi', href: '/admin/dropi-pedidos', icon: LayoutDashboard, external: true, permiso: 'dropi' },
+            /*
+             * Apunta a `/admin`, no a una pantalla concreta.
+             *
+             * Iba derecho a `/admin/dropi-pedidos`, que exige
+             * `esAracely() || esAlistador()`. Gerente, Contador y Servicio al
+             * Cliente entran al panel sin problema pero NO a ese recurso: el
+             * menú les ofrecía la entrada y la pantalla les respondía 403.
+             * Filament ya sabe mandar a cada quien a una página que sí puede
+             * ver —al Contador lo deja en el dashboard de Dropi—, así que
+             * basta con dejarlo decidir.
+             */
+            { name: '🚚 Abrir módulo Dropi', href: '/admin', icon: LayoutDashboard, external: true, permiso: 'dropi' },
             { name: 'Productos y stock en Dropi', href: '/app/dropi/carga-productos', icon: Package, permiso: 'dropi_productos' },
         ],
     },
@@ -357,7 +548,9 @@ const groups = [
         label: 'Configuración',
         items: [
             { name: '🛡 Roles y permisos', href: '/app/roles', icon: Users, permiso: 'configuracion' },
-            { name: 'Reglas de negocio', href: '/app/reglas', icon: Settings, permiso: 'configuracion' },
+            // Clave propia, no `configuracion`: el contador entra a ver el
+            // grupo contable sin que eso le abra Roles, Empresa ni Plantillas.
+            { name: 'Reglas de negocio', href: '/app/reglas', icon: Settings, permiso: 'reglas' },
             { name: 'Empresa', href: '/app/empresa', icon: Home, permiso: 'configuracion' },
             { name: 'Plantillas PDF', href: '/app/plantillas', icon: FileText, permiso: 'configuracion' },
             { name: 'SIIGO', href: '/app/siigo', icon: Settings, permiso: 'siigo' },
@@ -367,7 +560,32 @@ const groups = [
 
 // UX #15: usar page.url (reactivo a Inertia) en vez de window.location (estático).
 const currentPath = computed(() => page.url || '/');
-const isActive = (href) => href === '/app' ? currentPath.value === '/app' : currentPath.value.startsWith(href);
+/*
+ * Se resalta UNA sola entrada: la de ruta más larga que coincida.
+ *
+ * Con un `startsWith` a secas, estando en `/app/cartera/retenciones` se
+ * encendía también «Dashboard cartera» (`/app/cartera`), porque una es prefijo
+ * de la otra. Con dos resaltadas a la vez nadie sabe dónde está parado, y el
+ * problema creció al unificar pantallas: ahora hay más rutas anidadas.
+ */
+const hrefActivo = computed(() => {
+    const url = currentPath.value.split('?')[0];
+    let mejor = null;
+    for (const g of visibleGroups.value) {
+        for (const it of g.items) {
+            if (it.external) continue;
+            // Una entrada unificada también responde por las rutas de sus
+            // pestañas, declaradas en `rutas`.
+            for (const r of [it.href, ...(it.rutas ?? [])]) {
+                const coincide = r === '/app' ? url === '/app' : (url === r || url.startsWith(r + '/'));
+                if (coincide && (! mejor || r.length > mejor.largo)) mejor = { href: it.href, largo: r.length };
+            }
+        }
+    }
+    return mejor?.href ?? null;
+});
+
+const isActive = (href) => hrefActivo.value === href;
 
 // Sin entrada guardada el grupo está abierto: lo que el rol ve, lo ve completo.
 const grupoAbierto = (key) => openGroups.value[key] !== false;
@@ -494,8 +712,22 @@ const visibleGroups = computed(() => groups
                 </div>
 
                 <div class="flex items-center gap-2">
-                    <!-- FASE E · Semáforo SIIGO (polling 30s) -->
-                    <SemaforoSiigo/>
+                    <!--
+                        FASE E · Semáforo SIIGO (polling 30s).
+
+                        Sólo para quien puede abrir /app/siigo. Se mostraba a
+                        todo el mundo, y como esa pantalla es de gerencia, cada
+                        usuario sin acceso se quedaba con el chip en «cargando…»
+                        para siempre —el `catch {}` del componente se traga el
+                        403— mientras pedía el semáforo cada 30 segundos y
+                        recibía un Forbidden cada vez. Y el chip es un enlace,
+                        así que al hacerle clic se llegaba a un 403.
+
+                        Es el mismo defecto que ya se había arreglado en el menú
+                        («mostraba enlaces que el controller no deja abrir»);
+                        este sobrevivió porque vive en la barra, no en `groups`.
+                    -->
+                    <SemaforoSiigo v-if="puedeVer('siigo')"/>
                     <!-- MEJORAS-B · Bell real-time con polling 20s + sonido -->
                     <NotificacionesBell/>
                     <div class="flex items-center gap-2 pl-2 border-l border-surface-200 dark:border-surface-800">
@@ -543,5 +775,6 @@ const visibleGroups = computed(() => groups
                 </div>
             </transition-group>
         </div>
+        <AvisoPagoVencido/>
     </div>
 </template>

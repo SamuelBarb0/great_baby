@@ -2,6 +2,7 @@
 
 namespace App\Modules\Dropi\Filament\Pages;
 
+use App\Auth\Permisos;
 use App\Modules\Dropi\Actions\ConfirmarEmpaqueYSiguiente;
 use App\Modules\Dropi\Actions\ProcesarEscaneoEmpaque;
 use App\Modules\Dropi\Enums\EstadoPedidoDropi;
@@ -23,7 +24,7 @@ class EstacionEmpaque extends Page
 
     protected static string|\UnitEnum|null $navigationGroup = 'Operación';
 
-    protected static ?int $navigationSort = 0;
+    protected static ?int $navigationSort = 1;
 
     protected static ?string $slug = 'estacion-empaque';
 
@@ -35,11 +36,9 @@ class EstacionEmpaque extends Page
 
     public static function canAccess(): bool
     {
-        $u = auth()->user();
-        if (! $u) {
-            return false;
-        }
-        return $u->esAracely() || $u->hasAnyRole(['Alistador']);
+        // Antes era `hasAnyRole(['Alistador'])`: la casilla «Estación de
+        //   empaque» de Roles no abría esta pantalla. La casilla manda.
+        return Permisos::puede(auth()->user(), 'estacion_empaque');
     }
 
     /**
@@ -87,7 +86,7 @@ class EstacionEmpaque extends Page
         $this->dispatch('empaque-scan', sonido: $resultado['sonido'], mensaje: $resultado['mensaje']);
     }
 
-    public function confirmarYSiguiente(): void
+    public function confirmarYSiguiente(?array $gps = null): void
     {
         if (! $this->pedidoActivoId) {
             return;
@@ -108,7 +107,7 @@ class EstacionEmpaque extends Page
         }
 
         try {
-            $res = ConfirmarEmpaqueYSiguiente::run($this->pedidoActivoId, auth()->id());
+            $res = ConfirmarEmpaqueYSiguiente::run($this->pedidoActivoId, auth()->id(), $gps);
             Notification::make()->title($res['msg'])->success()->send();
             $this->pedidoActivoId = null;
             $this->ultimoResultado = null;

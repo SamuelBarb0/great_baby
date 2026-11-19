@@ -30,9 +30,9 @@ class DashboardDropi extends Page implements HasForms
 
     protected static ?string $title = 'Dashboard Dropi';
 
-    protected static string|\UnitEnum|null $navigationGroup = 'Dropi';
+    protected static string|\UnitEnum|null $navigationGroup = 'Dinero';
 
-    protected static ?int $navigationSort = 0;
+    protected static ?int $navigationSort = 1;
 
     protected string $view = 'dropi.pages.dashboard-dropi';
 
@@ -47,7 +47,17 @@ class DashboardDropi extends Page implements HasForms
     {
         $u = auth()->user();
         if (! $u) return false;
-        return $u->esAracely() || $u->hasAnyRole(['Gerente', 'Contador']);
+
+        // Es la pantalla de entrada de /admin, así que la abre quien tenga
+        //   alguna casilla «de plata» del módulo: gerencia, contador y los
+        //   perfiles creados en la pantalla de Roles (p. ej. «Operador
+        //   Dropi»). Alistador y SAC entran directo a su propia pantalla y
+        //   no necesitan ver los tableros financieros.
+        return \App\Auth\Permisos::esRoot($u)
+            || \App\Auth\Permisos::puede($u, 'dropi_dashboard')
+            || \App\Auth\Permisos::puede($u, 'dropi_cortes')
+            || \App\Auth\Permisos::puede($u, 'dropi_wallet')
+            || \App\Auth\Permisos::puede($u, 'dropi_reportes');
     }
 
     public function mount(): void

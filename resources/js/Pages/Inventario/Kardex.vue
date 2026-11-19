@@ -13,6 +13,7 @@ const props = defineProps({
     saldoTotal: { type: Number, default: 0 },
     costoPromedio: { type: Number, default: 0 },
     valorStock: { type: Number, default: 0 },
+    sin_repartir: { type: Object, default: null },
 });
 
 const { money } = useMoney();
@@ -70,7 +71,25 @@ const tipoColor = (t, cantidad) => {
                 </div>
             </div>
 
-            <div v-if="codigo && !variante" class="card p-8 text-center text-red-600">Variante no encontrada</div>
+            <div v-if="codigo && !variante" class="card p-8 text-center text-red-600">
+                No hay nada con ese código de barras ni esa referencia.
+            </div>
+
+            <!--
+                LOG-H3 · la variante existe, pero lo que entró quedó asentado
+                a nivel producto. Un kardex vacío se lee como «nunca se movió»,
+                y acá hay unidades en bodega.
+            -->
+            <div v-if="sin_repartir"
+                class="card p-4 border-l-4 border-amber-500 bg-amber-500/10 text-sm text-amber-900 dark:text-amber-200">
+                Esta variante no tiene movimientos propios, pero el producto
+                <strong>{{ sin_repartir.referencia }}</strong> tiene
+                <strong>{{ sin_repartir.cuantos }}</strong>
+                {{ sin_repartir.cuantos === 1 ? 'movimiento' : 'movimientos' }}
+                a nivel producto, sin repartir por variante —así los asienta la recepción, porque
+                la orden de compra enlaza al producto, no a la variante—.
+                Buscá por la referencia <strong>{{ sin_repartir.referencia }}</strong> para verlos.
+            </div>
 
             <!-- Header variante + KPIs valorización -->
             <div v-if="variante" class="grid grid-cols-1 md:grid-cols-4 gap-3">

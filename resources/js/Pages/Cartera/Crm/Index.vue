@@ -7,13 +7,16 @@ import { useEscClose } from '@/composables/useEscClose';
 import { useMoney } from '@/composables/useMoney';
 
 const props = defineProps({
+    // Reescribir los segmentos de TODOS los clientes es de Gerencia.
+    puede_segmentar: { type: Boolean, default: false },
     segmentos: { type: Array, required: true },
     interaccionesRecientes: { type: Array, required: true },
     comisionesUltimoMes: { type: Object, required: true },
     tiposInteraccion: { type: Array, required: true },
+    fuentes: { type: Array, default: () => [] },
 });
 
-const tab = ref('segmentacion'); // segmentacion | interacciones | comisiones
+const tab = ref('segmentacion'); // segmentacion | fuentes | interacciones | comisiones
 
 const { money: fmtCOP } = useMoney();
 
@@ -107,7 +110,7 @@ const guardarInteraccion = () => {
                     <p class="text-sm text-surface-500 mt-1">Segmentación de clientes, bitácora de interacciones y comisiones.</p>
                 </div>
                 <div class="flex items-center gap-2">
-                    <button v-if="tab === 'segmentacion'" @click="solicitarSegmentar" :disabled="segmentando"
+                    <button v-if="puede_segmentar && tab === 'segmentacion'" @click="solicitarSegmentar" :disabled="segmentando"
                             class="btn-secondary text-sm">
                         <RefreshCw :class="['h-4 w-4', segmentando ? 'animate-spin' : '']"/>
                         Re-segmentar
@@ -122,6 +125,9 @@ const guardarInteraccion = () => {
             <div class="flex items-center gap-2 border-b border-surface-200 dark:border-surface-800">
                 <button @click="tab = 'segmentacion'" :class="['px-4 py-2 text-sm font-semibold border-b-2', tab === 'segmentacion' ? 'border-brand-500 text-brand-600' : 'border-transparent text-surface-500']">
                     🎯 Segmentación
+                </button>
+                <button @click="tab = 'fuentes'" :class="['px-4 py-2 text-sm font-semibold border-b-2', tab === 'fuentes' ? 'border-brand-500 text-brand-600' : 'border-transparent text-surface-500']">
+                    🧭 Fuentes
                 </button>
                 <button @click="tab = 'interacciones'" :class="['px-4 py-2 text-sm font-semibold border-b-2', tab === 'interacciones' ? 'border-brand-500 text-brand-600' : 'border-transparent text-surface-500']">
                     📞 Interacciones
@@ -141,7 +147,7 @@ const guardarInteraccion = () => {
                 <div v-if="! segmentos.length" class="card p-12 text-center text-surface-500">
                     <Users class="h-10 w-10 mx-auto opacity-40"/>
                     <div class="text-sm mt-2">Todavía no se ha ejecutado la segmentación.</div>
-                    <button @click="solicitarSegmentar" class="btn-primary mt-4 mx-auto">Ejecutar ahora</button>
+                    <button v-if="puede_segmentar" @click="solicitarSegmentar" class="btn-primary mt-4 mx-auto">Ejecutar ahora</button>
                 </div>
                 <div v-else class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
                     <div v-for="s in segmentos" :key="s.segmento"
@@ -154,6 +160,42 @@ const guardarInteraccion = () => {
                 </div>
                 <div class="text-xs text-surface-500 text-center py-4">
                     Reglas de segmentación configurables en <Link href="/app/reglas" class="text-brand-600 hover:underline">Reglas</Link> (grupo CRM).
+                </div>
+            </div>
+
+            <!-- Tab: Fuentes (MKT-6) -->
+            <div v-if="tab === 'fuentes'" class="card p-4">
+                <div class="text-xs uppercase tracking-widest font-bold text-brand-600 mb-3">
+                    🧭 ¿Por dónde llegan los clientes?
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead>
+                            <tr class="text-left text-xs uppercase text-surface-500 border-b border-surface-200 dark:border-surface-800">
+                                <th class="py-2 pr-3">Fuente</th>
+                                <th class="py-2 px-3 text-right">Clientes</th>
+                                <th class="py-2 px-3 text-right">Con pedido</th>
+                                <th class="py-2 px-3 text-right">Conversión</th>
+                                <th class="py-2 px-3 text-right">Pedidos</th>
+                                <th class="py-2 pl-3 text-right">Ventas</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="f in fuentes" :key="f.fuente ?? 'sin'" class="border-b border-surface-100 dark:border-surface-800/60"
+                                :class="f.fuente === null ? 'text-surface-500' : ''">
+                                <td class="py-2 pr-3 font-medium">{{ f.label }}</td>
+                                <td class="py-2 px-3 text-right tabular-nums">{{ f.contactos }}</td>
+                                <td class="py-2 px-3 text-right tabular-nums">{{ f.clientes_con_pedido }}</td>
+                                <td class="py-2 px-3 text-right tabular-nums">{{ f.conversion }}%</td>
+                                <td class="py-2 px-3 text-right tabular-nums">{{ f.pedidos }}</td>
+                                <td class="py-2 pl-3 text-right tabular-nums">{{ fmtCOP(f.ventas) }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="text-xs text-surface-500 mt-3">
+                    La fuente se elige en la ficha del contacto («¿Cómo llegó?») y cada pedido la copia al crearse.
+                    Ventas = pedidos facturados o despachados.
                 </div>
             </div>
 

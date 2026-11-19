@@ -134,7 +134,10 @@ class ConciliadorFacturasSiigo
      */
     private function facturasDeSiigo(CarbonInterface $desde): array
     {
-        $resolucion = (int) (SiigoConfig::current()->tipo_documento_id ?? 0);
+        // Las de Dropi salen con su propia resolución en la misma cuenta (7-nov):
+        // también son nuestras.
+        $cfg = SiigoConfig::current();
+        $resoluciones = array_values(array_filter([(int) $cfg->tipo_documento_id, (int) $cfg->tipo_documento_dropi_id]));
         $salida = [];
         $pagina = 1;
 
@@ -152,7 +155,7 @@ class ConciliadorFacturasSiigo
 
             foreach ($filas as $x) {
                 $docId = (int) ($x['document']['id'] ?? 0);
-                if ($resolucion > 0 && $docId !== $resolucion) {
+                if ($resoluciones && ! in_array($docId, $resoluciones, true)) {
                     continue;
                 }
                 $salida[(string) $x['id']] = [

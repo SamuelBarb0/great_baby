@@ -5,6 +5,7 @@ namespace App\Providers;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Support\Facades\View;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -41,6 +42,8 @@ class AppServiceProvider extends ServiceProvider
         \App\Modules\Catalogo\Models\PrecioVariante::observe(\App\Modules\Siigo\Observers\PrecioVarianteObserver::class);
         // QA-FIX #7 · pago proveedor → SIIGO voucher egreso.
         \App\Modules\Cartera\Models\PagoProveedor::observe(\App\Modules\Siigo\Observers\PagoProveedorObserver::class);
+        // Tablero de lanzamiento · cada contenedor nuevo nace con sus 10 tarjetas.
+        \App\Modules\Compras\Models\Importacion::observe(\App\Modules\Marketing\Observers\ImportacionObserver::class);
 
         // Re-audit SEG A2 · rate-limiters compuestos para el Portal B2B.
         //   `portal-login`     → 5 intentos/min por email+IP (bloquea brute-force targeteado)
@@ -75,5 +78,43 @@ class AppServiceProvider extends ServiceProvider
             }
             return Limit::perMinute($perMin);
         });
+
+        /*
+         * Fase G · Control documental.
+         *
+         * Cada formato impreso recibe su ficha del listado maestro sin que
+         * quien lo imprime tenga que acordarse de pasarla. Se hace acá y no
+         * en los seis controladores por una razón concreta: el día que se
+         * agregue un formato nuevo, olvidarse de la ficha dejaría una hoja
+         * sin código ni versión, que es exactamente el problema que esta
+         * fase viene a cerrar.
+         *
+         * La llave del listado es el nombre de la vista con guiones bajos:
+         * `rrhh.pdf.entrega-cargo` → `entrega_cargo`.
+         */
+        View::composer(
+            array_map(
+                fn (string $clave) => 'rrhh.pdf.'.str_replace('_', '-', $clave),
+                array_keys(\App\Modules\Rrhh\Models\FormatoControlado::SEMILLA),
+            ),
+            function (\Illuminate\View\View $vista) {
+                $clave = str($vista->getName())->afterLast('.')->replace('-', '_')->toString();
+
+                $vista->with('formato', \App\Modules\Rrhh\Models\FormatoControlado::de($clave));
+
+                /*
+                 * El recuadro también lleva la marca de la empresa, y cinco de
+                 * los seis formatos ya la pasaban. El sexto no —tenía el
+                 * nombre escrito dentro de la plantilla— y al unificar el
+                 * encabezado se quedó sin ella.
+                 *
+                 * Se completa sólo si el controlador no la mandó, para no
+                 * pisar lo que ya venía decidido.
+                 */
+                if (! array_key_exists('empresa', $vista->getData())) {
+                    $vista->with('empresa', \App\Models\EmpresaConfig::current());
+                }
+            },
+        );
     }
 }

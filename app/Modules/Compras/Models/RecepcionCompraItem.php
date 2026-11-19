@@ -18,7 +18,7 @@ class RecepcionCompraItem extends Model implements AuditableContract
 
     protected $fillable = [
         'recepcion_id', 'orden_item_id', 'producto_id', 'variante_id',
-        'cantidad_recibida', 'costo_unit', 'subtotal',
+        'cantidad_recibida', 'costo_unit', 'subtotal', 'color_nombre',
         'lote', 'fecha_vencimiento', 'observaciones',
         // LOG-J8 · clasificación al descargar (apto|averia|cuarentena|revision|faltante)
         'clasificacion', 'motivo_clasificacion',

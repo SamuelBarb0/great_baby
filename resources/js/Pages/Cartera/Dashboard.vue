@@ -1,5 +1,6 @@
 <script setup>
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
+import FiltroEjes from '@/Components/FiltroEjes.vue';
 import { Head, router, Link, usePage } from '@inertiajs/vue3';
 import { useMoney } from '@/composables/useMoney';
 import { useIntervalFn } from '@vueuse/core';
@@ -23,7 +24,21 @@ const props = defineProps({
     proximosVencer: { type: Array, required: true },
     refreshSeg: { type: Number, default: 30 },
     bucketDias: { type: Object, required: true },
+    filtros: { type: Object, default: () => ({ linea: 'todas', destino: 'todas' }) },
+    opcionesEjes: { type: Object, default: () => ({ lineas: [], destinos: [] }) },
+    // El contrato pide el semáforo «por tramos Y POR VENDEDOR». Lo segundo no
+    // estaba: no había forma de responder quién vende bien pero cobra mal.
+    porVendedor: { type: Array, default: () => [] },
+    tramos: { type: Array, default: () => [] },
 });
+
+// Línea de negocio y destino: «Dropi» = la cartera del e-commerce, sola.
+const linea = ref(props.filtros.linea || 'todas');
+const destino = ref(props.filtros.destino || 'todas');
+watch([linea, destino], () => router.get('/app/cartera', {
+    linea: linea.value !== 'todas' ? linea.value : null,
+    destino: destino.value !== 'todas' ? destino.value : null,
+}, { preserveScroll: true, preserveState: true, replace: true }));
 
 const sincronizando = ref(false);
 const ultimoSync = ref(new Date());
@@ -32,7 +47,7 @@ useIntervalFn(() => {
     if (document.visibilityState !== 'visible') return;
     sincronizando.value = true;
     router.reload({
-        only: ['semaforo', 'kpis', 'topMorosos', 'cobradoMes', 'facturadoMes', 'proximosVencer'],
+        only: ['semaforo', 'kpis', 'topMorosos', 'cobradoMes', 'facturadoMes', 'proximosVencer', 'porVendedor'],
         preserveScroll: true,
         preserveState: true,
         onSuccess: () => { ultimoSync.value = new Date(); },
@@ -76,6 +91,9 @@ const abrirWhatsApp = (telefono, nombre, saldo, dias) => {
                         <Wallet class="h-4 w-4"/> Cartera · Dashboard
                     </h1>
                     <div class="text-sm text-surface-500 mt-1">Semáforo de cobros al día, top morosos y proyección del mes.</div>
+                    <div class="mt-3">
+                        <FiltroEjes v-model:linea="linea" v-model:destino="destino" :opciones="opcionesEjes"/>
+                    </div>
                 </div>
                 <div class="text-xs uppercase tracking-widest flex items-center gap-1.5">
                     <span v-if="sincronizando" class="inline-block h-2 w-2 rounded-full bg-brand-500 animate-pulse"></span>
@@ -162,6 +180,53 @@ const abrirWhatsApp = (telefono, nombre, saldo, dias) => {
                             </tbody>
                         </table>
                     </div>
+                </div>
+            </div>
+
+            <!-- Cartera por vendedor · lo más vencido arriba -->
+            <div class="card p-4">
+                <div class="text-xs uppercase tracking-widest font-bold text-brand-600 mb-3">
+                    🧑‍💼 Cartera por vendedor
+                </div>
+                <div v-if="! porVendedor.length" class="text-center py-6 text-surface-500 text-sm">
+                    Sin cartera pendiente.
+                </div>
+                <div v-else class="overflow-x-auto">
+                    <table v-tabla-movil class="w-full min-w-[860px] text-sm">
+                        <thead>
+                            <tr class="text-surface-500 text-xs uppercase border-b border-surface-200 dark:border-surface-800">
+                                <th class="text-left py-2">Vendedor</th>
+                                <th v-for="t in tramos" :key="t.valor" class="text-right">{{ t.label }}</th>
+                                <th class="text-right">Vencido</th>
+                                <th class="text-right">Total</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="v in porVendedor" :key="v.vendedor_id ?? 'sin'"
+                                class="border-b border-surface-100 dark:border-surface-800/60"
+                                :class="v.vendedor_id ? '' : 'bg-amber-50/60 dark:bg-amber-900/10'">
+                                <td class="py-2">
+                                    {{ v.vendedor }}
+                                    <!--
+                                        Lo que no tiene vendedor va aparte y señalado, no
+                                        repartido: esconderlo haría cuadrar el total mintiendo.
+                                    -->
+                                    <span v-if="! v.vendedor_id" class="text-[10px] text-amber-700 block">
+                                        facturas viejas sin vendedor asignado
+                                    </span>
+                                </td>
+                                <td v-for="t in tramos" :key="t.valor" class="text-right tabular-nums"
+                                    :style="{ color: v.por_tramo[t.valor]?.monto ? t.color : '' }">
+                                    {{ v.por_tramo[t.valor]?.monto ? fmtCOP(v.por_tramo[t.valor].monto) : '—' }}
+                                </td>
+                                <td class="text-right tabular-nums font-semibold"
+                                    :class="v.vencido > 0 ? 'text-red-600' : ''">
+                                    {{ fmtCOP(v.vencido) }}
+                                </td>
+                                <td class="text-right tabular-nums font-bold">{{ fmtCOP(v.total) }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
                 </div>
             </div>
 

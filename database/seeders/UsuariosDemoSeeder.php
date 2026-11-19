@@ -22,7 +22,7 @@ class UsuariosDemoSeeder extends Seeder
 {
     public const PASSWORD_DEMO = 'demo';
 
-    /** 10 roles del sistema + 1 usuario demo cada uno. */
+    /** Un usuario demo por rol del sistema. */
     public const USUARIOS = [
         // [email, name, rol, ciudad para AdminBodega]
         ['aracely@greatbaby.com',               'Aracely (demo)',             'Aracely'],
@@ -36,6 +36,17 @@ class UsuariosDemoSeeder extends Seeder
         ['sac.demo@greatbaby.com',              'Servicio Cliente Demo',      'ServicioCliente'],
         ['marketing.demo@greatbaby.com',        'Mia Marketing Demo',         'Marketing'],
         ['facturador.demo@greatbaby.com',       'Facturador Demo',            'Facturador'],
+        // Gestión Humana y el líder de área no tenían usuario demo, aunque el
+        //   módulo entero está construido alrededor de los dos: ella maneja
+        //   selección, contratación y el cuadro de novedades; él pide personal
+        //   y da el concepto del período de prueba. Sin ellos no había forma
+        //   de recorrer el módulo en local sin crear usuarios a mano.
+        ['gestionhumana.demo@greatbaby.com',    'Elena Gestión Humana (demo)', 'GestionHumana'],
+        ['lider.demo@greatbaby.com',            'Líder de Área Demo',          'LiderArea'],
+        // El colaborador tampoco tenía uno, y es el rol más acotado de todos:
+        //   abre una sola pantalla. Sin él, la prueba que compara el menú con
+        //   las puertas lo saltaba en silencio y nadie cubría ese caso.
+        ['colaborador.demo@greatbaby.com',      'Colaborador Demo',            'Colaborador'],
     ];
 
     public function run(): void

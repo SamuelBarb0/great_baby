@@ -124,7 +124,7 @@ class RegistrarCargaInventario
                 continue;
             }
             $cuenta = $productos->get($m->producto_id)?->cta('inventario')
-                ?? (string) setting('contable.cta_inventario_default', '1435');
+                ?? (string) setting('contable.cta_inventario_default');
             $porCuenta[$cuenta] = ($porCuenta[$cuenta] ?? 0) + $valor;
             $totalValor += $valor;
         }

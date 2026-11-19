@@ -68,6 +68,7 @@ class DropiGestionController extends Controller implements HasMiddleware
                 ])->all(),
             ],
             'estadosDisponibles' => array_map(fn ($c) => ['value' => $c->value, 'label' => $c->label() ?? $c->name], EstadoPedidoDropi::cases()),
+            'trazabilidad' => \App\Modules\Dropi\Support\Trazabilidad::lineaDeTiempo($p),
         ]);
     }
 

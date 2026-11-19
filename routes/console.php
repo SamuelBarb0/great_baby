@@ -8,15 +8,64 @@ Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
 
+/*
+ * Quien efectivamente vacía la cola.
+ *
+ * Todo lo de abajo encola trabajo, y hasta hoy no había nadie corriendo un
+ * `queue:work`: los documentos se encolaban y se quedaban ahí. Peor, los jobs
+ * de SIIGO caducan a las 12 horas (`retryUntil`), así que pasado ese plazo el
+ * worker los descarta SIN llamar a la API y el documento no llega nunca. El
+ * 2026-11-03 había 112 trabajos de una semana atrás, todos muertos, y la
+ * cobertura en SIIGO era 0 % de 28 facturas sin que nada lo avisara.
+ *
+ * Con esto basta el cron de un minuto que ya pide Laravel (`schedule:run`):
+ * cada minuto se levanta un worker, vacía lo que haya y se va. `--max-time`
+ * lo corta antes del minuto siguiente y el candado de 2 min evita que se
+ * apilen si una corrida se cuelga.
+ */
+Schedule::command('queue:work --queue=siigo,default --stop-when-empty --max-time=55 --tries=3')
+    ->everyMinute()
+    ->withoutOverlapping(2)
+    ->runInBackground();
+
 // §6 diseño Dropi — libera locks vencidos del alistador cada 2 min.
 Schedule::command('dropi:liberar-locks')->everyTwoMinutes()->withoutOverlapping();
 
 // F15 · re-matcheo periódico de wallet huérfanos (movimientos que llegaron antes
 // de que el pedido apareciera en el sync).
 Schedule::command('dropi:reconciliar-huerfanos')->everyThirtyMinutes()->withoutOverlapping();
+// Tarjeta 8 · avisos de la campana (plazo 48/72 h, paquetes por fuera,
+//   devoluciones, diferencias). Una vez por pedido y nivel.
+Schedule::command('dropi:alertas')->everyThirtyMinutes()->withoutOverlapping();
 
 // §7 TO-BE Cartera — barrido diario de cobranza WhatsApp a las 9:00.
 Schedule::command('cartera:cobrar')->dailyAt('09:00')->withoutOverlapping();
+
+/*
+ * Lunes a primera hora: qué bodegas llevan demasiado sin contarse.
+ *
+ * Semanal y no diario a propósito. Un aviso que sale todos los días se vuelve
+ * paisaje, y contar una bodega no es algo que se resuelva el mismo día.
+ */
+Schedule::command('inventario:recordar-conteo')->weeklyOn(1, '07:00')->withoutOverlapping();
+
+/*
+ * Gestión Humana · recordatorio de períodos de prueba. Lunes temprano.
+ *
+ * Semanal y no diario: el plazo se mide en MESES, y con los días de
+ * anticipación que pone la regla alcanza para avisar dos o tres veces antes de
+ * que venza. Un aviso que sale todos los días se vuelve paisaje, y entonces
+ * deja de avisar.
+ *
+ * Había dos comandos agendados para esto —`rrhh:avisar-prueba` a diario y
+ * `rrhh:avisar-periodos-prueba` los lunes—, con tipos de aviso distintos y
+ * destinatarios invertidos. Queda uno.
+ */
+Schedule::command('rrhh:avisar-prueba')
+    ->weeklyOn(1, '07:30')->timezone('America/Bogota')->withoutOverlapping();
+
+// Después de la cobranza del día: lo que cruzó los 120 sube a Gerencia.
+Schedule::command('cartera:escalar-vencidas')->dailyAt('09:30')->withoutOverlapping();
 
 // SIIGO — sync incremental de productos (B3-M6 · escalonado al minuto :02 de
 // cada cuarto de hora para no colisionar con inventario/empaque; usa cursor
@@ -73,5 +122,29 @@ $dropiWebSync = fn () => (bool) config('dropi.web.sync_activo');
 Schedule::command('dropi:web-sync recientes')->everyFifteenSeconds()->withoutOverlapping(2)->when($dropiWebSync);
 Schedule::command('dropi:web-sync ventana')->everyMinute()->withoutOverlapping(10)->when($dropiWebSync);
 Schedule::command('dropi:web-sync transito')->everyTenMinutes()->withoutOverlapping(30)->when($dropiWebSync);
+// Pagos: Dropi paga ~1 día después de la entrega sin cambiar el estatus; se
+//   revisa el detalle de los entregados sin pago (trae su `history_wallet`).
+Schedule::command('dropi:web-sync pagos --max-detalles=60')->everyThirtyMinutes()->withoutOverlapping(20)->when($dropiWebSync);
 // Wallet: los pagos de Dropi entran por lotes durante el día; cada 30 min basta.
 Schedule::command('dropi:web-wallet-sync')->everyThirtyMinutes()->withoutOverlapping(20)->when($dropiWebSync);
+
+/*
+ * Compras · lo que se atrasa en el camino. Son de main (7-nov).
+ */
+Schedule::command('compras:avisar-contenedores-atrasados')
+    ->dailyAt('07:00')->timezone('America/Bogota')->withoutOverlapping();
+
+Schedule::command('compras:avisar-pagos-exterior')
+    ->dailyAt('07:05')->timezone('America/Bogota')->withoutOverlapping();
+
+/*
+ * Acá iba `rrhh:avisar-periodos-prueba`, y se quitó.
+ *
+ * Había DOS comandos agendados avisando del mismo período de prueba, con
+ * tipos de aviso distintos y destinatarios invertidos: uno le avisaba al jefe
+ * cuando YA había opinado y a todo el ERP cuando no —con lo cual Gestión
+ * Humana no se enteraba nunca—. Queda uno solo, `rrhh:avisar-prueba`,
+ * agendado más abajo los lunes a las 7:30, con los destinatarios correctos.
+ *
+ * Su clase ya no existe: dejarlo agendado haría fallar el programador entero.
+ */

@@ -14,6 +14,7 @@ const props = defineProps({
     contacto: { type: Object, default: null },
     listas: { type: Array, default: () => [] },
     ciudades_dane: { type: Array, default: () => [] },
+    fuentes: { type: Object, default: () => ({}) },
 });
 
 const editando = computed(() => !! props.contacto?.id);
@@ -31,10 +32,18 @@ const form = ref({
     es_cliente: props.contacto?.es_cliente ?? true,
     es_cliente_b2b: props.contacto?.es_cliente_b2b ?? false,
     es_proveedor: props.contacto?.es_proveedor ?? false,
+    es_autorretenedor: props.contacto?.es_autorretenedor ?? false,
     es_empleado: props.contacto?.es_empleado ?? false,
     regimen_iva: props.contacto?.regimen_iva ?? '',
+    retenciones_default: {
+        fuente: !! props.contacto?.retenciones_default?.fuente,
+        ica: !! props.contacto?.retenciones_default?.ica,
+        iva: !! props.contacto?.retenciones_default?.iva,
+    },
     lista_precios_id: props.contacto?.lista_precios_id ?? '',
     activo: props.contacto?.activo ?? true,
+    fuente: props.contacto?.fuente ?? '',
+    fuente_detalle: props.contacto?.fuente_detalle ?? '',
 });
 
 const guardando = ref(false);
@@ -190,6 +199,18 @@ const guardar = () => {
                         <label class="text-xs font-semibold text-surface-600 dark:text-surface-300">Departamento</label>
                         <input v-model="form.departamento" class="input w-full min-h-11" maxlength="80"/>
                     </div>
+                    <div>
+                        <label class="text-xs font-semibold text-surface-600 dark:text-surface-300">¿Cómo llegó?</label>
+                        <select v-model="form.fuente" class="input w-full min-h-11">
+                            <option value="">Sin registrar</option>
+                            <option v-for="(label, clave) in fuentes" :key="clave" :value="clave">{{ label }}</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="text-xs font-semibold text-surface-600 dark:text-surface-300">Detalle de la fuente</label>
+                        <input v-model="form.fuente_detalle" class="input w-full min-h-11" maxlength="120"
+                               :placeholder="form.fuente === 'referido' ? '¿Quién lo refirió?' : 'Campaña, feria, página… (opcional)'"/>
+                    </div>
                 </div>
             </div>
 
@@ -239,6 +260,45 @@ const guardar = () => {
                             <option value="responsable">Responsable de IVA</option>
                             <option value="no_responsable">No responsable</option>
                         </select>
+                    </div>
+                </div>
+
+                <!--
+                    La casilla que no existía. El motor de retenciones ya la
+                    respetaba, pero nadie podía marcarla: sólo se leía.
+                    Practicarle retefuente a un autorretenedor es doble
+                    retención, o sea sanción.
+                -->
+                <div v-if="form.es_proveedor" class="rounded-lg border border-surface-200 dark:border-surface-700 p-3">
+                    <label class="flex items-start gap-2 cursor-pointer">
+                        <input type="checkbox" v-model="form.es_autorretenedor" class="h-4 w-4 mt-0.5"/>
+                        <span>
+                            <span class="text-sm font-semibold">Es autorretenedor</span>
+                            <span class="block text-xs text-surface-500">
+                                Si se autorretiene, al pagarle NO se le practica retefuente.
+                                Dejarlo marcado por error retiene de menos; dejarlo sin marcar
+                                cuando sí lo es, retiene de más y hay que devolvérselo.
+                            </span>
+                        </span>
+                    </label>
+                </div>
+
+                <div v-if="form.es_cliente || form.es_cliente_b2b">
+                    <label class="text-xs font-semibold text-surface-600 dark:text-surface-300">Retenciones que nos practica al pagar</label>
+                    <p class="text-xs text-surface-500 mb-1">
+                        Sólo si es agente de retención. Se calculan solas al facturar con las reglas de Cartera → Retenciones
+                        y la factura muestra el neto a pagar.
+                    </p>
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-1">
+                        <label class="flex items-center gap-2 p-2 rounded min-h-11 cursor-pointer hover:bg-surface-50 dark:hover:bg-surface-800">
+                            <input type="checkbox" v-model="form.retenciones_default.fuente" class="h-4 w-4"/> <span class="text-sm">Retefuente</span>
+                        </label>
+                        <label class="flex items-center gap-2 p-2 rounded min-h-11 cursor-pointer hover:bg-surface-50 dark:hover:bg-surface-800">
+                            <input type="checkbox" v-model="form.retenciones_default.iva" class="h-4 w-4"/> <span class="text-sm">ReteIVA</span>
+                        </label>
+                        <label class="flex items-center gap-2 p-2 rounded min-h-11 cursor-pointer hover:bg-surface-50 dark:hover:bg-surface-800">
+                            <input type="checkbox" v-model="form.retenciones_default.ica" class="h-4 w-4"/> <span class="text-sm">ReteICA (según su ciudad)</span>
+                        </label>
                     </div>
                 </div>
 

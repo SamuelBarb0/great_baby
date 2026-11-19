@@ -2,6 +2,7 @@
 
 namespace App\Modules\Dropi\Services;
 
+use App\Modules\Cartera\Models\FacturaVenta;
 use App\Modules\Dropi\Enums\EstadoPedidoDropi;
 use App\Modules\Dropi\Models\DropiPedido;
 use App\Modules\Dropi\Models\DropiSancion;
@@ -52,7 +53,40 @@ class CruceWalletPedidos
                 'n' => $this->diferencias()->count(),
                 'monto' => (float) $this->diferencias()->sum('diferencia'),
             ],
+            'recibo_pendiente' => [
+                'n' => $this->pagosSinRecibo()->count(),
+                'monto' => (float) $this->pagosSinRecibo()->sum('monto'),
+            ],
         ];
+    }
+
+    /**
+     * Pagos de guía enlazados a su pedido, con su estado contable
+     * (`estado_contable`): lo que conecta el cruce con la contabilidad.
+     */
+    public function pagosDePedidos(): Builder
+    {
+        return DropiWalletMovimiento::query()->conEstadoContable()->with('pedido')
+            ->where('tipo', 'pago_guia')->whereNotNull('pedido_id')
+            ->where('fecha', '>=', $this->desde()->toDateString());
+    }
+
+    /** Pagos de pedidos facturados que no tienen recibo de caja: no han llegado al libro. */
+    public function pagosSinRecibo(): Builder
+    {
+        return DropiWalletMovimiento::query()->estadoContable(DropiWalletMovimiento::CONTABLE_RECIBO_PENDIENTE)
+            ->where('fecha', '>=', $this->desde()->toDateString());
+    }
+
+    /**
+     * @param  Collection<int, DropiWalletMovimiento>  $pagos
+     * @return array<int, string> factura_id => número
+     */
+    public function numerosDeFactura(Collection $pagos): array
+    {
+        $ids = $pagos->pluck('pedido.factura_venta_id')->filter()->unique()->values();
+
+        return $ids->isEmpty() ? [] : FacturaVenta::whereIn('id', $ids)->pluck('numero', 'id')->all();
     }
 
     /** Entregados hace más del plazo y sin pago: lo que hay que reclamar a Dropi. */
@@ -78,7 +112,7 @@ class CruceWalletPedidos
     /** @return Collection<int, DropiWalletMovimiento> pagos de Dropi cuyo pedido no está en el ERP */
     public function pagosSinPedido(): Collection
     {
-        return DropiWalletMovimiento::where('tipo', 'pago_guia')->whereNull('pedido_id')
+        return DropiWalletMovimiento::query()->conEstadoContable()->where('tipo', 'pago_guia')->whereNull('pedido_id')
             ->where('fecha', '>=', $this->desde()->toDateString())
             ->orderByDesc('fecha')->limit(100)->get();
     }

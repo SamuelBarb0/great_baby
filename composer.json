@@ -19,6 +19,7 @@
         "openspout/openspout": "^4.28",
         "owen-it/laravel-auditing": "^14.0",
         "pxlrbt/filament-excel": "^4.1",
+        "smalot/pdfparser": "^2.13",
         "spatie/laravel-medialibrary": "^11.23",
         "spatie/laravel-permission": "^6.25"
     },
@@ -59,7 +60,7 @@
         ],
         "dev": [
             "Composer\\Config::disableProcessTimeout",
-            "npx concurrently -c \"#93c5fd,#c4b5fd,#fb7185,#fdba74\" \"php artisan serve\" \"php artisan queue:listen --tries=1 --timeout=0\" \"php artisan pail --timeout=0\" \"npm run dev\" --names=server,queue,logs,vite --kill-others"
+            "npx concurrently -c \"#93c5fd,#c4b5fd,#fb7185,#fdba74\" \"php artisan serve\" \"php artisan queue:listen --queue=siigo,default --tries=1 --timeout=0\" \"php artisan pail --timeout=0\" \"npm run dev\" --names=server,queue,logs,vite --kill-others"
         ],
         "test": [
             "@php artisan config:clear --ansi",

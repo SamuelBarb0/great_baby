@@ -36,7 +36,13 @@ class Contacto extends Model implements AuditableContract, AuthenticatableContra
         'tipo_documento', 'numero_documento', 'nombre_completo', 'razon_social',
         'email', 'telefono', 'direccion', 'ciudad', 'departamento',
         'es_cliente', 'es_cliente_b2b', 'es_proveedor', 'es_empleado', 'es_vendedor_dropi',
-        'regimen_iva', 'retenciones_default', 'activo',
+        // `es_autorretenedor` es operativo, no sensible: decide si al pagarle
+        // se le practica retefuente. Faltaba acá, así que aunque el formulario
+        // lo mandara, `update()` lo descartaba sin decir nada.
+        'regimen_iva', 'es_autorretenedor', 'retenciones_default', 'activo',
+        // MKT-6 · de dónde llegó (WhatsApp, página, referido…) y el detalle
+        //   libre (quién lo refirió, qué campaña, qué feria).
+        'fuente', 'fuente_detalle',
         // CRM segmentación (setea el motor, no el request web)
         'segmento', 'segmento_score', 'ticket_promedio', 'ultima_compra_at',
         'total_comprado_ytd', 'segmentado_at',
@@ -50,6 +56,18 @@ class Contacto extends Model implements AuditableContract, AuthenticatableContra
     ];
 
     protected $hidden = ['password', 'remember_token', 'reset_token'];
+
+    /** MKT-6 · Canales por los que llega un cliente. */
+    public const FUENTES = [
+        'whatsapp' => 'WhatsApp',
+        'pagina_web' => 'Página web',
+        'referido' => 'Referido',
+        'redes_sociales' => 'Redes sociales',
+        'vendedor' => 'Vendedor en terreno',
+        'feria' => 'Feria o evento',
+        'llamada' => 'Llamada',
+        'otro' => 'Otro',
+    ];
 
     protected $casts = [
         'es_cliente' => 'boolean',

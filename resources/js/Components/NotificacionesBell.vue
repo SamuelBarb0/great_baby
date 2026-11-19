@@ -22,24 +22,59 @@ const beep = () => {
     } catch {}
 };
 
+/*
+ * Lo que llega se mezcla con lo que ya estaba.
+ *
+ * Antes la campana sólo mostraba lo ocurrido DESPUÉS de abrir la pestaña, y
+ * nunca leía la tabla de avisos: Elena abría la campana con dos solicitudes
+ * esperándola y le decía «Sin novedades». Ahora el servidor manda también
+ * `pendientes` —lo suyo sin leer—, y acá se funden sin repetir: un aviso nuevo
+ * llega por las dos vías y tiene el mismo `id`.
+ */
+const fundir = (nuevos, previos) => {
+    const vistos = new Set();
+    return [...nuevos, ...previos]
+        .filter((e) => (vistos.has(e.id) ? false : vistos.add(e.id)))
+        .slice(0, 30);
+};
+
 const poll = async () => {
     try {
         const res = await fetch('/app/notificaciones?desde=' + encodeURIComponent(ultimoCheck), {
             headers: { Accept: 'application/json' },
         });
         const data = await res.json();
+        const pendientes = data.pendientes || [];
+
         if (data.eventos.length > 0) {
-            eventos.value = [...data.eventos, ...eventos.value].slice(0, 30);
             noLeidas.value += data.eventos.length;
             beep();
         }
+        // El conteo del badge nunca debe ser menor que lo que de verdad espera
+        // sin leer, aunque la pestaña se acabe de abrir.
+        noLeidas.value = Math.max(noLeidas.value, pendientes.length);
+        eventos.value = fundir([...data.eventos, ...pendientes], eventos.value);
+
         ultimoCheck = data.ahora;
     } catch {}
 };
 
-const abrir = () => {
+const abrir = async () => {
     abierto.value = !abierto.value;
-    if (abierto.value) noLeidas.value = 0;
+    if (! abierto.value) return;
+
+    noLeidas.value = 0;
+    // Leerlos es abrir la campana. Si no se marcaran, el contador volvería a
+    // encenderse en el siguiente sondeo y nunca bajaría de ahí.
+    try {
+        await fetch('/app/notificaciones/leidas', {
+            method: 'POST',
+            headers: {
+                Accept: 'application/json',
+                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '',
+            },
+        });
+    } catch {}
 };
 const irA = (e) => { abierto.value = false; router.visit(e.url); };
 

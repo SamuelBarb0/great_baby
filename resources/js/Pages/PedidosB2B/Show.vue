@@ -8,7 +8,25 @@ import AppLayout from '@/Layouts/AppLayout.vue';
 const props = defineProps({
     pedido: { type: Object, required: true },
     items: { type: Array, required: true },
+    // Multiempresa · razones sociales activas para cambiar quién factura.
+    empresas: { type: Array, default: () => [] },
+    /*
+     * Qué puede apretar QUIEN está mirando. Antes los botones salían sólo por
+     * `pedido.estado`, así que un despachador veía «Aprobar», «Rechazar» y
+     * «Facturar» — y el botón de un retenido le decía «Liberar (Gerencia)».
+     * El default en false es a propósito: si el controlador algún día deja de
+     * mandarlo, el botón desaparece en vez de quedar abierto.
+     */
+    puedo: {
+        type: Object,
+        default: () => ({ aprobar: false, facturar: false, despachar: false }),
+    },
+
 });
+
+const cambiarEmpresa = (e) => {
+    router.post(`/app/pedidos-b2b/${props.pedido.id}/empresa`, { empresa_id: Number(e.target.value) }, { preserveScroll: true });
+};
 
 const money = (n) => new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n || 0);
 const modalRechazar = ref(false);
@@ -115,6 +133,16 @@ const rechazar = () => {
                         <div class="text-xs text-surface-500 uppercase">Pedido B2B</div>
                         <h1 class="text-2xl font-bold">{{ pedido.numero }}</h1>
                         <div class="text-xs text-surface-500 mt-1">Recibido {{ pedido.creado }}</div>
+                        <!-- Multiempresa · quién factura; se cambia sólo antes de facturar. -->
+                        <div class="text-sm mt-2 flex items-center gap-2">
+                            <span class="text-xs text-surface-500 uppercase">Factura</span>
+                            <select v-if="empresas.length > 1 && !pedido.factura && pedido.estado !== 'rechazado'"
+                                    :value="pedido.empresa_id" @change="cambiarEmpresa"
+                                    class="input py-1 text-sm">
+                                <option v-for="e in empresas" :key="e.id" :value="e.id">{{ e.nombre }}</option>
+                            </select>
+                            <b v-else>{{ pedido.empresa }}</b>
+                        </div>
                     </div>
                     <div class="text-right">
                         <div class="text-xs text-surface-500 uppercase">Total</div>
@@ -125,22 +153,22 @@ const rechazar = () => {
                 <!-- Acciones -->
                 <div class="flex items-center gap-2 flex-wrap border-t border-surface-200 dark:border-surface-800 pt-4">
                     <!-- LOG-J3 · Gerencia puede aprobar también un retenido (es "liberar") -->
-                    <button v-if="['enviado','retenido'].includes(pedido.estado)" @click="pedirAprobar" :disabled="procesando"
+                    <button v-if="puedo.aprobar && ['enviado','retenido'].includes(pedido.estado)" @click="pedirAprobar" :disabled="procesando"
                             :class="pedido.estado === 'retenido' ? 'btn-primary bg-amber-600 hover:bg-amber-700' : 'btn-primary'">
                         <CheckCircle class="h-4 w-4"/>
                         {{ pedido.estado === 'retenido' ? 'Liberar (Gerencia)' : 'Aprobar' }}
                     </button>
-                    <button v-if="['enviado','retenido','aprobado'].includes(pedido.estado)" @click="modalRechazar = true" :disabled="procesando" class="btn-ghost text-red-600 border border-red-300">
+                    <button v-if="puedo.aprobar && ['enviado','retenido','aprobado'].includes(pedido.estado)" @click="modalRechazar = true" :disabled="procesando" class="btn-ghost text-red-600 border border-red-300">
                         <XCircle class="h-4 w-4"/> Rechazar
                     </button>
-                    <button v-if="pedido.estado === 'aprobado'" @click="pedirFacturar" :disabled="procesando" class="btn-primary bg-emerald-600 hover:bg-emerald-700">
+                    <button v-if="puedo.facturar && pedido.estado === 'aprobado'" @click="pedirFacturar" :disabled="procesando" class="btn-primary bg-emerald-600 hover:bg-emerald-700">
                         <FileText class="h-4 w-4"/> Facturar
                     </button>
                     <Link v-if="pedido.factura" :href="`/app/facturas/${pedido.factura.id}`" class="btn-ghost">
                         <FileText class="h-4 w-4"/> Ver factura {{ pedido.factura.numero }}
                     </Link>
                     <!-- LOG-J7 · Despachar · basta con factura emitida (la sync SIIGO va en segundo plano) -->
-                    <button v-if="pedido.factura && !pedido.despachado_at && pedido.estado !== 'rechazado'"
+                    <button v-if="puedo.despachar && pedido.factura && !pedido.despachado_at && pedido.estado !== 'rechazado'"
                             @click="modalDespachar = true"
                             :disabled="procesando"
                             class="btn-primary bg-indigo-600 hover:bg-indigo-700">

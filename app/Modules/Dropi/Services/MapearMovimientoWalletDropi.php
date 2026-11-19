@@ -38,6 +38,7 @@ class MapearMovimientoWalletDropi
         '1042' => TipoMovimientoWallet::FleteGarantia,
         '1043' => TipoMovimientoWallet::FleteGarantia,
         '1047' => TipoMovimientoWallet::FleteGarantia,
+        '1072' => TipoMovimientoWallet::FleteGarantia, // cobro de flete por orden (garantía)
 
         '1038' => TipoMovimientoWallet::Tarjeta,
         '1039' => TipoMovimientoWallet::Tarjeta,

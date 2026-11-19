@@ -12,6 +12,9 @@ import { avisar, avisarError } from '@/composables/useAviso';
 import { mensajeDeError } from '@/composables/useMensajeError';
 const { money } = useMoney();
 
+import EtiquetaYReferencias from '@/Components/EtiquetaYReferencias.vue';
+import AbrirEnDropi from '@/Components/AbrirEnDropi.vue';
+
 const props = defineProps({
     historial: { type: Array, default: () => [] },
     producto: { type: Object, default: null },
@@ -19,6 +22,8 @@ const props = defineProps({
     // Precio por lista del producto agregado; vacío en los granulares,
     // que llevan el precio en cada variante.
     precios_lista: { type: Array, default: () => [] },
+    // Si quien mira puede CAMBIAR esos precios. Por defecto no.
+    puede_precios: { type: Boolean, default: false },
     // Qué le falta al producto para poder venderse y costearse.
     listo_para_vender: { type: Object, default: () => ({}) },
     // Por qué entra el stock inicial de un producto nuevo (motivos de la carga de inventario).
@@ -56,6 +61,7 @@ const form = useForm({
     factor_conversion: props.producto?.factor_conversion || null,
     posicion_arancelaria: props.producto?.posicion_arancelaria || '',
     reposicion_max_dias: props.producto?.reposicion_max_dias || null,
+    arancel_pct: props.producto?.arancel_pct ?? null,
     proteger_precio: props.producto?.proteger_precio ?? false,
     maneja_lotes: props.producto?.maneja_lotes ?? false,
     maneja_seriales: props.producto?.maneja_seriales ?? false,
@@ -74,6 +80,9 @@ const form = useForm({
     stock_observacion: '',
     stock_soporte: '',
     stock_tercero_id: null,
+    // Dónde entra ese stock inicial. Null = la primera activa, que es como se
+    // comportaba antes y es lo que esperan los importadores.
+    stock_ubicacion_id: null,
     // Pestaña 2: Comercial
     impuesto_id: props.producto?.impuesto_id || null,
     precio_proveedor: props.producto?.precio_proveedor || 0,
@@ -642,6 +651,7 @@ const matrizDisenos = ref([]);
                             title="Duplicar · crea un producto nuevo con los mismos datos">
                         <Copy class="h-4 w-4"/> Duplicar
                     </button>
+                    <AbrirEnDropi :datos="form"/>
                     <button v-if="!esNuevo" @click="eliminar" class="btn-ghost text-red-500 hover:text-red-700 text-sm">
                         <Trash2 class="h-4 w-4"/>
                     </button>
@@ -850,11 +860,17 @@ const matrizDisenos = ref([]);
                     </div>
                 </div>
 
+                <EtiquetaYReferencias v-if="producto" :producto="producto"/>
+
                 <!-- Aduana + Reposición -->
                 <div class="border-t pt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
                     <div>
                         <label class="text-xs font-semibold text-surface-600">Posición arancelaria</label>
                         <input v-model="form.posicion_arancelaria" class="input w-full font-mono" maxlength="20" placeholder="Ej: 6111.20.00.00"/>
+                    </div>
+                    <div>
+                        <label class="text-xs font-semibold text-surface-600">Arancel (%)</label>
+                        <input v-model="form.arancel_pct" type="number" min="0" max="100" step="0.01" class="input w-full" placeholder="Vacío = el de la orden"/>
                     </div>
                     <div>
                         <label class="text-xs font-semibold text-surface-600">Tiempo reposición máx (días)</label>
@@ -887,13 +903,35 @@ const matrizDisenos = ref([]);
                         <strong>Enciende</strong> si vendes el mismo producto en distintas versiones (Rojo‑M, Rojo‑L, Azul‑M…). Vas a poder capturar cada variante en la pestaña 2 y cada una va a SIIGO como su propio producto para facturar bien.<br>
                         <strong>Déjalo apagado</strong> si es un producto único sin variaciones (ej. un biberón, un peluche). SIIGO lo verá como un solo renglón.
                     </p>
-                    <div v-if="!form.desglose_stock" class="mt-2">
-                        <label class="text-xs font-semibold text-surface-600">Stock inicial</label>
-                        <input v-model="form.stock_directo" type="number" min="0" class="input w-40"/>
-                        <p class="text-[10px] text-surface-500 mt-1">Cantidad de unidades que tienes hoy en bodega.</p>
+                    <!-- El stock inicial necesita saber DÓNDE entra. Antes sólo
+                         se pedía la cantidad y el kardex la dejaba en la primera
+                         ubicación activa: se montaba una bodega nueva, se
+                         escribían 60 unidades y aparecían en otra bodega sin que
+                         nadie se enterara hasta ir a despachar. -->
+                    <div v-if="!form.desglose_stock" class="mt-2 grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                            <label class="text-xs font-semibold text-surface-600">Stock inicial</label>
+                            <input v-model="form.stock_directo" type="number" min="0" class="input w-40"/>
+                            <p class="text-[10px] text-surface-500 mt-1">Cantidad de unidades que tienes hoy en bodega.</p>
+                        </div>
+                        <div v-if="Number(form.stock_directo) > 0">
+                            <label class="text-xs font-semibold text-surface-600">¿En cuál bodega está?</label>
+                            <select v-model="form.stock_ubicacion_id" class="input w-full">
+                                <option :value="null">— la primera disponible —</option>
+                                <option v-for="u in (catalogos.ubicaciones || [])" :key="u.id" :value="u.id">
+                                    {{ u.codigo }} · {{ u.nombre }}
+                                </option>
+                            </select>
+                            <p class="text-[10px] mt-1"
+                               :class="form.stock_ubicacion_id ? 'text-surface-500' : 'text-amber-700'">
+                                {{ form.stock_ubicacion_id
+                                    ? 'Ahí van a quedar las unidades.'
+                                    : 'Sin elegir, las unidades caen en la primera bodega de la lista.' }}
+                            </p>
+                        </div>
 
                         <!-- Por qué entra: el ingreso queda como carga CI- con su asiento -->
-                        <div v-if="pideMotivoStock" class="mt-3 rounded-lg border border-surface-200 dark:border-surface-700 p-3 space-y-2">
+                        <div v-if="pideMotivoStock" class="md:col-span-2 rounded-lg border border-surface-200 dark:border-surface-700 p-3 space-y-2">
                             <p class="text-xs font-semibold">¿Por qué entra este stock? <span class="font-normal text-surface-500">Queda como documento de carga y asiento contable.</span></p>
                             <div class="grid sm:grid-cols-2 gap-2">
                                 <label v-for="m in motivos_stock" :key="m.value" class="flex gap-2 rounded border p-2 cursor-pointer text-xs"
@@ -1188,7 +1226,7 @@ const matrizDisenos = ref([]);
                                 Sin precio en una lista, los clientes que la tengan asignada no pueden pedir este producto.
                             </div>
                         </div>
-                        <button type="button" @click="guardarPrecios" :disabled="guardandoPrecios"
+                        <button v-if="puede_precios" type="button" @click="guardarPrecios" :disabled="guardandoPrecios"
                                 class="btn-primary min-h-[44px] sm:min-h-0 disabled:opacity-50">
                             {{ guardandoPrecios ? 'Guardando…' : 'Guardar precios' }}
                         </button>
@@ -1216,8 +1254,11 @@ const matrizDisenos = ref([]);
                                 <td class="px-3 py-2 text-xs text-surface-500">{{ l.grupo }}</td>
                                 <td class="px-3 py-2 text-right">
                                     <input v-model="l.precio" type="number" min="0" step="1"
+                                           :readonly="! puede_precios"
+                                           :title="puede_precios ? '' : 'Sólo Gerencia o el equipo comercial cambian las listas de precios'"
                                            placeholder="sin precio"
-                                           class="input w-36 text-right font-mono tabular-nums"/>
+                                           :class="['input w-36 text-right font-mono tabular-nums',
+                                                    puede_precios ? '' : 'bg-surface-100 dark:bg-surface-800 cursor-not-allowed']"/>
                                 </td>
                             </tr>
                         </tbody>

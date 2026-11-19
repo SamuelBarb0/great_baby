@@ -21,9 +21,9 @@ class ReportesDropi extends Page
 
     protected static ?string $title = 'Reportes Dropi';
 
-    protected static string|\UnitEnum|null $navigationGroup = 'Dropi';
+    protected static string|\UnitEnum|null $navigationGroup = 'Dinero';
 
-    protected static ?int $navigationSort = 8;
+    protected static ?int $navigationSort = 5;
 
     protected string $view = 'dropi.pages.reportes-dropi';
 
@@ -31,7 +31,9 @@ class ReportesDropi extends Page
     {
         $u = auth()->user();
         if (! $u) return false;
-        return $u->esAracely() || $u->hasAnyRole(['Gerente', 'Contador']);
+        // La casilla «Reportes Dropi» de la pantalla de Roles, no el nombre
+        //   del rol: así un perfil como «Operador Dropi» sí puede entrar.
+        return \App\Auth\Permisos::puede($u, 'dropi_reportes');
     }
 
     public function getBloques(): array
@@ -53,33 +55,33 @@ class ReportesDropi extends Page
                 'titulo' => '⚙️ Operativos',
                 'reportes' => [
                     ['nombre' => 'Corte del día', 'desc' => 'Pedidos del corte activo con estado y transportadora', 'url' => DropiPedidoResource::getUrl('index'), 'icon' => 'heroicon-o-clock'],
-                    ['nombre' => 'Pendientes por inventario', 'desc' => 'Guías esperando devolución compatible', 'url' => DropiPedidoResource::getUrl('index', ['tableFilters' => ['estado' => ['value' => 'pendiente_inventario']]]), 'icon' => 'heroicon-o-exclamation-triangle'],
-                    ['nombre' => 'Despachados sin entregar', 'desc' => 'Seguimiento transportadora', 'url' => DropiPedidoResource::getUrl('index', ['tableFilters' => ['estado' => ['value' => 'despachado']]]), 'icon' => 'heroicon-o-truck'],
+                    ['nombre' => 'Pendientes por inventario', 'desc' => 'Guías esperando devolución compatible', 'url' => DropiPedidoResource::getUrl('index', ['filters' => ['estado' => ['value' => 'pendiente_inventario']]]), 'icon' => 'heroicon-o-exclamation-triangle'],
+                    ['nombre' => 'Despachados sin entregar', 'desc' => 'Seguimiento transportadora', 'url' => DropiPedidoResource::getUrl('index', ['filters' => ['estado' => ['value' => 'despachado']]]), 'icon' => 'heroicon-o-truck'],
                     ['nombre' => 'Devoluciones', 'desc' => 'Todas con destino de inventario', 'url' => DropiDevolucionResource::getUrl('index'), 'icon' => 'heroicon-o-arrow-uturn-left'],
                 ],
             ],
             'financieros' => [
                 'titulo' => '💰 Financieros · ' . $labelPer,
                 'reportes' => [
-                    ['nombre' => 'Ventas del periodo', 'desc' => '$' . number_format($ventas, 0, ',', '.') . ' · pedidos pagados', 'url' => DropiPedidoResource::getUrl('index', ['tableFilters' => ['estado' => ['value' => 'pagado']]]), 'icon' => 'heroicon-o-arrow-trending-up'],
-                    ['nombre' => 'Devoluciones en pesos', 'desc' => '$' . number_format($devoluciones, 0, ',', '.'), 'url' => DropiPedidoResource::getUrl('index', ['tableFilters' => ['estado' => ['value' => 'devuelto']]]), 'icon' => 'heroicon-o-currency-dollar'],
+                    ['nombre' => 'Ventas del periodo', 'desc' => '$' . number_format($ventas, 0, ',', '.') . ' · pedidos pagados', 'url' => DropiPedidoResource::getUrl('index', ['filters' => ['estado' => ['value' => 'pagado']]]), 'icon' => 'heroicon-o-arrow-trending-up'],
+                    ['nombre' => 'Devoluciones en pesos', 'desc' => '$' . number_format($devoluciones, 0, ',', '.'), 'url' => DropiPedidoResource::getUrl('index', ['filters' => ['estado' => ['value' => 'devuelto']]]), 'icon' => 'heroicon-o-currency-dollar'],
                     ['nombre' => 'Conciliación wallet', 'desc' => 'Movimientos ↔ pedidos', 'url' => DropiWalletMovimientoResource::getUrl('index'), 'icon' => 'heroicon-o-wallet'],
-                    ['nombre' => 'Retiros a banco', 'desc' => '$' . number_format($retiros, 0, ',', '.') . ' en el periodo', 'url' => DropiWalletMovimientoResource::getUrl('index', ['tableFilters' => ['tipo' => ['value' => 'retiro_banco']]]), 'icon' => 'heroicon-o-banknotes'],
-                    ['nombre' => 'Sanciones detectadas', 'desc' => '$' . number_format($sanciones, 0, ',', '.') . ' · descontadas por Dropi', 'url' => DropiPedidoResource::getUrl('index'), 'icon' => 'heroicon-o-shield-exclamation'],
+                    ['nombre' => 'Retiros a banco', 'desc' => '$' . number_format($retiros, 0, ',', '.') . ' en el periodo', 'url' => DropiWalletMovimientoResource::getUrl('index', ['filters' => ['tipo' => ['value' => 'retiro_banco']]]), 'icon' => 'heroicon-o-banknotes'],
+                    ['nombre' => 'Sanciones detectadas', 'desc' => '$' . number_format($sanciones, 0, ',', '.') . ' · descontadas por Dropi', 'url' => DiscrepanciasWallet::getUrl(), 'icon' => 'heroicon-o-shield-exclamation'],
                 ],
             ],
             'auditoria' => [
                 'titulo' => '🕵️ Auditoría',
                 'reportes' => [
-                    ['nombre' => 'Bitácora de estados', 'desc' => 'Quién cambió qué estado y cuándo', 'url' => '#', 'icon' => 'heroicon-o-clipboard-document-list'],
-                    ['nombre' => 'Cambios financieros', 'desc' => 'Wallet, sanciones, remisiones auditadas', 'url' => '#', 'icon' => 'heroicon-o-shield-check'],
+                    ['nombre' => 'Bitácora de estados', 'desc' => 'Quién cambió qué estado y cuándo', 'url' => BitacoraEstadosDropi::getUrl(), 'icon' => 'heroicon-o-clipboard-document-list'],
+                    ['nombre' => 'Cambios financieros', 'desc' => 'Wallet, sanciones, remisiones auditadas', 'url' => CambiosFinancierosDropi::getUrl(), 'icon' => 'heroicon-o-shield-check'],
                 ],
             ],
             'ejecutivos' => [
                 'titulo' => '📊 Ejecutivos',
                 'reportes' => [
                     ['nombre' => 'Dashboard consolidado', 'desc' => 'Corte activo + finanzas + alertas', 'url' => DashboardDropi::getUrl(), 'icon' => 'heroicon-o-chart-bar-square'],
-                    ['nombre' => 'Comparativo periodo', 'desc' => 'Este mes vs. mes anterior', 'url' => DashboardDropi::getUrl(), 'icon' => 'heroicon-o-arrows-right-left'],
+                    ['nombre' => 'Comparativo periodo', 'desc' => 'Este mes vs. mes anterior', 'url' => ComparativoPeriodoDropi::getUrl(), 'icon' => 'heroicon-o-arrows-right-left'],
                 ],
             ],
         ];

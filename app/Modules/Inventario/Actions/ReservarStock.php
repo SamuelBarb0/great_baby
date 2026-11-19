@@ -133,7 +133,23 @@ class ReservarStock
     private function idsDelSujeto(Producto|ProductoVariante $sujeto): array
     {
         if ($sujeto instanceof ProductoVariante) {
-            return [$sujeto->id, null, "variante #{$sujeto->id}"];
+            /*
+             * La variante también graba su `producto_id`, igual que el kardex.
+             *
+             * `inventario_movimientos` lo viene haciendo desde siempre —79 de
+             * 79 filas con variante lo traen— y `reservas_inventario` lo
+             * dejaba en nulo. La disponibilidad masiva del portal suma las dos
+             * tablas con el MISMO filtro, `whereIn('producto_id', ...)`, así
+             * que del lado del físico encontraba todo y del lado de lo
+             * reservado no encontraba nada: el portal ofrecía mercancía que ya
+             * estaba apartada para otro pedido.
+             *
+             * No cambia a quién pertenece la reserva —eso lo decide
+             * `variante_id`, y los candados y la búsqueda de reserva existente
+             * siguen filtrando por ahí—; es el mismo dato denormalizado para
+             * poder agrupar por producto sin un join.
+             */
+            return [$sujeto->id, $sujeto->producto_id, "variante #{$sujeto->id}"];
         }
         if ($sujeto->esGranular()) {
             throw new InvalidArgumentException(

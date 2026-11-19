@@ -96,7 +96,13 @@ it('cambiar el vínculo no toca pedidos que ya se alistaron', function () {
         ->and(DropiVinculoProducto::first()->variante_id)->toBe($otra->id);
 });
 
-it('la pantalla lista lo pendiente y vincula desde el modal', function () {
+/*
+ * «Productos sin vincular» se quitó el 6-nov: lo pendiente se vincula desde
+ * «Productos de Dropi», que lista las llaves que esperan en pedidos aunque
+ * todavía no se haya leído el catálogo de Dropi.
+ */
+it('Productos de Dropi lista lo pendiente sin haber leído Dropi y vincula a una variante', function () {
+    \Illuminate\Support\Facades\Storage::fake('local');
     app(SincronizarPedidosDropi::class)->importarPedidos([pedidoDropi('G5', 'DV-1843712')]);
     \Spatie\Permission\Models\Role::findOrCreate('Aracely', 'web');
     $user = \App\Models\User::factory()->create();
@@ -104,15 +110,39 @@ it('la pantalla lista lo pendiente y vincula desde el modal', function () {
     $this->actingAs($user);
     \Filament\Facades\Filament::setCurrentPanel('admin');
 
-    expect(\App\Modules\Dropi\Filament\Pages\ProductosSinVincular::buscarVariantes('volante'))
-        ->toHaveKey($this->variante->id);
+    expect(\App\Modules\Dropi\Support\DestinosVinculo::buscar('volante'))
+        ->toHaveKey('v:' . $this->variante->id);
 
-    \Livewire\Livewire::test(\App\Modules\Dropi\Filament\Pages\ProductosSinVincular::class)
+    \Livewire\Livewire::test(\App\Modules\Dropi\Filament\Pages\ProductosDeDropi::class)
         ->assertSee('Volante de Juguete con Música')
         ->assertSee('DV-1843712')
-        ->callAction('vincular', ['variante_id' => $this->variante->id], ['sku' => 'DV-1843712', 'nombre' => 'Volante'])
+        // `v:<id>` = variante; `p:<id>` = producto agregado (ver DestinosVinculo).
+        ->callAction('vincularLlave', ['destino' => 'v:' . $this->variante->id], ['llave' => 'DV-1843712', 'nombre' => 'Volante'])
         ->assertHasNoActionErrors()
-        ->assertSee('No hay productos sin vincular');
+        ->assertSee('Nada en este grupo.');
 
     expect(DropiPedido::where('guia', 'G5')->value('estado'))->toBe(EstadoPedidoDropi::Pending);
+});
+
+it('desde Productos de Dropi también se vincula un producto agregado (sin variantes)', function () {
+    \Illuminate\Support\Facades\Storage::fake('local');
+    $agregado = Producto::sinKardexAutomatico(fn () => Producto::create([
+        'referencia' => 'TAP-01', 'nombre' => 'Tapete mágico', 'desglose_stock' => false,
+    ]));
+    app(SincronizarPedidosDropi::class)->importarPedidos([pedidoDropi('G6', 'DP-2315758')]);
+    \Spatie\Permission\Models\Role::findOrCreate('Aracely', 'web');
+    $user = \App\Models\User::factory()->create();
+    $user->assignRole('Aracely');
+    $this->actingAs($user);
+    \Filament\Facades\Filament::setCurrentPanel('admin');
+
+    expect(\App\Modules\Dropi\Support\DestinosVinculo::buscar('tapete'))
+        ->toHaveKey('p:' . $agregado->id);
+
+    \Livewire\Livewire::test(\App\Modules\Dropi\Filament\Pages\ProductosDeDropi::class)
+        ->callAction('vincularLlave', ['destino' => 'p:' . $agregado->id], ['llave' => 'DP-2315758', 'nombre' => 'Tapete'])
+        ->assertHasNoActionErrors();
+
+    $item = DropiPedidoItem::whereHas('pedido', fn ($q) => $q->where('guia', 'G6'))->sole();
+    expect($item->variante_id)->toBeNull()->and($item->producto_id)->toBe($agregado->id);
 });

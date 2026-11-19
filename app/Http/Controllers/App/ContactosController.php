@@ -115,12 +115,39 @@ class ContactosController extends Controller implements HasMiddleware
             return response()->json($rows);
         }
 
-        return response()->json(
-            Contacto::where(function ($qq) use ($q) {
+        /*
+         * El `rol` filtra de verdad, y la ficha trae lo que el motor de
+         * retenciones necesita.
+         *
+         * La pantalla de pagos a proveedor llamaba con `rol=proveedor` y esto
+         * lo IGNORABA: devolvia cualquier contacto —clientes, empleados— y
+         * `crear()` solo valida `exists:contactos,id`, asi que se podia
+         * registrar un pago a proveedor contra un CLIENTE.
+         *
+         * Y devolvia solo id/nombre/documento, asi que la ciudad nunca se
+         * autollenaba y el formulario se quedaba con «Bogota» fijo: **se
+         * calculaba ReteICA de Bogota para un proveedor de cualquier ciudad.**
+         * Eso es plata que se retiene mal.
+         */
+        $rol = (string) $request->input('rol', '');
+
+        $contactos = Contacto::query()
+            ->where(function ($qq) use ($q) {
                 $qq->where('nombre_completo', 'like', "%{$q}%")
                     ->orWhere('numero_documento', 'like', "%{$q}%");
-            })->limit(10)->get(['id', 'nombre_completo as nombre', 'numero_documento as documento'])
-        );
+            })
+            ->when($rol === 'proveedor', fn ($qq) => $qq->where('es_proveedor', true))
+            ->when($rol === 'cliente', fn ($qq) => $qq->where('es_cliente', true))
+            ->limit(10)
+            ->get(['id', 'nombre_completo', 'razon_social', 'numero_documento', 'ciudad', 'es_autorretenedor']);
+
+        return response()->json($contactos->map(fn ($c) => [
+            'id' => $c->id,
+            'nombre' => $c->razon_social ?: $c->nombre_completo,
+            'documento' => $c->numero_documento,
+            'ciudad' => $c->ciudad,
+            'es_autorretenedor' => (bool) $c->es_autorretenedor,
+        ]));
     }
 
     public function show(Contacto $contacto): Response
@@ -148,6 +175,8 @@ class ContactosController extends Controller implements HasMiddleware
                 'departamento' => $contacto->departamento,
                 'regimen_iva' => $contacto->regimen_iva,
                 'activo' => (bool) $contacto->activo,
+                'fuente' => $contacto->fuente ? (Contacto::FUENTES[$contacto->fuente] ?? $contacto->fuente) : null,
+                'fuente_detalle' => $contacto->fuente_detalle,
                 'roles' => [
                     'cliente' => (bool) $contacto->es_cliente,
                     'b2b' => (bool) $contacto->es_cliente_b2b,
@@ -213,11 +242,16 @@ class ContactosController extends Controller implements HasMiddleware
                 'es_cliente' => (bool) $contacto->es_cliente,
                 'es_cliente_b2b' => (bool) $contacto->es_cliente_b2b,
                 'es_proveedor' => (bool) $contacto->es_proveedor,
+                'es_autorretenedor' => (bool) $contacto->es_autorretenedor,
                 'es_empleado' => (bool) $contacto->es_empleado,
                 'regimen_iva' => $contacto->regimen_iva,
+                'retenciones_default' => (array) ($contacto->retenciones_default ?? []),
                 'lista_precios_id' => $contacto->lista_precios_id,
                 'activo' => (bool) $contacto->activo,
+                'fuente' => $contacto->fuente,
+                'fuente_detalle' => $contacto->fuente_detalle,
             ] : null,
+            'fuentes' => Contacto::FUENTES,
             // Primero las listas de Great Baby, después las que llegaron del
             // catálogo de SIIGO. Ordenadas sólo por nombre, el desplegable
             // abría en «14.999» y «Asistente Gerente» —listas de otra empresa
@@ -231,17 +265,19 @@ class ContactosController extends Controller implements HasMiddleware
             // Detal, Dropi y Distribuidor están en cero. El cliente queda
             // asignado a una lista vacía y el vendedor descubre el problema
             // recién cuando le busca mercancía y no le aparece nada.
+            // El conteo mira las DOS tablas de precios: los granulares tarifan
+            // por variante y los agregados por producto. Contando solo la
+            // primera, una lista con precios de puros agregados figuraba como
+            // vacia y quedaba bloqueada: no se le podia asignar a nadie.
             'listas' => \App\Modules\Catalogo\Models\ListaPrecios::query()
-                ->withCount(['precios as con_precio_count' => fn ($q) => $q
-                    ->where(fn ($w) => $w->whereNull('vigente_hasta')
-                        ->orWhere('vigente_hasta', '>=', now()->toDateString()))])
+                ->conConteoDePrecios()
                 ->orderByRaw('siigo_id IS NOT NULL')
                 ->orderBy('nombre')
                 ->get(['id', 'nombre', 'siigo_id'])
                 ->map(fn ($l) => [
                     'id' => $l->id,
                     'nombre' => $l->nombre,
-                    'productos' => (int) $l->con_precio_count,
+                    'productos' => $l->productos_tarifados,
                     'grupo' => $l->siigo_id ? 'Listas del catálogo de SIIGO' : 'Listas de Great Baby',
                 ]),
 
@@ -258,13 +294,84 @@ class ContactosController extends Controller implements HasMiddleware
         ]);
     }
 
+    /**
+     * Saca del documento lo que es puro formato.
+     *
+     * Puntos, espacios y comas: un NIT es un numero, no un monto. El guion se
+     * DEJA, para que la validacion pueda ver el digito de verificacion y
+     * explicarlo; si se quitara aca, `901738354-7` llegaria como un numero de
+     * diez digitos indistinguible de uno legitimo.
+     */
+    private static function limpiarDocumento(string $valor): string
+    {
+        return trim(str_replace(['.', ' ', ',', "\xC2\xA0"], '', $valor));
+    }
+
     public function guardar(Request $r, ?Contacto $contacto = null): RedirectResponse
     {
+
+        /*
+         * La casilla de la pantalla de roles, cumplida.
+         *
+         * Hasta ahora «contactos» se manejaba sólo con «ver»: quien podía mirar
+         * podía también crear y editar terceros. Marcar o desmarcar «Crear» y «Editar» en
+         * /app/roles no cambiaba nada, y eso hace creer que el candado está
+         * puesto cuando no lo está.
+         *
+         * Se distingue por si la fila ya existe, que es lo que diferencia
+         * crear de editar. Gerencia pasa siempre.
+         */
+        abort_unless(
+            \App\Auth\Permisos::puedeAccion($r->user(), 'contactos', $contacto?->exists ? 'editar' : 'crear'),
+            403,
+            $contacto?->exists
+                ? 'No tenés permiso para editar terceros.'
+                : 'No tenés permiso para crear terceros.'
+        );
         $existe = $contacto?->exists ?? false;
+
+        /*
+         * El documento se limpia antes de validar.
+         *
+         * Great Baby lo pidio el 2026-11-03: «que se exija la cedula o NIT sin
+         * puntos ... actualmente digitan los numeros mal y crean el tercero
+         * mal». Los puntos, espacios y comas son ruido de formato y se quitan
+         * solos. El digito de verificacion NO: ese se rechaza con un mensaje,
+         * porque un `-7` al final tambien puede ser un numero mal tecleado y
+         * no hay como distinguir una cosa de la otra.
+         */
+        $r->merge([
+            'numero_documento' => self::limpiarDocumento((string) $r->input('numero_documento')),
+        ]);
 
         $datos = $r->validate([
             'tipo_documento' => ['required', 'in:CC,CE,NIT,PP'],
             'numero_documento' => ['required', 'string', 'max:30',
+                /*
+                 * El digito de verificacion NO identifica a nadie: se calcula
+                 * a partir del propio NIT. Escribirlo hace que el mismo
+                 * tercero entre dos veces, una con el y otra sin el, y
+                 * despues la cartera de ese cliente no cuadra con ninguna.
+                 *
+                 * Se rechaza en vez de quitarlo en silencio porque un `-7` al
+                 * final tambien puede ser un numero mal tecleado, y no hay
+                 * forma de distinguir una cosa de la otra.
+                 */
+                function (string $campo, mixed $valor, \Closure $falla) {
+                    $v = (string) $valor;
+
+                    if (preg_match('/^(\d{6,})-(\d)$/', $v, $m)) {
+                        $falla("El NIT va sin el dígito de verificación: escribí {$m[1]}, no {$v}. "
+                            .'Ese dígito se calcula a partir del NIT, no identifica a nadie, y es lo '
+                            .'que hace que el mismo tercero quede creado dos veces.');
+
+                        return;
+                    }
+
+                    if (! preg_match('/^[0-9A-Za-z]+$/', $v)) {
+                        $falla('El documento va sin puntos, espacios ni guiones: sólo el número.');
+                    }
+                },
                 \Illuminate\Validation\Rule::unique('contactos', 'numero_documento')->ignore($contacto?->id)],
             'nombre_completo' => ['required', 'string', 'max:180'],
             'razon_social' => ['nullable', 'string', 'max:180'],
@@ -278,8 +385,27 @@ class ContactosController extends Controller implements HasMiddleware
             'es_proveedor' => ['boolean'],
             'es_empleado' => ['boolean'],
             'regimen_iva' => ['nullable', 'in:responsable,no_responsable'],
+            /*
+             * Si el proveedor se autorretiene, nosotros NO le retenemos.
+             *
+             * El motor ya lo respeta —probado el 29-oct: $5.000.000 a un
+             * autorretenedor dan retención $0 y a uno normal $125.000— pero
+             * esta columna sólo se LEÍA. No había casilla, ni regla de
+             * validación, ni una sola línea en todo el código que la
+             * escribiera: la única forma de marcarla era por base de datos.
+             *
+             * Y practicarle retefuente a un autorretenedor es doble retención,
+             * que es sanción. La regla estaba bien programada y era
+             * inalcanzable.
+             */
+            'es_autorretenedor' => ['boolean'],
+            // Qué nos retiene este cliente al pagar (AplicarRetencionesVenta).
+            'retenciones_default' => ['nullable', 'array:fuente,ica,iva'],
+            'retenciones_default.*' => ['boolean'],
             'lista_precios_id' => ['nullable', 'integer', 'exists:listas_precios,id'],
             'activo' => ['boolean'],
+            'fuente' => ['nullable', 'in:'.implode(',', array_keys(Contacto::FUENTES))],
+            'fuente_detalle' => ['nullable', 'string', 'max:120'],
         ], [
             'numero_documento.unique' => 'Ya existe un contacto con ese documento.',
         ]);

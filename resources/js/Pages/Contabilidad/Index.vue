@@ -3,6 +3,8 @@ import { ref, computed, watch } from 'vue';
 import { Head, router, Link } from '@inertiajs/vue3';
 import { Calculator, TrendingUp, TrendingDown, CheckCircle, AlertCircle, EyeOff, Eye, Search, X, Users } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
+import PestanasSeccion from '@/Components/PestanasSeccion.vue';
+import { pestanasPanel } from '@/composables/usePestanasContables';
 import KpiCard from '@/Components/KpiCard.vue';
 import { useMoney } from '@/composables/useMoney';
 import { pucLabel } from '@/composables/pucLabels';
@@ -36,6 +38,7 @@ const filtrar = () => {
         acumulado: acumulado.value ? 1 : null,
         agrupar_tercero: agruparTercero.value ? 1 : null,
         tercero_id: tercero.value?.id || null,
+        linea: props.filtros.linea !== 'todas' ? props.filtros.linea : null,
     }, {
         preserveScroll: true, preserveState: true, replace: true,
         onStart: () => { cargando.value = true; },
@@ -100,6 +103,8 @@ const linkTodosMovs = computed(() =>
     <Head title="Contabilidad"/>
     <AppLayout>
         <div class="space-y-4">
+            <PestanasSeccion :pestanas="pestanasPanel"/>
+
             <div>
                 <h1 class="text-2xl font-bold flex items-center gap-2">
                     <Calculator class="h-6 w-6 text-brand-600"/>
@@ -207,8 +212,8 @@ const linkTodosMovs = computed(() =>
                             <tr v-for="(c, i) in porCuenta" :key="c.cuenta_puc + '|' + (c.tercero || '') + '|' + i" class="border-b border-surface-100 dark:border-surface-900 hover:bg-surface-50 dark:hover:bg-surface-900/30">
                                 <!-- Re-audit UX-A4 · label del PUC (tooltip + segunda línea). -->
                                 <td class="py-2">
-                                    <div class="font-mono font-semibold text-brand-600" :title="pucLabel(c.cuenta_puc)">{{ c.cuenta_puc }}</div>
-                                    <div class="text-[10px] text-surface-500">{{ pucLabel(c.cuenta_puc) }}</div>
+                                    <div class="font-mono font-semibold text-brand-600" :title="c.cuenta_nombre || pucLabel(c.cuenta_puc)">{{ c.cuenta_puc }}</div>
+                                    <div class="text-[10px] text-surface-500">{{ c.cuenta_nombre || pucLabel(c.cuenta_puc) }}</div>
                                 </td>
                                 <td v-if="filtros.agrupar_tercero" class="text-xs" :class="c.tercero === 'Sin tercero' ? 'text-surface-400' : ''">{{ c.tercero }}</td>
                                 <td class="text-right font-mono">{{ money(c.debe) }}</td>
@@ -266,7 +271,7 @@ const linkTodosMovs = computed(() =>
                                     <span :class="m.anulado ? 'opacity-70' : ''">{{ fechaCorta(m.fecha) }}</span>
                                     <span v-if="m.anulado" class="ml-1 text-[10px] font-bold text-red-600 uppercase">Anulado</span>
                                 </td>
-                                <td class="font-mono text-brand-600" :class="m.anulado ? 'opacity-70' : ''" :title="pucLabel(m.cuenta_puc)">{{ m.cuenta_puc }}</td>
+                                <td class="font-mono text-brand-600" :class="m.anulado ? 'opacity-70' : ''" :title="m.cuenta_nombre || pucLabel(m.cuenta_puc)">{{ m.cuenta_puc }}</td>
                                 <td class="text-xs" :class="m.anulado ? 'opacity-70' : ''" :title="m.descripcion">{{ m.descripcion }}</td>
                                 <td class="text-xs text-surface-500" :class="m.anulado ? 'opacity-70' : ''">
                                     <a v-if="m.origen_url" :href="m.origen_url" class="text-brand-600 hover:underline" title="Ver el asiento completo y su documento">{{ m.origen }}</a>

@@ -60,6 +60,7 @@ class ReporteStockBodega extends Page
             ->join('producto_variantes as v', 'v.id', '=', 'm.variante_id')
             ->leftJoin('productos as p', 'p.id', '=', 'v.producto_id')
             ->where('m.ubicacion_id', $this->ubicacionId)
+            ->whereNull('m.deleted_at')   // INV-A6 · lo anulado no es stock
             ->selectRaw('
                 v.id as variante_id,
                 NULL as producto_agregado_id,
@@ -79,6 +80,7 @@ class ReporteStockBodega extends Page
             ->join('productos as p', 'p.id', '=', 'm.producto_id')
             ->where('m.ubicacion_id', $this->ubicacionId)
             ->whereNull('m.variante_id')
+            ->whereNull('m.deleted_at')   // INV-A6 · lo anulado no es stock
             ->selectRaw('
                 NULL as variante_id,
                 p.id as producto_agregado_id,

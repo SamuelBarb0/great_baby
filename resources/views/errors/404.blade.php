@@ -3,7 +3,33 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>Documento no disponible · GREAT BABY ERP</title>
+    @php
+        /*
+         * El 404 cuenta DOS historias distintas y hay que saber cuál.
+         *
+         * Esta pantalla nació para los links de factura que se le mandan al
+         * cliente: ahí «expiró o fue revocado · pedile al vendedor un nuevo
+         * link» es exactamente lo que hay que decir. Pero la misma pantalla
+         * sale cuando alguien escribe mal una dirección, y entonces manda a la
+         * persona a pedir un link que no necesita y que no le va a servir.
+         *
+         * Los `abort(404, '...')` del ERP traen SU mensaje, escrito en
+         * castellano («Documento no disponible.», «El archivo ya no está.»).
+         * Una ruta que no existe trae el de Symfony, que empieza con «The
+         * route» —y es en inglés, así que tampoco se le puede mostrar a nadie—.
+         * Esa es la diferencia que se usa acá.
+         */
+        $mensaje = trim((string) ($exception?->getMessage() ?? ''));
+        $esRutaInexistente = $mensaje === '' || str_starts_with($mensaje, 'The route');
+
+        $titulo = $esRutaInexistente ? 'Esta dirección no existe' : 'Documento no disponible';
+        $detalle = $esRutaInexistente
+            ? 'La dirección que escribiste no corresponde a ninguna pantalla del sistema. Revisá el enlace, o volvé al inicio y buscá desde el menú.'
+            // Lo que escribió el propio ERP dice más que cualquier texto
+            // genérico: «El archivo ya no está» no es lo mismo que «expiró».
+            : $mensaje.' Si esperabas encontrar una factura, pídele al vendedor un nuevo link.';
+    @endphp
+    <title>{{ $titulo }} · GREAT BABY ERP</title>
     <style>
         :root { color-scheme: light dark; }
         html,body { height:100%; margin:0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background:#f8fafc; color:#0f172a; }
@@ -33,8 +59,8 @@
         <div class="card">
             <div class="brand">GREAT BABY ERP</div>
             <p class="code">404</p>
-            <h1>Documento no disponible</h1>
-            <p>El enlace que buscas no existe, expiró o fue revocado. Si esperabas encontrar una factura, pídele al vendedor un nuevo link.</p>
+            <h1>{{ $titulo }}</h1>
+            <p>{{ $detalle }}</p>
             <a class="btn" href="{{ url('/') }}">Volver al inicio</a>
         </div>
     </div>

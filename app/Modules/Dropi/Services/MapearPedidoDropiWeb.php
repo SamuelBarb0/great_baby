@@ -127,15 +127,33 @@ class MapearPedidoDropiWeb
     /** Misma llave que MapearProductosDropiExcel, para que Excel y web no dupliquen ítems. */
     private static function skuLinea(array $d): ?string
     {
-        if (! empty($d['variation_id'])) {
-            return 'DV-' . $d['variation_id'];
+        return self::claveVinculo($d['variation_id'] ?? null, $d['product']['sku'] ?? null, $d['product_id'] ?? null);
+    }
+
+    /**
+     * La llave con que un producto de Dropi se vincula al ERP: la variación si
+     * la hay, si no el SKU (cuando no es basura como «-0»), si no el id del
+     * producto. Pública porque «Traer productos de Dropi» tiene que armar
+     * EXACTAMENTE la misma llave que traen los pedidos, o el vínculo no casa.
+     */
+    public static function claveVinculo(mixed $variacionId, mixed $sku, mixed $productoId): ?string
+    {
+        if (! empty($variacionId)) {
+            return 'DV-' . $variacionId;
         }
-        $sku = trim((string) ($d['product']['sku'] ?? ''));
-        if ($sku !== '' && ! in_array($sku, ["'-0", '-0', '-'], true)) {
+        $sku = trim((string) ($sku ?? ''));
+        if (self::skuValido($sku)) {
             return $sku;
         }
 
-        return ! empty($d['product_id']) ? 'DP-' . $d['product_id'] : null;
+        return ! empty($productoId) ? 'DP-' . $productoId : null;
+    }
+
+    public static function skuValido(?string $sku): bool
+    {
+        $sku = trim((string) $sku);
+
+        return $sku !== '' && ! in_array($sku, ["'-0", '-0', '-'], true);
     }
 
     private static function nombreVariacion(mixed $v): ?string

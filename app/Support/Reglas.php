@@ -14,6 +14,7 @@ class Reglas
         'empaque.foto_obligatoria' => ['grupo' => 'empaque', 'tipo' => 'bool', 'valor' => '1', 'etiqueta' => 'Foto obligatoria para confirmar empaque', 'descripcion' => 'Bloquea el confirmar si no hay foto'],
         'empaque.tiempo_objetivo_seg' => ['grupo' => 'empaque', 'tipo' => 'int', 'valor' => 180, 'etiqueta' => 'Tiempo objetivo por empaque (segundos)', 'descripcion' => 'Base para semáforos y ranking'],
         'empaque.rate_limit_min' => ['grupo' => 'empaque', 'tipo' => 'int', 'valor' => 120, 'etiqueta' => 'Escaneos máximos por minuto', 'descripcion' => 'Throttle en la estación'],
+        'empaque.gps_obligatorio' => ['grupo' => 'empaque', 'tipo' => 'bool', 'valor' => '0', 'etiqueta' => 'Ubicación (GPS) obligatoria para empacar y despachar Dropi', 'descripcion' => 'Si el navegador no entrega la ubicación, no deja confirmar. Apagada: se registra si la hay y se anota por qué no'],
         'empaque.retention_foto_dias' => ['grupo' => 'empaque', 'tipo' => 'int', 'valor' => 180, 'etiqueta' => 'Días retención foto empaque', 'descripcion' => 'Purga automática de fotos más antiguas que N días post-empaque (Habeas Data)'],
 
         // ============ DASHBOARD (alertas) ============
@@ -30,8 +31,108 @@ class Reglas
 
         // ============ DROPI ============
         'dropi.dias_retorno_mercancia' => ['grupo' => 'dropi', 'tipo' => 'int', 'valor' => 20, 'etiqueta' => 'Días máx. mercancía en tránsito antes de sospechosa', 'descripcion' => 'Al superar: alertar Aracely y marcar sospechoso'],
+
+        /*
+         * Los plazos con los que se juzga una guía.
+         *
+         * Hasta el 2026-11-06 el canal Dropi tenía su alerta de mercancía en
+         * tránsito y la venta B2B no tenía nada: el pedido moría en
+         * «despachado» y nadie sabía si había llegado.
+         *
+         * Son dos plazos y no uno porque «tardía» y «no entregada» son cosas
+         * distintas: la primera se le pregunta a la transportadora, la segunda
+         * se le reclama.
+         */
+        /*
+         * Cada cuánto hay que contar una bodega.
+         *
+         * El contrato pide inventario semestral. El módulo de conteos estaba
+         * completo —cuenta, compara, exige cuatro ojos y hace el asiento— pero
+         * no tenía cadencia: dependía de que alguien se acordara, y nadie
+         * llevaba la cuenta de cuándo fue la última de cada bodega.
+         */
+        /*
+         * ¿El portal rechaza un pedido que se pasa del stock?
+         *
+         * Nace APAGADO a propósito. El inventario de Great Baby todavía no es
+         * confiable —faltan los saldos iniciales de la migración— y prender
+         * esto antes de tiempo bloquearía pedidos reales por datos malos, que
+         * es peor que el problema que resuelve.
+         *
+         * Apagado, el portal igual MUESTRA la disponibilidad: el cliente ve
+         * que quedan 3 y decide. Prendido, no lo deja pasar de ahí.
+         *
+         * Nunca aplica al vendedor en la calle: él puede comprometer algo que
+         * está por llegar.
+         */
+        /*
+         * El correo de los avisos.
+         *
+         * Hasta el 2026-11-06 el ERP sólo avisaba dentro de la aplicación:
+         * quien no entraba ese día no se enteraba de un pedido retenido, de
+         * una guía sin entregar ni de una nómina esperando aprobación. El
+         * contrato pide avisos en la app, por correo y por WhatsApp.
+         *
+         * Nace APAGADO porque el servidor todavía manda el correo al log
+         * (`MAIL_MAILER=log`). Se prende el día que haya SMTP de verdad.
+         *
+         * Y la lista de tipos es explícita a propósito: mandar por correo TODO
+         * lo que pasa por la campana es la forma más rápida de que la gente lo
+         * mande a spam y deje de leer también lo importante.
+         */
+        /*
+         * Hasta cuándo se recibe una garantía.
+         *
+         * No bloquea: una garantía fuera de plazo la puede aceptar Gerencia
+         * por relación comercial, y esa es una decisión de negocio, no del
+         * sistema. Lo que sí hace es decirlo en pantalla, para que quien la
+         * recibe sepa lo que está aceptando.
+         */
+        /*
+         * Con cuánta anticipación se avisa de un período de prueba.
+         *
+         * La pantalla ya mostraba los días que quedaban, pero mostrar no es
+         * avisar: había que entrar y mirar. Y vencerse solo cuesta: pasado el
+         * período, terminar el contrato deja de ser libre y pasa a necesitar
+         * justa causa.
+         */
+        'rrhh.dias_aviso_prueba' => ['grupo' => 'rrhh', 'tipo' => 'int', 'valor' => 15, 'etiqueta' => 'Días de anticipación del aviso de período de prueba', 'descripcion' => 'Con cuántos días de anticipación avisa por la campana al jefe y a Gestión Humana.'],
+
+        'garantias.dias_plazo' => ['grupo' => 'garantias', 'tipo' => 'int', 'valor' => 30, 'etiqueta' => 'Días de garantía desde la factura', 'descripcion' => 'Pasados estos días la pantalla avisa, pero deja crear el ticket igual. 0 = sin plazo.'],
+        'garantias.dias_concepto' => ['grupo' => 'garantias', 'tipo' => 'int', 'valor' => 3, 'etiqueta' => 'Días para dar concepto', 'descripcion' => 'Plazo interno para aprobar o rechazar un reclamo. Es el SLA del área.'],
+
+        'notificaciones.correo_activo' => ['grupo' => 'notificaciones', 'tipo' => 'bool', 'valor' => false, 'etiqueta' => 'Mandar avisos por correo', 'descripcion' => 'Prender cuando el servidor tenga SMTP configurado. Apagado, los avisos sólo salen en la campana.'],
+        'notificaciones.tipos_por_correo' => ['grupo' => 'notificaciones', 'tipo' => 'json', 'valor' => '["pedido_retenido_cartera","pedido_liberado","conteo_fisico_vencido","rrhh_prueba","cartera_escalada"]', 'etiqueta' => 'Qué avisos van también por correo', 'descripcion' => 'Lista de tipos. Lo que no esté acá sale sólo en la campana. Tiene que ser un tipo que el sistema emita de verdad: un nombre que no existe no da error, simplemente no manda el correo nunca.'],
+        'notificaciones.correo_copia' => ['grupo' => 'notificaciones', 'tipo' => 'string', 'valor' => '', 'etiqueta' => 'A quién le llegan los avisos generales', 'descripcion' => 'Correos separados por coma. Son los avisos que no tienen un destinatario propio.'],
+
+        'portal.bloquear_sin_stock' => ['grupo' => 'catalogo', 'tipo' => 'bool', 'valor' => false, 'etiqueta' => 'El portal no deja pedir más de lo que hay', 'descripcion' => 'Prender SÓLO cuando el inventario del sistema sea confiable. Apagado, el portal muestra la disponibilidad pero deja pedir.'],
+
+        /*
+         * Cuánto vale una cotización antes de vencerse.
+         *
+         * Un precio sin fecha es una promesa indefinida, y con el dólar y los
+         * fletes como están eso se vuelve plata perdida. Quince días alcanza
+         * para que el cliente consulte y vuelva, sin comprometer un precio por
+         * un mes entero.
+         */
+        'ventas.dias_vigencia_cotizacion' => ['grupo' => 'catalogo', 'tipo' => 'int', 'valor' => 15, 'etiqueta' => 'Días que vale una cotización', 'descripcion' => 'Pasada la fecha hay que hacer una nueva con los precios de hoy. Se puede cambiar cotización por cotización.'],
+
+        /*
+         * Con cuánta anticipación avisar de una cotización aceptada que está
+         * por vencerse sin convertirse. Es plata que el cliente YA dijo que sí
+         * y que se pierde por no haberla pasado a pedido.
+         */
+        'ventas.dias_aviso_cotizacion' => ['grupo' => 'catalogo', 'tipo' => 'int', 'valor' => 3, 'etiqueta' => 'Días de aviso antes de que venza una cotización aceptada', 'descripcion' => 'Avisa al vendedor para que la convierta en pedido antes de que haya que recotizar.'],
+
+        'inventario.meses_entre_conteos' => ['grupo' => 'logistica', 'tipo' => 'int', 'valor' => 6, 'etiqueta' => 'Meses entre tomas físicas', 'descripcion' => 'Pasados estos meses sin una toma cerrada, la bodega sale avisada por la campana.'],
+        'logistica.dias_transito' => ['grupo' => 'logistica', 'tipo' => 'int', 'valor' => 5, 'etiqueta' => 'Días normales de entrega', 'descripcion' => 'Pasados estos días sin entregar, la guía se marca TARDÍA.'],
+        'logistica.dias_sin_entregar' => ['grupo' => 'logistica', 'tipo' => 'int', 'valor' => 15, 'etiqueta' => 'Días para dar una guía por no entregada', 'descripcion' => 'Pasados estos días la guía se marca NO ENTREGADA: hay que reclamarle a la transportadora.'],
+        'logistica.rastreo_urls' => ['grupo' => 'logistica', 'tipo' => 'json', 'valor' => '{"SERVIENTREGA":"https://www.servientrega.com/wps/portal/rastreo-envio?guia={guia}","INTERRAPIDISIMO":"https://www.interrapidisimo.com/sigue-tu-envio/?guia={guia}","COORDINADORA":"https://www.coordinadora.com/portafolio-de-servicios/rastreo-de-guia/?guia={guia}","ENVIA":"https://envia.co/rastreo?guia={guia}"}', 'etiqueta' => 'Enlaces de rastreo por transportadora', 'descripcion' => 'JSON {"TRANSPORTADORA":"url con {guia}"}. El nombre se compara sin tildes ni mayúsculas.'],
         'dropi.dias_tolerancia_devolucion' => ['grupo' => 'dropi', 'tipo' => 'int', 'valor' => 7, 'etiqueta' => 'Días tolerancia devolución física post-marca', 'descripcion' => 'Si Dropi marca devuelto pero no llega en N días → mercancía fantasma'],
         'dropi.dias_espera_cobro' => ['grupo' => 'dropi', 'tipo' => 'int', 'valor' => 40, 'etiqueta' => 'Días máx. entregado sin cobro antes de discrepancia', 'descripcion' => 'Un pedido entregado y sin movimiento wallet tras N días aparece en Discrepancias'],
+        'dropi.facturacion_automatica' => ['grupo' => 'dropi', 'tipo' => 'bool', 'valor' => '0', 'etiqueta' => 'Facturar cada pedido Dropi al despacharlo', 'descripcion' => 'Remisión 1:1 + factura a consumidor final por el valor de proveedor, y a SIIGO si está activo. Apagada: no se factura nada'],
+        'dropi.facturar_desde' => ['grupo' => 'dropi', 'tipo' => 'string', 'valor' => '', 'etiqueta' => 'Facturar pedidos Dropi despachados desde (AAAA-MM-DD)', 'descripcion' => 'Corte para no facturar la historia al prender la facturación automática'],
+        'dropi.nit_tercero' => ['grupo' => 'dropi', 'tipo' => 'string', 'valor' => '', 'etiqueta' => 'NIT de Dropi (tercero de comisiones y sanciones)', 'descripcion' => 'Los gastos que cobra Dropi (fletes de garantía, tarjeta, sanciones) se asientan con este tercero'],
         'dropi.auto_nota_credito' => ['grupo' => 'dropi', 'tipo' => 'bool', 'valor' => '1', 'etiqueta' => 'Auto-generar Nota Crédito al devolver', 'descripcion' => 'Al marcar DropiPedido como Devuelto emite NC'],
         'dropi.auto_nc_envia_siigo' => ['grupo' => 'dropi', 'tipo' => 'bool', 'valor' => '1', 'etiqueta' => 'Auto-enviar NC a SIIGO', 'descripcion' => ''],
 
@@ -41,22 +142,197 @@ class Reglas
 
         // ============ CONTABILIDAD · cuentas por defecto ============
         // Actualizados 2026-09-28 con PUC oficial Great Baby SAS (NIT 901738354).
-        // ⚠ Las cuentas de INGRESO/COSTO/INVENTARIO específicas de producto deben ser
-        // confirmadas con Silvia (contadora) porque dependen de la línea (accesorios/ropa/etc).
-        // Dejamos GRUPO de 4 dígitos como default; en la ficha contable de cada producto
-        // se puede sobrescribir con la subcuenta específica (6 dígitos).
-        'contable.cta_cxc_default' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '130505', 'etiqueta' => 'Cuenta CxC por defecto (Clientes nacionales)', 'descripcion' => 'PUC Great Baby · 130505 Clientes nacionales'],
-        'contable.cta_ingreso_default' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '4135', 'etiqueta' => 'Cuenta ingreso por defecto', 'descripcion' => '⚠ Confirmar subcuenta específica con Silvia (4135xx según categoría)'],
+        //
+        // ⚠ ACÁ VA SIEMPRE UNA CUENTA HOJA, nunca un grupo de 4 o 6 dígitos.
+        //
+        // Hasta el 2026-11-05 el default era el GRUPO, con la idea de que la ficha
+        // de cada producto lo sobrescribiera con la subcuenta. Nadie sobrescribió
+        // nada: las 21 facturas de producción quedaron asentadas en 4135 y 1305,
+        // que el plan marca como NO MOVIBLES. Y no reventaba, que es lo peor: el
+        // mapeo a SIIGO resuelve un grupo por su «primera descendiente activa», así
+        // que el día que se conectara SIIGO los ingresos enteros de Great Baby
+        // entraban como 41350101 ALIMENTACIÓN E HIDRATACIÓN.
+        'contable.cta_cxc_default' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '13050501', 'etiqueta' => 'Cuenta CxC por defecto (Clientes)', 'descripcion' => 'PUC 13050501 Clientes nacionales. Era 1305, el grupo, que no admite movimiento.'],
+        'dropi.empresa' => ['grupo' => 'dropi', 'tipo' => 'string', 'valor' => 'great_baby', 'etiqueta' => 'Razón social que factura lo de Dropi', 'descripcion' => 'Código de EmpresaConfig con el que se factura lo de Dropi. Es Great Baby (7-nov: misma empresa, otra resolución; la resolución va en el panel Dropi → Configuración → SIIGO de Dropi).'],
+        /*
+         * El ingreso NO se decide acá en el caso normal.
+         *
+         * Great Baby parte las ventas por categoría de producto: la 41350101 es
+         * alimentación, la 41350104 juguetería, la 41350110 vestuario, y así diez
+         * cuentas. El asiento de venta agrupa las líneas de la factura por la
+         * cuenta del producto —y si no la tiene, la de su categoría—; esta regla
+         * es sólo el cajón de lo que no tiene ninguna de las dos.
+         *
+         * 413505 «Venta de mercancías» es hoja y admite movimiento, así que lo que
+         * caiga acá se ve y se puede reclasificar. Antes era 4135, el grupo.
+         */
+        'contable.cta_ingreso_default' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '413505', 'etiqueta' => 'Cuenta ingreso por defecto', 'descripcion' => 'PUC 413505 Venta de mercancías. Sólo se usa cuando el producto y su categoría no traen cuenta propia; lo normal es que el ingreso vaya a la 4135xx de su categoría.'],
         'contable.cta_iva_venta_default' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '240805', 'etiqueta' => 'Cuenta IVA venta por defecto', 'descripcion' => 'PUC Great Baby · 240805 IVA generado en ventas'],
         'contable.cta_iva_compra_default' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '240810', 'etiqueta' => 'Cuenta IVA compra descontable', 'descripcion' => 'PUC Great Baby · 240810 IVA descontable por compras'],
         'contable.cta_costo_default' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '6135', 'etiqueta' => 'Cuenta costo por defecto', 'descripcion' => '⚠ Confirmar subcuenta específica con Silvia (6135xx según categoría)'],
         'contable.cta_inventario_default' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '1435', 'etiqueta' => 'Cuenta inventario por defecto', 'descripcion' => '⚠ Confirmar subcuenta específica con Silvia (1435xx según categoría)'],
         'contable.cta_devolucion_default' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '4175', 'etiqueta' => 'Cuenta devolución en ventas por defecto', 'descripcion' => '⚠ Confirmar subcuenta específica con Silvia'],
         'contable.cta_descuento_default' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '5305', 'etiqueta' => 'Cuenta descuento comercial por defecto', 'descripcion' => '⚠ Confirmar subcuenta específica con Silvia'],
-        'contable.cta_bancos_default' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '112005', 'etiqueta' => 'Cuenta bancos por defecto', 'descripcion' => 'PUC Great Baby · 112005 Bancos moneda nacional'],
-        'contable.cta_caja_default' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '110505', 'etiqueta' => 'Cuenta caja general', 'descripcion' => 'PUC Great Baby · 110505 Caja general'],
+        /*
+         * SEGREGACION DE FUNCIONES · quien crea no aprueba.
+         *
+         * Las dos guardas existian en el codigo con su mensaje de 403 y su
+         * comentario diciendo que el default era `false`... pero el codigo
+         * ponia `true`, asi que `! $permitirAuto` era SIEMPRE falso y el
+         * control nunca se disparaba. Y como las claves no estaban registradas
+         * aca, `Reglas::set()` las rechazaba con «Regla desconocida»: **no habia
+         * forma de arreglarlo desde la interfaz.**
+         *
+         * Ahora el default es `false` (control ACTIVO, como decia la intencion)
+         * y estan registradas, asi que si manana le estorba a alguien se apaga
+         * desde Reglas de negocio sin tocar codigo.
+         *
+         * Aracely, Gerencia y Gerente quedan exentos siempre: el control es
+         * para que un Contador o un AdminBodega no se apruebe lo suyo.
+         */
+        // Lo habitual con China: el plazo corre desde que zarpa el buque.
+        'compras.credito_dias_zarpe' => ['grupo' => 'contable', 'tipo' => 'int', 'valor' => 90, 'etiqueta' => 'Días de crédito con China desde el zarpe', 'descripcion' => 'Plazo con que nace el plan de pagos de una orden de importación.'],
+        'compras.interes_tramos' => ['grupo' => 'contable', 'tipo' => 'json', 'valor' => '[]', 'etiqueta' => 'Tramos de interés por mora con China', 'descripcion' => 'Ejemplo: [{"desde":1,"hasta":30,"pct":1.5}]. Vacío = no se estima interés.'],
+        // Word de Alejandro: dependen de si la orden va con trading o con fábrica directa.
+        'compras.minimo_trading' => ['grupo' => 'contable', 'tipo' => 'int', 'valor' => 220000, 'etiqueta' => 'Valor mínimo del contenedor con trading (¥)', 'descripcion' => 'Por debajo de este valor la pre-liquidación avisa. Depende del flete del momento.'],
+        'compras.minimo_fabrica' => ['grupo' => 'contable', 'tipo' => 'int', 'valor' => 180000, 'etiqueta' => 'Valor mínimo del contenedor con fábrica directa (¥)', 'descripcion' => 'Por debajo de este valor la pre-liquidación avisa. Depende del flete del momento.'],
+        // Sin ella Araceli recibe el aviso, pero el traslado no se puede crear.
+        'compras.ubicacion_ecommerce' => ['grupo' => 'contable', 'tipo' => 'int', 'valor' => 0, 'etiqueta' => 'Ubicación de e-commerce para las importaciones', 'descripcion' => 'Id de la ubicación a la que se traslada lo que llega marcado para e-commerce. 0 = sin configurar.'],
+        'compras.permitir_auto_aprobar' => ['grupo' => 'contable', 'tipo' => 'bool', 'valor' => false, 'etiqueta' => 'Permitir que quien crea una OC la apruebe', 'descripcion' => 'NO (recomendado) exige que la apruebe otra persona. Gerencia siempre puede.'],
+        'contabilidad.permitir_auto_aprobar_asiento' => ['grupo' => 'contable', 'tipo' => 'bool', 'valor' => false, 'etiqueta' => 'Permitir que quien crea un asiento manual lo apruebe', 'descripcion' => 'NO (recomendado). El asiento aprobado viaja a SIIGO, que es la contabilidad oficial.'],
+
+        /*
+         * Conciliación contra el extracto del banco.
+         *
+         * El banco registra el mismo día o al siguiente, pero un pago del
+         * viernes puede figurar el lunes. Tres días cubre el fin de semana sin
+         * casar un pago de una quincena con el de la otra.
+         */
+        /*
+         * Van con prefijo `contable.` y no `contabilidad.` a propósito.
+         *
+         * La pantalla de Reglas filtra por el PREFIJO DE LA CLAVE, no por el
+         * grupo: `contable.*` es lo que el Contador puede tocar y
+         * `contabilidad.*` son los candados que sólo abre Gerencia. Con el
+         * prefijo equivocado estas dos quedaban invisibles justo para quien
+         * concilia, que es quien sabe cuántos días de holgura da su banco y a
+         * qué cuenta va cada concepto.
+         */
+        'contable.dias_match_extracto' => ['grupo' => 'contable', 'tipo' => 'int', 'valor' => 3, 'etiqueta' => 'Días de holgura para cruzar extracto contra pagos', 'descripcion' => 'Un pago del viernes puede aparecer en el banco el lunes. Con 0 sólo casa el mismo día.'],
+
+        /*
+         * Lo que cobra el banco solo y nadie registra: el 4x1000, la cuota de
+         * manejo, su IVA, los intereses de ahorros. Aparecen decenas de veces
+         * al mes y no son errores de nadie —son gastos que igual hay que
+         * asentar—, así que la conciliación les sugiere cuenta en vez de
+         * dejarlos como diferencia sin explicar. El mapa es editable porque
+         * cada empresa tiene su propio plan de cuentas.
+         */
+        'contable.conceptos_banco' => ['grupo' => 'contable', 'tipo' => 'json', 'valor' => '{"4X1000":"530525","IMPTO GOBIERNO":"530525","CUOTA PLAN":"530520","CUOTA MANEJO":"530520","COMISION":"530520","IVA CUOTA":"530520","COBRO IVA":"530520","ABONO INTERESES":"421005","RETEFUENTE":"135515"}', 'etiqueta' => 'Conceptos del banco → cuenta PUC', 'descripcion' => 'JSON {"TEXTO EN LA DESCRIPCIÓN":"cuenta"}. Se compara en mayúsculas y sin tildes; el primero que coincida manda.'],
+
+        // Contra que cuenta se debita un gasto operativo cuando el contador no
+        // le puso una. 5195 «Diversos» es el cajon de sastre del PUC: sirve
+        // para que el gasto ENTRE al libro, y despues se reclasifica. Antes de
+        // esto el gasto no entraba a ningun lado.
+        'contable.cta_gasto_default' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '5195', 'etiqueta' => 'Cuenta de gasto por defecto', 'descripcion' => 'PUC Great Baby · 5195 Diversos. Se usa cuando el gasto no trae cuenta propia.'],
+
+        /*
+         * La cuenta de cada tipo de gasto.
+         *
+         * Las mando Great Baby el 2026-11-03, respondiendo el cuestionario de
+         * insumos: cada concepto con su cuenta del PUC. Hasta ahora la
+         * categoria del gasto era una etiqueta suelta y la cuenta se escribia
+         * a mano en cada gasto, asi que dos papelerias podian terminar en dos
+         * cuentas distintas.
+         *
+         * Viven aca y no escritas en el codigo porque el contador las va a
+         * querer mover, y porque el listado de la pantalla de gastos sale de
+         * estas mismas claves: agregar un tipo es agregar una regla.
+         */
+        'gastos.cta_aseo_cafeteria' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '51952501', 'etiqueta' => 'Gasto · Aseo y cafetería', 'descripcion' => 'PUC 51952501 · Elementos de aseo y cafetería.'],
+        'gastos.cta_papeleria' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '51953001', 'etiqueta' => 'Gasto · Papelería', 'descripcion' => 'PUC 51953001 · Útiles de papelería y fotocopias.'],
+        'gastos.cta_arriendo' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '51201001', 'etiqueta' => 'Gasto · Arriendo', 'descripcion' => 'PUC 51201001 · Arrendamientos de construcciones y edificaciones. Es un SERVICIO: su IVA va a la 24081501, no a la de compras.'],
+        'gastos.cta_envios' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '51355001', 'etiqueta' => 'Gasto · Envíos y fletes', 'descripcion' => 'PUC 51355001 · Transporte, fletes y acarreos.'],
+        'gastos.cta_honorarios' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '51101001', 'etiqueta' => 'Gasto · Honorarios', 'descripcion' => 'PUC 51101001 · Honorarios de asesoría contable, que es la hoja que trae el PUC. Si el honorario es jurídico va a la 51102501 y si es técnico a la 51103501. Ojo con la retención: tiene tarifa propia, distinta a compras generales.'],
+        'gastos.cta_publicidad' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '52356004', 'etiqueta' => 'Gasto · Publicidad', 'descripcion' => 'PUC 52356004 · Marketing corporativo. Es gasto de VENTAS (clase 52), no de administración.'],
+        'gastos.cta_servicio_acueducto' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '51352501', 'etiqueta' => 'Gasto · Servicio · acueducto', 'descripcion' => 'PUC 51352501 · Servicios públicos · acueducto y alcantarillado.'],
+        'gastos.cta_servicio_energia' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '51353001', 'etiqueta' => 'Gasto · Servicio · energía', 'descripcion' => 'PUC 51353001 · Servicios públicos · energía eléctrica.'],
+        'gastos.cta_servicio_internet' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '51353501', 'etiqueta' => 'Gasto · Servicio · internet', 'descripcion' => 'PUC 51353501. El grupo se llama «Teléfono», pero la hoja del PUC de Great Baby es INTERNET: el teléfono fijo no tiene cuenta propia.'],
+        'gastos.cta_servicio_celular' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '51353502', 'etiqueta' => 'Gasto · Servicio · celular', 'descripcion' => 'PUC 51353502 · Servicios públicos · celular.'],
+        'gastos.cta_servicio_gas' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '51355501', 'etiqueta' => 'Gasto · Servicio · gas', 'descripcion' => 'PUC 51355501 · Servicios públicos · gas.'],
+        // La contrapartida de un gasto causado y todavia no pagado.
+        /*
+         * Las cuentas de la nómina.
+         *
+         * La nómina y la liquidación definitiva NO generaban ni un movimiento
+         * contable: se liquidaba, gerencia aprobaba, tesorería pagaba, y el
+         * libro no se enteraba nunca. El gasto de personal —que en esta
+         * empresa es de los más grandes— no existía en el balance ni en el
+         * estado de resultados.
+         *
+         * Los códigos son de OCHO dígitos a propósito. El plan de cuentas
+         * marca las de seis como agrupadoras (`permite_movimiento = 0`), y
+         * asentar contra ellas es el defecto que ya tiene el resto del libro:
+         * 104 de 104 movimientos contra cuentas que no admiten movimiento.
+         * Acá se arranca bien.
+         *
+         * Son configurables porque el plan lo maneja la contadora, no el
+         * código: si mañana reclasifica una subcuenta, se cambia en Reglas y
+         * la siguiente nómina ya sale con la nueva.
+         */
+        'contable.cta_nomina_sueldos' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '51050601', 'etiqueta' => 'Nómina · sueldos', 'descripcion' => 'PUC 51050601 Sueldos. Se debita el salario del período, el adicional y, en crédito, lo que no se causó por ausentismo.'],
+        'contable.cta_nomina_extras' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '51051501', 'etiqueta' => 'Nómina · horas extras', 'descripcion' => 'PUC 51051501 Horas extras y recargos.'],
+        'contable.cta_nomina_auxilio' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '51052701', 'etiqueta' => 'Nómina · auxilio de transporte', 'descripcion' => 'PUC 51052701 Auxilio de transporte. Va aparte de los sueldos porque no es salario y no constituye base prestacional.'],
+        'contable.cta_nomina_gasto_salud' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '51056901', 'etiqueta' => 'Nómina · gasto aporte EPS', 'descripcion' => 'PUC 51056901 Aportes a EPS. Es lo que PAGA LA EMPRESA, no lo que se le descuenta al empleado.'],
+        'contable.cta_nomina_gasto_pension' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '51057001', 'etiqueta' => 'Nómina · gasto aporte pensión', 'descripcion' => 'PUC 51057001 Aporte a fondos de pensión. Es la parte patronal.'],
+        'contable.cta_nomina_gasto_arl' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '51056801', 'etiqueta' => 'Nómina · gasto ARL', 'descripcion' => 'PUC 51056801 Aportes a ARL. La ARL la paga entera la empresa: al empleado no se le descuenta nada.'],
+        'contable.cta_nomina_gasto_caja' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '51057201', 'etiqueta' => 'Nómina · gasto caja de compensación', 'descripcion' => 'PUC 51057201 Aportes cajas de compensación familiar.'],
+        'contable.cta_nomina_gasto_icbf' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '51057501', 'etiqueta' => 'Nómina · gasto ICBF', 'descripcion' => 'PUC 51057501 Aportes ICBF.'],
+        'contable.cta_nomina_gasto_sena' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '51057801', 'etiqueta' => 'Nómina · gasto SENA', 'descripcion' => 'PUC 51057801 Aportes SENA.'],
+        'contable.cta_nomina_gasto_cesantias' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '51053001', 'etiqueta' => 'Nómina · gasto cesantías', 'descripcion' => 'PUC 51053001 Cesantías. Es la provisión del mes, no un pago.'],
+        'contable.cta_nomina_gasto_intereses' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '51053301', 'etiqueta' => 'Nómina · gasto intereses de cesantías', 'descripcion' => 'PUC 51053301 Intereses sobre cesantías.'],
+        'contable.cta_nomina_gasto_prima' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '51053601', 'etiqueta' => 'Nómina · gasto prima', 'descripcion' => 'PUC 51053601 Prima de servicios.'],
+        'contable.cta_nomina_gasto_vacaciones' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '51053901', 'etiqueta' => 'Nómina · gasto vacaciones', 'descripcion' => 'PUC 51053901 Vacaciones.'],
+        'contable.cta_nomina_salarios_por_pagar' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '25050501', 'etiqueta' => 'Nómina · salarios por pagar', 'descripcion' => 'PUC 25050501 Salarios por pagar. Acá queda el NETO mientras no se consigne; al pagar se cancela contra bancos.'],
+        'contable.cta_nomina_por_pagar_salud' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '23700501', 'etiqueta' => 'Nómina · EPS por pagar', 'descripcion' => 'PUC 23700501 Aportes a EPS. Junta lo descontado al empleado y lo que pone la empresa: a la EPS se le gira todo junto.'],
+        'contable.cta_nomina_por_pagar_pension' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '23803001', 'etiqueta' => 'Nómina · pensión por pagar', 'descripcion' => 'PUC 23803001 Fondos de cesantías y/o pensiones. Igual que salud: lo del empleado y lo de la empresa van juntos.'],
+        'contable.cta_nomina_por_pagar_arl' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '23701501', 'etiqueta' => 'Nómina · ARL por pagar', 'descripcion' => 'PUC 23701501 Aportes ARL.'],
+        'contable.cta_nomina_por_pagar_parafiscales' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '23701001', 'etiqueta' => 'Nómina · parafiscales por pagar', 'descripcion' => 'PUC 23701001 Aportes al ICBF, SENA y cajas de compensación. Los tres van a la misma cuenta porque se giran en la misma planilla.'],
+        'contable.cta_nomina_provision_cesantias' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '25101001', 'etiqueta' => 'Nómina · cesantías consolidadas', 'descripcion' => 'PUC 25101001 Cesantías. Es el pasivo que se acumula mes a mes.'],
+        'contable.cta_nomina_provision_intereses' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '25150101', 'etiqueta' => 'Nómina · intereses de cesantías consolidados', 'descripcion' => 'PUC 25150101 Intereses sobre cesantías.'],
+        'contable.cta_nomina_provision_prima' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '25200101', 'etiqueta' => 'Nómina · prima consolidada', 'descripcion' => 'PUC 25200101 Prima de servicios.'],
+        'contable.cta_nomina_provision_vacaciones' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '25250101', 'etiqueta' => 'Nómina · vacaciones consolidadas', 'descripcion' => 'PUC 25250101 Vacaciones.'],
+        'contable.cta_liquidacion_indemnizacion' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '51056001', 'etiqueta' => 'Liquidación · gasto indemnización', 'descripcion' => 'PUC 51056001 Indemnizaciones laborales. Es gasto del período en que se despide: no sale de una provisión, porque nadie provisiona despidos.'],
+        'contable.cta_liquidacion_descuentos' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '13651501', 'etiqueta' => 'Liquidación · otros descuentos', 'descripcion' => '⚠ CONFIRMAR CON LA CONTADORA. Es la contrapartida de lo que se le descuenta a alguien en su liquidación (un préstamo pendiente, una dotación no devuelta). El plan de esta empresa sólo trae 1365 con dos hijas —Educación y Calamidad doméstica— y ninguna describe el caso general, así que el valor de acá es provisional. Afecta sólo a las liquidaciones que traen descuentos.'],
+        'contable.cta_liquidacion_cesantias_consignadas' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '23803001', 'etiqueta' => 'Liquidación · cesantías ya consignadas al fondo', 'descripcion' => 'PUC 23803001 Fondos de cesantías y/o pensiones. Es la parte de las cesantías que la empresa ya giró al fondo: el trabajador las cobra allá, no acá. Por eso en la liquidación se descuentan del neto y en el libro se acreditan a esta cuenta en vez de salir del banco.'],
+        'contable.cta_gastos_por_pagar' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '2335', 'etiqueta' => 'Cuenta de gastos por pagar', 'descripcion' => 'PUC Great Baby · 2335 Costos y gastos por pagar'],
+        /*
+         * El banco por el que sale la plata.
+         *
+         * Era 111010 «Moneda nacional · Davivienda», y Great Baby NO TIENE
+         * Davivienda: esa cuenta la inventamos nosotros. En producción quedó con
+         * saldo $-6.182.038, un banco en rojo porque sólo salió la nómina y nunca
+         * entró nada.
+         *
+         * Silvia lo confirmó el 2026-11-04 («no tenemos davivienda, sólo son dos
+         * cuentas bancolombia y una tarjeta prepago») y el extracto de septiembre
+         * lo cierra: cuenta de ahorros Bancolombia 30300002664, sucursal Éxito
+         * Bucaramanga, de donde salen todos los «PAGO A PROVE».
+         */
+        'contable.cta_bancos_default' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '11200501', 'etiqueta' => 'Cuenta bancos por defecto', 'descripcion' => 'PUC 11200501 Bancolombia Great Baby Cta Ahorros **2664 · la cuenta operativa, confirmada contra el extracto. Si se paga desde otra, acá se cambia.'],
+        'contable.cta_caja_default' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '11050501', 'etiqueta' => 'Cuenta caja general', 'descripcion' => 'PUC 11050501 Caja general. Era 110505, que es la agrupadora del mismo nombre y no admite movimiento.'],
         'contable.cta_proveedores_default' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '220505', 'etiqueta' => 'Cuenta proveedores nacionales', 'descripcion' => 'PUC Great Baby · 220505 Proveedores nacionales'],
+        // Faltaba registrarla: el código la pedía con `setting()` pero la clave
+        // no existía, así que devolvía siempre el literal del código y no había
+        // forma de cambiarla desde la pantalla de Reglas.
+        'contable.cta_proveedores_exterior' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '2210', 'etiqueta' => 'Cuenta proveedores del exterior', 'descripcion' => 'Se usa al pagar una IMPORTACIÓN, en vez de 220505. ⚠ Confirmar la subcuenta con Silvia: en el plan de cuentas 2210 es cuenta de nivel 3 y no admite movimiento.'],
         'contable.cta_retefuente_default' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '236575', 'etiqueta' => 'Cuenta autorretenciones por defecto', 'descripcion' => '⚠ Confirmar concepto específico con Silvia (2365xx según naturaleza)'],
+        // Retenciones que el CLIENTE nos practica al pagar una venta: son saldo a
+        // favor (1355), no por pagar (2365, que es lo de compras).
+        'contable.cta_retefuente_venta' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '135515', 'etiqueta' => 'Retefuente que nos practican (ventas)', 'descripcion' => 'PUC · 135515 Retención en la fuente. ⚠ Confirmar con Silvia'],
+        'contable.cta_reteiva_venta' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '135517', 'etiqueta' => 'ReteIVA que nos practican (ventas)', 'descripcion' => 'PUC · 135517 Impuesto a las ventas retenido. ⚠ Confirmar con Silvia'],
+        'contable.cta_reteica_venta' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '135518', 'etiqueta' => 'ReteICA que nos practican (ventas)', 'descripcion' => 'PUC · 135518 Impuesto de industria y comercio retenido. ⚠ Confirmar con Silvia'],
+        'contable.concepto_retencion_venta' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => 'compras_generales', 'etiqueta' => 'Concepto de retención en ventas', 'descripcion' => 'Regla de Cartera → Retenciones que se usa al facturar: el cliente nos compra mercancía, así que para él es «compras generales».'],
         'contable.centro_costo_default' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => 'GB-01', 'etiqueta' => 'Centro de costo por defecto', 'descripcion' => 'Cuenta / centro de imputación por defecto para asientos'],
 
         // Contrapartida de las cargas masivas de inventario, una por motivo.
@@ -67,6 +343,123 @@ class Reglas
         'contable.cta_carga_saldo_inicial' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '3705', 'etiqueta' => 'Carga de inventario · Inventario inicial', 'descripcion' => '⚠ Confirmar con la contadora · crédito del inventario de apertura (o la cuenta puente de saldos iniciales que use)'],
         'contable.cta_carga_donacion' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '4295', 'etiqueta' => 'Carga de inventario · Donación', 'descripcion' => '⚠ Confirmar con la contadora · crédito cuando la mercancía se recibe sin pagarla (ingreso diverso)'],
         'contable.cta_carga_sobrante' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '4295', 'etiqueta' => 'Carga de inventario · Sobrante', 'descripcion' => 'Crédito de mercancía que aparece sin documento (misma cuenta que el sobrante de toma física)'],
+        /*
+         * ============ Gestión Humana · cuadro de novedades ============
+         *
+         * Los dos valores con los que se calcula la columna «DTOS» del cuadro
+         * que se manda al contador. Son cifras que cambian cada enero por
+         * decreto, así que viven acá y no en el código: el día que suban, se
+         * corrigen en la pantalla de reglas sin tocar nada más.
+         *
+         * Importante: lo que ya se descontó NO se recalcula al cambiarlas. Un
+         * corte cerrado se queda como se cerró, porque la nómina de ese mes ya
+         * salió con ese número.
+         */
+        'rrhh.salario_minimo' => ['grupo' => 'rrhh', 'tipo' => 'float', 'valor' => '1750905', 'etiqueta' => 'Salario mínimo mensual (SMMLV)', 'descripcion' => 'Vigente 2026: $1.750.905 (Decreto 1469 de 2025, ratificado por el Decreto 159 del 19-feb-2026). Cambia cada enero — actualizarlo acá. De este valor sale el tope de 2 SMMLV para el auxilio de transporte ($3.501.810).'],
+        'rrhh.auxilio_transporte' => ['grupo' => 'rrhh', 'tipo' => 'float', 'valor' => '249095', 'etiqueta' => 'Auxilio de transporte mensual', 'descripcion' => 'Vigente 2026: $249.095 (Decreto 1470 de 2025). Cambia cada enero. Lo devenga quien gana hasta 2 SMMLV Y se transporta al trabajo: a quien vive en el sitio o tiene ruta de la empresa se le excluye desde su ficha, no desde acá.'],
+        'rrhh.dias_mes' => ['grupo' => 'rrhh', 'tipo' => 'int', 'valor' => 30, 'etiqueta' => 'Días del mes para liquidar', 'descripcion' => 'El mes comercial de 30 días con el que se prorratea salario y auxilio. Cambiarlo altera TODO descuento que se calcule de aquí en adelante.'],
+
+        /*
+         * ==================== Gestión Humana · nómina =======================
+         *
+         * Los porcentajes y recargos con los que se liquida. Van acá y no en
+         * el código por una razón concreta: cambian por ley, normalmente en
+         * enero, y una nómina que haya que esperar a un programador para
+         * salir con el porcentaje nuevo es una nómina que sale tarde.
+         *
+         * Los valores por defecto son los vigentes y la fuente está en la
+         * descripción de cada uno, para que quien los cambie sepa contra qué
+         * está comparando.
+         */
+        'rrhh.aporte_salud_pct' => ['grupo' => 'rrhh', 'tipo' => 'float', 'valor' => '4', 'etiqueta' => 'Aporte a salud del trabajador (%)', 'descripcion' => 'Lo que se le descuenta al colaborador. Ley 100 de 1993: 4% del ingreso base de cotización. El 8,5% restante lo paga la empresa y no sale en este descuento.'],
+        'rrhh.aporte_pension_pct' => ['grupo' => 'rrhh', 'tipo' => 'float', 'valor' => '4', 'etiqueta' => 'Aporte a pensión del trabajador (%)', 'descripcion' => 'Lo que se le descuenta al colaborador. Ley 100 de 1993: 4% del ingreso base de cotización. El 12% restante lo paga la empresa.'],
+
+        /*
+         * Los cuatro recargos de hora extra. El ERP no tiene marcación: las
+         * horas entran digitadas en el cuadro de novedades, con su clase
+         * (ordinaria o dominical) y si fue nocturna.
+         *
+         * El valor de la hora ordinaria sale de `dias_mes` × 8 — con el mes
+         * comercial de 30 son las 240 horas de siempre.
+         */
+        'rrhh.recargo_extra_diurna' => ['grupo' => 'rrhh', 'tipo' => 'float', 'valor' => '1.25', 'etiqueta' => 'Factor hora extra diurna', 'descripcion' => 'Código Sustantivo del Trabajo art. 168: la hora extra diurna se paga con un recargo del 25%, o sea 1,25 veces la hora ordinaria.'],
+        'rrhh.recargo_extra_nocturna' => ['grupo' => 'rrhh', 'tipo' => 'float', 'valor' => '1.75', 'etiqueta' => 'Factor hora extra nocturna', 'descripcion' => 'Recargo del 75%: 1,75 veces la hora ordinaria.'],
+        'rrhh.recargo_extra_dominical' => ['grupo' => 'rrhh', 'tipo' => 'float', 'valor' => '2', 'etiqueta' => 'Factor hora extra dominical o festiva', 'descripcion' => 'Recargo dominical del 75% más el 25% de la extra: 2 veces la hora ordinaria.'],
+        'rrhh.recargo_extra_dominical_nocturna' => ['grupo' => 'rrhh', 'tipo' => 'float', 'valor' => '2.5', 'etiqueta' => 'Factor hora extra dominical nocturna', 'descripcion' => 'Dominical y nocturna a la vez: 2,5 veces la hora ordinaria.'],
+
+        /*
+         * ============ Gestión Humana · lo que paga la empresa ===============
+         *
+         * Encima del sueldo, la empresa pone seguridad social, parafiscales y
+         * las provisiones de prestaciones. Es lo que convierte «lo que se
+         * consigna» en «lo que cuesta la nómina», y suele ser ~1,5 veces el
+         * salario.
+         *
+         * La EXONERACIÓN es la regla que más plata mueve: una empresa que
+         * declara renta no paga salud 8,5%, SENA 2% ni ICBF 3% por los
+         * trabajadores que ganan menos de 10 salarios mínimos (Ley 1607/2012
+         * art. 25, modificada por la Ley 1819/2016 art. 65). Darla por
+         * sentada en un sentido o en el otro infla o desinfla el costo en
+         * 13,5 puntos, así que se decide acá y no en el código.
+         */
+        'rrhh.empresa_exonerada_parafiscales' => ['grupo' => 'rrhh', 'tipo' => 'bool', 'valor' => '1', 'etiqueta' => '¿La empresa está exonerada de salud, SENA e ICBF?', 'descripcion' => 'Sí para la empresa que declara renta, por los trabajadores que ganan menos de 10 SMMLV (Ley 1607/2012 art. 25). Confirmar con el contador: cambia el costo de la nómina en 13,5 puntos.'],
+        'rrhh.patronal_salud_pct' => ['grupo' => 'rrhh', 'tipo' => 'float', 'valor' => '8.5', 'etiqueta' => 'Salud a cargo de la empresa (%)', 'descripcion' => 'El 8,5% que completa el 12,5% total. No se paga si la empresa está exonerada y el trabajador gana menos de 10 SMMLV.'],
+        'rrhh.patronal_pension_pct' => ['grupo' => 'rrhh', 'tipo' => 'float', 'valor' => '12', 'etiqueta' => 'Pensión a cargo de la empresa (%)', 'descripcion' => 'El 12% que completa el 16% total. NO tiene exoneración: se paga siempre.'],
+        'rrhh.patronal_caja_pct' => ['grupo' => 'rrhh', 'tipo' => 'float', 'valor' => '4', 'etiqueta' => 'Caja de compensación (%)', 'descripcion' => 'Se paga SIEMPRE, con exoneración o sin ella. Es el parafiscal que no se exonera.'],
+        'rrhh.patronal_sena_pct' => ['grupo' => 'rrhh', 'tipo' => 'float', 'valor' => '2', 'etiqueta' => 'SENA (%)', 'descripcion' => 'Exonerado bajo las mismas condiciones que la salud patronal.'],
+        'rrhh.patronal_icbf_pct' => ['grupo' => 'rrhh', 'tipo' => 'float', 'valor' => '3', 'etiqueta' => 'ICBF (%)', 'descripcion' => 'Exonerado bajo las mismas condiciones que la salud patronal.'],
+
+        /*
+         * ARL por nivel de riesgo (Decreto 1072 de 2015). Lo paga la empresa
+         * entero y depende del CARGO, no del sueldo: el nivel vive en la
+         * ficha de cada persona.
+         */
+        'rrhh.arl_i_pct' => ['grupo' => 'rrhh', 'tipo' => 'float', 'valor' => '0.522', 'etiqueta' => 'ARL riesgo I (%)', 'descripcion' => 'Riesgo mínimo: oficina, labores administrativas.'],
+        'rrhh.arl_ii_pct' => ['grupo' => 'rrhh', 'tipo' => 'float', 'valor' => '1.044', 'etiqueta' => 'ARL riesgo II (%)', 'descripcion' => 'Riesgo bajo.'],
+        'rrhh.arl_iii_pct' => ['grupo' => 'rrhh', 'tipo' => 'float', 'valor' => '2.436', 'etiqueta' => 'ARL riesgo III (%)', 'descripcion' => 'Riesgo medio: bodega, manipulación de carga.'],
+        'rrhh.arl_iv_pct' => ['grupo' => 'rrhh', 'tipo' => 'float', 'valor' => '4.35', 'etiqueta' => 'ARL riesgo IV (%)', 'descripcion' => 'Riesgo alto.'],
+        'rrhh.arl_v_pct' => ['grupo' => 'rrhh', 'tipo' => 'float', 'valor' => '6.96', 'etiqueta' => 'ARL riesgo V (%)', 'descripcion' => 'Riesgo máximo.'],
+
+        /*
+         * Provisiones de prestaciones. No se pagan este mes: se guardan,
+         * porque la prima llega en junio y las cesantías en febrero. Una
+         * empresa que no las provisiona se encuentra el hueco de golpe.
+         *
+         * Las vacaciones se provisionan sobre el salario SIN auxilio, igual
+         * que se liquidan.
+         */
+        'rrhh.provision_cesantias_pct' => ['grupo' => 'rrhh', 'tipo' => 'float', 'valor' => '8.33', 'etiqueta' => 'Provisión de cesantías (%)', 'descripcion' => 'Un mes de salario por año: 1 ÷ 12 = 8,33%. Sobre salario más auxilio.'],
+        'rrhh.provision_intereses_pct' => ['grupo' => 'rrhh', 'tipo' => 'float', 'valor' => '1', 'etiqueta' => 'Provisión de intereses sobre cesantías (%)', 'descripcion' => '12% anual sobre las cesantías: 1% mensual del salario base.'],
+        'rrhh.provision_prima_pct' => ['grupo' => 'rrhh', 'tipo' => 'float', 'valor' => '8.33', 'etiqueta' => 'Provisión de prima (%)', 'descripcion' => 'Un mes de salario por año. Sobre salario más auxilio.'],
+        'rrhh.provision_vacaciones_pct' => ['grupo' => 'rrhh', 'tipo' => 'float', 'valor' => '4.17', 'etiqueta' => 'Provisión de vacaciones (%)', 'descripcion' => '15 días hábiles por año = medio mes: 4,17%. Sobre el salario SIN auxilio, igual que se liquidan.'],
+
+        /*
+         * ============ Gestión Humana · examen médico ocupacional ============
+         *
+         * La IPS a la que se manda a la gente, tal como va impresa en la carta
+         * SST-F-001. Vive acá y no en el código porque es un proveedor: se
+         * cambia de IPS y la carta tiene que salir con la nueva sin esperar a
+         * un programador.
+         */
+        /*
+         * ============== Gestión Humana · temario de inducción ===============
+         *
+         * La lista de temas que se le explican a quien entra. Vive acá y no
+         * en el código porque la edita el área: agregar «manejo del escáner»
+         * no debería esperar a un programador.
+         *
+         * ⚠ PROVISIONAL. El área todavía no nos pasó su formato de inducción
+         * —está pedido en la solicitud de insumos—. Estos temas son un punto
+         * de partida razonable, no los suyos. Cuando llegue el formato se
+         * reemplaza esta lista; las inducciones ya dadas no cambian, porque
+         * cada una guarda el temario con el que se dio.
+         */
+        'rrhh.temario_induccion' => ['grupo' => 'rrhh', 'tipo' => 'string', 'valor' => 'Quiénes somos: historia, misión y líneas de negocio|Reglamento interno de trabajo|Horario, marcación y manejo de permisos|Política de seguridad y salud en el trabajo (SST)|Riesgos del puesto y elementos de protección|Ruta de evacuación y qué hacer en una emergencia|Conocimiento del producto y del catálogo|Sistemas: acceso al ERP y a su espacio de colaborador|Manejo de la información y datos personales (Ley 1581)|Canal para reportar novedades y a quién acudir', 'etiqueta' => 'Temario de la inducción', 'descripcion' => '⚠ Provisional: faltan los temas del formato del área. Separados por barra vertical ( | ). Cada inducción guarda el temario con el que se dio, así que cambiar esta lista no altera las que ya se hicieron.'],
+
+        'rrhh.ips_emo_nombre' => ['grupo' => 'rrhh', 'tipo' => 'string', 'valor' => 'IPS ELOGIOS', 'etiqueta' => 'IPS del examen médico ocupacional', 'descripcion' => 'A quién va dirigida la carta SST-F-001.'],
+        'rrhh.ips_emo_direccion' => ['grupo' => 'rrhh', 'tipo' => 'string', 'valor' => 'Carrera 36 # 49-45, Barrio Cabecera del Llano', 'etiqueta' => 'Dirección de la IPS', 'descripcion' => 'Dónde debe presentarse la persona.'],
+        'rrhh.ips_emo_horario' => ['grupo' => 'rrhh', 'tipo' => 'string', 'valor' => 'de 7:00 a.m. a 12:00 m. y de 2:00 p.m. a 5:00 p.m.', 'etiqueta' => 'Horario de atención de la IPS', 'descripcion' => 'Se imprime tal cual en la carta.'],
+        'rrhh.ips_emo_instrucciones' => ['grupo' => 'rrhh', 'tipo' => 'string', 'valor' => 'Contar con dos (2) horas de disponibilidad y presentarse con documento de identidad.', 'etiqueta' => 'Instrucciones para el colaborador', 'descripcion' => 'Lo que la persona tiene que saber antes de ir: tiempo, ayuno, qué llevar.'],
 
         // ============ CRM · segmentación ============
         'crm.vip_min_ventas' => ['grupo' => 'crm', 'tipo' => 'float', 'valor' => '5000000', 'etiqueta' => 'Ventas anuales mínimas para VIP (COP)', 'descripcion' => ''],
@@ -79,8 +472,27 @@ class Reglas
         'siigo.doc_type_gasto' => ['grupo' => 'siigo', 'tipo' => 'int', 'valor' => 0, 'etiqueta' => 'SIIGO · Tipo de documento Gasto (asiento)', 'descripcion' => 'ID del comprobante contable para gastos'],
         'siigo.doc_type_importacion' => ['grupo' => 'siigo', 'tipo' => 'int', 'valor' => 0, 'etiqueta' => 'SIIGO · Tipo de documento Importación', 'descripcion' => 'ID del comprobante de compra para importaciones'],
         'siigo.doc_type_conciliacion' => ['grupo' => 'siigo', 'tipo' => 'int', 'valor' => 0, 'etiqueta' => 'SIIGO · Tipo de documento Conciliación (asiento)', 'descripcion' => 'ID del comprobante contable para conciliaciones'],
+        /*
+         * Como se compone la porcion declarada de una factura de REPARTO.
+         *
+         *   · «cantidad» — menos unidades al PRECIO REAL. El precio unitario
+         *     queda igual al de cualquier otra factura del producto, que es lo
+         *     que se compara si alguien cruza precios entre clientes. La
+         *     cantidad sale fraccionada.
+         *   · «precio» — las MISMAS unidades a precio menor. El conteo cuadra
+         *     con lo despachado, pero el precio unitario queda falseado.
+         *
+         * Esta por defecto en «cantidad» porque un precio inventado es mas
+         * dificil de sostener ante la DIAN que un conteo que no cuadra, y
+         * porque el inventario de verdad vive en el ERP, no en SIIGO. Es una
+         * decision contable: la cambia Silvia desde la pantalla de reglas.
+         */
+        'siigo.reparto_modo' => ['grupo' => 'siigo', 'tipo' => 'string', 'valor' => 'cantidad', 'etiqueta' => 'SIIGO · Como se declara un reparto', 'descripcion' => '«cantidad» = menos unidades al precio real (recomendado) · «precio» = mismas unidades a precio menor'],
         'siigo.cta_gasto_default' => ['grupo' => 'siigo', 'tipo' => 'string', 'valor' => '5195', 'etiqueta' => 'SIIGO · Cuenta de gasto por defecto', 'descripcion' => 'PUC débito para gastos sin asiento previo'],
-        'siigo.cta_banco_default' => ['grupo' => 'siigo', 'tipo' => 'string', 'valor' => '1110', 'etiqueta' => 'SIIGO · Cuenta de banco por defecto', 'descripcion' => 'PUC de bancos'],
+        // La misma cuenta que `contable.cta_bancos_default`: la operativa de
+        // Bancolombia. Era 1110, el encabezado «Bancos», que no recibe
+        // movimiento — SIIGO lo rechaza.
+        'siigo.cta_banco_default' => ['grupo' => 'siigo', 'tipo' => 'string', 'valor' => '11200501', 'etiqueta' => 'SIIGO · Cuenta de banco por defecto', 'descripcion' => 'PUC 11200501 Bancolombia Great Baby Cta Ahorros **2664, confirmada contra el extracto.'],
         'siigo.cta_conciliacion_default' => ['grupo' => 'siigo', 'tipo' => 'string', 'valor' => '139535', 'etiqueta' => 'SIIGO · Partida conciliatoria por defecto', 'descripcion' => 'PUC para la diferencia de conciliación'],
         'siigo.proveedor_importacion_doc' => ['grupo' => 'siigo', 'tipo' => 'string', 'valor' => '', 'etiqueta' => 'SIIGO · NIT proveedor de importaciones', 'descripcion' => 'Identificación por defecto para comprobantes de importación'],
         // UBIC-6 · resolución DIAN FV auto-asignada a nuevas ubicaciones de venta.
@@ -139,11 +551,11 @@ class Reglas
         // forma de arreglarlo desde el panel. Los tipos son los de SIIGO:
         // RC = recibo de caja (cobro a cliente) · RP = recibo de pago / egreso
         // (pago a proveedor) · CC = comprobante contable (asientos).
-        'siigo.doc_type_recibo' => ['grupo' => 'siigo', 'tipo' => 'int', 'valor' => 2371, 'etiqueta' => 'SIIGO · Tipo documento Recibo de caja (RC)', 'descripcion' => 'ID del comprobante con que se registran los COBROS a clientes. Se consulta con GET /v1/document-types?type=RC'],
+        'siigo.doc_type_recibo' => ['grupo' => 'siigo', 'tipo' => 'int', 'valor' => 2371, 'etiqueta' => 'SIIGO · Tipo documento Recibo de caja (RC)', 'descripcion' => 'ID del comprobante con que se registran los COBROS a clientes. Se consulta con GET /v1/document-types?type=RC ⚠ El valor por defecto es el del SANDBOX. Los IDs de comprobante son POR CUENTA, así que al apuntar a la cuenta real de Great Baby hay que correr `php artisan siigo:sync-document-types` y volver a elegir en el desplegable de acá, que muestra los comprobantes reales y marca «no figura en SIIGO» si el guardado ya no existe.'],
         'siigo.payment_type_recibo' => ['grupo' => 'siigo', 'tipo' => 'int', 'valor' => 0, 'etiqueta' => 'SIIGO · Medio de pago del recibo de caja', 'descripcion' => 'Medio de pago para los cobros. Se consulta con GET /v1/payment-types?document_type=RC'],
-        'siigo.doc_type_egreso' => ['grupo' => 'siigo', 'tipo' => 'int', 'valor' => 2376, 'etiqueta' => 'SIIGO · Tipo documento Egreso (RP)', 'descripcion' => 'ID del comprobante con que se registran los PAGOS a proveedores. Se consulta con GET /v1/document-types?type=RP'],
+        'siigo.doc_type_egreso' => ['grupo' => 'siigo', 'tipo' => 'int', 'valor' => 2376, 'etiqueta' => 'SIIGO · Tipo documento Egreso (RP)', 'descripcion' => 'ID del comprobante con que se registran los PAGOS a proveedores. Se consulta con GET /v1/document-types?type=RP ⚠ El valor por defecto es el del SANDBOX. Los IDs de comprobante son POR CUENTA, así que al apuntar a la cuenta real de Great Baby hay que correr `php artisan siigo:sync-document-types` y volver a elegir en el desplegable de acá, que muestra los comprobantes reales y marca «no figura en SIIGO» si el guardado ya no existe.'],
         'siigo.payment_type_egreso' => ['grupo' => 'siigo', 'tipo' => 'int', 'valor' => 0, 'etiqueta' => 'SIIGO · Medio de pago del egreso', 'descripcion' => 'Medio de pago para los pagos a proveedores. Si queda en 0 se usa el del recibo de caja'],
-        'siigo.doc_type_asiento' => ['grupo' => 'siigo', 'tipo' => 'int', 'valor' => 2393, 'etiqueta' => 'SIIGO · Tipo documento Asiento contable (CC)', 'descripcion' => 'ID del comprobante contable para asientos manuales y de inventario. Se consulta con GET /v1/document-types?type=CC'],
+        'siigo.doc_type_asiento' => ['grupo' => 'siigo', 'tipo' => 'int', 'valor' => 2393, 'etiqueta' => 'SIIGO · Tipo documento Asiento contable (CC)', 'descripcion' => 'ID del comprobante contable para asientos manuales y de inventario. Se consulta con GET /v1/document-types?type=CC ⚠ El valor por defecto es el del SANDBOX. Los IDs de comprobante son POR CUENTA, así que al apuntar a la cuenta real de Great Baby hay que correr `php artisan siigo:sync-document-types` y volver a elegir en el desplegable de acá, que muestra los comprobantes reales y marca «no figura en SIIGO» si el guardado ya no existe.'],
     ];
 
     /** Memoization por-request para evitar N lecturas de cache en un mismo handler. */
@@ -233,6 +645,10 @@ class Reglas
         [$ok, $val, $err] = self::castear($clave, $valor);
         if (! $ok) throw new \InvalidArgumentException("Regla {$clave}: {$err}");
 
+        if ($err = self::cuentaAgrupadora($clave, (string) $val)) {
+            throw new \InvalidArgumentException("Regla {$clave}: {$err}");
+        }
+
         ReglaNegocio::updateOrCreate(
             ['clave' => $clave],
             [
@@ -244,6 +660,91 @@ class Reglas
             ]
         );
         self::limpiarRequestCache();
+    }
+
+    /**
+     * Impide guardar una cuenta que el PUC marca como agrupadora.
+     *
+     * Es el candado que faltaba. Las reglas de cuenta se llenaron con grupos
+     * —1305, 4135, 112005, 236540— y nada se quejó: los asientos se escribían
+     * igual, el libro cuadraba igual, y el error sólo se iba a ver el día que
+     * SIIGO rechazara el documento, o peor, el día que NO lo rechazara y lo
+     * metiera en la primera subcuenta que encontrara.
+     *
+     * Aplica a las cuentas del PUC de Great Baby. Eso incluye `contable.cta_*`,
+     * `gastos.cta_*` y CINCO de las `siigo.*`, que a pesar del prefijo guardan
+     * códigos del plan de Great Baby y no del catálogo de SIIGO. Las tres que
+     * terminan en `_siigo` sí son de SIIGO —22050501, 1435010101, 24082001— y
+     * no viven en esta tabla, así que quedan fuera.
+     *
+     * La distinción no es cosmética: la propia pantalla de SIIGO avisa que
+     * `siigo.cta_gasto_default` (5195), `siigo.cta_banco_default` (1110) y
+     * `siigo.cta_sobrante_inventario_default` (4295) son encabezados, y que
+     * `siigo.cta_perdida_inventario_default` (5299) ni siquiera existe en el
+     * plan. La primera versión de este candado las dejó pasar.
+     *
+     * Una cuenta que no está en el catálogo se deja pasar: puede ser una
+     * instalación nueva con `plan_cuentas` vacío, y negarse ahí rompería el
+     * seeding. Lo que no se deja pasar es una cuenta que SÍ existe y que el
+     * propio plan dice que no recibe movimiento.
+     *
+     * @return string|null el motivo del rechazo, o null si la cuenta sirve
+     */
+    /**
+     * Reglas con prefijo `siigo.` que igual guardan una cuenta del PUC de
+     * Great Baby. Lista explícita y no un patrón, porque la diferencia con las
+     * `_siigo` no se ve en el nombre de la clave.
+     */
+    private const CUENTAS_PUC_DE_SIIGO = [
+        'siigo.cta_gasto_default',
+        'siigo.cta_banco_default',
+        'siigo.cta_conciliacion_default',
+        'siigo.cta_perdida_inventario_default',
+        'siigo.cta_sobrante_inventario_default',
+    ];
+
+    private static function cuentaAgrupadora(string $clave, string $valor): ?string
+    {
+        $esDelPuc = str_starts_with($clave, 'contable.cta_')
+            || str_starts_with($clave, 'gastos.cta_')
+            || in_array($clave, self::CUENTAS_PUC_DE_SIIGO, true);
+
+        if (! $esDelPuc) {
+            return null;
+        }
+
+        $codigo = trim($valor);
+        if ($codigo === '') {
+            return null;
+        }
+
+        try {
+            $cuenta = \App\Modules\Contabilidad\Models\PlanCuenta::where('codigo', $codigo)
+                ->first(['codigo', 'nombre', 'permite_movimiento']);
+        } catch (\Throwable) {
+            // Sin tabla todavía (instalación nueva, migración a medias) no hay
+            // nada contra qué validar. No es motivo para bloquear.
+            return null;
+        }
+
+        if (! $cuenta || $cuenta->permite_movimiento) {
+            return null;
+        }
+
+        $hijas = \App\Modules\Contabilidad\Models\PlanCuenta::where('codigo', 'like', $codigo.'%')
+            ->where('codigo', '!=', $codigo)
+            ->where('permite_movimiento', true)
+            ->where('activa', true)
+            ->orderBy('codigo')
+            ->limit(3)
+            ->pluck('codigo')
+            ->all();
+
+        $sugerencia = $hijas === []
+            ? ' Buscá una subcuenta de detalle en el plan de cuentas.'
+            : ' Usá una de sus subcuentas: '.implode(', ', $hijas).'.';
+
+        return "la cuenta {$codigo} ({$cuenta->nombre}) agrupa, no recibe movimiento.".$sugerencia;
     }
 
     /** Siembra en BD los defaults que aún no existen. Idempotente + concurrent-safe (firstOrCreate). */

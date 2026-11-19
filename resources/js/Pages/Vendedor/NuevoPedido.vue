@@ -8,7 +8,11 @@ const props = defineProps({
     cliente: { type: Object, required: true },
     variantes: { type: Array, required: true },
     credito: { type: Object, required: true },
+    // Multiempresa · razones sociales activas; la primera es Great Baby.
+    empresas: { type: Array, default: () => [] },
 });
+
+const empresaId = ref(props.empresas[0]?.id ?? null);
 
 const money = (n) => new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n || 0);
 
@@ -52,10 +56,23 @@ const agregar = (v) => {
             producto_id: v.producto_id ?? null,
             sku: v.sku, nombre: v.nombre, color: v.color, talla: v.talla,
             precio: v.precio, iva_pct: v.iva_pct, cantidad: 1,
+            disponible: v.disponible ?? 0,
         };
     }
 };
 const quitar = (k) => { delete carrito.value[k]; carrito.value = { ...carrito.value }; };
+
+/*
+ * Lo que se está prometiendo por encima de lo que hay.
+ *
+ * El catálogo no mostraba existencias: se podían cargar 999 unidades de algo
+ * que tiene 35 y ni la pantalla ni el envío decían nada. El pedido salía, el
+ * cliente quedaba avisado, y el faltante aparecía recién en bodega.
+ *
+ * No se bloquea —Great Baby vende contra contenedor en camino— pero se ve.
+ */
+const sinStock = computed(() =>
+    carritoLista.value.filter((it) => it.cantidad > (it.disponible ?? 0)));
 
 const carritoLista = computed(() => Object.values(carrito.value));
 const subtotal = computed(() => carritoLista.value.reduce((a, it) => a + it.precio * it.cantidad, 0));
@@ -92,8 +109,43 @@ const confirmar = () => {
             cantidad: it.cantidad,
         })),
         notas: notas.value || null,
+        empresa_id: empresaId.value,
     }, {
         onError: (e) => { err.value = Object.values(e)[0] || 'No se pudo crear.'; },
+        onFinish: () => procesando.value = false,
+    });
+};
+
+/*
+ * El mismo carrito, otro destino.
+ *
+ * Un cliente B2B casi nunca compra en la primera conversación: pide precios,
+ * compara y vuelve a la semana. Eso se hacía por WhatsApp y se transcribía a
+ * mano. Cotizar desde acá —con el mismo carrito y los mismos precios— evita
+ * una segunda pantalla de catálogo que se iría separando de ésta.
+ *
+ * A diferencia del pedido, la cotización no compromete inventario y vence.
+ */
+const vigenteHasta = ref('');
+
+const cotizar = () => {
+    err.value = null;
+    if (!carritoLista.value.length) {
+        err.value = 'Agregá al menos un producto.';
+        return;
+    }
+    procesando.value = true;
+    router.post(`/app/vendedor/cotizacion-nueva/${props.cliente.id}`, {
+        items: carritoLista.value.map((it) => ({
+            variante_id: it.variante_id,
+            producto_id: it.producto_id,
+            cantidad: it.cantidad,
+        })),
+        notas: notas.value || null,
+        vigente_hasta: vigenteHasta.value || null,
+        empresa_id: empresaId.value,
+    }, {
+        onError: (e) => { err.value = Object.values(e)[0] || 'No se pudo cotizar.'; },
         onFinish: () => procesando.value = false,
     });
 };
@@ -154,7 +206,13 @@ const confirmar = () => {
                                     <span v-if="v.color || v.talla"> · {{ v.color }} {{ v.talla }}</span>
                                 </div>
                             </div>
-                            <div class="text-sm font-bold whitespace-nowrap">{{ money(v.precio) }}</div>
+                            <div class="text-right whitespace-nowrap">
+                                <div class="text-sm font-bold">{{ money(v.precio) }}</div>
+                                <div :class="['text-[10px] font-semibold',
+                                              v.disponible > 0 ? 'text-emerald-600' : 'text-red-600']">
+                                    {{ v.disponible > 0 ? `${v.disponible} disponibles` : 'sin stock' }}
+                                </div>
+                            </div>
                             <button @click="agregar(v)" class="btn-primary text-xs px-2 py-1">
                                 <Plus class="h-3 w-3"/> Agregar
                             </button>
@@ -172,10 +230,16 @@ const confirmar = () => {
                     </div>
                     <div v-else class="space-y-2 max-h-[380px] overflow-y-auto">
                         <div v-for="it in carritoLista" :key="it.clave"
-                             class="p-2 rounded border border-surface-200 dark:border-surface-700 flex items-center gap-2">
+                             :class="['p-2 rounded border flex items-center gap-2',
+                                      it.cantidad > (it.disponible ?? 0)
+                                        ? 'border-red-400 bg-red-50 dark:bg-red-950/20'
+                                        : 'border-surface-200 dark:border-surface-700']">
                             <div class="flex-1 min-w-0">
                                 <div class="text-sm font-semibold truncate">{{ it.nombre }}</div>
                                 <div class="text-xs text-surface-500">{{ it.color }} {{ it.talla }} · {{ money(it.precio) }}</div>
+                                <div v-if="it.cantidad > (it.disponible ?? 0)" class="text-[10px] font-bold text-red-600">
+                                    Sólo hay {{ it.disponible ?? 0 }} · faltan {{ it.cantidad - (it.disponible ?? 0) }}
+                                </div>
                             </div>
                             <input v-model.number="it.cantidad" type="number" min="1" max="9999"
                                    class="w-14 text-center border rounded px-1 py-0.5 text-sm">
@@ -185,6 +249,14 @@ const confirmar = () => {
                         </div>
                     </div>
 
+                    <!-- Con una sola empresa activa no se pregunta. -->
+                    <label v-if="empresas.length > 1" class="block text-sm">
+                        <span class="text-xs font-semibold">Factura</span>
+                        <select v-model.number="empresaId" class="w-full text-sm border rounded p-2 dark:bg-surface-800">
+                            <option v-for="e in empresas" :key="e.id" :value="e.id">{{ e.nombre }}</option>
+                        </select>
+                    </label>
+
                     <textarea v-model="notas" placeholder="Notas opcionales para el pedido…" rows="2"
                               class="w-full text-sm border rounded p-2 dark:bg-surface-800"></textarea>
 
@@ -192,6 +264,12 @@ const confirmar = () => {
                         <div class="flex justify-between"><span>Subtotal</span><b>{{ money(subtotal) }}</b></div>
                         <div class="flex justify-between text-surface-500"><span>IVA</span><span>{{ money(iva) }}</span></div>
                         <div class="flex justify-between text-lg font-bold border-t pt-1"><span>Total</span><span class="text-brand-600">{{ money(total) }}</span></div>
+                    </div>
+
+                    <div v-if="sinStock.length" class="p-2 rounded bg-red-50 border-l-4 border-red-500 text-xs text-red-800">
+                        ⚠ <b>No hay stock para {{ sinStock.length }} ítem(s)</b> de este pedido.
+                        Se puede enviar igual si la mercancía viene en camino, pero bodega no va a
+                        poder alistarlo completo hasta que entre.
                     </div>
 
                     <div v-if="vaARetener && carritoLista.length" class="p-2 rounded bg-amber-50 border-l-4 border-amber-500 text-xs text-amber-800">
@@ -206,6 +284,29 @@ const confirmar = () => {
                         <Send class="h-4 w-4"/>
                         {{ procesando ? 'Enviando…' : `Enviar pedido para ${cliente.nombre}` }}
                     </button>
+
+                    <!--
+                        El otro destino del mismo carrito: cotizar.
+
+                        Va debajo y más discreto porque el pedido sigue siendo
+                        lo normal; cotizar es para cuando el cliente todavía
+                        está decidiendo. No compromete inventario y vence.
+                    -->
+                    <div class="pt-2 border-t border-surface-200 dark:border-surface-800 space-y-2">
+                        <label class="block text-xs text-surface-500">
+                            Vigencia de la cotización (opcional)
+                            <input v-model="vigenteHasta" type="date"
+                                   class="mt-1 w-full px-3 py-2 rounded-lg border border-surface-200 dark:border-surface-800 bg-transparent text-sm"/>
+                        </label>
+                        <button @click="cotizar" :disabled="procesando || !carritoLista.length"
+                                class="w-full py-2 text-sm rounded-lg border border-brand-600 text-brand-600 font-medium disabled:opacity-50">
+                            {{ procesando ? 'Guardando…' : 'Guardar como cotización' }}
+                        </button>
+                        <p class="text-[11px] text-surface-500">
+                            No reserva mercancía. Al convertirla en pedido se respetan estos precios
+                            aunque la lista haya cambiado.
+                        </p>
+                    </div>
                 </div>
             </div>
         </div>

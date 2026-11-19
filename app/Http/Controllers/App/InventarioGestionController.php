@@ -7,10 +7,12 @@ use App\Modules\Dropi\Models\InventarioMovimiento;
 use App\Modules\Dropi\Models\InventarioUbicacion;
 use App\Modules\Dropi\Models\ProductoVariante;
 use App\Modules\Inventario\Models\AlertaStockConfig;
+use App\Modules\Inventario\Support\CostoPromedio;
 use App\Modules\Dropi\Models\Producto;
 use App\Modules\Inventario\Models\TomaFisica;
 use App\Modules\Inventario\Models\TomaFisicaItem;
 use App\Modules\Inventario\Models\Traslado;
+use App\Modules\Marketing\Services\MuestrasMarketing;
 use App\Modules\Inventario\Models\TrasladoItem;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -49,6 +51,9 @@ class InventarioGestionController extends Controller implements HasMiddleware
         // ProductoVariante era navegable desde kardex; los agregados no
         // tenían historial consultable aunque sí movimientos en la BD.
         $productoAgregado = null;
+        // LOG-H3 · aviso cuando la variante existe pero lo recibido quedó
+        // asentado a nivel producto.
+        $hayMovimientosSinRepartir = null;
         $movimientos = [];
         $saldoTotal = 0;
         $costoPromedio = 0;
@@ -59,10 +64,22 @@ class InventarioGestionController extends Controller implements HasMiddleware
             $variante = ProductoVariante::with('producto:id,referencia,nombre')
                 ->where('codigo_barras', $codigo)
                 ->first();
-            // 2. Si no hay variante, probar como producto AGREGADO por referencia.
+            /*
+             * 2. Si no hay variante, buscar el PRODUCTO por referencia.
+             *
+             * LOG-H3 · antes esto exigía `desglose_stock = false`, y ahí se
+             * perdía lo recién recibido: la orden de compra enlaza a nivel
+             * producto, así que la recepción asienta el movimiento con
+             * `variante_id = NULL` AUNQUE el producto tenga variantes. Con 20
+             * unidades en bodega y su entrada registrada, buscar la referencia
+             * respondía «Variante no encontrada».
+             *
+             * No se le inventa una variante al movimiento —la recepción
+             * genuinamente no sabe cuál es—: se muestra lo que hay y se dice
+             * que está a nivel producto, sin repartir.
+             */
             if (! $variante) {
                 $productoAgregado = \App\Modules\Dropi\Models\Producto::where('referencia', $codigo)
-                    ->where('desglose_stock', false)
                     ->first(['id', 'referencia', 'nombre', 'desglose_stock']);
             }
 
@@ -84,6 +101,27 @@ class InventarioGestionController extends Controller implements HasMiddleware
                     }
                 }
                 $movs = $q->orderBy('created_at')->limit(500)->get();
+
+                /*
+                 * LOG-H3 · La otra mitad del mismo defecto.
+                 *
+                 * Buscando por el código de barras SÍ aparece la variante,
+                 * pero su kardex sale vacío porque la entrada quedó a nivel
+                 * producto. Un kardex vacío se lee como «nunca se movió», y
+                 * acá hay unidades en bodega.
+                 */
+                if ($variante && $movs->isEmpty()) {
+                    $sueltos = InventarioMovimiento::whereNull('variante_id')
+                        ->where('producto_id', $variante->producto_id)
+                        ->count();
+
+                    if ($sueltos > 0) {
+                        $hayMovimientosSinRepartir = [
+                            'cuantos' => $sueltos,
+                            'referencia' => $variante->producto?->referencia,
+                        ];
+                    }
+                }
 
                 // Sprint 3 · Kardex FORMATO SIIGO · calcula:
                 //   1. Costo promedio ponderado tras cada entrada.
@@ -158,11 +196,19 @@ class InventarioGestionController extends Controller implements HasMiddleware
             ] : ($productoAgregado ? [
                 'id' => $productoAgregado->id, 'codigo' => $productoAgregado->referencia,
                 'producto' => $productoAgregado->nombre, 'referencia' => $productoAgregado->referencia,
-                'detalle' => 'Producto agregado · sin variantes',
+                // Decir cuál de los dos casos es. Un producto con desglose
+                // que muestra movimientos sin variante no es lo mismo que uno
+                // que nunca tuvo variantes, y confundirlos haría creer que el
+                // kardex de la variante está completo.
+                'detalle' => $productoAgregado->desglose_stock
+                    ? 'Movimientos a nivel producto · todavía sin repartir por variante'
+                    : 'Producto agregado · sin variantes',
                 'siigo_id' => null, 'siigo_code' => null,
                 'es_agregado' => true,
+                'con_desglose' => (bool) $productoAgregado->desglose_stock,
             ] : null),
             'movimientos' => $movimientos,
+            'sin_repartir' => $hayMovimientosSinRepartir,
             'saldoTotal' => $saldoTotal,
             'costoPromedio' => $costoPromedio,
             'valorStock' => $valorStock,
@@ -266,7 +312,12 @@ class InventarioGestionController extends Controller implements HasMiddleware
         $costoPromedios = $this->calcularCostosPromedio();
 
         // Total unidades por ubicación
-        $saldos = InventarioMovimiento::selectRaw('ubicacion_id, SUM(cantidad) as total, COUNT(DISTINCT variante_id) as skus')
+        // Contaba `DISTINCT variante_id`, así que una bodega llena de productos
+        // agregados decía «0 SKUs» al lado de sus propias unidades.
+        $saldos = InventarioMovimiento::selectRaw(
+            'ubicacion_id, SUM(cantidad) as total, '
+            .'COUNT(DISTINCT COALESCE(CONCAT("v", variante_id), CONCAT("p", producto_id))) as skus'
+        )
             ->groupBy('ubicacion_id')
             ->having('total', '!=', 0)
             ->get()->keyBy('ubicacion_id');
@@ -286,26 +337,46 @@ class InventarioGestionController extends Controller implements HasMiddleware
                 ];
             });
 
-        // Top 30 variantes con más stock · agregando costo_prom y valor
-        $topStock = InventarioMovimiento::selectRaw('variante_id, SUM(cantidad) as total')
+        /*
+         * Top 30 con más stock.
+         *
+         * Pedía `whereNotNull('variante_id')`, así que los productos AGREGADOS
+         * no aparecían nunca: la pantalla decía «Top 30 con más stock» y dejaba
+         * afuera buena parte de la mercancía que hay en bodega.
+         */
+        $porVariante = InventarioMovimiento::selectRaw('variante_id as sujeto, SUM(cantidad) as total')
             ->whereNotNull('variante_id')
-            ->groupBy('variante_id')->having('total', '>', 0)->orderByDesc('total')->limit(30)->get();
+            ->groupBy('variante_id')->having('total', '>', 0)
+            ->orderByDesc('total')->limit(30)->get()
+            ->map(fn ($r) => ['tipo' => 'v', 'id' => (int) $r->sujeto, 'total' => (int) $r->total]);
 
-        $ids = $topStock->pluck('variante_id')->filter()->all();
-        $vars = ProductoVariante::with('producto:id,referencia,nombre')->whereIn('id', $ids)->get()->keyBy('id');
+        $porProducto = InventarioMovimiento::selectRaw('producto_id as sujeto, SUM(cantidad) as total')
+            ->whereNull('variante_id')->whereNotNull('producto_id')
+            ->groupBy('producto_id')->having('total', '>', 0)
+            ->orderByDesc('total')->limit(30)->get()
+            ->map(fn ($r) => ['tipo' => 'p', 'id' => (int) $r->sujeto, 'total' => (int) $r->total]);
 
-        $top = $topStock->map(function ($r) use ($vars, $costoPromedios) {
-            $vid = (int) $r->variante_id;
-            $v = $vars->get($vid);
-            $costoProm = (float) ($costoPromedios[$vid] ?? 0);
-            $total = (int) $r->total;
+        $topStock = $porVariante->concat($porProducto)->sortByDesc('total')->take(30)->values();
+
+        $vars = ProductoVariante::with('producto:id,referencia,nombre')
+            ->whereIn('id', $topStock->where('tipo', 'v')->pluck('id')->all())
+            ->get()->keyBy('id');
+        $prods = Producto::whereIn('id', $topStock->where('tipo', 'p')->pluck('id')->all())
+            ->get(['id', 'referencia', 'nombre', 'siigo_code'])->keyBy('id');
+
+        $top = $topStock->map(function ($r) use ($vars, $prods, $costoPromedios) {
+            $esVariante = $r['tipo'] === 'v';
+            $v = $esVariante ? $vars->get($r['id']) : null;
+            $p = $esVariante ? $v?->producto : $prods->get($r['id']);
+            $costoProm = (float) ($costoPromedios[$r['tipo'].':'.$r['id']] ?? 0);
+
             return [
-                'codigo' => $v?->codigo_barras ?? '—',
-                'producto' => $v?->producto?->nombre ?? '—',
-                'total' => $total,
+                'codigo' => ($esVariante ? $v?->codigo_barras : $p?->referencia) ?? '—',
+                'producto' => $p?->nombre ?? '—',
+                'total' => $r['total'],
                 'costo_prom' => $costoProm,
-                'valor' => round($total * $costoProm, 2),
-                'siigo_code' => $v?->siigo_code,
+                'valor' => round($r['total'] * $costoProm, 2),
+                'siigo_code' => $esVariante ? $v?->siigo_code : $p?->siigo_code,
             ];
         });
 
@@ -328,18 +399,43 @@ class InventarioGestionController extends Controller implements HasMiddleware
      */
     private function calcularCostosPromedio(): array
     {
-        $entradas = InventarioMovimiento::selectRaw(
-            'variante_id, SUM(cantidad * costo_unit) as valor_ent, SUM(cantidad) as cant_ent'
-        )
-            ->where('cantidad', '>', 0)
-            ->where('costo_unit', '>', 0)
-            ->groupBy('variante_id')
-            ->get()->keyBy('variante_id');
-
+        /*
+         * Agrupaba sólo por `variante_id`. Los productos AGREGADOS —los que no
+         * tienen variante, que es la mayor parte del catálogo de Great Baby—
+         * caían todos en una sola fila con la clave NULL: el costo de una pijama
+         * de $12.000 promediado con el de un coche de $400.000, y ese número
+         * mezclado aplicado después a los dos. Encontrado el 2026-10-13 en el
+         * «Reporte de stock por bodega».
+         *
+         * Se devuelve con las mismas claves que usa el resto del inventario:
+         * `v:{id}` por variante, `p:{id}` por producto agregado.
+         */
         $out = [];
-        foreach ($entradas as $vid => $r) {
-            $out[$vid] = $r->cant_ent > 0 ? round((float) $r->valor_ent / (float) $r->cant_ent, 4) : 0;
-        }
+
+        $promedio = function ($campo, $prefijo) use (&$out) {
+            $q = InventarioMovimiento::selectRaw(
+                "{$campo} as sujeto, SUM(cantidad * costo_unit) as valor_ent, SUM(cantidad) as cant_ent"
+            )
+                ->where('cantidad', '>', 0)
+                ->where('costo_unit', '>', 0)
+                ->whereNotNull($campo)
+                ->groupBy($campo);
+
+            // Un producto cuenta como agregado sólo si el movimiento no trae
+            // variante; si no, se contaría dos veces lo mismo.
+            if ($campo === 'producto_id') {
+                $q->whereNull('variante_id');
+            }
+
+            foreach ($q->get() as $r) {
+                $out[$prefijo.':'.$r->sujeto] = $r->cant_ent > 0
+                    ? round((float) $r->valor_ent / (float) $r->cant_ent, 4) : 0;
+            }
+        };
+
+        $promedio('variante_id', 'v');
+        $promedio('producto_id', 'p');
+
         return $out;
     }
 
@@ -349,13 +445,15 @@ class InventarioGestionController extends Controller implements HasMiddleware
      */
     private function calcularValorPorUbicacion(array $costos): array
     {
-        $saldos = InventarioMovimiento::selectRaw('ubicacion_id, variante_id, SUM(cantidad) as saldo')
-            ->groupBy('ubicacion_id', 'variante_id')
+        $saldos = InventarioMovimiento::selectRaw(
+            'ubicacion_id, variante_id, producto_id, SUM(cantidad) as saldo'
+        )
+            ->groupBy('ubicacion_id', 'variante_id', 'producto_id')
             ->having('saldo', '>', 0)
             ->get();
         $out = [];
         foreach ($saldos as $r) {
-            $costo = (float) ($costos[$r->variante_id] ?? 0);
+            $costo = (float) ($costos[CostoPromedio::clave($r->variante_id, $r->producto_id)] ?? 0);
             $out[$r->ubicacion_id] = ($out[$r->ubicacion_id] ?? 0) + ((int) $r->saldo * $costo);
         }
         return array_map(fn ($v) => round($v, 2), $out);
@@ -375,6 +473,19 @@ class InventarioGestionController extends Controller implements HasMiddleware
                 'fecha' => $t->fecha_conteo?->format('Y-m-d'),
                 'items_diferentes' => (int) $t->items_diferentes,
             ]),
+
+            // Sin esto el botón «Nuevo conteo» era decorativo: abría el modal
+            // con el desplegable de ubicaciones VACÍO, así que nunca se podía
+            // crear una toma física. La pantalla declaraba la prop y el
+            // controlador no la mandaba. Encontrado el 2026-10-13 haciendo el
+            // recorrido completo.
+            'ubicaciones' => InventarioUbicacion::where('activa', true)
+                // Las de SIIGO son bodegas importadas del catálogo: no se
+                // cuentan, son destino contable. Mismo criterio que en la
+                // pantalla de ubicaciones.
+                ->where('codigo', 'not like', 'SIIGO-%')
+                ->orderBy('codigo')
+                ->get(['id', 'codigo', 'nombre']),
         ]);
     }
 
@@ -446,15 +557,21 @@ class InventarioGestionController extends Controller implements HasMiddleware
     // ---------- TRASLADO SHOW (repeater items + acciones state machine) ----------
     public function trasladoShow(int $id): Response
     {
-        $t = Traslado::with(['items.variante.producto', 'origen', 'destino', 'solicitante', 'ejecutor'])
+        $t = Traslado::with(['items.variante.producto', 'items.producto', 'origen', 'destino', 'solicitante', 'ejecutor',
+                'aprobador', 'enviador', 'recogedor', 'prestamo'])
             ->findOrFail($id);
+        $esMuestra = $t->esMuestra();
 
         // INV-A2 · badge SIIGO del traslado · se calcula desde los movimientos
         // kardex ligados: si todos los traslado_salida/entrada tienen
         // siigo_journal_id → verde (asientos ya en SIIGO); si alguno falta → ámbar;
         // sin movs todavía → gris.
         $siigoBadge = $this->resumirBadgeSiigo(
-            \App\Modules\Dropi\Models\InventarioMovimiento::where('referencia_type', Traslado::class)
+            // La columna es `referencia_tipo`. Con `referencia_type` esta
+            // consulta lanza «Unknown column» y la pantalla de detalle da 500
+            // antes de pintar nada. Mismo error que tenía la devolución a
+            // proveedor; no se notaba porque no hay traslados ni conteos todavía.
+            \App\Modules\Dropi\Models\InventarioMovimiento::where('referencia_tipo', Traslado::class)
                 ->where('referencia_id', $t->id)
                 ->get(['id', 'siigo_journal_id', 'siigo_sync_at'])
         );
@@ -473,17 +590,36 @@ class InventarioGestionController extends Controller implements HasMiddleware
                 'fecha_solicitud' => optional($t->fecha_solicitud)->format('Y-m-d'),
                 'fecha_envio' => optional($t->fecha_envio)->format('Y-m-d H:i'),
                 'fecha_ejecucion' => optional($t->fecha_ejecucion)->format('Y-m-d H:i'),
+                // MKT-5 · muestras de Marketing: quién aprobó, entregó y recogió.
+                'muestra' => $esMuestra ? [
+                    'es_prestamo' => $t->esPrestamoMarketing(),
+                    'aprobado_por' => $t->aprobador?->name,
+                    'aprobado_at' => optional($t->aprobado_at)->format('Y-m-d H:i'),
+                    'enviado_por' => $t->enviador?->name,
+                    'recogido_por' => $t->recogedor?->name,
+                    'estado_mercancia' => $t->estado_mercancia,
+                    'estado_mercancia_label' => Traslado::ESTADOS_MERCANCIA[$t->estado_mercancia] ?? null,
+                    'observaciones_entrega' => $t->observaciones_entrega,
+                    'prestamo' => $t->prestamo?->numero,
+                ] : null,
+                // Mismo caso que el conteo: un ítem agregado no tiene variante
+                // y salía sin SKU ni nombre. El guardar ya los aceptaba
+                // (INV-A7); faltaba que la pantalla supiera mostrarlos.
                 'items' => $t->items->map(fn ($it) => [
                     'id' => $it->id,
                     'variante_id' => $it->variante_id,
-                    'sku' => $it->variante?->codigo_barras,
-                    'producto' => $it->variante?->producto?->nombre,
-                    'detalle' => trim(($it->variante?->color_nombre ?? '') . ' ' . ($it->variante?->talla ?? '')),
+                    'sku' => $it->variante?->codigo_barras ?? $it->producto?->referencia,
+                    'producto' => $it->variante?->producto?->nombre ?? $it->producto?->nombre,
+                    'detalle' => $it->variante
+                        ? trim(($it->variante->color_nombre ?? '').' '.($it->variante->talla ?? ''))
+                        : 'todas las presentaciones',
                     'cantidad_solicitada' => (float) $it->cantidad_solicitada,
                     'cantidad_ejecutada' => (float) $it->cantidad_ejecutada,
                     'notas' => $it->notas,
                 ])->values(),
             ],
+            'equipo_marketing' => $esMuestra ? app(MuestrasMarketing::class)->equipo() : [],
+            'estados_mercancia' => $esMuestra ? Traslado::ESTADOS_MERCANCIA : [],
         ]);
     }
 
@@ -510,8 +646,7 @@ class InventarioGestionController extends Controller implements HasMiddleware
         // scope por bodega
         $u = $r->user();
         if (! $u->esAracely()) {
-            $bod = $u->bodegasAsignadasIds();
-            abort_unless(in_array((int)$t->origen_id, $bod, true) && in_array((int)$t->destino_id, $bod, true), 403);
+            abort_unless($t->loOperaEnBodega($u), 403);
         }
         \App\Modules\Inventario\Models\TrasladoItem::updateOrCreate(
             [
@@ -533,8 +668,7 @@ class InventarioGestionController extends Controller implements HasMiddleware
         );
         $u = $r->user();
         if (! $u->esAracely()) {
-            $bod = $u->bodegasAsignadasIds();
-            abort_unless(in_array((int)$t->origen_id, $bod, true) && in_array((int)$t->destino_id, $bod, true), 403);
+            abort_unless($t->loOperaEnBodega($u), 403);
         }
         \App\Modules\Inventario\Models\TrasladoItem::where('traslado_id', $t->id)->whereKey($itemId)->delete();
         return back()->with('success', 'Ítem eliminado.');
@@ -553,12 +687,7 @@ class InventarioGestionController extends Controller implements HasMiddleware
         if (! $u || $u->esAracely()) {
             return;
         }
-        $bodegas = $u->bodegasAsignadasIds();
-        abort_unless(
-            in_array((int) $t->origen_id, $bodegas, true) && in_array((int) $t->destino_id, $bodegas, true),
-            403,
-            'Este traslado es de otra bodega.'
-        );
+        abort_unless($t->loOperaEnBodega($u), 403, 'Este traslado es de otra bodega.');
     }
 
     /**
@@ -584,17 +713,46 @@ class InventarioGestionController extends Controller implements HasMiddleware
         $t = Traslado::findOrFail($id);
         $this->autorizarTraslado($t);
         try {
-            app(\App\Modules\Inventario\Actions\EjecutarTraslado::class)->enviar($t);
+            $t = app(\App\Modules\Inventario\Actions\EjecutarTraslado::class)->enviar($t);
+            if ($t->esPrestamoMarketing()) {
+                app(MuestrasMarketing::class)->avisarLista($t);
+                return back()->with('success', "Muestras {$t->numero} listas: se le avisó a Marketing que pase a recogerlas.");
+            }
             return back()->with('success', "Traslado {$t->numero} enviado.");
         } catch (\Throwable $e) {
             return back()->with('error', $e->getMessage());
         }
     }
 
-    public function trasladoRecibir(int $id): RedirectResponse
+    public function trasladoRecibir(Request $r, int $id): RedirectResponse
     {
-        $t = Traslado::findOrFail($id);
+        $t = Traslado::with(['origen', 'destino'])->findOrFail($id);
         $this->autorizarTraslado($t);
+
+        // MKT-5 · en las muestras de Marketing la entrega queda firmada: quién
+        // se la llevó (o la trajo de vuelta) y en qué estado iba.
+        if ($t->esMuestra()) {
+            $data = $r->validate([
+                'recogido_por' => ['required', 'integer', 'exists:users,id'],
+                'estado_mercancia' => ['required', 'in:'.implode(',', array_keys(Traslado::ESTADOS_MERCANCIA))],
+                'observaciones_entrega' => ['nullable', 'string', 'max:1000', 'required_unless:estado_mercancia,completo'],
+            ], [
+                'observaciones_entrega.required_unless' => 'Si no va completa y en buen estado, anotá qué pasó.',
+            ], [
+                'recogido_por' => $t->esPrestamoMarketing() ? 'quién la recogió' : 'quién la trajo',
+                'estado_mercancia' => 'estado de la mercancía',
+            ]);
+            try {
+                app(MuestrasMarketing::class)->entregar($t, (int) $data['recogido_por'],
+                    $data['estado_mercancia'], $data['observaciones_entrega'] ?? null);
+                return back()->with('success', $t->esPrestamoMarketing()
+                    ? "Muestras {$t->numero} entregadas a Marketing."
+                    : "Devolución {$t->numero} recibida en bodega.");
+            } catch (\Throwable $e) {
+                return back()->with('error', $e->getMessage());
+            }
+        }
+
         try {
             app(\App\Modules\Inventario\Actions\EjecutarTraslado::class)->recibir($t);
             return back()->with('success', "Traslado {$t->numero} recibido.");
@@ -609,8 +767,24 @@ class InventarioGestionController extends Controller implements HasMiddleware
         $t = Traslado::findOrFail($id);
         $this->autorizarTraslado($t);
         try {
-            app(\App\Modules\Inventario\Actions\EjecutarTraslado::class)->anular($t, $data['motivo']);
+            $t = app(\App\Modules\Inventario\Actions\EjecutarTraslado::class)->anular($t, $data['motivo']);
+            if ($t->esMuestra()) {
+                app(MuestrasMarketing::class)->avisarAnulada($t, $data['motivo']);
+            }
             return back()->with('success', "Traslado {$t->numero} anulado.");
+        } catch (\Throwable $e) {
+            return back()->with('error', $e->getMessage());
+        }
+    }
+
+    /** MKT-5 · aprobar una solicitud de muestras de Marketing. */
+    public function trasladoAprobar(Request $r, int $id): RedirectResponse
+    {
+        $t = Traslado::with(['origen', 'destino'])->findOrFail($id);
+        $this->autorizarTraslado($t);
+        try {
+            app(MuestrasMarketing::class)->aprobar($t, $r->user());
+            return back()->with('success', "Solicitud {$t->numero} aprobada. Agregá las referencias y marcala lista.");
         } catch (\Throwable $e) {
             return back()->with('error', $e->getMessage());
         }
@@ -619,13 +793,17 @@ class InventarioGestionController extends Controller implements HasMiddleware
     // ---------- CONTEO SHOW + ACCIONES ----------
     public function conteoShow(int $id): Response
     {
-        $toma = TomaFisica::with(['items.variante.producto', 'ubicacion', 'creador', 'cerrador'])->findOrFail($id);
+        $toma = TomaFisica::with(['items.variante.producto', 'items.producto', 'ubicacion', 'creador', 'cerrador'])->findOrFail($id);
         $estado = is_object($toma->estado) ? $toma->estado->value : $toma->estado;
 
         // INV-A2 · badge SIIGO del conteo · ajuste_toma_fisica dispara journal
         // en SIIGO (post BUG-INV). Mostramos el estado del asiento aquí.
         $siigoBadge = $this->resumirBadgeSiigo(
-            \App\Modules\Dropi\Models\InventarioMovimiento::where('referencia_type', TomaFisica::class)
+            // La columna es `referencia_tipo`. Con `referencia_type` esta
+            // consulta lanza «Unknown column» y la pantalla de detalle da 500
+            // antes de pintar nada. Mismo error que tenía la devolución a
+            // proveedor; no se notaba porque no hay traslados ni conteos todavía.
+            \App\Modules\Dropi\Models\InventarioMovimiento::where('referencia_tipo', TomaFisica::class)
                 ->where('referencia_id', $toma->id)
                 ->get(['id', 'siigo_journal_id', 'siigo_sync_at'])
         );
@@ -643,11 +821,21 @@ class InventarioGestionController extends Controller implements HasMiddleware
                 'cerrada_at' => optional($toma->cerrada_at)->format('Y-m-d H:i'),
                 'items_diferentes' => (int) $toma->items_diferentes,
                 'valor_ajuste' => (float) $toma->valor_ajuste,
+                /*
+                 * El renglón tiene que decir QUÉ se está contando.
+                 *
+                 * Esto leía sólo `$it->variante`. Un ítem agregado —que no
+                 * tiene variante— salía con SKU y producto en blanco: la
+                 * persona en bodega veía una fila que decía «19» y nada más.
+                 * No se puede contar lo que no se sabe qué es.
+                 */
                 'items' => $toma->items->map(fn ($it) => [
                     'id' => $it->id,
-                    'sku' => $it->variante?->codigo_barras,
-                    'producto' => $it->variante?->producto?->nombre,
-                    'detalle' => trim(($it->variante?->color_nombre ?? '') . ' ' . ($it->variante?->talla ?? '')),
+                    'sku' => $it->variante?->codigo_barras ?? $it->producto?->referencia,
+                    'producto' => $it->variante?->producto?->nombre ?? $it->producto?->nombre,
+                    'detalle' => $it->variante
+                        ? trim(($it->variante->color_nombre ?? '').' '.($it->variante->talla ?? ''))
+                        : 'todas las presentaciones',
                     'saldo_sistema' => (float) $it->saldo_sistema,
                     'cantidad_contada' => $it->cantidad_contada === null ? null : (float) $it->cantidad_contada,
                     'diferencia' => (float) $it->diferencia,
@@ -842,7 +1030,12 @@ class InventarioGestionController extends Controller implements HasMiddleware
     // ---------- ALERTAS STOCK ----------
     public function alertasIndex(Request $r): Response
     {
-        $configs = AlertaStockConfig::with(['variante.producto:id,nombre', 'ubicacion:id,codigo,nombre'])
+        // `producto` también: la alerta puede ser de un agregado, y sin la
+        // relación cargada serían dos consultas por fila de la tabla.
+        $configs = AlertaStockConfig::with([
+            'variante.producto:id,nombre', 'producto:id,nombre,referencia',
+            'ubicacion:id,codigo,nombre',
+        ])
             ->orderByDesc('id')->paginate(30);
         $ubicaciones = InventarioUbicacion::where('activa', true)->orderBy('codigo')->get(['id','codigo','nombre']);
         return Inertia::render('Inventario/Alertas/Index', [
@@ -852,9 +1045,20 @@ class InventarioGestionController extends Controller implements HasMiddleware
             'can_importar_alertas' => (bool) $r->user()?->esAracely(),
             'alertas' => $configs->through(fn ($a) => [
                 'id' => $a->id,
+                /*
+                 * La alerta puede ser de una variante O de un producto
+                 * agregado, y hasta acá todo se resolvía SÓLO por la variante:
+                 * una alerta de agregado —las que entran por el Excel masivo,
+                 * que sí las acepta— salía con el nombre y el SKU en blanco, y
+                 * sin `producto_id` no se podía ni editar.
+                 */
                 'variante_id' => $a->variante_id,
-                'producto' => $a->variante?->producto?->nombre,
-                'sku' => $a->variante?->codigo_barras,
+                'producto_id' => $a->producto_id,
+                'producto' => $a->variante?->producto?->nombre ?? $a->producto?->nombre,
+                'sku' => $a->variante?->codigo_barras ?? $a->producto?->referencia,
+                // Para que la tabla pueda decir «todas las presentaciones» en
+                // vez de dejar la columna vacía.
+                'es_agregado' => $a->esAgregada(),
                 'ubicacion_id' => $a->ubicacion_id,
                 'ubicacion' => $a->ubicacion ? ($a->ubicacion->codigo . ' · ' . $a->ubicacion->nombre) : '— Global —',
                 'minimo' => (int) $a->stock_minimo,
@@ -1003,10 +1207,40 @@ class InventarioGestionController extends Controller implements HasMiddleware
     }
 
     // ---------- AUTOCOMPLETE VARIANTES ----------
+    /**
+     * Busca lo que se puede trasladar: variantes Y productos agregados.
+     *
+     * Miraba sólo `ProductoVariante`. Los productos cuyo saldo vive sin
+     * variante —46 unidades de GB-DEMO-002, 20 de AND2512-79/154 el 29-oct—
+     * no aparecían jamás, así que el traslado se quedaba en borrador sin
+     * manera de agregarles un ítem. El guardar ya los aceptaba desde INV-A7;
+     * lo que faltaba era poder encontrarlos.
+     *
+     * Devuelve las dos cosas en una lista: la variante trae `id`, el agregado
+     * trae `producto_id`, y el front manda el que venga lleno.
+     */
     public function buscarVariantes(Request $r)
     {
         $q = trim((string) $r->input('q', ''));
         if (strlen($q) < 2) return response()->json([]);
+
+        $agregados = Producto::query()
+            ->where(fn ($p) => $p->where('nombre', 'like', "%{$q}%")->orWhere('referencia', 'like', "%{$q}%"))
+            // Lo que de verdad tiene saldo sin variante, lo diga la bandera o no:
+            // es el mismo desacuerdo entre `desglose_stock` y el kardex que
+            // dejaba sin contar media bodega.
+            ->whereHas('movimientos', fn ($m) => $m->whereNull('variante_id'))
+            ->limit(15)
+            ->get(['id', 'referencia', 'nombre'])
+            ->map(fn ($p) => [
+                'id' => null,
+                'producto_id' => $p->id,
+                'sku' => $p->referencia,
+                'producto' => $p->nombre,
+                'detalle' => 'todas las presentaciones',
+                'label' => trim($p->nombre.' ['.$p->referencia.']'),
+            ]);
+
         $vars = ProductoVariante::query()
             ->with('producto:id,referencia,nombre')
             ->where(function ($x) use ($q) {
@@ -1014,13 +1248,17 @@ class InventarioGestionController extends Controller implements HasMiddleware
                   ->orWhereHas('producto', fn ($p) => $p->where('nombre', 'like', "%{$q}%")->orWhere('referencia', 'like', "%{$q}%"));
             })
             ->limit(15)->get();
-        return response()->json($vars->map(fn ($v) => [
+        $porVariante = $vars->map(fn ($v) => [
             'id' => $v->id,
+            'producto_id' => null,
             'sku' => $v->codigo_barras,
             'producto' => $v->producto?->nombre,
             'detalle' => trim(($v->color_nombre ?? '') . ' ' . ($v->talla ?? '')),
             'label' => trim(($v->producto?->nombre ?? '?') . ' · ' . ($v->color_nombre ?? '') . ' ' . ($v->talla ?? '') . ' [' . $v->codigo_barras . ']'),
-        ]));
+        ]);
+
+        // Los agregados primero: son los que faltaban y los que más se buscan.
+        return response()->json($agregados->concat($porVariante)->values());
     }
 
     // ---------- INV-B2 · IMPORT EXCEL MASIVO (Conteos, Traslados, Alertas) ----------
@@ -1199,8 +1437,7 @@ class InventarioGestionController extends Controller implements HasMiddleware
         );
         $u = $r->user();
         if (! $u->esAracely()) {
-            $bod = $u->bodegasAsignadasIds();
-            abort_unless(in_array((int) $t->origen_id, $bod, true) && in_array((int) $t->destino_id, $bod, true), 403);
+            abort_unless($t->loOperaEnBodega($u), 403);
         }
 
         $filas = $this->parsearArchivoSku($r);

@@ -8,15 +8,24 @@ use App\Modules\Dropi\Models\DropiPedido;
 use Carbon\CarbonImmutable;
 
 beforeEach(function () {
-    // Reforzamos que el driver activo sea el mock aunque .env cambie
+    // Reforzamos que el driver activo sea el mock aunque .env cambie.
+    //
+    // El fixture vive con las pruebas (tests/Fixtures/dropi). Antes se leía de
+    // storage/app/dropi-fixtures, que storage/app/.gitignore ignora entero: el
+    // archivo nunca llegó al repo, el mock devolvía cero pedidos y las cuatro
+    // pruebas fallaban en cualquier máquina menos la de quien las escribió.
     app()->bind(
         DropiClientInterface::class,
-        fn () => new DropiMockClient(storage_path('app/dropi-fixtures')),
+        fn () => new DropiMockClient(base_path('tests/Fixtures/dropi')),
     );
+
+    // Fecha fija y vieja: con «hace un año» el fixture (fechas fijas) se
+    // habría quedado por fuera de la ventana al año de escrito.
+    $this->desde = CarbonImmutable::parse('2020-01-01');
 });
 
 it('sincroniza pedidos desde el fixture', function () {
-    $result = app(SincronizarPedidosDropi::class)->handle(CarbonImmutable::now()->subYear());
+    $result = app(SincronizarPedidosDropi::class)->handle($this->desde);
 
     expect($result['driver'])->toBe('mock')
         ->and($result['procesados'])->toBe(4)
@@ -26,20 +35,56 @@ it('sincroniza pedidos desde el fixture', function () {
 });
 
 it('es idempotente: correr dos veces no duplica', function () {
+    /*
+     * La segunda corrida no trae nada nuevo NI nada actualizado: los cuatro
+     * pedidos llegan idénticos, así que `guardarPedido()` los clasifica como
+     * `sin_cambios`.
+     *
+     * La prueba esperaba `actualizados => 4` y eso describía un sistema peor:
+     * contar como «actualizado» una fila que no cambió haría que el resumen
+     * del sync dijera que hubo movimiento todos los días, y el día que de
+     * verdad cambiara algo nadie lo notaría entre el ruido.
+     */
     $action = app(SincronizarPedidosDropi::class);
-    $desde = CarbonImmutable::now()->subYear();
+    $desde = $this->desde;
 
     $primera = $action->handle($desde);
     $segunda = $action->handle($desde);
 
     expect($primera['nuevos'])->toBe(4)
         ->and($segunda['nuevos'])->toBe(0)
-        ->and($segunda['actualizados'])->toBe(4)
+        ->and($segunda['actualizados'])->toBe(0)
+        ->and($segunda['sin_cambios'])->toBe(4)
+        ->and($segunda['procesados'])->toBe(4)
         ->and(DropiPedido::count())->toBe(4);
 });
 
+it('sí cuenta como actualizado lo que de verdad cambió', function () {
+    /*
+     * La otra mitad: si `sin_cambios` se tragara también los cambios reales,
+     * el sync quedaría mudo.
+     *
+     * Se ensucia un dato de cabecera y no el estado: el estado no sirve para
+     * esta prueba porque la máquina de estados RECHAZA ir hacia atrás —poner
+     * el pedido en «entregado» y que el fixture lo traiga en «pending» no es
+     * un cambio, es una transición bloqueada, y se registra como tal—.
+     */
+    $action = app(SincronizarPedidosDropi::class);
+    $desde = $this->desde;
+
+    $action->handle($desde);
+
+    DropiPedido::where('guia', 'GUI-100001')->update(['cliente_nombre' => 'Nombre viejo que Dropi ya corrigió']);
+
+    $segunda = $action->handle($desde);
+
+    expect($segunda['nuevos'])->toBe(0)
+        ->and($segunda['actualizados'])->toBe(1)
+        ->and($segunda['sin_cambios'])->toBe(3);
+});
+
 it('marca los pedidos como pendiente_inventario cuando no hay stock', function () {
-    app(SincronizarPedidosDropi::class)->handle(CarbonImmutable::now()->subYear());
+    app(SincronizarPedidosDropi::class)->handle($this->desde);
 
     $pedido = DropiPedido::where('guia', 'GUI-100001')->first();
 

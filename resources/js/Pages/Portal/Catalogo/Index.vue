@@ -90,6 +90,19 @@ const rangoPrecio = (p) => {
                         <span v-if="p.es_agregado">Colores surtidos</span>
                         <span v-else>{{ p.variantes_count }} variantes</span>
                     </div>
+                    <!--
+                        Cuánto hay. El catálogo no mostraba stock de ninguna
+                        clase: el cliente pedía lo que quisiera y el problema
+                        salía el día del alistamiento.
+                    -->
+                    <div class="text-xs mt-1 font-semibold" :class="[
+                        p.disponible === 0 ? 'text-red-600'
+                        : p.disponible <= 10 ? 'text-amber-600' : 'text-emerald-600',
+                    ]">
+                        <template v-if="p.disponible === 0">Agotado</template>
+                        <template v-else-if="p.disponible <= 10">Quedan {{ p.disponible }}</template>
+                        <template v-else>{{ p.disponible }} disponibles</template>
+                    </div>
                     <div class="mt-auto pt-2">
                         <div v-if="rangoPrecio(p)" class="font-bold text-brand-600">{{ rangoPrecio(p) }}</div>
                         <a v-else :href="`https://wa.me/573001234567?text=${encodeURIComponent('Hola GREAT BABY, quisiera cotizar el producto ' + p.referencia + ' - ' + p.nombre)}`"

@@ -1,10 +1,13 @@
 <script setup>
-import { reactive, ref } from 'vue';
+import { computed, reactive, ref } from 'vue';
 import { Head, router, usePage } from '@inertiajs/vue3';
 import { Lock, Mail, Eye, EyeOff, KeyRound } from 'lucide-vue-next';
 
 const page = usePage();
 const form = reactive({ email: '', password: '', remember: false, processing: false });
+
+/** Todo lo que el servidor haya devuelto, en el orden en que llegó. */
+const erroresVisibles = computed(() => Object.values(page.props.errors ?? {}).filter(Boolean));
 
 // H3 · toggle visibilidad + panel reset password.
 const showPassword = ref(false);
@@ -57,8 +60,19 @@ const enviarReset = async () => {
             </div>
 
             <div class="card p-6 space-y-4">
-                <div v-if="page.props.errors?.email" class="p-3 rounded-lg bg-red-50 dark:bg-red-950/40 border-l-4 border-red-500 text-red-700 dark:text-red-300 text-sm">
-                    {{ page.props.errors.email }}
+                <!--
+                    Se muestran TODOS los errores, no sólo el del correo.
+
+                    El servidor exige ocho caracteres de clave y ese mensaje
+                    llega en `errors.password`, que esta pantalla no pintaba:
+                    el cliente escribía una clave corta, apretaba Ingresar y no
+                    pasaba absolutamente nada. Sin mensaje, sin recarga, sin
+                    pista. La conclusión razonable es que el portal está roto,
+                    y la llamada entra por WhatsApp.
+                -->
+                <div v-if="erroresVisibles.length"
+                     class="p-3 rounded-lg bg-red-50 dark:bg-red-950/40 border-l-4 border-red-500 text-red-700 dark:text-red-300 text-sm space-y-1">
+                    <p v-for="(mensaje, i) in erroresVisibles" :key="i">{{ mensaje }}</p>
                 </div>
 
                 <!-- H3 · form de login (oculto si estamos en reset) -->

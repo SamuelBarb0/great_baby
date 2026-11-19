@@ -12,6 +12,7 @@ class ImportacionPdfController extends Controller
     public function pdf(Importacion $importacion): Response
     {
         abort_unless(auth()->check(), 401);
+        abort_unless(\App\Auth\Permisos::puede(auth()->user(), 'compras_importacion'), 403);
 
         $importacion->load(['ordenes.items', 'gastos.proveedor', 'lineas.producto', 'lineas.variante', 'liquidador']);
 

@@ -22,7 +22,7 @@ use Illuminate\Support\Facades\Queue;
 
 beforeEach(function () {
     Queue::fake();
-    SiigoConfig::current()->forceFill(['push_auto' => true, 'activo' => true])->save();
+    SiigoConfig::current()->forceFill(['username' => 'sandbox@siigoapi.com', 'access_key' => 'llave-de-prueba', 'push_auto' => true, 'activo' => true])->save();
     SiigoConfig::invalidarPushAutoCache();
 });
 

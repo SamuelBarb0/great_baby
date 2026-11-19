@@ -29,7 +29,9 @@ class RolesController extends Controller implements HasMiddleware
     {
         return [new Middleware(function (Request $r, \Closure $next) {
             // Repartir accesos es lo más sensible del sistema: sólo root.
-            abort_unless(Permisos::esRoot($r->user()), 403,
+            // Casilla: Usuarios. Es la pantalla donde se reparten los accesos,
+                //   asi que tambien se reparte desde una casilla.
+                abort_unless(Permisos::puede($r->user(), 'usuarios'), 403,
                 'Sólo Aracely o Gerencia pueden administrar roles.');
 
             return $next($r);
@@ -38,14 +40,27 @@ class RolesController extends Controller implements HasMiddleware
 
     public function index(): Response
     {
-        $roles = Role::withCount(['users', 'permissions'])
+        /*
+         * El contador cuenta SECCIONES, no permisos.
+         *
+         * Desde que cada sección tiene cuatro acciones, contar permisos daría
+         * «112 accesos» donde antes decía 28 y nadie sabría qué significa.
+         * Lo que importa es a cuántas pantallas entra el rol; el detalle de
+         * qué puede hacer en cada una está adentro.
+         */
+        $roles = Role::withCount([
+            'users',
+            'permissions as secciones_count' => fn ($q) => $q->where('name', 'like', 'ver.%'),
+            'permissions as acciones_count' => fn ($q) => $q->where('name', 'not like', 'ver.%'),
+        ])
             ->orderBy('name')
             ->get()
             ->map(fn (Role $r) => [
                 'id' => $r->id,
                 'nombre' => $r->name,
                 'usuarios' => $r->users_count,
-                'permisos' => $r->permissions_count,
+                'permisos' => $r->secciones_count,
+                'acciones' => $r->acciones_count,
                 'protegido' => in_array($r->name, Permisos::ROLES_PROTEGIDOS, true),
                 'root' => in_array($r->name, ['Aracely', 'Gerencia'], true),
             ]);
@@ -71,6 +86,9 @@ class RolesController extends Controller implements HasMiddleware
                 'usuarios' => $role->users()->pluck('users.id')->all(),
             ] : null,
             'catalogo' => Permisos::catalogo(),
+            'acciones' => collect(Permisos::ACCIONES)
+                ->map(fn ($texto, $accion) => ['accion' => $accion, 'texto' => $texto])
+                ->values(),
             'usuarios' => User::orderBy('name')->get(['id', 'name', 'email'])
                 ->map(fn ($u) => [
                     'id' => $u->id,
@@ -92,7 +110,9 @@ class RolesController extends Controller implements HasMiddleware
             ],
             'permisos' => ['array'],
             'permisos.*' => ['string', Rule::in(
-                array_map(fn ($s) => Permisos::permiso($s), array_keys(Permisos::MATRIZ))
+                // Las cuatro casillas de cada sección: con sólo el `ver`, guardar un rol con
+                // crear, editar o eliminar marcado se rechazaba como «permiso inválido».
+                array_merge(...array_map(fn ($s) => Permisos::permisosDe($s), array_keys(Permisos::MATRIZ)))
             )],
             'usuarios' => ['array'],
             'usuarios.*' => ['integer', 'exists:users,id'],

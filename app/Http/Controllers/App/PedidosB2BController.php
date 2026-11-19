@@ -19,18 +19,81 @@ class PedidosB2BController extends Controller implements HasMiddleware
     /** Ítems descontados del kardex en el último despacho, para el mensaje al usuario. */
     private int $lineasDescontadas = 0;
 
+    /**
+     * Las tres decisiones del pedido, cada una con su dueño.
+     *
+     * Están acá arriba y no sueltas dentro de cada método para que la pantalla
+     * pueda preguntar lo MISMO que después se va a exigir. El defecto que
+     * arreglan era exactamente ese desajuste: la pantalla decidía por estado y
+     * la puerta no decidía nada.
+     */
+    private function puedeAprobar(?\App\Models\User $u): bool
+    {
+        // Aprobar o rechazar un pedido es decisión comercial, y además es el
+        // mismo botón que libera un pedido retenido por cartera.
+        return (bool) $u && ($u->esAracely() || $u->esContable());
+    }
+
+    private function puedeFacturar(?\App\Models\User $u): bool
+    {
+        // La misma puerta que la Bandeja de facturación, para que no vuelvan
+        // a separarse: quien factura allá factura acá.
+        return (bool) $u && ($u->esAracely() || $u->esFacturador());
+    }
+
+    private function puedeDespachar(?\App\Models\User $u): bool
+    {
+        // Esta sí es de bodega: es la salida física al transportador.
+        return (bool) $u && ($u->esAracely() || $u->esEquipoBodega() || $u->hasRole('Despachador'));
+    }
+
+    /**
+     * ¿Este usuario sólo puede ver LOS SUYOS?
+     *
+     * El vendedor entra por una puerta distinta: su propio Panel y su
+     * Seguimiento le pintan enlaces a `/app/pedidos-b2b/{id}`, y hasta ahora
+     * los cuatro le daban 403 — el menú lo ofrecía y la puerta lo negaba, en
+     * su propia pantalla y sobre sus propios pedidos. Pero abrirle la lista
+     * entera sería mostrarle la cartera de sus compañeros, así que entra
+     * acotado: sólo las filas donde él es el vendedor.
+     */
+    private function soloLosSuyos(?\App\Models\User $u): bool
+    {
+        return (bool) $u
+            && ! ($u->esAracely() || $u->esEquipoBodega() || $u->hasRole('Despachador')
+                || $u->esContable() || $u->esFacturador())
+            && \App\Auth\Permisos::puede($u, 'vendedor');
+    }
+
     public static function middleware(): array
     {
         return [
             new Middleware(function (Request $r, \Closure $next) {
-                // LOG · Pedidos B2B: AdminBodega y Despachador también entran
-                //   (necesitan ver qué viene para despachar y en qué estado).
-                //   Las acciones de aprobar/rechazar/facturar siguen siendo
-                //   responsabilidad gerencial, protegidas por su propia
-                //   validación de estado adentro de cada método.
+                /*
+                 * Quién ENTRA a la pantalla. Quién puede APRETAR cada botón se
+                 * decide abajo, acción por acción.
+                 *
+                 * El comentario que estaba acá decía que aprobar/rechazar/
+                 * facturar «siguen siendo responsabilidad gerencial, protegidas
+                 * por su propia validación de estado adentro de cada método».
+                 * Un chequeo de estado no es un chequeo de autorización: lo
+                 * único que exigía `aprobar()` era que el pedido estuviera en
+                 * `enviado` o `retenido`. Se comprobó en pantalla — un
+                 * despachador abría el pedido y veía **Aprobar**, **Rechazar**
+                 * y **Facturar**, y el botón de un retenido le decía «Liberar
+                 * (Gerencia)» mientras le pedía confirmar que «Gerencia
+                 * autoriza vender aunque el semáforo de cartera lo bloqueó».
+                 * Funcionaba: emitía factura real contra la resolución DIAN.
+                 *
+                 * Además entran cartera y facturación, que antes no podían ni
+                 * ver la pantalla donde se toman sus propias decisiones.
+                 */
                 $u = $r->user();
                 abort_unless(
-                    $u && ($u->esEquipoBodega() || $u->hasRole('Despachador')),
+                    $u && ($u->esEquipoBodega() || $u->hasRole('Despachador')
+                        || $u->esContable() || $u->esFacturador() || $u->esAracely()
+                        // El vendedor entra sólo a los suyos; ver `soloLosSuyos()`.
+                        || \App\Auth\Permisos::puede($u, 'vendedor')),
                     403
                 );
                 return $next($r);
@@ -41,7 +104,13 @@ class PedidosB2BController extends Controller implements HasMiddleware
     public function index(Request $request): Response
     {
         $estado = (string) $request->input('estado', '');
+        // El vendedor ve SÓLO los suyos. Fail-closed: si mañana alguien entra
+        // por una puerta nueva sin pasar por acá, ve su propia lista vacía, no
+        // la de todos.
+        $mios = $this->soloLosSuyos($request->user()) ? $request->user()->id : null;
+
         $pedidos = PedidoCliente::with(['contacto:id,nombre_completo,razon_social,email', 'lista:id,nombre'])
+            ->when($mios, fn ($q) => $q->where('vendedor_id', $mios))
             ->when($estado, fn ($q) => $q->where('estado', $estado))
             // LOG-J3 · retenidos y nuevos (enviado) arriba porque son los que
             //   requieren una acción humana; luego por recencia. Si hay filtro
@@ -58,6 +127,7 @@ class PedidosB2BController extends Controller implements HasMiddleware
             ->withQueryString();
 
         $conteos = PedidoCliente::selectRaw('estado, COUNT(*) as total')
+            ->when($mios, fn ($q) => $q->where('vendedor_id', $mios))
             ->groupBy('estado')->pluck('total', 'estado')->all();
 
         return Inertia::render('PedidosB2B/Index', [
@@ -77,19 +147,37 @@ class PedidosB2BController extends Controller implements HasMiddleware
         ]);
     }
 
-    public function show(int $pedido): Response
+    public function show(Request $r, int $pedido): Response
     {
         // LOG-J7 · cargamos siigo_id + cufe para que la UI decida si permite despachar.
         // LOG-J10 · creadoPor/facturadoPor/despachadoPor para armar la línea de tiempo.
         $p = PedidoCliente::with([
             'items.variante:id,codigo_barras', 'contacto', 'lista:id,nombre',
             'factura:id,numero,siigo_id,cufe',
-            'facturadoPor:id,name', 'despachadoPor:id,name',
+            'aprobadoPor:id,name', 'facturadoPor:id,name', 'despachadoPor:id,name',
             // LOG-J5 · incluimos el alistador para el timeline + Show card.
             'alistador:id,name',
         ])->findOrFail($pedido);
 
+        /*
+         * El recorte del vendedor también acá: si no, bastaba con cambiar el
+         * número en la barra de direcciones para leer el pedido de un
+         * compañero. Un filtro que sólo vive en el listado no es un filtro.
+         */
+        abort_if($this->soloLosSuyos($r->user()) && $p->vendedor_id !== $r->user()->id,
+            403, 'Este pedido es de otro vendedor.');
+
         return Inertia::render('PedidosB2B/Show', [
+            /*
+             * Lo que ESTE usuario puede apretar. La pantalla pintaba los
+             * botones mirando sólo `pedido.estado`, así que un despachador
+             * veía «Aprobar», «Rechazar» y «Facturar» — y funcionaban.
+             */
+            'puedo' => [
+                'aprobar' => $this->puedeAprobar($r->user()),
+                'facturar' => $this->puedeFacturar($r->user()),
+                'despachar' => $this->puedeDespachar($r->user()),
+            ],
             'pedido' => [
                 'id' => $p->id,
                 'numero' => $p->numero,
@@ -102,6 +190,9 @@ class PedidosB2BController extends Controller implements HasMiddleware
                 'motivo_rechazo' => $p->motivo_rechazo,
                 // LOG-J2 · motivo de retención automática por cartera.
                 'motivo_retencion' => $p->motivo_retencion,
+                // Multiempresa · razón social que factura (NULL = la principal).
+                'empresa_id' => \App\Models\EmpresaConfig::porId($p->empresa_id)->id,
+                'empresa' => \App\Models\EmpresaConfig::porId($p->empresa_id)->nombreCorto(),
                 'creado' => $p->created_at?->format('Y-m-d H:i'),
                 'enviado_at' => $p->enviado_at?->format('Y-m-d H:i'),
                 'aprobado_at' => $p->aprobado_at?->format('Y-m-d H:i'),
@@ -150,7 +241,9 @@ class PedidosB2BController extends Controller implements HasMiddleware
                     ] : null,
                     $p->aprobado_at ? [
                         'hito' => 'Pedido aprobado',
-                        'actor' => 'Gerencia',
+                        // Decía «Gerencia» fijo. Dejó de ser impreciso y pasó
+                        // a ser falso cuando el Contador también pudo aprobar.
+                        'actor' => $p->aprobadoPor?->name ?? 'Gerencia',
                         'at' => $p->aprobado_at->format('Y-m-d H:i'),
                         'icon' => '✓',
                         'color' => 'emerald',
@@ -199,8 +292,12 @@ class PedidosB2BController extends Controller implements HasMiddleware
                         'at' => $p->alistado_fin_at->format('Y-m-d H:i'),
                         'icon' => $p->alistado_con_novedad ? '⚠' : '📦',
                         'color' => $p->alistado_con_novedad ? 'red' : 'emerald',
+                        // `diffInMinutes` devuelve flotante en Carbon 3: la línea de
+                        // tiempo mostraba «0.31666666666666665 min» en un alistamiento
+                        // de 19 segundos. Se redondea, y por debajo del minuto se
+                        // cuenta en segundos para que diga algo.
                         'detalle' => ($p->alistado_inicio_at
-                            ? max(0, $p->alistado_inicio_at->diffInMinutes($p->alistado_fin_at)).' min'
+                            ? $this->duracionLegible($p->alistado_inicio_at, $p->alistado_fin_at)
                             : '').
                             ($p->alistado_tipo_novedad ? ' · '.strtoupper($p->alistado_tipo_novedad) : '').
                             ($p->alistado_notas ? ' · '.$p->alistado_notas : ''),
@@ -243,11 +340,36 @@ class PedidosB2BController extends Controller implements HasMiddleware
                 'precio' => (float) $i->precio_unitario,
                 'total' => (float) $i->total,
             ])->values(),
+            'empresas' => \App\Models\EmpresaConfig::activas()
+                ->map(fn ($e) => ['id' => $e->id, 'nombre' => $e->nombreCorto()])->values(),
         ]);
     }
 
-    public function aprobar(int $pedido): RedirectResponse
+    /**
+     * Multiempresa · cambiar la razón social que factura. Sólo mientras no
+     * haya factura: después, el número, el NIT y la cuenta de SIIGO ya son
+     * los de la empresa que facturó.
+     */
+    public function cambiarEmpresa(Request $r, int $pedido): RedirectResponse
     {
+        $data = $r->validate([
+            'empresa_id' => ['required', 'integer', \Illuminate\Validation\Rule::exists('empresa_config', 'id')->where('activa', true)],
+        ]);
+
+        $p = PedidoCliente::findOrFail($pedido);
+        abort_if($p->factura_id, 422, 'El pedido ya está facturado: la empresa no se puede cambiar.');
+        abort_if($p->estado === 'rechazado', 422, 'El pedido está rechazado.');
+
+        $p->update(['empresa_id' => (int) $data['empresa_id']]);
+
+        return back()->with('success', 'Este pedido lo factura '.\App\Models\EmpresaConfig::porId($p->empresa_id)->nombreCorto().'.');
+    }
+
+    public function aprobar(Request $r, int $pedido): RedirectResponse
+    {
+        abort_unless($this->puedeAprobar($r->user()), 403,
+            'Aprobar o liberar un pedido es decisión de Gerencia o cartera.');
+
         // C-QA-D-3: lock para evitar carrera Aprobar/Rechazar concurrente.
         // LOG-J3 · Gerencia también libera un `retenido` desde este botón —
         //   es el mismo gesto conceptual (aprobar), y así no hay dos endpoints
@@ -255,17 +377,36 @@ class PedidosB2BController extends Controller implements HasMiddleware
         $pre = PedidoCliente::findOrFail($pedido);
         $eraRetenido = $pre->estado === 'retenido';
 
-        DB::transaction(function () use ($pedido) {
+        $aprobadorId = $r->user()->id;
+
+        DB::transaction(function () use ($pedido, $aprobadorId) {
             $p = PedidoCliente::whereKey($pedido)->lockForUpdate()->firstOrFail();
             abort_unless(in_array($p->estado, ['enviado', 'retenido'], true), 422,
                 'Sólo se aprueban pedidos enviados o retenidos por cartera.');
             $p->update([
                 'estado' => 'aprobado',
                 'aprobado_at' => now(),
+                // Quién aprobó, que no se guardaba. Era el único paso de la
+                // cadena sin autor, justo el que autoriza que salga mercancía.
+                'aprobado_por_id' => $aprobadorId,
                 // LOG-J3 · si venía retenido, dejamos el motivo como huella para
                 //   el timeline (hito 'retenido') pero el pedido ya está vivo.
             ]);
         });
+
+        /*
+         * Aprobar aparta la mercancía.
+         *
+         * Hasta hoy no se apartaba nada: dos vendedores podían prometer la
+         * misma caja y el segundo se enteraba el día del alistamiento. La
+         * maquinaria de reservas existía completa y no la llamaba nadie.
+         *
+         * Va FUERA de la transacción de arriba a propósito: si el stock no
+         * alcanza, el pedido igual queda aprobado —ya pasó el filtro de
+         * cartera, que es otra decisión— y lo que falta se avisa.
+         */
+        $reserva = app(\App\Modules\Inventario\Actions\ReservarPedido::class)
+            ->handle(PedidoCliente::with('items')->findOrFail($pedido));
 
         // LOG-J3 · Notificación: avisar que un retenido fue liberado por Gerencia.
         //   El vendedor/cliente ve la bell y entiende que ya puede imprimir
@@ -281,13 +422,41 @@ class PedidosB2BController extends Controller implements HasMiddleware
             ]);
         }
 
-        return back()->with('success',
-            $eraRetenido ? 'Pedido LIBERADO por Gerencia. Listo para facturar.'
-                         : 'Pedido aprobado. Listo para facturar.');
+        $msg = $eraRetenido ? 'Pedido LIBERADO por Gerencia. Listo para facturar.'
+                            : 'Pedido aprobado. Listo para facturar.';
+
+        /*
+         * Si no se apartó NADA, eso se dice antes que cualquier otra cosa.
+         *
+         * Un pedido sin bodega de origen se aprueba igual pero no reserva, y
+         * la pantalla decía «Pedido aprobado» sin una sola señal: la mercancía
+         * se le seguía ofreciendo a otros pedidos y aparecía vendida dos veces
+         * el día del alistamiento.
+         */
+        if (($reserva['sin_reservar'] ?? null) !== null) {
+            return back()->with('flash', ['type' => 'warning',
+                'message' => $msg.' '.$reserva['sin_reservar']]);
+        }
+
+        // Lo que no alcanzó se dice ahora, no el día del alistamiento.
+        if ($reserva['faltantes'] !== []) {
+            $detalle = collect($reserva['faltantes'])
+                ->map(fn ($f) => "{$f['sku']} (pide {$f['pedido']}, hay {$f['disponible']})")
+                ->take(4)->implode(' · ');
+            $mas = count($reserva['faltantes']) > 4 ? ' y más' : '';
+
+            return back()->with('flash', ['type' => 'warning',
+                'message' => $msg." Ojo: no alcanzó el stock de {$detalle}{$mas}. Se apartó lo que había."]);
+        }
+
+        return back()->with('success', $msg);
     }
 
     public function rechazar(Request $r, int $pedido): RedirectResponse
     {
+        abort_unless($this->puedeAprobar($r->user()), 403,
+            'Rechazar un pedido es decisión de Gerencia o cartera.');
+
         // C-QA-D-Bloque2: mín 10 chars — motivos como "no" son inútiles para el cliente.
         $data = $r->validate(['motivo' => ['required', 'string', 'min:10', 'max:500']]);
         $pre = PedidoCliente::findOrFail($pedido);
@@ -305,6 +474,10 @@ class PedidosB2BController extends Controller implements HasMiddleware
                 'motivo_rechazo' => $data['motivo'],
             ]);
         });
+
+        // Lo que se había apartado vuelve a estar disponible: un pedido
+        // rechazado no le puede seguir quitando mercancía a los demás.
+        app(\App\Modules\Inventario\Actions\ReservarPedido::class)->liberar($pre);
 
         // LOG-J3 · Si venía retenido, el motivo que ve el cliente/vendedor
         //   es la decisión de Gerencia, no la razón de cartera (que ya quedó
@@ -331,8 +504,31 @@ class PedidosB2BController extends Controller implements HasMiddleware
      * cerrar el ciclo con huella — así se puede consultar luego la línea de
      * tiempo del pedido (LOG-J10).
      */
+    private ?string $motivoStock = null;
+
+    /** Cuánto duró algo, en palabras: «19 s», «4 min», «1 h 12 min». */
+    private function duracionLegible(?\Carbon\Carbon $desde, ?\Carbon\Carbon $hasta): string
+    {
+        if (! $desde || ! $hasta) {
+            return '';
+        }
+
+        $seg = max(0, (int) round($desde->diffInSeconds($hasta)));
+
+        if ($seg < 60) {
+            return "{$seg} s";
+        }
+
+        $min = (int) round($seg / 60);
+
+        return $min < 60 ? "{$min} min" : intdiv($min, 60).' h '.($min % 60).' min';
+    }
+
     public function despachar(Request $r, int $pedido): RedirectResponse
     {
+        abort_unless($this->puedeDespachar($r->user()), 403,
+            'Despachar es de bodega.');
+
         $data = $r->validate([
             'guia_transportadora' => ['required', 'string', 'max:60'],
             'transportadora' => ['nullable', 'string', 'max:80'],
@@ -379,10 +575,9 @@ class PedidosB2BController extends Controller implements HasMiddleware
 
             // La mercancía sale de la bodega: baja del kardex. Sin esto el ERP
             // seguía mostrando en stock lo que ya iba camino al cliente.
-            $lineas = (new \App\Modules\Inventario\Actions\DescontarStockPorDespacho())
-                ->ejecutar($p, $r->user()->id);
-
-            $this->lineasDescontadas = $lineas;
+            $accion = new \App\Modules\Inventario\Actions\DescontarStockPorDespacho();
+            $this->lineasDescontadas = $accion->ejecutar($p, $r->user()->id);
+            $this->motivoStock = $accion->motivo;
         });
 
         $msg = 'Pedido despachado · guía registrada.';
@@ -390,11 +585,27 @@ class PedidosB2BController extends Controller implements HasMiddleware
             $msg .= " Se descontaron {$this->lineasDescontadas} ítem(s) del inventario.";
         }
 
+        // Un despacho que no bajó inventario NO es un despacho exitoso a secas:
+        // el estante y el sistema quedan distintos y nadie se entera hasta el
+        // conteo. Se avisa en pantalla, no sólo en el log.
+        if ($this->motivoStock) {
+            return back()->with('warning', 'Pedido despachado, PERO el inventario no bajó. '
+                .$this->motivoStock.' Avisá a logística para cuadrarlo a mano.');
+        }
+
         return back()->with('success', $msg);
     }
 
-    public function facturar(int $pedido): RedirectResponse
+    public function facturar(Request $r, int $pedido): RedirectResponse
     {
+        /*
+         * Facturar emite un documento real contra la resolución DIAN de la
+         * empresa y consume consecutivo. La misma puerta que la Bandeja de
+         * facturación.
+         */
+        abort_unless($this->puedeFacturar($r->user()), 403,
+            'Facturar es del equipo de facturación.');
+
         // ── GATE DE CRÉDITO (flujo bodega F2) ────────────────────────────────
         // Corre ANTES de la tx de facturación: si el pedido es a crédito, valida
         // cupo / mora / factura vencida. Si retiene, crea la excepción (que se
@@ -465,14 +676,42 @@ class PedidosB2BController extends Controller implements HasMiddleware
                 ->latest('vigente_desde')
                 ->value('plazo_dias') ?? 30;
 
-            // LOG-J7+SIIGO · Si la integración Siigo está activa, la factura nace
-            //   electrónica (es_electronica=true) para que `ReintentarEmisionDian`
-            //   la mande a /v1/invoices SIEMPRE después de commit. Si Siigo está
-            //   apagado, cae a factura interna (DIAN manual) sin perder el flujo.
-            $siigoActivo = \App\Modules\Siigo\Models\SiigoConfig::current()->activo ?? false;
+            /*
+             * Quién decide si la factura viaja a SIIGO: el DESTINO FISCAL.
+             *
+             * Decía `es_electronica => (bool) $siigoActivo`, o sea que miraba
+             * si la integración estaba viva en ese segundo e ignoraba por
+             * completo lo que había elegido el usuario. Dos consecuencias, las
+             * dos malas:
+             *
+             *   · Con SIIGO caído, una factura FISCAL nacía marcada «no va» y
+             *     quedaba así para siempre: nada la vuelve a evaluar. Fue lo
+             *     que pasó en producción — 20 facturas fiscales, cero en SIIGO,
+             *     y la bandeja de pendientes mostrando 0 porque filtra por la
+             *     misma columna.
+             *   · Con SIIGO vivo, una factura marcada INTERNA nacía electrónica
+             *     igual y se iba para allá. Declarar algo que alguien decidió
+             *     expresamente no declarar es el peor de los dos.
+             *
+             * Que SIIGO esté arriba o abajo no cambia el destino de la
+             * factura: cambia cuándo sale. Para eso está la cola y el
+             * interruptor `push_auto`.
+             *
+             * Multiempresa · factura la razón social que eligió el pedido, con
+             * su prefijo y su cuenta de SIIGO (NULL = Great Baby).
+             */
+            $empresa = \App\Models\EmpresaConfig::porId($p->empresa_id);
+
+            // El pedido B2B no lleva destino propio —la columna sólo existe en
+            // los documentos donde alguien lo decide— así que su factura nace
+            // fiscal, igual que el default de la tabla. Se escribe explícito
+            // para que de acá salga la marca y no de un default silencioso.
+            $destinoFactura = \App\Modules\Contabilidad\Enums\DestinoFiscal::Siigo;
+            $viajaASiigo = $destinoFactura->tieneParteFiscal();
 
             $f = FacturaVenta::create([
-                'numero' => $this->siguienteNumeroFactura(),  // C-QA-D-2
+                'empresa_id' => $empresa->id,
+                'numero' => \App\Modules\Cartera\Support\NumeroFactura::siguiente($empresa),  // C-QA-D-2
                 'contacto_id' => $p->contacto_id,
                 'fecha_emision' => now()->toDateString(),
                 'fecha_vencimiento' => now()->addDays($plazo)->toDateString(),
@@ -483,7 +722,22 @@ class PedidosB2BController extends Controller implements HasMiddleware
                 'impuestos' => $p->iva,
                 'total' => $p->total,
                 'saldo' => $p->total,
-                'es_electronica' => (bool) $siigoActivo,
+                'destino_fiscal' => $destinoFactura,
+                'es_electronica' => $viajaASiigo,
+                /*
+                 * El vendedor y la bodega VIAJAN del pedido a la factura.
+                 *
+                 * No se copiaban, y las dos columnas existen en
+                 * `facturas_venta` con su llave foránea. Resultado: las 24
+                 * facturas del sistema tenían `vendedor_id` en NULL, y
+                 * `CalcularComisionMensual` filtra justo por esa columna
+                 * (`FacturaVenta::where('vendedor_id', ...)`), así que toda
+                 * comisión daba $0 por construcción, sobre todo lo facturado.
+                 * `ubicacion_id` deja sin efecto la resolución DIAN y las
+                 * cuentas PUC por bodega, que se configuran por ubicación.
+                 */
+                'vendedor_id' => $p->vendedor_id,
+                'ubicacion_id' => $p->ubicacion_origen_id,
                 'origen_type' => \App\Modules\Portal\Models\PedidoCliente::class,
                 'origen_id' => $p->id,
                 'observaciones' => 'Pedido B2B ' . $p->numero,
@@ -508,6 +762,10 @@ class PedidosB2BController extends Controller implements HasMiddleware
                     'subtotal' => $it->subtotal,
                 ]);
             }
+
+            // Lo que el cliente nos va a retener: antes del asiento y de SIIGO,
+            // que lo leen de la factura.
+            app(\App\Modules\Cartera\Actions\AplicarRetencionesVenta::class)->ejecutar($f);
 
             // C-QA-D-1 (CRÍTICO): el observer `saved` corre en create con items=0 y NO genera asiento.
             // Disparamos explícitamente después de insertar ítems.
@@ -546,6 +804,16 @@ class PedidosB2BController extends Controller implements HasMiddleware
         //   para que la factura B2B viaje a /v1/invoices sin bloquear al usuario.
         //   `ReintentarEmisionDian` ya maneja lock, backoff 1-5-30min-3h,
         //   notificación en la bell y "ya estaba emitida" (idempotente).
+        /*
+         * Facturado: se suelta lo apartado.
+         *
+         * A partir de acá manda la factura, y el despacho descuenta el stock
+         * de verdad. Si la reserva siguiera viva, la misma mercancía quedaria
+         * contada dos veces y el disponible saldria mas bajo de lo que es.
+         */
+        app(\App\Modules\Inventario\Actions\ReservarPedido::class)
+            ->liberar(PedidoCliente::findOrFail($pedido));
+
         if ($factura->es_electronica) {
             // Las decisiones del Facturador (send_dian/send_mail) viajan en las
             // columnas de la factura · el SiigoEmisionService las lee al armar
@@ -560,22 +828,5 @@ class PedidosB2BController extends Controller implements HasMiddleware
         }
 
         return back()->with('success', $msg);
-    }
-
-    /**
-     * Re-audit DATOS C3/C4 · consecutivo transaccional real, con validación de
-     * rango DIAN de la empresa. Reemplaza el SELECT MAX+1 anterior (race +
-     * ancho fijo se rompe en 10 000).
-     */
-    private function siguienteNumeroFactura(): string
-    {
-        $prefijo = (setting('empresa.prefijo_dian') ?: 'FV') . '-' . now()->format('ymd') . '-';
-        $rangoHasta = (int) setting('empresa.rango_hasta', 0) ?: null;
-
-        return \App\Modules\Cartera\Actions\SiguienteConsecutivoFactura::run(
-            $prefijo,
-            4,
-            $rangoHasta,
-        );
     }
 }

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { Head, Link, router } from '@inertiajs/vue3';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import { Camera, Warehouse, ArrowRightLeft, ArrowLeftRight } from 'lucide-vue-next';
@@ -18,6 +18,7 @@ import { Camera, Warehouse, ArrowRightLeft, ArrowLeftRight } from 'lucide-vue-ne
  * los últimos 20.
  */
 const props = defineProps({
+    pendientes: { type: Array, default: () => [] },
     mis_bodegas: { type: Array, required: true },
     prestamos: { type: Object, required: true },
     bodegas_comerciales: { type: Array, required: true },
@@ -26,9 +27,14 @@ const props = defineProps({
     // modelo no guarda a qué préstamo corresponde.
     en_mi_almacen: { type: Array, default: () => [] },
     es_super: { type: Boolean, default: false },
+    // MKT-5 · préstamos ya entregados: la devolución dice cuál cierra.
+    para_devolver: { type: Array, default: () => [] },
 });
 
 const abiertos = computed(() => props.prestamos?.abiertos ?? []);
+// Lo de hoy: lanzamientos y productos que esperan, y las muestras por recoger.
+const porRecoger = computed(() => abiertos.value.filter((p) => p.es_prestamo && p.estado === 'en_transito'));
+const irAMuestras = () => document.getElementById('muestras')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 const cerrados = computed(() => props.prestamos?.cerrados ?? []);
 
 /**
@@ -47,6 +53,7 @@ const modal = ref(null);          // 'pedir' | 'devolver' | null
 const comercialId = ref(props.bodegas_comerciales[0]?.id ?? '');
 const mktId = ref(props.mis_bodegas[0]?.id ?? '');
 const observaciones = ref('');
+const prestamoId = ref('');
 const enviando = ref(false);
 const errores = ref({});
 
@@ -55,6 +62,7 @@ const puedePedir = computed(() => props.bodegas_comerciales.length > 0 && props.
 const abrir = (tipo) => {
     modal.value = tipo;
     observaciones.value = '';
+    prestamoId.value = props.para_devolver.length === 1 ? props.para_devolver[0].id : '';
     errores.value = {};
 };
 
@@ -67,6 +75,7 @@ const enviar = () => {
         origen_id: pedir ? comercialId.value : mktId.value,
         destino_id: pedir ? mktId.value : comercialId.value,
         observaciones: observaciones.value || null,
+        prestamo_id: pedir ? null : (prestamoId.value || null),
     }, {
         preserveScroll: true,
         onSuccess: () => { modal.value = null; },
@@ -75,27 +84,59 @@ const enviar = () => {
     });
 };
 
+// Desde la tarjeta de muestras o un producto: abre directo la solicitud.
+onMounted(() => {
+    if (new URLSearchParams(window.location.search).get('pedir') && puedePedir.value) abrir('pedir');
+});
+
 const estadoChip = (e) => ({
     borrador: 'bg-surface-100 text-surface-700',
     en_transito: 'bg-amber-100 text-amber-900 ring-1 ring-amber-400',
     recibido: 'bg-emerald-100 text-emerald-800',
     anulado: 'bg-red-100 text-red-800',
 }[e] || 'bg-surface-100');
+
+/** Quién firmó cada paso, en una línea: «Aprobó Aracely · Entregó Jorge · Recogió Laura». */
+const firmas = (p) => [
+    p.aprobado_por && `Aprobó ${p.aprobado_por}`,
+    p.entregado_por && (p.es_prestamo ? `Alistó ${p.entregado_por}` : `Despachó ${p.entregado_por}`),
+    p.recogido_por && (p.es_prestamo ? `Recogió ${p.recogido_por}` : `La trajo ${p.recogido_por}`),
+].filter(Boolean).join(' · ');
 </script>
 
 <template>
-    <Head title="Marketing · préstamos"/>
+    <Head title="Lo que me toca"/>
     <AppLayout>
         <div class="space-y-5 max-w-6xl mx-auto">
             <div>
-                <h1 class="text-2xl font-bold flex items-center gap-2">
-                    <Camera class="h-6 w-6 text-brand-600"/>
-                    Marketing · préstamos de bodega
-                </h1>
-                <p class="text-sm text-surface-500 mt-1">
-                    Pedí productos prestados a bodega para fotos y videos, y devolvelos cuando termines.
-                    Todo queda registrado en el kardex, sin papelitos.
-                </p>
+                <h1 class="text-2xl font-bold">Lo que me toca</h1>
+                <p class="text-sm text-surface-500 mt-1">Lo que está esperando por Marketing hoy.</p>
+            </div>
+
+            <section class="card divide-y divide-surface-100 dark:divide-surface-800" aria-label="Pendientes">
+                <div v-for="f in pendientes" :key="f.url" class="p-3 flex flex-wrap items-center justify-between gap-3">
+                    <div class="min-w-0">
+                        <div class="text-sm font-semibold">{{ f.titulo }}</div>
+                        <div class="text-xs text-surface-500">{{ f.detalle }}</div>
+                    </div>
+                    <Link :href="f.url" class="btn-primary text-sm">{{ f.boton }}</Link>
+                </div>
+                <div v-for="p in porRecoger" :key="p.id" class="p-3 flex flex-wrap items-center justify-between gap-3">
+                    <div class="min-w-0">
+                        <div class="text-sm font-semibold">Muestra lista para recoger: {{ p.numero }}</div>
+                        <div class="text-xs text-surface-500">{{ p.observaciones || 'Bodega ya la alistó.' }}</div>
+                    </div>
+                    <button type="button" @click="irAMuestras" class="btn-primary text-sm">Ver</button>
+                </div>
+                <p v-if="!pendientes.length && !porRecoger.length" class="p-6 text-sm text-surface-500 text-center">No hay nada esperando. Cuando llegue un contenedor, aparece aquí.</p>
+            </section>
+
+            <div id="muestras">
+                <h2 class="text-lg font-bold flex items-center gap-2">
+                    <Camera class="h-5 w-5 text-brand-600"/>
+                    Muestras de bodega
+                </h2>
+                <p class="text-sm text-surface-500 mt-1">Pida productos prestados para fotos y videos, y devuélvalos cuando termine.</p>
             </div>
 
             <!-- Nuestros almacenes + accesos rápidos -->
@@ -135,7 +176,7 @@ const estadoChip = (e) => ({
                         Pedíselo a Aracely y estos botones se activan.
                     </div>
                     <div v-else class="text-[11px] text-surface-500 pt-1 italic">
-                        La solicitud queda en borrador; bodega la surte y la despacha.
+                        Pedís → la aprueban → bodega la alista y te avisa → la recogés y queda firmado quién y en qué estado.
                     </div>
                 </div>
             </div>
@@ -153,9 +194,9 @@ const estadoChip = (e) => ({
                         <tr>
                             <th class="p-2 text-left">N°</th>
                             <th class="p-2 text-left">De → A</th>
-                            <th class="p-2 text-left">Motivo</th>
+                            <th class="p-2 text-left">Qué se pidió</th>
                             <th class="p-2 text-center">Items</th>
-                            <th class="p-2 text-left">Solicitó</th>
+                            <th class="p-2 text-left">Responsables</th>
                             <th class="p-2 text-left">Fecha</th>
                             <th class="p-2 text-center">Estado</th>
                         </tr>
@@ -168,12 +209,21 @@ const estadoChip = (e) => ({
                                 <span class="text-surface-400 mx-1">→</span>
                                 <span class="font-mono text-xs">{{ p.destino }}</span>
                             </td>
-                            <td class="p-2 text-xs">{{ p.motivo || '—' }}</td>
+                            <td class="p-2 text-xs max-w-xs">
+                                <div class="line-clamp-2">{{ p.observaciones || '—' }}</div>
+                                <div v-if="p.estado_mercancia_label" class="mt-0.5"
+                                     :class="p.estado_mercancia === 'completo' ? 'text-emerald-700' : 'text-amber-700 font-semibold'">
+                                    {{ p.estado_mercancia_label }}<span v-if="p.observaciones_entrega"> · {{ p.observaciones_entrega }}</span>
+                                </div>
+                            </td>
                             <td class="p-2 text-center">{{ p.items_count }}</td>
-                            <td class="p-2 text-xs">{{ p.solicitado_por || '—' }}</td>
+                            <td class="p-2 text-xs">
+                                <div>Pidió {{ p.solicitado_por || '—' }}</div>
+                                <div v-if="firmas(p)" class="text-surface-500">{{ firmas(p) }}</div>
+                            </td>
                             <td class="p-2 text-xs">{{ p.fecha }}</td>
                             <td class="p-2 text-center">
-                                <span class="px-2 py-0.5 rounded text-xs font-semibold" :class="estadoChip(p.estado)">{{ p.estado_label || p.estado }}</span>
+                                <span class="px-2 py-0.5 rounded text-xs font-semibold whitespace-nowrap" :class="estadoChip(p.estado)">{{ p.paso || p.estado_label }}</span>
                             </td>
                         </tr>
                     </tbody>
@@ -211,12 +261,18 @@ const estadoChip = (e) => ({
                             <div class="font-mono text-xs">{{ p.numero }} · {{ p.origen }} → {{ p.destino }}</div>
                             <div class="text-xs text-surface-500">
                                 {{ p.items_count }} ítems · {{ p.ejecutado_at || p.fecha }}
+                                <span v-if="p.prestamo"> · cierra {{ p.prestamo }}</span>
+                            </div>
+                            <div v-if="firmas(p)" class="text-xs text-surface-500">{{ firmas(p) }}</div>
+                            <div v-if="p.estado_mercancia_label" class="text-xs"
+                                 :class="p.estado_mercancia === 'completo' ? 'text-emerald-700' : 'text-amber-700 font-semibold'">
+                                {{ p.estado_mercancia_label }}<span v-if="p.observaciones_entrega"> · {{ p.observaciones_entrega }}</span>
                             </div>
                         </div>
                         <!-- El chip decía "OK" en verde para todo. Un préstamo
                              anulado se veía igual que una devolución completa. -->
-                        <span class="px-2 py-0.5 rounded text-xs font-semibold" :class="estadoChip(p.estado)">
-                            {{ p.estado_label || p.estado }}
+                        <span class="px-2 py-0.5 rounded text-xs font-semibold whitespace-nowrap" :class="estadoChip(p.estado)">
+                            {{ p.paso || p.estado_label }}
                         </span>
                     </div>
                 </div>
@@ -245,6 +301,16 @@ const estadoChip = (e) => ({
                     </select>
                 </div>
 
+                <div v-if="modal === 'devolver' && para_devolver.length">
+                    <label class="text-xs font-semibold">¿De qué préstamo es?</label>
+                    <select v-model.number="prestamoId" class="input w-full">
+                        <option value="">No sé / varios</option>
+                        <option v-for="p in para_devolver" :key="p.id" :value="p.id">
+                            {{ p.numero }}{{ p.observaciones ? ' · ' + p.observaciones.slice(0, 50) : '' }}
+                        </option>
+                    </select>
+                </div>
+
                 <div>
                     <label class="text-xs font-semibold">
                         {{ modal === 'pedir' ? '¿Qué necesitás y para cuándo?' : '¿Qué estás devolviendo?' }}
@@ -261,7 +327,9 @@ const estadoChip = (e) => ({
                 </p>
 
                 <p class="text-xs text-surface-500">
-                    Queda como solicitud en borrador. Bodega decide qué referencias entran y la despacha.
+                    {{ modal === 'pedir'
+                        ? 'Se aprueba, bodega elige las referencias y te llega un aviso cuando esté lista para recoger.'
+                        : 'Bodega la recibe y anota en qué estado llegó.' }}
                 </p>
 
                 <div class="flex justify-end gap-2 pt-1">

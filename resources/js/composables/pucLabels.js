@@ -5,6 +5,20 @@
  * reportes contables una tabla de números. Este helper devuelve el nombre
  * corto de la cuenta; para prefijos (1305xx, 4135xx) devuelve el nombre del
  * grupo. Compatible tanto con tooltip como con render inline.
+ *
+ * ⚠ ESTO ES EL RESPALDO, NO LA FUENTE.
+ *
+ * Se escribió cuando el ERP todavía no tenía cargado el PUC del cliente. Hoy
+ * sí lo tiene —1.079 cuentas con su nombre— y el backend manda `cuenta_nombre`
+ * en cada fila: las pantallas usan ese y caen acá sólo si la cuenta no está en
+ * el catálogo.
+ *
+ * Importa que sea así porque esta tabla resuelve POR PREFIJO, y desde que el
+ * asiento de venta parte el ingreso por categoría eso dejó de ser una
+ * aproximación y pasó a ser un error: 41350110 «Vestuario bebé» y 41350104
+ * «Juguetería» aparecían con el mismo nombre, una encima de la otra, como si
+ * fueran la misma cuenta. No agregues códigos nuevos acá; van en el plan de
+ * cuentas.
  */
 
 // Cuentas exactas (más específicas) primero.

@@ -1,24 +1,39 @@
 <script setup>
-import { Head } from '@inertiajs/vue3';
+import { ref, watch } from 'vue';
+import { Head, router } from '@inertiajs/vue3';
 import { useMoney } from '@/composables/useMoney';
 import { BarChart3, AlertTriangle, DollarSign, Users } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
+import FiltroEjes from '@/Components/FiltroEjes.vue';
 
 const props = defineProps({
     kpis: { type: Object, required: true },
     edades: { type: Object, required: true },
     topMorosos: { type: Array, required: true },
     consignaciones: { type: Array, required: true },
+    filtros: { type: Object, default: () => ({ linea: 'todas', destino: 'todas' }) },
+    opcionesEjes: { type: Object, default: () => ({ lineas: [], destinos: [] }) },
 });
 
 const { money } = useMoney();
+
+// Línea de negocio y destino: «Dropi» = la cartera del e-commerce, sola.
+const linea = ref(props.filtros.linea || 'todas');
+const destino = ref(props.filtros.destino || 'todas');
+watch([linea, destino], () => router.get('/app/cartera/reportes', {
+    linea: linea.value !== 'todas' ? linea.value : null,
+    destino: destino.value !== 'todas' ? destino.value : null,
+}, { preserveScroll: true, preserveState: true, replace: true }));
 </script>
 
 <template>
     <Head title="Reportes cartera"/>
     <AppLayout>
         <div class="space-y-4">
-            <h1 class="text-2xl font-bold flex items-center gap-2"><BarChart3 class="h-6 w-6 text-brand-600"/>Reportes de cartera</h1>
+            <div class="flex items-end justify-between flex-wrap gap-3">
+                <h1 class="text-2xl font-bold flex items-center gap-2"><BarChart3 class="h-6 w-6 text-brand-600"/>Reportes de cartera</h1>
+                <FiltroEjes v-model:linea="linea" v-model:destino="destino" :opciones="opcionesEjes"/>
+            </div>
 
             <div class="grid grid-cols-3 gap-3">
                 <div class="card p-4"><div class="text-xs uppercase text-surface-500 flex items-center gap-1"><DollarSign class="h-3 w-3"/>Total cartera</div><div class="text-2xl font-bold mt-1 text-brand-600">{{ money(kpis.total_cartera) }}</div></div>

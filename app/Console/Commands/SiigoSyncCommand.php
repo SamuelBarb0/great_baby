@@ -27,7 +27,13 @@ class SiigoSyncCommand extends Command
         if ($r === 'catalogos' || $r === 'all') {
             $this->info('Sincronizando catálogos + warehouses...');
             $x = $service->sincronizarCatalogos();
-            $this->line('  → ' . collect($x)->map(fn ($n, $k) => "{$k}: {$n}")->join(' · '));
+            // El resumen reventaba el comando cuando algún valor no era
+            // escalar («Array to string conversion»), y entonces parecía que
+            // la sincronización había fallado aunque ya hubiera guardado los
+            // 582 registros. El resumen es decoración: no puede tumbar nada.
+            $this->line('  → '.collect($x)->map(function ($n, $k) {
+                return $k.': '.(is_scalar($n) ? $n : (is_countable($n) ? count($n) : json_encode($n)));
+            })->join(' · '));
         }
 
         if ($r === 'productos' || $r === 'all') {

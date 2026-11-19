@@ -1,11 +1,51 @@
 <script setup>
-import { ref } from 'vue';
+import { ref, reactive, computed } from 'vue';
 import { Head, Link, router } from '@inertiajs/vue3';
 import { ArrowLeft, ShieldCheck, CheckCircle, XCircle, Truck, Lock } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import AppConfirmModal from '@/Components/AppConfirmModal.vue';
+import { useMoney } from '@/composables/useMoney';
 
 const props = defineProps({ ticket: { type: Object, required: true } });
+
+const { money: fmtCOP } = useMoney();
+
+/*
+ * Los cinco renglones donde se va la plata de una garantía.
+ *
+ * Separados y no un total, porque la pregunta que importa no es «cuánto
+ * gastamos» sino «en qué»: si el grueso es flete, el problema es la logística
+ * inversa; si es producto, el problema es el producto.
+ */
+const RENGLONES = [
+    { campo: 'costo_producto', label: 'Producto repuesto (al costo)' },
+    { campo: 'costo_flete_recoger', label: 'Flete · recoger lo fallado' },
+    { campo: 'costo_flete_enviar', label: 'Flete · enviar el reemplazo' },
+    { campo: 'costo_nota_credito', label: 'Nota crédito (plata devuelta)' },
+    { campo: 'costo_otros', label: 'Otros (reparación, peritaje)' },
+];
+
+const costo = reactive({
+    costo_producto: props.ticket.costo?.producto || null,
+    costo_flete_recoger: props.ticket.costo?.flete_recoger || null,
+    costo_flete_enviar: props.ticket.costo?.flete_enviar || null,
+    costo_nota_credito: props.ticket.costo?.nota_credito || null,
+    costo_otros: props.ticket.costo?.otros || null,
+    costo_nota: props.ticket.costo_nota || '',
+});
+
+const totalCosto = computed(() =>
+    RENGLONES.reduce((s, c) => s + (parseFloat(costo[c.campo]) || 0), 0));
+
+const guardandoCosto = ref(false);
+
+const guardarCosto = () => {
+    guardandoCosto.value = true;
+    router.post(`/app/garantias/${props.ticket.id}/costo`, { ...costo }, {
+        preserveScroll: true,
+        onFinish: () => { guardandoCosto.value = false; },
+    });
+};
 
 // Confirmaciones con el modal propio: el confirm() nativo queda bloqueado
 // dentro del iframe de la app de escritorio y en celular ignora el diseno.
@@ -96,10 +136,51 @@ const badge = (e) => ({
                     <a v-if="ticket.cliente_telefono" :href="`https://wa.me/57${ticket.cliente_telefono.replace(/\D/g,'')}?text=${encodeURIComponent('Hola, sobre tu garantía ' + ticket.numero)}`"
                         target="_blank" class="text-xs text-emerald-600 hover:underline block mt-2">📱 Contactar por WhatsApp</a>
                 </div>
-                <div v-if="ticket.pedido_original" class="card p-4">
-                    <div class="text-xs uppercase font-bold text-brand-600 mb-2">Pedido original</div>
-                    <div class="font-mono">{{ ticket.pedido_original.guia }}</div>
-                    <div class="text-sm text-surface-500">{{ ticket.pedido_original.cliente }}</div>
+                <!--
+                    Qué producto se reclama. La pantalla mandaba la variante y
+                    no la mostraba: no había forma de confirmar qué se va a
+                    reponer. Sirve igual para una variante y para un producto
+                    de «colores surtidos», que no tiene variantes.
+                -->
+                <div v-if="ticket.producto" class="card p-4">
+                    <div class="text-xs uppercase font-bold text-brand-600 mb-2">Producto</div>
+                    <div class="font-semibold">{{ ticket.producto.nombre }}</div>
+                    <div class="text-sm text-surface-500">
+                        <span class="font-mono">{{ ticket.producto.sku }}</span>
+                        <span v-if="ticket.producto.detalle"> · {{ ticket.producto.detalle }}</span>
+                    </div>
+                    <div v-if="ticket.producto.es_agregado" class="text-[11px] text-surface-500 mt-1">
+                        Se maneja sin desglose por color ni talla.
+                    </div>
+                </div>
+                <!--
+                    La venta de origen, venga de donde venga.
+
+                    Sólo se pintaba `pedido_original`, que es el pedido de
+                    Dropi: toda garantía abierta contra una factura B2B llegaba
+                    acá con el dato servido y la pantalla no mostraba nada, así
+                    que quien atiende no veía contra qué venta se abrió. Es el
+                    dato que se mira primero cuando el cliente llama.
+                -->
+                <div v-if="ticket.pedido_original || ticket.origen" class="card p-4">
+                    <div class="text-xs uppercase font-bold text-brand-600 mb-2">
+                        {{ ticket.pedido_original ? 'Pedido original' : 'Venta de origen' }}
+                    </div>
+
+                    <template v-if="ticket.pedido_original">
+                        <div class="font-mono">{{ ticket.pedido_original.guia }}</div>
+                        <div class="text-sm text-surface-500">{{ ticket.pedido_original.cliente }}</div>
+                    </template>
+
+                    <template v-else>
+                        <div class="font-mono">{{ ticket.origen }}</div>
+                        <div v-if="ticket.cliente_b2b" class="text-sm text-surface-500">
+                            {{ ticket.cliente_b2b }}
+                        </div>
+                        <div v-if="ticket.origen_canal" class="text-[11px] text-surface-500 mt-1">
+                            {{ ticket.origen_canal === 'FacturaVenta' ? 'Factura de venta' : ticket.origen_canal }}
+                        </div>
+                    </template>
                 </div>
             </div>
 
@@ -120,6 +201,57 @@ const badge = (e) => ({
             <div v-if="ticket.notas_decision" class="card p-4">
                 <div class="text-xs uppercase font-bold text-brand-600 mb-2">Decisión ({{ ticket.decidio_por }} · {{ ticket.decision_at }})</div>
                 <p class="text-sm whitespace-pre-wrap">{{ ticket.notas_decision }}</p>
+            </div>
+
+            <!--
+                Lo que la garantía le cuesta a la EMPRESA.
+
+                No confundir con la reposición, que al cliente le vale $0 por
+                contrato. Esto es lo que sale de la caja, y hasta ahora no se
+                guardaba en ninguna parte: el módulo medía tiempos y no plata.
+            -->
+            <div class="card p-4">
+                <div class="flex items-center justify-between mb-3">
+                    <div class="text-xs uppercase font-bold text-brand-600">
+                        💸 Qué nos costó esta garantía
+                    </div>
+                    <div class="text-right">
+                        <div class="text-xl font-black tabular-nums text-red-600">{{ fmtCOP(totalCosto) }}</div>
+                        <div v-if="ticket.costo_cargado_at" class="text-[10px] text-surface-500">
+                            cargado {{ ticket.costo_cargado_at }}
+                        </div>
+                        <div v-else class="text-[10px] text-amber-600">sin cargar</div>
+                    </div>
+                </div>
+
+                <p class="text-xs text-surface-500 mb-3">
+                    Al cliente le vale <strong>$0</strong>: eso es la reposición. Esto es lo que paga
+                    la empresa. Se puede volver a cargar cuando llegue la factura del flete.
+                </p>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <label v-for="c in RENGLONES" :key="c.campo" class="text-sm">
+                        <span class="block text-xs text-surface-500 mb-1">{{ c.label }}</span>
+                        <input v-model.number="costo[c.campo]" type="number" min="0" step="100"
+                               class="w-full px-3 py-2 rounded-lg border border-surface-200 dark:border-surface-800 bg-transparent text-sm text-right tabular-nums"/>
+                        <span v-if="c.campo === 'costo_producto' && ticket.costo_sugerido > 0 && ! costo.costo_producto"
+                              class="block text-[10px] text-brand-600 mt-0.5 cursor-pointer hover:underline"
+                              @click="costo.costo_producto = ticket.costo_sugerido">
+                            usar el costo del producto: {{ fmtCOP(ticket.costo_sugerido) }}
+                        </span>
+                    </label>
+                </div>
+
+                <label class="block text-sm mt-3">
+                    <span class="block text-xs text-surface-500 mb-1">En qué se fue (opcional)</span>
+                    <input v-model="costo.costo_nota" type="text" maxlength="255"
+                           class="w-full px-3 py-2 rounded-lg border border-surface-200 dark:border-surface-800 bg-transparent text-sm"/>
+                </label>
+
+                <button @click="guardarCosto" :disabled="guardandoCosto"
+                        class="mt-3 px-4 py-2 rounded-lg bg-brand-600 text-white text-sm font-medium disabled:opacity-50">
+                    {{ guardandoCosto ? 'Guardando…' : 'Guardar costo' }}
+                </button>
             </div>
         </div>
 

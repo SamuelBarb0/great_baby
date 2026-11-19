@@ -22,13 +22,43 @@
  *
  * color admite: emerald | rose | amber | sky | brand (default). El mapa
  * es estático para que Tailwind JIT genere las clases en el build.
+ *
+ * ── Pedir un motivo ──────────────────────────────────────────────────────
+ *
+ * Hay acciones que el servidor no acepta sin explicación: anular un pago
+ * —que además borra su asiento del libro— o cerrar una vacante. Para esas,
+ * `pedirMotivo` muestra un campo de texto y el motivo llega como argumento:
+ *
+ *   modal.value = {
+ *     titulo: '¿Anular el pago?',
+ *     pedirMotivo: { etiqueta: '¿Por qué se anula?', minimo: 5 },
+ *     onConfirmar: (motivo) => { ... },
+ *   };
+ *
+ * El botón queda deshabilitado hasta que el texto llegue al mínimo, así el
+ * 422 del servidor no es la primera noticia de que faltaba algo. Los
+ * llamadores que no piden motivo no cambian en nada.
  */
-import { computed } from 'vue';
+import { computed, ref, watch } from 'vue';
 
 const props = defineProps({
     cfg: { type: Object, default: null },
 });
 const emit = defineEmits(['cerrar']);
+
+const motivo = ref('');
+// Cada vez que el modal se abre arranca en blanco: si no, el motivo de la
+// anulación anterior aparecería escrito en la siguiente.
+watch(() => props.cfg, () => { motivo.value = ''; });
+
+const minimoMotivo = computed(() => props.cfg?.pedirMotivo?.minimo ?? 5);
+const faltaMotivo = computed(() =>
+    !! props.cfg?.pedirMotivo && motivo.value.trim().length < minimoMotivo.value);
+
+const confirmar = () => {
+    if (faltaMotivo.value) return;
+    props.cfg?.onConfirmar?.(motivo.value.trim());
+};
 
 const COLORES = {
     emerald: { title: 'text-emerald-700', btn: 'bg-emerald-600 hover:bg-emerald-700' },
@@ -58,6 +88,19 @@ const cargando = computed(() => !!props.cfg?.cargando);
         <div class="bg-white dark:bg-surface-800 rounded-xl shadow-xl max-w-md w-full m-4 p-5 space-y-4">
             <h2 class="font-bold text-lg" :class="paleta.title">{{ cfg.titulo }}</h2>
             <p class="text-sm text-surface-600 whitespace-pre-line">{{ cfg.mensaje }}</p>
+
+            <div v-if="cfg.pedirMotivo" class="space-y-1">
+                <label class="block text-xs font-bold text-surface-600">
+                    {{ cfg.pedirMotivo.etiqueta || 'Motivo' }}
+                </label>
+                <textarea v-model="motivo" rows="3"
+                          :placeholder="cfg.pedirMotivo.placeholder || 'Queda guardado con tu nombre y la hora.'"
+                          class="w-full text-sm rounded border border-surface-300 p-2 focus:border-brand-500 focus:ring-brand-500"></textarea>
+                <p v-if="faltaMotivo" class="text-xs text-surface-500">
+                    Escribí al menos {{ minimoMotivo }} caracteres.
+                </p>
+            </div>
+
             <!--
                 En celular los dos botones ocupan la mitad cada uno y miden 44px
                 de alto, que es el minimo para tocar con el dedo sin fallar;
@@ -69,8 +112,8 @@ const cargando = computed(() => !!props.cfg?.cargando);
                         class="flex-1 sm:flex-none text-sm px-4 min-h-[44px] sm:min-h-0 sm:py-1.5 rounded border border-surface-300 hover:bg-surface-50">
                     Cancelar
                 </button>
-                <button @click="cfg.onConfirmar"
-                        :disabled="cargando"
+                <button @click="confirmar"
+                        :disabled="cargando || faltaMotivo"
                         :class="['flex-1 sm:flex-none text-sm px-4 min-h-[44px] sm:min-h-0 sm:py-1.5 rounded text-white disabled:opacity-50', paleta.btn]">
                     {{ cargando ? 'Procesando…' : textoConfirmar }}
                 </button>

@@ -33,8 +33,11 @@ class SiigoController extends Controller implements HasMiddleware
                 // F8 · ampliado: antes solo Aracely · ahora Aracely + Gerente
                 // (Gerente puede monitorear pero solo Aracely toggleaKillSwitch).
                 $u = $r->user();
+                // Casilla: Integracion SIIGO. Preguntaba por nombre de rol, asi
+                //   que un rol nuevo nunca iba a poder monitorear la integracion
+                //   por mas que le marcaran la casilla.
                 abort_unless(
-                    $u?->esAracely() || $u?->hasAnyRole(['Gerente', 'Gerencia']),
+                    \App\Auth\Permisos::puede($u, 'siigo'),
                     403
                 );
                 return $next($r);
@@ -146,9 +149,69 @@ class SiigoController extends Controller implements HasMiddleware
         try {
             app(\App\Modules\Siigo\Clients\SiigoClient::class)->authenticate();
 
-            return back()->with('success', 'SIIGO respondió correctamente: la integración está viva.');
+            /*
+             * Una conexión que responde ES la prueba de que está configurado.
+             *
+             * `siigo_config.activo` es la puerta que miran TODOS los jobs de
+             * push: con ella en false salen en 6 ms sin llamar a nada. Y no
+             * había una sola pantalla que la prendiera —el interruptor del
+             * panel vive dentro de un `v-if="config.activo"`, o sea que el
+             * botón para encenderlo estaba escondido porque estaba apagado—.
+             *
+             * El resultado, comprobado el 2026-10-14: Aracely pega usuario,
+             * llave y Partner ID, prueba la conexión, le dice «la integración
+             * está viva»… y el panel sigue mostrando «SIIGO aún no
+             * configurado» mientras 71 documentos esperan en la cola sin que
+             * nadie los mande.
+             */
+            $recienActivada = ! $cfg->activo;
+            if ($recienActivada) {
+                $cfg->forceFill(['activo' => true])->save();
+                SiigoConfig::invalidarPushAutoCache();
+            }
+
+            return back()->with('success',
+                ($recienActivada ? 'Integración ACTIVADA · ' : '')
+                .'SIIGO respondió correctamente: la integración está viva. '
+                .$this->reencolarPendientes()
+                .($cfg->push_auto ? '' : ' OJO: el push automático está en pausa — prendelo abajo para que salgan solos.'));
         } catch (\Throwable $t) {
             return back()->with('error', 'SIIGO no aceptó las credenciales · '.$t->getMessage());
+        }
+    }
+
+    /**
+     * Apenas la llave vuelve a servir, se reencola lo que quedó pendiente.
+     *
+     * Sin esto había que esperar a la pasada de las 04:15. Y pasó de verdad:
+     * la llave del sandbox se cayó la tarde del 2026-10-09, los 29 trabajos
+     * encolados aguantaron sus 12 horas de `retryUntil` esperándola, se
+     * vencieron de madrugada y a la mañana siguiente el ERP seguía sin mandar
+     * nada aunque la credencial ya estuviera arreglada.
+     *
+     * No se pierde trabajo por eso —`siigo:empujar-pendientes` barre las
+     * tablas y encuentra lo que no tiene `siigo_id`—, pero sí se pierde un día.
+     * Acá se dispara ese mismo barrido en el momento en que alguien prueba la
+     * conexión con éxito, que es justo cuando Aracely acaba de pegar la llave.
+     */
+    private function reencolarPendientes(): string
+    {
+        try {
+            \Illuminate\Support\Facades\Artisan::call('siigo:empujar-pendientes');
+            $salida = \Illuminate\Support\Facades\Artisan::output();
+
+            if (preg_match('/(\d+) documentos encolados/', $salida, $m) && (int) $m[1] > 0) {
+                return "Se reencolaron {$m[1]} documento(s) que estaban esperando.";
+            }
+
+            return 'No había nada pendiente por reenviar.';
+        } catch (\Throwable $e) {
+            // Que un fallo acá no tumbe el mensaje de «conexión OK», que es la
+            // información que la persona vino a buscar.
+            \Illuminate\Support\Facades\Log::channel('siigo')
+                ->warning('No se pudo reencolar tras probar la conexión', ['error' => $e->getMessage()]);
+
+            return 'Revisá los pendientes a mano: el reenvío automático falló.';
         }
     }
 
@@ -709,7 +772,19 @@ class SiigoController extends Controller implements HasMiddleware
                 ->where('estado', 'fallido')
                 ->where('created_at', '>=', $desdeHoy)
                 ->count(),
-            'productos_sin_siigo_id' => Producto::whereNull('siigo_id')->where('activo', true)->count(),
+            /*
+             * Sin `siigo_id` PROPIO y sin variantes que ya estén allá.
+             *
+             * Un producto granular no viaja a SIIGO: viajan sus variantes, una
+             * por talla/color, y el padre se queda sin id a propósito. Contarlo
+             * como «sin sincronizar» pintaba 28 productos en rojo cuando sus 80
+             * variantes estaban las 80 arriba — y con 28 alarmas falsas fijas,
+             * un producto que sí falle no se distingue de nada.
+             */
+            'productos_sin_siigo_id' => Producto::whereNull('siigo_id')
+                ->where('activo', true)
+                ->whereDoesntHave('variantes', fn ($q) => $q->whereNotNull('siigo_id'))
+                ->count(),
             'total_semana' => SiigoSyncLog::where('created_at', '>=', $desdeSemana)->count(),
         ];
     }
@@ -903,9 +978,29 @@ class SiigoController extends Controller implements HasMiddleware
             'siigo.cta_sobrante_inventario_default' => 'Sobrante de toma física',
         ];
 
+        /*
+         * Qué claves eligió alguien de verdad, para poder distinguirlas de las
+         * que vienen del valor por defecto del código.
+         */
+        $elegidas = \App\Models\ReglaNegocio::todas();
+
         $filas = [];
         foreach ($claves as $clave => $etiqueta) {
-            $codigo = trim((string) setting($clave, ''));
+            /*
+             * El valor EFECTIVO, que es el que el ERP va a escribir en el
+             * asiento. Acá decía `setting($clave, '')`, y ese segundo argumento
+             * **anula el valor por defecto** de `Reglas::DEFAULTS` (`??` sólo
+             * cae con null, y '' no es null). Resultado: las cinco filas decían
+             * «Sin configurar · sin valor» mientras el ERP armaba los asientos
+             * con 5195, 1110, 139535, 5299 y 4295 — entre ellas una que no
+             * existe en el plan y tres de encabezado.
+             *
+             * O sea: la tarjeta que existe para avisar «SIIGO va a rechazar
+             * estas cuentas» escondía exactamente eso. Lo que se muestra tiene
+             * que ser lo que hay. Encontrado el 2026-10-14.
+             */
+            $codigo = trim((string) setting($clave));
+            $heredado = ! array_key_exists($clave, $elegidas);
 
             if ($codigo === '') {
                 $filas[] = ['clave' => $clave, 'etiqueta' => $etiqueta, 'codigo' => '',
@@ -916,9 +1011,11 @@ class SiigoController extends Controller implements HasMiddleware
             $cuenta = \Illuminate\Support\Facades\DB::table('plan_cuentas')
                 ->where('codigo', $codigo)->first(['codigo', 'nombre']);
 
+            $origen = $heredado ? ' · valor por defecto, nadie lo eligió todavía' : '';
+
             if (! $cuenta) {
                 $filas[] = ['clave' => $clave, 'etiqueta' => $etiqueta, 'codigo' => $codigo,
-                    'estado' => 'rojo', 'detalle' => 'No existe en el plan de cuentas.'];
+                    'estado' => 'rojo', 'detalle' => 'No existe en el plan de cuentas.'.$origen];
                 continue;
             }
 
@@ -932,9 +1029,9 @@ class SiigoController extends Controller implements HasMiddleware
                 'etiqueta' => $etiqueta,
                 'codigo' => $codigo,
                 'estado' => $hijas > 0 ? 'amber' : 'verde',
-                'detalle' => $hijas > 0
+                'detalle' => ($hijas > 0
                     ? $cuenta->nombre." · es cuenta de encabezado ({$hijas} subcuentas): hay que usar una auxiliar."
-                    : $cuenta->nombre,
+                    : $cuenta->nombre).$origen,
             ];
         }
 
@@ -1016,8 +1113,22 @@ class SiigoController extends Controller implements HasMiddleware
         // decidir qué productos siguen vivos (los soft-deleteados ya no urgen).
         $ids = $rows->pluck('producto_id')->map(fn ($x) => (int) $x)->filter()->all();
         $productos = Producto::whereIn('id', $ids)
+            ->withCount(['variantes as variantes_en_siigo' => fn ($q) => $q->whereNotNull('siigo_id')])
             ->get(['id', 'referencia', 'nombre', 'activo', 'siigo_id'])
             ->keyBy('id');
+
+        /*
+         * Un padre granular falla siempre y no importa: lo que SIIGO vende son
+         * sus variantes, y si ya están arriba el padre no tiene por qué subir.
+         * Listarlo igual llenaba la tarjeta con 28 alarmas permanentes que
+         * nadie podía resolver —la pantalla pedía «sincronizá el producto» y
+         * sincronizarlo nunca le iba a dar id— y tapaban las fallas de verdad.
+         */
+        $rows = $rows->reject(function ($r) use ($productos) {
+            $p = $productos[(int) $r->producto_id] ?? null;
+
+            return $p && ! $p->siigo_id && $p->variantes_en_siigo > 0;
+        });
 
         return $rows->map(function ($r) use ($productos) {
             $pid = (int) $r->producto_id;

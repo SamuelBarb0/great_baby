@@ -10,6 +10,8 @@ import { Head, router } from '@inertiajs/vue3';
 import { CreditCard, Plus, X, Trash2, Pencil, AlertTriangle, ExternalLink } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
 
+import PestanasSeccion from '@/Components/PestanasSeccion.vue';
+import { pestanasConfigContable } from '@/composables/usePestanasContables';
 const props = defineProps({
     metodos: { type: Array, required: true },
     tipos: { type: Array, required: true },
@@ -122,6 +124,8 @@ const tipoLabel = (v) => props.tipos.find(t => t.valor === v)?.label || v;
     <Head title="Métodos de pago"/>
     <AppLayout>
         <div class="space-y-4 max-w-5xl">
+            <PestanasSeccion :pestanas="pestanasConfigContable"/>
+
             <div class="flex items-start justify-between gap-4 flex-wrap">
                 <div>
                     <h1 class="text-2xl font-bold flex items-center gap-2">

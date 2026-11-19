@@ -6,13 +6,15 @@ use App\Modules\Dropi\Enums\EstadoPedidoDropi;
 use App\Modules\Dropi\Models\DropiPedido;
 use App\Modules\Dropi\Models\DropiPedidoItem;
 use App\Modules\Dropi\Models\DropiVinculoProducto;
+use App\Modules\Dropi\Models\Producto;
 use App\Modules\Dropi\Models\ProductoVariante;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Lorisleiva\Actions\Concerns\AsAction;
 
 /**
- * Enlaza una llave de Dropi con una variante del catálogo GB (una sola vez).
+ * Enlaza una llave de Dropi con el catálogo GB (una sola vez): con una variante,
+ * o —si el producto está en modo AGREGADO, sin variantes— con el producto.
  *
  *  1. Guarda el vínculo: desde ahí el importador y el sync lo resuelven solos.
  *  2. Asigna la variante a los ítems que ya estaban esperando. Si se cambia un
@@ -32,33 +34,73 @@ class VincularProductoDropi
     /**
      * @return array{items: int, pedidos_liberados: int}
      */
-    public function handle(string $sku, int $varianteId, ?int $userId = null): array
+    public function handle(string $sku, int $varianteId, ?int $userId = null, array $nombres = []): array
     {
         $variante = ProductoVariante::findOrFail($varianteId);
 
-        $items = DB::transaction(function () use ($sku, $variante, $userId) {
+        return $this->vincular($sku, $variante->id, $variante->producto_id, $userId, $nombres);
+    }
+
+    /**
+     * Vincula la llave con un producto AGREGADO (`desglose_stock = false`).
+     *
+     * Todas las variaciones de Dropi de ese producto descuentan del mismo total,
+     * que es como el ERP ya lleva su stock. Un producto con desglose NO se
+     * vincula entero: su stock está repartido por variante y hay que elegir una.
+     *
+     * @param  array{producto_nombre?: ?string, variacion?: ?string}  $nombres  lo que dice Dropi, para la lista
+     */
+    public function aProducto(string $sku, int $productoId, ?int $userId = null, array $nombres = []): array
+    {
+        $producto = Producto::findOrFail($productoId);
+        if ($producto->desglose_stock) {
+            throw new \DomainException(
+                "El producto {$producto->referencia} lleva el stock por variante: vincule la llave {$sku} con una de sus variantes."
+            );
+        }
+
+        return $this->vincular($sku, null, $producto->id, $userId, $nombres);
+    }
+
+    /** @return array{items: int, pedidos_liberados: int} */
+    private function vincular(string $sku, ?int $varianteId, int $productoId, ?int $userId, array $nombres): array
+    {
+        $items = DB::transaction(function () use ($sku, $varianteId, $productoId, $userId, $nombres) {
             $muestra = DropiPedidoItem::where('sku_dropi', $sku)->latest('id')->first();
 
             DropiVinculoProducto::updateOrCreate(
                 ['sku_dropi' => $sku],
                 [
-                    'variante_id' => $variante->id,
-                    'producto_nombre' => $muestra?->producto_nombre,
-                    'variacion' => $muestra?->variacion,
+                    'variante_id' => $varianteId,
+                    // Sólo se guarda el producto cuando ES el destino (agregado);
+                    // con variante, el producto sale de la variante.
+                    'producto_id' => $varianteId ? null : $productoId,
+                    'producto_nombre' => $muestra?->producto_nombre ?? ($nombres['producto_nombre'] ?? null),
+                    'variacion' => $muestra?->variacion ?? ($nombres['variacion'] ?? null),
                     'vinculado_por' => $userId,
                 ],
             );
 
+            // ¿Ya apunta exactamente a este destino? Entonces no hay nada que reasignar.
+            // El `whereNotNull` no sobra: sin él, en un ítem que todavía no tiene
+            // destino `variante_id = X` vale NULL, el NOT de NULL también, y el
+            // ítem que justo se quería vincular quedaba fuera.
+            $yaApunta = fn ($q) => $varianteId
+                ? $q->whereNotNull('variante_id')->where('variante_id', $varianteId)
+                : $q->whereNull('variante_id')->whereNotNull('producto_id')->where('producto_id', $productoId);
+
             $items = DropiPedidoItem::query()
                 ->where('sku_dropi', $sku)
-                ->where(fn ($q) => $q->where('variante_id', '!=', $variante->id)->orWhereNull('variante_id'))
-                ->where(fn ($q) => $q->whereNull('variante_id')
+                ->whereNot($yaApunta)
+                // Sin destino todavía, o de un pedido que aún no se alista: lo
+                // alistado ya movió inventario con el destino viejo y no se toca.
+                ->where(fn ($q) => $q->where(fn ($w) => $w->whereNull('variante_id')->whereNull('producto_id'))
                     ->orWhereHas('pedido', fn ($p) => $p->whereIn('estado', self::ESTADOS_REASIGNABLES)))
                 ->get();
 
             // Uno a uno (no update masivo) para que quede en la auditoría del ítem.
             foreach ($items as $item) {
-                $item->update(['variante_id' => $variante->id, 'producto_id' => $variante->producto_id]);
+                $item->update(['variante_id' => $varianteId, 'producto_id' => $productoId]);
             }
 
             return $items;

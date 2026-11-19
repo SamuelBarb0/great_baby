@@ -1,0 +1,243 @@
+<?php
+
+namespace App\Modules\Dropi\Actions;
+
+use App\Models\Contacto;
+use App\Modules\Cartera\Actions\RegistrarAsientoContable;
+use App\Modules\Cartera\Models\FacturaVenta;
+use App\Modules\Cartera\Models\FacturaVentaItem;
+use App\Modules\Cartera\Support\NumeroFactura;
+use App\Modules\Dropi\Models\DropiPedido;
+use App\Modules\Dropi\Models\DropiRemision;
+use Illuminate\Support\Facades\DB;
+use Lorisleiva\Actions\Concerns\AsAction;
+
+/**
+ * Tarjeta Dropi · 9. Facturación Dropi → SIIGO.
+ *
+ * Decidido con Samuel el 2026-10-20: cada pedido Dropi se factura UNO A UNO,
+ * AL DESPACHAR, a CONSUMIDOR FINAL, por el valor de proveedor (lo que Dropi le
+ * paga a Great Baby, no lo que paga el cliente final).
+ *
+ *   9.1 · remisión 1:1 por valor de proveedor. Antes sólo nacía al cerrar el
+ *         corte (11 de 148 cortes cerrados → 16 remisiones para ~4 900 pedidos).
+ *   9.3 · factura electrónica: nace `es_electronica` si SIIGO está activo y va
+ *         por ReintentarEmisionDian, el mismo camino de la factura B2B.
+ *
+ * IVA: Dropi no manda impuestos (`iva_total_product` llega null). El precio de
+ * proveedor es lo que entra a la wallet, así que se toma con IVA INCLUIDO y se
+ * separa con la tarifa del producto en el catálogo: el total de la factura es
+ * exactamente lo que paga Dropi y cuadra con el pago 1006.
+ *
+ * Detrás de la regla `dropi.facturacion_automatica` (apagada) y del corte
+ * `dropi.facturar_desde`: facturar ante la DIAN no se deshace, así que se
+ * prende a propósito y no factura la historia.
+ */
+class FacturarPedidoDropi
+{
+    use AsAction;
+
+    public const DOC_CONSUMIDOR_FINAL = '222222222222';
+
+    /** Por qué no se facturó, para la bitácora y el log. */
+    public ?string $motivo = null;
+
+    /**
+     * @param  bool  $manual  4.6 · facturar a pedido desde el escáner: no
+     *                        depende de la regla automática ni de la fecha de corte.
+     */
+    public function handle(DropiPedido $pedido, ?int $userId = null, bool $manual = false): ?FacturaVenta
+    {
+        $this->motivo = $manual ? null : self::motivoReglas();
+        if ($this->motivo) {
+            return null;
+        }
+
+        return DB::transaction(function () use ($pedido, $userId) {
+            $p = DropiPedido::with(['items.variante.producto.impuesto', 'items.producto.impuesto', 'remision'])
+                ->lockForUpdate()->findOrFail($pedido->id);
+
+            if ($p->factura_venta_id) {
+                $this->motivo = 'ya facturado';
+
+                return FacturaVenta::find($p->factura_venta_id);
+            }
+
+            // 9.1 · remisión 1:1 (si el cierre del corte no la creó ya).
+            if (! $p->remision) {
+                DropiRemision::create([
+                    'pedido_id' => $p->id,
+                    'consecutivo' => GenerarRemisionesCorte::siguienteConsecutivo(),
+                    'valor_proveedor' => $p->monto_esperado_proveedor,
+                ]);
+            }
+
+            $lineas = [];
+            $sinCatalogo = [];
+            foreach ($p->items as $it) {
+                $cant = (int) ($it->cantidad ?? 0);
+                if ($cant <= 0) continue;
+                if (! $it->variante_id && ! $it->producto_id) {
+                    $sinCatalogo[] = $it->sku_dropi ?? "ítem #{$it->id}";
+                    continue;
+                }
+                $producto = $it->variante?->producto ?? $it->producto;
+                $ivaPct = (float) ($producto?->impuesto?->porcentaje ?? 0);
+                $conIva = (float) $it->precio_proveedor_unit;
+                $base = round($conIva / (1 + $ivaPct / 100), 2);
+                $lineas[] = [
+                    'item' => $it, 'cantidad' => $cant, 'base' => $base, 'iva_pct' => $ivaPct,
+                    'total' => round($conIva * $cant, 2),
+                    'descripcion' => trim(($producto?->nombre ?? $it->sku_dropi ?? 'Producto').' · guía '.$p->guia),
+                ];
+            }
+
+            if (! $lineas) {
+                // Sin productos del catálogo no hay factura posible (la DIAN
+                // pide el producto). Queda la remisión y el motivo.
+                $this->motivo = 'ningún ítem vinculado al catálogo: '.implode(', ', $sinCatalogo);
+
+                return null;
+            }
+
+            $total = round(array_sum(array_column($lineas, 'total')), 2);
+            $subtotal = round(array_sum(array_map(fn ($l) => $l['base'] * $l['cantidad'], $lineas)), 2);
+            // Lo de Dropi lo factura la empresa de la regla `dropi.empresa`:
+            //   Great Baby, con su propia resolución en SIIGO (decidido el 7-nov:
+            //   misma empresa, otra resolución). Si la regla apunta a una razón
+            //   social que no está activa no se factura: queda la remisión con
+            //   el motivo, en vez de salir con el NIT equivocado.
+            $empresa = \App\Models\EmpresaConfig::porCodigo((string) setting('dropi.empresa', 'great_baby'));
+            if (! $empresa?->activa) {
+                $this->motivo = 'la empresa del e-commerce no está activa: configurala en Configuración → Empresas';
+
+                return null;
+            }
+            $siigo = \App\Modules\Siigo\Models\SiigoConfig::deEmpresa($empresa->id);
+
+            /*
+             * Dos cosas distintas que estaban mezcladas en una sola bandera.
+             *
+             * 1 · ¿Esta factura PUEDE salir con resolución propia? En Great
+             *     Baby lo de Dropi va con la suya (7-nov): sin ella saldría con
+             *     la resolución de Great Baby, y la emisión tampoco la dejaría
+             *     pasar. Eso es configuración y no cambia de un minuto a otro:
+             *     desde el 2026-11-10 hay resolución propia, prefijo ECOM.
+             *
+             * 2 · ¿SIIGO está vivo AHORA? Eso sí cambia, y no puede decidir el
+             *     destino de la factura: con la integración caída nacía marcada
+             *     «no viaja» y quedaba así PARA SIEMPRE, porque nadie la vuelve
+             *     a evaluar. Es el mismo defecto que tenían la factura B2B y la
+             *     manual, corregido el 2026-11-05.
+             *
+             * Así que el destino se declara —lo de Dropi va al fiscal— y lo
+             * único que lo puede frenar es no tener con qué numerarla.
+             */
+            $tieneResolucionPropia = ! ($siigo?->esPrincipal() ?? true)
+                || (int) ($siigo?->tipo_documento_dropi_id ?? 0) > 0;
+
+            $destinoFactura = \App\Modules\Contabilidad\Enums\DestinoFiscal::Siigo;
+            $viajaASiigo = $destinoFactura->tieneParteFiscal() && $tieneResolucionPropia;
+
+            $factura = FacturaVenta::create([
+                'empresa_id' => $empresa->id,
+                // Línea de negocio Dropi: el asiento (1305 contra ingreso e IVA),
+                // el cobro desde la wallet y las notas la heredan de aquí. Sin
+                // esto la columna tomaba su default `great_baby` y cada venta del
+                // e-commerce quedaba en los libros de Great Baby.
+                'linea_negocio' => \App\Modules\Contabilidad\Enums\LineaNegocio::Dropi,
+                'numero' => $empresa->es_principal ? NumeroFactura::dropi() : NumeroFactura::siguiente($empresa),
+                'contacto_id' => self::consumidorFinal()->id,
+                'fecha_emision' => now()->toDateString(),
+                'fecha_vencimiento' => now()->toDateString(),
+                'estado' => 'pendiente',
+                'tipo' => 'contado',
+                'subtotal' => $subtotal,
+                'descuento' => 0,
+                'impuestos' => round($total - $subtotal, 2),
+                'total' => $total,
+                'saldo' => $total,
+                'destino_fiscal' => $destinoFactura,
+                'es_electronica' => $viajaASiigo,
+                'origen_type' => DropiPedido::class,
+                'origen_id' => $p->id,
+                'observaciones' => "Dropi guía {$p->guia} · orden {$p->dropi_orden_id} · remisión "
+                    .($p->remision?->consecutivo ?? DropiRemision::where('pedido_id', $p->id)->value('consecutivo'))
+                    .($sinCatalogo ? ' · SIN PRODUCTO VINCULADO (no facturado): '.implode(', ', $sinCatalogo) : ''),
+                'facturado_por_user_id' => $userId,
+            ]);
+
+            foreach ($lineas as $l) {
+                FacturaVentaItem::create([
+                    'factura_id' => $factura->id,
+                    'variante_id' => $l['item']->variante_id,
+                    'producto_id' => $l['item']->producto_id,
+                    'descripcion' => mb_substr($l['descripcion'], 0, 250),
+                    'cantidad' => $l['cantidad'],
+                    'precio_unit' => $l['base'],
+                    'descuento_pct' => 0,
+                    'impuesto_pct' => $l['iva_pct'],
+                    'subtotal' => round($l['base'] * $l['cantidad'], 2),
+                ]);
+            }
+
+            // Igual que la B2B: el observer `saved` corre con 0 ítems; el
+            // asiento (1305 contra ingreso e IVA) se pide explícito.
+            (new RegistrarAsientoContable())->factura($factura->refresh());
+
+            DB::table('dropi_pedidos')->where('id', $p->id)->update(['factura_venta_id' => $factura->id]);
+
+            if ($factura->es_electronica) {
+                $id = $factura->id;
+                DB::afterCommit(fn () => \App\Jobs\ReintentarEmisionDian::dispatch($id)->onQueue('siigo'));
+            }
+
+            return $factura;
+        });
+    }
+
+    /** Por qué la facturación automática no corre hoy (null = sí corre). */
+    public static function motivoReglas(): ?string
+    {
+        if (! (bool) setting('dropi.facturacion_automatica', false)) {
+            return 'facturación automática apagada';
+        }
+        $desde = trim((string) setting('dropi.facturar_desde', ''));
+        if ($desde !== '' && now()->toDateString() < $desde) {
+            return "facturación desde {$desde}";
+        }
+
+        return null;
+    }
+
+    /**
+     * Por qué un pedido despachado no tiene factura, en palabras para el
+     * escáner. 4.6: quien escanea tiene que saberlo en el momento.
+     */
+    public static function motivoSinFactura(DropiPedido $pedido): string
+    {
+        if ($m = self::motivoReglas()) {
+            return ucfirst($m).'.';
+        }
+        $pedido->loadMissing('items');
+        if ($pedido->items->every(fn ($i) => ! $i->variante_id && ! $i->producto_id)) {
+            return 'Ningún producto del pedido está vinculado al catálogo (Dropi → Productos sin vincular).';
+        }
+
+        return 'La factura no se pudo crear: revisar el registro de errores.';
+    }
+
+    /** El tercero genérico de la DIAN para ventas a personas sin identificar. */
+    public static function consumidorFinal(): Contacto
+    {
+        return Contacto::firstOrCreate(
+            ['numero_documento' => self::DOC_CONSUMIDOR_FINAL],
+            [
+                'tipo_documento' => 'CC',
+                'nombre_completo' => 'CONSUMIDOR FINAL',
+                'es_cliente' => true,
+                'activo' => true,
+            ],
+        );
+    }
+}

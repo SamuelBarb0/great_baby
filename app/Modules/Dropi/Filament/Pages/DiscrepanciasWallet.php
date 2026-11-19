@@ -23,15 +23,18 @@ class DiscrepanciasWallet extends Page
 
     protected static ?string $title = 'Discrepancias · Wallet ↔ Pedidos';
 
-    protected static string|\UnitEnum|null $navigationGroup = 'Dropi';
+    protected static string|\UnitEnum|null $navigationGroup = 'Dinero';
 
-    protected static ?int $navigationSort = 7;
+    protected static ?int $navigationSort = 4;
 
     protected string $view = 'dropi.pages.discrepancias-wallet';
 
     public static function canAccess(): bool
     {
-        return auth()->user()?->esAracely() ?? false;
+        // Matriz de permisos: la casilla «Discrepancias Dropi» de la pantalla
+        //   de Roles. Antes era esAracely() y un rol nuevo no podía entrar
+        //   aunque tuviera la casilla marcada.
+        return \App\Auth\Permisos::puede(auth()->user(), 'dropi_discrepancias');
     }
 
     public function getPedidosSinCobro()

@@ -34,9 +34,13 @@ class Producto extends Model implements AuditableContract, HasMedia
         'copy_comercial', 'specs_json', 'keywords_seo', 'beneficios',
         // C-F1 · Desglose dual de stock
         'desglose_stock', 'stock_directo',
+        // Rack/estante/nivel como lo escribe bodega. NO es una ubicación de
+        // SIIGO: es la posición dentro de la bodega, que el catálogo comercial
+        // traía metida en el nombre del producto.
+        'posicion_bodega',
         // Sprint 4 · G.1 · Campos SIIGO Kardex Referencias
         'linea_id', 'grupo_id', 'subgrupo_id', 'clase_id',
-        'posicion_arancelaria', 'unidad_compra_id', 'factor_conversion',
+        'posicion_arancelaria', 'arancel_pct', 'unidad_compra_id', 'factor_conversion',
         'rentabilidad_pct', 'reposicion_max_dias', 'descuento_default_pct',
         'descripcion_ampliada', 'ficha_tecnica',
         'proteger_precio', 'maneja_lotes', 'maneja_seriales', 'es_estadistico',
@@ -49,6 +53,10 @@ class Producto extends Model implements AuditableContract, HasMedia
         'reference_fabrica', 'stock_minimo',
         // FASE F2.A4 · override por producto del grupo SIIGO (si vacío → categoría)
         'siigo_account_group_override',
+        // MKT-1/4 · Publicación (el «listo para publicar» y la visibilidad para
+        //   Ventas) y las piezas de contenido que lleva el producto.
+        'publico_objetivo', 'listo_publicar', 'publicado', 'publicado_cambiado_en', 'publicado_cambiado_por',
+        'piezas_video', 'piezas_reel', 'piezas_imagenes',
     ];
 
     protected $casts = [
@@ -81,7 +89,29 @@ class Producto extends Model implements AuditableContract, HasMedia
         // FASE H · Paridad SIIGO form
         'visible_en_facturas' => 'boolean',
         'stock_minimo' => 'decimal:4',
+        'listo_publicar' => 'boolean',
+        'publicado' => 'boolean',
+        'publicado_cambiado_en' => 'datetime',
+        'piezas_video' => 'boolean',
+        'piezas_reel' => 'boolean',
+        'piezas_imagenes' => 'integer',
     ];
+
+    /**
+     * Lo que ve Ventas (vendedores y portal de clientes): activo y publicado.
+     * Marketing lo apaga mientras prepara el contenido; el catálogo interno lo
+     * sigue mostrando, marcado como oculto.
+     */
+    public function scopeVisibleParaVentas($q)
+    {
+        return $q->where('activo', true)->where('publicado', true);
+    }
+
+    /** MKT-2 · Creativos de marketing del producto (fotos, videos, reels). */
+    public function creativos(): HasMany
+    {
+        return $this->hasMany(\App\Modules\Marketing\Models\MarketingCreativo::class);
+    }
 
     public function variantes(): HasMany { return $this->hasMany(ProductoVariante::class); }
 
@@ -159,6 +189,14 @@ class Producto extends Model implements AuditableContract, HasMedia
     protected static bool $omitirKardexInicial = false;
 
     /**
+     * Ubicación donde debe entrar el stock inicial del próximo producto.
+     *
+     * Null = la primera activa, que es como se comportaba antes y es lo que
+     * necesitan los importadores y seeders que no eligen lugar.
+     */
+    protected static ?int $ubicacionStockInicial = null;
+
+    /**
      * Por qué entra el stock inicial del producto que se está creando (motivo,
      * observación, soporte, tercero, usuario). Lo pone la ficha con
      * `conMotivoStockInicial()`; el observer lo usa para abrir la carga CI-.
@@ -166,6 +204,26 @@ class Producto extends Model implements AuditableContract, HasMedia
      * @var array{motivo: \App\Modules\Inventario\Enums\MotivoCargaInventario, observacion: string, soporte?: ?string, tercero_id?: ?int, user_id?: ?int}|null
      */
     protected static ?array $stockInicial = null;
+
+    /**
+     * Corre `$fn` dejando el stock inicial en la ubicación indicada.
+     *
+     * @template T
+     *
+     * @param  callable():T  $fn
+     * @return T
+     */
+    public static function conStockInicialEn(?int $ubicacionId, callable $fn)
+    {
+        $previo = self::$ubicacionStockInicial;
+        self::$ubicacionStockInicial = $ubicacionId;
+
+        try {
+            return $fn();
+        } finally {
+            self::$ubicacionStockInicial = $previo;
+        }
+    }
 
     /**
      * Crea el producto dentro de `$fn` con el porqué de su stock inicial.
@@ -230,7 +288,25 @@ class Producto extends Model implements AuditableContract, HasMedia
             if (self::$omitirKardexInicial) return;
             if ($p->desglose_stock || (int) $p->stock_directo <= 0) return;
 
-            $bodega = \App\Modules\Dropi\Models\InventarioUbicacion::query()
+            /*
+             * Dónde entra ese stock.
+             *
+             * Antes se tomaba SIEMPRE la primera ubicación activa por id, sin
+             * preguntar. Medido el 2026-10-13 montando una bodega nueva: se
+             * crea «BOG-DEMO», se escriben 60 unidades y las 60 aparecen en
+             * «R-A-01», una bodega vieja. El formulario pide la cantidad y
+             * nunca pregunta el lugar, así que el error es invisible hasta que
+             * alguien va a despachar y no encuentra la mercancía.
+             *
+             * Ahora manda la ubicación que eligió la persona; si no eligió
+             * ninguna se conserva el comportamiento anterior, para no romper
+             * las importaciones y los seeders que no la envían.
+             */
+            $bodega = self::$ubicacionStockInicial
+                ? \App\Modules\Dropi\Models\InventarioUbicacion::find(self::$ubicacionStockInicial)
+                : null;
+
+            $bodega ??= \App\Modules\Dropi\Models\InventarioUbicacion::query()
                 ->where(fn ($q) => $q->where('activa', true)->orWhereNull('activa'))
                 ->orderBy('id')
                 ->first();
@@ -266,7 +342,13 @@ class Producto extends Model implements AuditableContract, HasMedia
                 'ubicacion_id' => $bodega->id,
                 'tipo' => 'stock_inicial_form',
                 'cantidad' => (int) $p->stock_directo,
-                'costo_unit' => (float) ($p->precio_proveedor ?? 0) > 0 ? (float) $p->precio_proveedor : null,
+                // El stock inicial entraba SIN costo. Como el kardex valoriza
+                // con el promedio de las entradas, la bodega entera valía $0 y
+                // la venta salía a costo cero: ningún despacho causaba costo de
+                // ventas, así que el margen bruto del Estado de resultados daba
+                // 100% siempre. Medido el 2026-10-13 en el reporte de stock por
+                // bodega, con mercancía adentro y la bodega en $0.
+                'costo_unit' => $p->precio_proveedor ?: null,
                 'referencia_tipo' => \App\Modules\Inventario\Models\CargaInventario::class,
                 'referencia_id' => $carga->id,
                 'user_id' => $ctx['user_id'] ?? auth()->id(),
@@ -339,6 +421,35 @@ class Producto extends Model implements AuditableContract, HasMedia
     public function registerMediaCollections(): void
     {
         $this->addMediaCollection('imagenes')->useDisk('public');
+        // Siempre la misma para el mismo producto: se sube una vez y sale en cada orden.
+        $this->addMediaCollection('etiqueta_importacion')->useDisk('public')->singleFile();
+    }
+
+    /** Las otras referencias con que se conoce este producto. */
+    public function referenciasAlternas(): HasMany
+    {
+        return $this->hasMany(ProductoReferencia::class);
+    }
+
+    /** Por su referencia o por cualquiera de las anteriores: es el mismo producto. */
+    public static function buscarPorReferencia(string $referencia): ?self
+    {
+        return static::query()->where('referencia', $referencia)->first()
+            ?? static::query()->whereHas('referenciasAlternas', fn ($q) => $q->where('referencia', $referencia))->first();
+    }
+
+    public function agregarReferencia(string $referencia, ?string $motivo, ?int $userId): ProductoReferencia
+    {
+        $referencia = trim($referencia);
+        $dueno = self::buscarPorReferencia($referencia);
+        if ($dueno && $dueno->id !== $this->id) {
+            throw new \InvalidArgumentException("La referencia «{$referencia}» ya es del producto {$dueno->nombre}.");
+        }
+        if ($referencia === $this->referencia) {
+            throw new \InvalidArgumentException('Esa ya es la referencia de este producto.');
+        }
+
+        return $this->referenciasAlternas()->firstOrCreate(['referencia' => $referencia], ['motivo' => $motivo, 'creado_por' => $userId]);
     }
 
     /**

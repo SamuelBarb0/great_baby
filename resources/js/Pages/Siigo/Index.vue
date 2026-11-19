@@ -126,6 +126,43 @@ const probarConexion = () => {
     });
 };
 
+/*
+ * Traer de SIIGO los catálogos: grupos de inventario, impuestos y listas.
+ *
+ * La ruta existía desde siempre —`POST /app/siigo/sincronizar-catalogos`—
+ * pero el único botón que la llamaba vivía en el panel Filament, que por
+ * diseño es sólo de Dropi. Mientras tanto el formulario de producto mandaba
+ * al usuario «al panel SIIGO, a hacer clic en Sincronizar catálogos»: un
+ * botón que en ESTA pantalla no existía.
+ *
+ * Sin esos catálogos `account_group` se resuelve a null por las cuatro vías
+ * y SIIGO rechaza cada producto con «The field account_group is required».
+ * En producción eso tenía 156 productos sin sincronizar y, detrás de ellos,
+ * cada recepción y cada factura que dependiera de uno.
+ */
+const sincronizandoCat = ref(false);
+const resumenCat = ref(null);
+
+const sincronizarCatalogos = async () => {
+    if (sincronizandoCat.value) return;
+    sincronizandoCat.value = true;
+    resumenCat.value = null;
+    try {
+        const { data } = await window.axios.post('/app/siigo/sincronizar-catalogos', {});
+        if (data?.ok) {
+            const r = data.resumen || {};
+            resumenCat.value = `✓ ${r.account_groups ?? 0} grupos · ${r.taxes ?? 0} impuestos · ${r.price_lists ?? 0} listas`;
+            router.reload({ preserveScroll: true });
+        } else {
+            resumenCat.value = data?.mensaje || 'No se pudo sincronizar.';
+        }
+    } catch (e) {
+        resumenCat.value = e?.response?.data?.mensaje || 'No se pudo sincronizar.';
+    } finally {
+        sincronizandoCat.value = false;
+    }
+};
+
 const claseSemaforo = computed(() => ({
     'text-emerald-600 bg-emerald-50 border-emerald-200': semaforo.value.color === 'emerald',
     'text-amber-600 bg-amber-50 border-amber-200': semaforo.value.color === 'amber',
@@ -563,6 +600,18 @@ const claseEstadoLog = (l) => {
                             <dd class="font-semibold uppercase">{{ config.ambiente || '—' }}</dd>
                         </div>
                     </dl>
+
+                    <button type="button" @click="sincronizarCatalogos" :disabled="sincronizandoCat"
+                            class="btn-ghost w-full mt-4 text-xs justify-center disabled:opacity-50">
+                        <RefreshCw class="w-3.5 h-3.5" :class="sincronizandoCat ? 'animate-spin' : ''"/>
+                        {{ sincronizandoCat ? 'Trayendo catálogos…' : 'Sincronizar catálogos' }}
+                    </button>
+                    <p class="text-[11px] text-surface-500 mt-2 leading-snug">
+                        Trae los grupos de inventario, los impuestos y las listas de precios.
+                        Sin ellos SIIGO rechaza cada producto con
+                        <span class="font-mono">«The field account_group is required»</span>.
+                    </p>
+                    <p v-if="resumenCat" class="text-[11px] font-mono mt-2">{{ resumenCat }}</p>
                 </div>
             </div>
 

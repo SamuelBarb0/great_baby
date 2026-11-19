@@ -4,8 +4,12 @@ namespace App\Modules\Compras\Actions;
 
 use App\Modules\Compras\Enums\EstadoOrdenCompra;
 use App\Modules\Compras\Models\OrdenCompra;
+use App\Modules\Compras\Services\ColoresDeImportacion;
 use App\Modules\Compras\Models\OrdenCompraItem;
 use App\Modules\Compras\Models\RecepcionCompra;
+use App\Modules\Compras\Services\CostoImportacion;
+use App\Modules\Compras\Services\SeguimientoContenedor;
+use App\Modules\Compras\Services\TrasRecepcion;
 use App\Modules\Dropi\Models\InventarioMovimiento;
 use App\Modules\Siigo\Jobs\PushRecepcionASiigo;
 use Illuminate\Support\Facades\DB;
@@ -50,9 +54,27 @@ class RecibirMercancia
             // Lock la OC completa antes de tocar sus items.
             OrdenCompra::query()->whereKey($recepcion->orden_id)->lockForUpdate()->first();
 
+            $esImportacion = $recepcion->orden->esImportacion();
+            // Sin producto, lo que Jorge acepta no llegaría al inventario.
+            if ($esImportacion) {
+                CrearProductosDeOrden::run($recepcion->orden);
+                app(ColoresDeImportacion::class)->resolverEnRecepcion($recepcion);
+            }
+            $costos = app(CostoImportacion::class);
+            $tras = app(TrasRecepcion::class);
+
             foreach ($recepcion->items as $it) {
                 $cantidadRecibida = (float) $it->cantidad_recibida;
                 if ($cantidadRecibida <= 0) continue;
+
+                // Lo que no llegó no se recibe: ni stock, ni deuda, y la orden lo
+                // sigue teniendo pendiente. La línea queda como constancia.
+                $clasificacion = $it->clasificacion ?? 'apto';
+                if ($clasificacion === 'faltante') {
+                    $it->costo_unit = 0;
+                    $it->save();
+                    continue;
+                }
 
                 // Lock el item para leer cantidad_recibida sin race y validar el tope.
                 $ordenItem = OrdenCompraItem::query()->whereKey($it->orden_item_id)->lockForUpdate()->first();
@@ -62,7 +84,10 @@ class RecibirMercancia
 
                 // Re-audit FUNC-C1 · guard sobre-recepción atómico.
                 $pendiente = (float) $ordenItem->cantidad - (float) $ordenItem->cantidad_recibida;
-                if ($cantidadRecibida > $pendiente + 0.0001) {
+                // De China llega agrupado y en otras cantidades por color: en una
+                // importación el tope es el total de la referencia, y lo revisa
+                // `recepcionCrear`. Una compra nacional sigue topada por línea.
+                if (! $esImportacion && $cantidadRecibida > $pendiente + 0.0001) {
                     throw new InvalidArgumentException(sprintf(
                         'Sobre-recepción bloqueada · item "%s": pedido %.3f, ya recibido %.3f, esta recepción %.3f (pendiente %.3f).',
                         $ordenItem->descripcion ?? '?', $ordenItem->cantidad, $ordenItem->cantidad_recibida,
@@ -73,30 +98,46 @@ class RecibirMercancia
                 $ordenItem->cantidad_recibida = (float) $ordenItem->cantidad_recibida + $cantidadRecibida;
                 $ordenItem->save();
 
+                if (! $it->producto_id && ! $it->variante_id) {
+                    $it->producto_id = $ordenItem->producto_id;
+                    $it->variante_id = $ordenItem->variante_id;
+                    $it->save();
+                }
+
+                // La deuda con el proveedor y el 1465 van en pesos, no en su moneda.
+                if ($esImportacion) {
+                    $it->costo_unit = $costos->fobUnitario($ordenItem, $recepcion->orden);
+                    $it->save();
+                }
+
                 // C-F2 R2 · Recepción polimórfica.
                 //   Granular: item con variante_id → mov apunta a variante.
                 //   Agregado: item con producto_id (sin variante) → mov apunta a producto.
-                //   Solo se genera kardex si NO es importación (importaciones acumulan
-                //   costo pendiente hasta liquidar).
-                if (! $recepcion->orden->esImportacion() && ($it->variante_id || $it->producto_id)) {
+                //   La importación entra cuando Jorge la acepta, con lo que él contó.
+                //   Entra a costo estimado y `LiquidarImportacion` lo corrige.
+                if ($it->variante_id || $it->producto_id) {
                     // Re-audit M3 ρ ι · kardex ya soporta decimal(14,4); no
                     //   abortamos por fraccionarios. Grabamos `costo_unit`
                     //   para que PMP real (patrón μ) pueda calcular sin
                     //   caer al precio_proveedor del maestro.
-                    $costoUnit = (float) ($ordenItem->precio_unit ?? 0);
+                    $costoUnit = $esImportacion
+                        ? $costos->costoParaKardex($ordenItem, $recepcion->orden)
+                        : (float) ($ordenItem->precio_unit ?? 0);
                     $esAgregado = $it->variante_id === null && $it->producto_id !== null;
                     InventarioMovimiento::create([
                         'variante_id' => $it->variante_id,
                         'producto_id' => $it->producto_id, // creating hook lo popula si vacío en granular
-                        'ubicacion_id' => $recepcion->bodega_id,
-                        'tipo' => 'entrada_compra',
+                        // Lo que llegó mal entra al inventario, pero no a la venta.
+                        'ubicacion_id' => $clasificacion === 'apto' ? $recepcion->bodega_id : $tras->ubicacionNoVendible()->id,
+                        'tipo' => $esImportacion ? 'entrada_importacion' : 'entrada_compra',
                         'cantidad' => round($cantidadRecibida, 4),
                         'costo_unit' => $costoUnit,
                         'referencia_tipo' => RecepcionCompra::class,
                         'referencia_id' => $recepcion->id,
                         'user_id' => auth()->id(),
                         'notas' => "Rec {$recepcion->numero} OC {$recepcion->orden->numero}"
-                            .($esAgregado ? ' · AGREGADO' : ''),
+                            .($esAgregado ? ' · AGREGADO' : '')
+                            .($clasificacion !== 'apto' ? " · {$clasificacion}: {$it->motivo_clasificacion}" : ''),
                         'created_at' => now(),
                     ]);
                 }
@@ -111,6 +152,11 @@ class RecibirMercancia
             $this->actualizarEstadoOrden($recepcion->orden);
 
             RegistrarAsientoCompra::make()->recepcion($recepcion);
+
+            if ($esImportacion) {
+                $tras->separarEcommerce($recepcion);
+                app(SeguimientoContenedor::class)->llegoABodega($recepcion->orden);
+            }
 
             // COMP-B7 · push automático a SIIGO como factura de compra al
             // confirmar · evita el estado "recepciones sin SIIGO" que requería

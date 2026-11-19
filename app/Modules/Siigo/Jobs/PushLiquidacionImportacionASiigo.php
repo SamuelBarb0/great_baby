@@ -17,6 +17,7 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use DateTimeInterface;
 use App\Modules\Siigo\Jobs\Middleware\EsperarCredencialSiigo;
+use App\Modules\Siigo\Support\ClaveIdempotencia;
 use Illuminate\Queue\Middleware\RateLimited;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Queue\SerializesModels;
@@ -151,7 +152,7 @@ class PushLiquidacionImportacionASiigo implements ShouldQueue
             // nunca llegaba a ejecutarse, así que el typo estaba escondido. La
             // clave de idempotencia es la que evita duplicar el comprobante si
             // el job se reintenta.
-            $resp = $client->request('POST', '/v1/journals', $payload, 1, "imp:{$imp->id}");
+            $resp = $client->request('POST', '/v1/journals', $payload, 1, ClaveIdempotencia::para('imp', $imp));
             if (! $resp->ok()) {
                 throw new RuntimeException("SIIGO rechazó journal: HTTP {$resp->status()} · ".mb_substr((string) $resp->body(), 0, 400));
             }

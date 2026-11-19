@@ -5,6 +5,7 @@
         $colores = [
             'conectado' => ['#10b981', 'Conectado'],
             'esperando_codigo' => ['#f59e0b', 'Esperando el código del correo'],
+            'esperando_app' => ['#f59e0b', 'Esperando el código de la app'],
             'expirado' => ['#ef4444', 'Sesión vencida'],
             'desconectado' => ['#94a3b8', 'Desconectado'],
             'sin_configurar' => ['#ef4444', 'Falta configurar la cuenta de Dropi'],
@@ -39,6 +40,7 @@
             </div>
         @endif
 
+        @if($this->puedeEditar)
         <div style="margin-top:1.25rem;display:flex;gap:.75rem;flex-wrap:wrap;">
             @if($estado !== 'sin_configurar')
                 <x-filament::button wire:click="conectar" icon="heroicon-o-arrow-right-end-on-rectangle">
@@ -49,13 +51,18 @@
                 <x-filament::button wire:click="desconectar" color="gray" icon="heroicon-o-x-mark">Desconectar</x-filament::button>
             @endif
         </div>
+        @endif
     </x-filament::section>
 
-    @if($estado === 'esperando_codigo')
+    @if($this->puedeEditar && in_array($estado, ['esperando_codigo', 'esperando_app'], true))
         <x-filament::section>
             <x-slot name="heading">Código de verificación</x-slot>
             <x-slot name="description">
-                Dropi mandó un código al correo {{ $s->email }}. Escríbelo aquí; vence en pocos minutos.
+                @if($estado === 'esperando_app')
+                    La cuenta tiene verificación en dos pasos. Abre la app de autenticación (Google Authenticator, Authy…) en el celular de la cuenta y escribe el código de 6 dígitos de Dropi; cambia cada 30 segundos.
+                @else
+                    Dropi mandó un código al correo {{ $s->email }}. Escríbelo aquí; vence en pocos minutos.
+                @endif
             </x-slot>
             <form wire:submit="confirmarCodigo" style="display:flex;gap:.75rem;flex-wrap:wrap;align-items:center;">
                 <x-filament::input.wrapper style="max-width:14rem;">
@@ -78,6 +85,7 @@
             @endif
             Al cambiar de cuenta se cierra la sesión actual. La contraseña se guarda cifrada y no se vuelve a mostrar.
         </x-slot>
+        @if($this->puedeEditar)
         <form wire:submit="guardarCuenta" style="display:flex;flex-direction:column;gap:.75rem;max-width:28rem;">
             <div>
                 <label for="cuenta-email" style="display:block;font-size:.875rem;font-weight:500;margin-bottom:.25rem;">Correo</label>
@@ -104,8 +112,12 @@
                 @endif
             </div>
         </form>
+        @else
+        <p style="font-size:.9rem;color:#9ca3af;">Tu permiso sobre esta pantalla es de solo lectura.</p>
+        @endif
     </x-filament::section>
 
+    @if($this->puedeEditar)
     <x-filament::section collapsible collapsed>
         <x-slot name="heading">Conectar pegando el token</x-slot>
         <x-slot name="description">
@@ -120,4 +132,5 @@
             <div><x-filament::button type="submit" color="gray">Usar este token</x-filament::button></div>
         </form>
     </x-filament::section>
+    @endif
 </x-filament-panels::page>

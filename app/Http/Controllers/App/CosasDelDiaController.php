@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\App;
 
+use App\Auth\Permisos;
 use App\Http\Controllers\Controller;
 use App\Models\Contacto;
 use App\Modules\Cartera\Models\FacturaVenta;
@@ -35,7 +36,7 @@ class CosasDelDiaController extends Controller implements HasMiddleware
         })];
     }
 
-    public function __invoke(): Response
+    public function __invoke(Request $r): Response
     {
         // Cache 5 min para no golpear BD en cada refresh
         $data = Cache::remember('cosas-del-dia', 300, function () {
@@ -140,6 +141,148 @@ class CosasDelDiaController extends Controller implements HasMiddleware
             ];
         });
 
+        /*
+         * Las aprobaciones se arman FUERA del caché, porque dependen de quién
+         * mira.
+         *
+         * El caché de arriba es uno solo para todo el mundo: si esto entrara
+         * ahí, el primero que abriera la pantalla dejaría su versión guardada
+         * cinco minutos y el siguiente vería los montos del otro. Son cinco
+         * COUNT y cinco SUM, no vale la pena cachearlas.
+         */
+        $data['aprobaciones'] = $this->loQueEsperaFirma($r->user());
+
         return Inertia::render('Cosas/DelDia', $data);
+    }
+
+    /**
+     * Todo lo que está esperando una firma, junto.
+     *
+     * «Cosas del día» ya juntaba siete cosas operativas —pedidos sin aprobar,
+     * garantías sin decidir, cartera vencida—, pero las aprobaciones de plata
+     * quedaban cada una en su propia pantalla: la orden de compra en Compras,
+     * el asiento en Contabilidad, el gasto en Gastos, la solicitud de crédito
+     * en Cartera y la liquidación de comisión en CRM. Para saber qué estaba
+     * frenado había que abrir cinco pantallas y acordarse de las cinco.
+     *
+     * Y lo que se frena acá no es un trámite: una orden de compra sin aprobar
+     * es mercancía que no se pidió, y un pedido retenido esperando crédito es
+     * una venta detenida.
+     *
+     * Cada grupo trae monto además de conteo. «3 pendientes» no dice si son
+     * tres gastos de taxi o tres órdenes de importación.
+     */
+    private function loQueEsperaFirma(?\App\Models\User $u): array
+    {
+        if (! $u) {
+            return ['grupos' => [], 'total' => 0, 'monto' => 0.0];
+        }
+
+        /*
+         * Cada grupo se muestra solo a quien puede entrar a resolverlo.
+         *
+         * La puerta de esta pantalla es el equipo de bodega, que es mas ancha
+         * que las pantallas a las que mandan estas tarjetas: un AdminBodega
+         * entra aca y antes veia los montos de gastos, comisiones, asientos y
+         * solicitudes de credito, que sus propias pantallas le niegan con un
+         * 403. Una tarjeta que dice "$836.611 esperando tu firma" ya es el
+         * dato, aunque el clic despues rebote.
+         *
+         * Los permisos son los MISMOS que piden esas pantallas, no unos
+         * nuevos: si se inventara un permiso aca, nadie lo tendria -el
+         * sembrador solo siembra lo que crea en su propia corrida- y el bloque
+         * entero desapareceria para todos.
+         */
+        $contable = $u->esContable();
+        $grupos = [];
+
+        /*
+         * Órdenes de compra sin aprobar: mercancía que todavía no se pidió.
+         *
+         * Van los dos estados que `AprobarOrdenCompra` acepta. Antes sólo se
+         * contaba `borrador` y las que ya se le mandaron al proveedor
+         * —`enviada`, que siguen esperando firma— no aparecían.
+         */
+        $oc = DB::table('compras_ordenes')->whereIn('estado', ['borrador', 'enviada'])->whereNull('deleted_at');
+        if (Permisos::puede($u, 'compras_oc')) $grupos[] = [
+            'clave' => 'ordenes_compra',
+            'titulo' => 'Órdenes de compra sin aprobar',
+            'detalle' => 'Mientras no se aprueben, la mercancía no se pidió.',
+            'cantidad' => (clone $oc)->count(),
+            'monto' => round((float) (clone $oc)->sum('total'), 2),
+            // El menú las llama «Órdenes de compra» y apunta acá.
+            // `/app/compras/ordenes` no existe: el clic caía en un 404.
+            'url' => '/app/compras',
+        ];
+
+        // Gastos esperando visto bueno.
+        // Con `DB::table` el borrado suave no se aplica solo: sin esto, un
+        // gasto borrado seguiría pidiendo firma.
+        // La pantalla de gastos le muestra al comun solo LOS SUYOS; el total de
+        // todos es cosa de contabilidad.
+        $gastos = DB::table('gastos_operativos')->where('estado', 'pendiente')->whereNull('deleted_at');
+        if ($contable) $grupos[] = [
+            'clave' => 'gastos',
+            'titulo' => 'Gastos sin aprobar',
+            'detalle' => 'Quien los pidió ya puso la plata o está esperando para ponerla.',
+            'cantidad' => (clone $gastos)->count(),
+            'monto' => round((float) (clone $gastos)->sum('monto'), 2),
+            'url' => '/app/gastos',
+        ];
+
+        /*
+         * Solicitudes de crédito: cada una es un pedido retenido.
+         *
+         * Es la que más cuesta dejar quieta: del otro lado hay una venta
+         * parada y un cliente esperando.
+         */
+        $credito = DB::table('solicitudes_credito')->where('estado', 'pendiente');
+        if (Permisos::puede($u, 'excepciones_credito')) $grupos[] = [
+            'clave' => 'credito',
+            'titulo' => 'Solicitudes de crédito',
+            'detalle' => 'Cada una es un pedido retenido esperando respuesta.',
+            'cantidad' => (clone $credito)->count(),
+            'monto' => round((float) (clone $credito)->sum('monto_pedido'), 2),
+            'url' => '/app/cartera/solicitudes',
+        ];
+
+        /*
+         * Asientos que esperan firma: los CUADRADOS, no los borradores.
+         *
+         * Acá estaba el error: se consultaba `borrador`, que es el asiento que
+         * todavía se está escribiendo y no espera nada de nadie. El que pide
+         * firma es el que ya cuadró —debe igual a haber— y espera el «aprobar»
+         * para salir a SIIGO; es el único estado desde el que `aprobar()` deja
+         * pasar. Con la consulta vieja, las aprobaciones contables no
+         * aparecían NUNCA en esta pantalla.
+         */
+        $asientos = DB::table('asientos_manuales')->where('estado', 'cuadrado')->whereNull('deleted_at');
+        if ($contable) $grupos[] = [
+            'clave' => 'asientos',
+            'titulo' => 'Asientos manuales por aprobar',
+            'detalle' => 'Hasta que se aprueben no llegan a SIIGO, que es la contabilidad oficial.',
+            'cantidad' => (clone $asientos)->count(),
+            'monto' => round((float) (clone $asientos)->sum('valor_total'), 2),
+            'url' => '/app/contabilidad/asientos-manuales',
+        ];
+
+        // Liquidaciones de comisión en borrador: plata que el vendedor espera.
+        $comisiones = DB::table('comisiones_calculadas')->where('estado', 'borrador');
+        if (Permisos::puede($u, 'comisiones')) $grupos[] = [
+            'clave' => 'comisiones',
+            'titulo' => 'Liquidaciones de comisión en borrador',
+            'detalle' => 'Es plata que el vendedor ya se ganó y está esperando.',
+            'cantidad' => (clone $comisiones)->count(),
+            'monto' => round((float) (clone $comisiones)->sum('total_a_pagar'), 2),
+            'url' => '/app/cartera/comisiones',
+        ];
+
+        $conPendientes = array_values(array_filter($grupos, fn ($g) => $g['cantidad'] > 0));
+
+        return [
+            'grupos' => $conPendientes,
+            'total' => array_sum(array_column($conPendientes, 'cantidad')),
+            'monto' => round(array_sum(array_column($conPendientes, 'monto')), 2),
+        ];
     }
 }

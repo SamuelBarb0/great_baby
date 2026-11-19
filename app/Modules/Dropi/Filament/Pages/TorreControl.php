@@ -2,6 +2,7 @@
 
 namespace App\Modules\Dropi\Filament\Pages;
 
+use App\Auth\Permisos;
 use App\Modules\Dropi\Enums\EstadoPedidoDropi;
 use App\Modules\Dropi\Models\DropiPedido;
 use App\Modules\Dropi\Models\EmpaqueRegistro;
@@ -32,11 +33,10 @@ class TorreControl extends Page
 
     public static function canAccess(): bool
     {
-        $u = auth()->user();
-        if (! $u) {
-            return false;
-        }
-        return $u->esAracely() || $u->hasAnyRole(['Gerente', 'Admin', 'Alistador']);
+        // Antes era una lista de nombres de rol: un rol creado en Roles con la
+        //   casilla «Torre de control» la veía en /app pero no en el panel.
+        //   La casilla manda.
+        return Permisos::puede(auth()->user(), 'torre_control');
     }
 
     // Caché en memoria del componente para el ciclo de vida del render actual.

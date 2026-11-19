@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Contacto;
 use App\Modules\Cartera\Models\MovimientoContable;
 use App\Modules\Contabilidad\Support\OrigenContable;
+use App\Modules\Contabilidad\Support\FiltroEjes;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controllers\HasMiddleware;
 use Illuminate\Routing\Controllers\Middleware;
@@ -45,6 +46,9 @@ class ContabilidadController extends Controller implements HasMiddleware
         $desdeElegido = $data['desde'] ?? now('America/Bogota')->startOfMonth()->toDateString();
         $hasta = $data['hasta'] ?? now('America/Bogota')->toDateString();
         $incluirAnulados = (bool) ($data['incluir_anulados'] ?? false);
+        // `?linea=dropi` · el panel de Dropi abre el libro ya filtrado. Sólo la
+        // línea: el destino fiscal no se pide desde aquí.
+        $ejes = FiltroEjes::de($request->input('linea'), null);
         $acumulado = (bool) ($data['acumulado'] ?? false);
         $terceroId = isset($data['tercero_id']) ? (int) $data['tercero_id'] : null;
         $agruparTercero = (bool) ($data['agrupar_tercero'] ?? false);
@@ -56,7 +60,8 @@ class ContabilidadController extends Controller implements HasMiddleware
             ->where('fecha', '<=', $hasta)
             ->when($terceroId, fn ($q) => $q
                 ->where('tercero_type', Contacto::class)
-                ->where('tercero_id', $terceroId));
+                ->where('tercero_id', $terceroId))
+            ->when($ejes, fn ($q) => $ejes->aplicar($q));
 
         // Re-audit R4 SEG-M1 · bitácora consulta con anulados (dato sensible DIAN).
         if ($incluirAnulados) {
@@ -72,6 +77,7 @@ class ContabilidadController extends Controller implements HasMiddleware
             'filtros' => [
                 'desde' => $desdeElegido, 'hasta' => $hasta, 'incluir_anulados' => $incluirAnulados,
                 'acumulado' => $acumulado, 'tercero_id' => $terceroId, 'agrupar_tercero' => $agruparTercero,
+                'linea' => $ejes->linea,
                 'tercero' => $tercero ? [
                     'id' => $tercero->id,
                     'nombre' => $tercero->nombreDisplay(),
@@ -127,6 +133,11 @@ class ContabilidadController extends Controller implements HasMiddleware
             ->orderBy('cuenta_puc')
             ->get();
 
+        // El nombre real del plan de cuentas. El diccionario de apodos del
+        // front resuelve por prefijo, y desde que el ingreso se parte por
+        // categoria dos subcuentas distintas de 4135 salian con el mismo texto.
+        $nombresCuenta = \App\Modules\Contabilidad\Support\NombresDeCuenta::para($filas->pluck('cuenta_puc'));
+
         $nombres = $agruparTercero
             ? Contacto::query()
                 ->whereIn('id', $filas->where('tercero_type', Contacto::class)->pluck('tercero_id')->filter()->unique())
@@ -136,6 +147,7 @@ class ContabilidadController extends Controller implements HasMiddleware
 
         return $filas->map(fn ($r) => [
             'cuenta_puc' => $r->cuenta_puc,
+            'cuenta_nombre' => $nombresCuenta[$r->cuenta_puc] ?? null,
             'tercero' => $agruparTercero
                 ? ($r->tercero_id ? ($nombres[$r->tercero_id] ?? class_basename((string) $r->tercero_type).' #'.$r->tercero_id) : 'Sin tercero')
                 : null,
@@ -147,15 +159,20 @@ class ContabilidadController extends Controller implements HasMiddleware
 
     private function movimientosRecientes(\Closure $base, int $limit = 50): array
     {
-        return $base()
+        $filas = $base()
             ->with(['user:id,name'])
             ->orderByDesc('fecha')->orderByDesc('id')
             ->limit($limit)
-            ->get()
+            ->get();
+
+        $nombres = \App\Modules\Contabilidad\Support\NombresDeCuenta::para($filas->pluck('cuenta_puc'));
+
+        return $filas
             ->map(fn ($m) => [
                 'id' => $m->id,
                 'fecha' => $m->fecha instanceof \Carbon\Carbon ? $m->fecha->toDateString() : (string) $m->fecha,
                 'cuenta_puc' => $m->cuenta_puc,
+                'cuenta_nombre' => $nombres[$m->cuenta_puc] ?? null,
                 'debe' => (float) $m->debe,
                 'haber' => (float) $m->haber,
                 'descripcion' => $m->descripcion,

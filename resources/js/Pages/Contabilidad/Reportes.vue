@@ -4,6 +4,8 @@ import { Head, Link, router } from '@inertiajs/vue3';
 import { BarChart3, FileText, Clock, Cloud, CloudOff, Download } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
 
+import PestanasSeccion from '@/Components/PestanasSeccion.vue';
+import { pestanasReportes } from '@/composables/usePestanasContables';
 const props = defineProps({
     reportes: { type: Array, required: true },
     reportes_siigo: { type: Array, default: () => [] },
@@ -51,6 +53,8 @@ const pedirBalance = () => {
     <Head title="Reportes contables · SIIGO"/>
     <AppLayout>
         <div class="space-y-6 max-w-5xl">
+            <PestanasSeccion :pestanas="pestanasReportes"/>
+
             <div>
                 <h1 class="text-2xl font-bold flex items-center gap-2">
                     <BarChart3 class="h-6 w-6 text-brand-600"/>

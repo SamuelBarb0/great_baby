@@ -17,11 +17,19 @@ class OrdenCompraItem extends Model implements AuditableContract
 
     protected $table = 'compra_orden_items';
 
+    public const TIPO_PRODUCTO = 'producto';
+
+    /** Parte o empaque de otro producto de la orden: no sube al inventario. */
+    public const TIPO_COMPONENTE = 'componente';
+
     protected $fillable = [
         'orden_id', 'producto_id', 'variante_id',
         'descripcion', 'cantidad', 'cantidad_recibida',
         'precio_unit', 'descuento_pct', 'iva_pct',
         'subtotal', 'iva', 'total', 'costo_prorrateado_unit',
+        'cajas', 'unidades_por_caja', 'caja_largo_cm', 'caja_ancho_cm', 'caja_alto_cm',
+        'cbm_caja', 'peso_caja_kg', 'empresa_destino_id',
+        'tipo_linea', 'componente_de_item_id', 'color_nombre',
     ];
 
     protected $casts = [
@@ -34,11 +42,30 @@ class OrdenCompraItem extends Model implements AuditableContract
         'iva' => 'decimal:2',
         'total' => 'decimal:2',
         'costo_prorrateado_unit' => 'decimal:4',
+        'cajas' => 'integer',
+        'unidades_por_caja' => 'integer',
+        'caja_largo_cm' => 'decimal:2',
+        'caja_ancho_cm' => 'decimal:2',
+        'caja_alto_cm' => 'decimal:2',
+        'cbm_caja' => 'decimal:6',
+        'peso_caja_kg' => 'decimal:2',
     ];
 
     protected static function booted(): void
     {
         static::saving(function (OrdenCompraItem $item) {
+            // Importación por cajas: lo que se pide son cajas, las unidades salen solas.
+            if ($item->cajas && $item->unidades_por_caja) {
+                $item->cantidad = $item->cajas * $item->unidades_por_caja;
+            }
+            // El CBM escrito manda (así trabaja su Excel); si no hay, sale de las medidas.
+            if ((float) $item->cbm_caja <= 0 && (float) $item->caja_largo_cm > 0 && (float) $item->caja_ancho_cm > 0 && (float) $item->caja_alto_cm > 0) {
+                $item->cbm_caja = round(
+                    (float) $item->caja_largo_cm * (float) $item->caja_ancho_cm * (float) $item->caja_alto_cm / 1_000_000,
+                    6,
+                );
+            }
+
             $bruto = (float) $item->cantidad * (float) $item->precio_unit;
             $descuento = $bruto * ((float) $item->descuento_pct / 100);
             $sub = round($bruto - $descuento, 2);
@@ -63,6 +90,22 @@ class OrdenCompraItem extends Model implements AuditableContract
     public function variante(): BelongsTo
     {
         return $this->belongsTo(ProductoVariante::class);
+    }
+
+    public function empresaDestino(): BelongsTo
+    {
+        return $this->belongsTo(\App\Models\EmpresaConfig::class, 'empresa_destino_id');
+    }
+
+    /** m³ que ocupa la línea en el contenedor. */
+    public function cbmTotal(): float
+    {
+        return (float) $this->cbm_caja * (int) $this->cajas;
+    }
+
+    public function esComponente(): bool
+    {
+        return $this->tipo_linea === self::TIPO_COMPONENTE;
     }
 
     public function pendiente(): float

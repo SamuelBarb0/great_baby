@@ -1,0 +1,1 @@
+const i=["success","warning","info","error"];function o(n,r="success"){if(!n||typeof window>"u")return;const e=i.includes(r)?r:"info";window.dispatchEvent(new CustomEvent("gb:aviso",{detail:{mensaje:String(n),tono:e}}))}function s(n){o(n||"Hubo un error en la operación","error")}export{o as a,s as b};

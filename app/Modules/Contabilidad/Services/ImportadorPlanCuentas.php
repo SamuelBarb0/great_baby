@@ -24,6 +24,9 @@ class ImportadorPlanCuentas
 {
     private const MAX_FILAS = 20000;
 
+    /** Cuántas filas se miran buscando el encabezado antes de rendirse. */
+    private const FILAS_PREAMBULO = 20;
+
     /**
      * @return array{creados:int, actualizados:int, errores:array<int,string>}
      */
@@ -43,18 +46,36 @@ class ImportadorPlanCuentas
                 $i++;
                 $cells = array_map(fn ($c) => trim((string) $c->getValue()), $row->getCells());
 
+                /*
+                 * La cabecera se BUSCA, no se asume que es la primera fila.
+                 *
+                 * El PUC que manda el cliente trae cuatro líneas de preámbulo
+                 * —«Cuentas contables», la razón social, el NIT y una vacía—
+                 * antes del encabezado, y lo escribe «Código» con tilde. Con la
+                 * versión anterior, que tomaba la fila 1 tal cual, su archivo
+                 * real moría con «faltan columnas obligatorias» y había que
+                 * editarlo a mano. Les prometimos que mandaran el Excel como lo
+                 * usan hoy: esto es lo que sostiene esa promesa.
+                 */
                 if ($esHeader) {
-                    $esHeader = false;
-                    $columnas = array_map(fn ($h) => strtolower(trim($h)), $cells);
-                    $header = $columnas;
-                    if (! in_array('codigo', $header, true) || ! in_array('nombre', $header, true)) {
+                    $posibles = array_map([self::class, 'normalizarEncabezado'], $cells);
+
+                    if (in_array('codigo', $posibles, true) && in_array('nombre', $posibles, true)) {
+                        $esHeader = false;
+                        $columnas = $posibles;
+                        continue;
+                    }
+
+                    if ($i > self::FILAS_PREAMBULO) {
                         $reader->close();
                         return ['creados' => 0, 'actualizados' => 0, 'errores' => [
-                            'Faltan columnas obligatorias: la plantilla debe tener al menos "codigo" y "nombre". '
+                            'No se encontró el encabezado: el archivo debe tener una fila con las columnas '
+                                . '"codigo" y "nombre" dentro de las primeras ' . self::FILAS_PREAMBULO . ' filas. '
                                 . 'Descarga la plantilla oficial con el botón "Plantilla".',
                         ]];
                     }
-                    continue;
+
+                    continue;  // sigue siendo preámbulo
                 }
 
                 if (empty(array_filter($cells))) {
@@ -66,7 +87,25 @@ class ImportadorPlanCuentas
                     array_pad($cells, count($columnas), '')
                 );
 
-                $codigo = preg_replace('/\D/', '', (string) ($fila['codigo'] ?? ''));
+                $codigoCrudo = (string) ($fila['codigo'] ?? '');
+
+                /*
+                 * Las filas de prosa no son cuentas y no se reportan como error.
+                 *
+                 * El export del cliente termina con «Procesado en septiembre 23
+                 * 2026 12:57». Al quitarle los no-dígitos quedaba «2320261257»
+                 * y se contaba como una cuenta sin nombre: la importación decía
+                 * «con avisos · 1 error» por un pie de página, y eso hace dudar
+                 * de las otras mil que sí entraron bien.
+                 *
+                 * Una fila cuyo código trae LETRAS no es una cuenta: se salta en
+                 * silencio. Un código numérico sin nombre sí sigue siendo error.
+                 */
+                if (preg_match('/\p{L}/u', $codigoCrudo)) {
+                    continue;
+                }
+
+                $codigo = preg_replace('/\D/', '', $codigoCrudo);
                 $nombre = self::sanitizar((string) ($fila['nombre'] ?? ''));
 
                 if ($codigo === '') {
@@ -97,6 +136,19 @@ class ImportadorPlanCuentas
             break; // solo la primera hoja
         }
         $reader->close();
+
+        /*
+         * Si el archivo se acabó sin que apareciera el encabezado, el problema
+         * es el encabezado y hay que decirlo así. Antes caía en el mensaje
+         * genérico de abajo —«no se encontraron cuentas válidas»— que manda a
+         * revisar las filas cuando lo que falta es el título de las columnas.
+         */
+        if ($esHeader) {
+            return ['creados' => 0, 'actualizados' => 0, 'errores' => [
+                'No se encontró el encabezado: el archivo debe tener una fila con las columnas '
+                    . '"codigo" y "nombre". Descarga la plantilla oficial con el botón "Plantilla".',
+            ]];
+        }
 
         if (empty($registros)) {
             return ['creados' => 0, 'actualizados' => 0, 'errores' => array_merge($errores, ['No se encontraron cuentas válidas para importar.'])];
@@ -204,6 +256,24 @@ class ImportadorPlanCuentas
     }
 
     /** Anti CSV-injection + corte de longitud. */
+    /**
+     * Un encabezado, comparable: minúsculas, sin tildes y sin espacios sobrantes.
+     *
+     * El cliente escribe «Código»; la plantilla dice «codigo». Son la misma
+     * columna y el importador no tiene por qué obligarlo a elegir.
+     */
+    private static function normalizarEncabezado(string $h): string
+    {
+        $h = mb_strtolower(trim($h), 'UTF-8');
+
+        return strtr($h, [
+            'á' => 'a', 'é' => 'e', 'í' => 'i', 'ó' => 'o', 'ú' => 'u',
+            'à' => 'a', 'è' => 'e', 'ì' => 'i', 'ò' => 'o', 'ù' => 'u',
+            'ä' => 'a', 'ë' => 'e', 'ï' => 'i', 'ö' => 'o', 'ü' => 'u',
+            'ñ' => 'n',
+        ]);
+    }
+
     private static function sanitizar(?string $v): string
     {
         if ($v === null) {

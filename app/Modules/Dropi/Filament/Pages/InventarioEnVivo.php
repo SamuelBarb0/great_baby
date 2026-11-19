@@ -2,6 +2,7 @@
 
 namespace App\Modules\Dropi\Filament\Pages;
 
+use App\Auth\Permisos;
 use App\Modules\Dropi\Enums\CategoriaUbicacion;
 use App\Modules\Dropi\Models\InventarioMovimiento;
 use App\Modules\Dropi\Models\InventarioUbicacion;
@@ -19,9 +20,9 @@ class InventarioEnVivo extends Page
 
     protected static ?string $title = 'Saldo de inventario por variante × ubicación';
 
-    protected static string|\UnitEnum|null $navigationGroup = 'Catálogo';
+    protected static string|\UnitEnum|null $navigationGroup = 'Productos';
 
-    protected static ?int $navigationSort = 2;
+    protected static ?int $navigationSort = 4;
 
     protected string $view = 'dropi.pages.inventario-en-vivo';
 
@@ -31,8 +32,9 @@ class InventarioEnVivo extends Page
 
     public static function canAccess(): bool
     {
-        $u = auth()->user();
-        return $u ? ($u->esAracely() || $u->esAlistador()) : false;
+        // Antes preguntaba por la casilla de la Vista del alistador
+        //   (`esAlistador()`): «Inventario en vivo» tiene la suya.
+        return Permisos::puede(auth()->user(), 'inventario_vivo');
     }
 
     /**
@@ -118,27 +120,6 @@ class InventarioEnVivo extends Page
             ]);
 
         return $variantes->concat($agregados)->all();
-    }
-
-    /**
-     * DEPRECATED wrapper legacy para la vista blade que aún use getVariantes().
-     * Se removerá cuando la vista adopte getFilas().
-     */
-    public function getVariantes()
-    {
-        return ProductoVariante::query()
-            ->with('producto')
-            ->when($this->busqueda !== '', function ($q) {
-                $b = "%{$this->busqueda}%";
-                $q->where(function ($qq) use ($b) {
-                    $qq->where('codigo_barras', 'like', $b)
-                       ->orWhereHas('producto', fn ($p) => $p->where('nombre', 'like', $b)->orWhere('referencia', 'like', $b));
-                });
-            })
-            ->orderBy('producto_id')
-            ->orderBy('codigo_barras')
-            ->limit(200)
-            ->get();
     }
 
     /** @return \Illuminate\Support\Collection<int, InventarioUbicacion> */

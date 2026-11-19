@@ -23,6 +23,14 @@ use App\Auth\MenuApp;
 use App\Models\User;
 
 /** href del ítem => clave de permiso que declara en AppLayout.vue */
+/*
+ * OJO · este mapa es una copia A MANO del menú de `AppLayout.vue`.
+ *
+ * Cuando una entrada del menú cambia de clave hay que cambiarla también acá, o
+ * la prueba compara contra un menú que ya no existe. Pasó al cablear las
+ * casillas de /app/roles: cuatro items pasaron a declarar su propia clave y
+ * esta copia siguió diciendo la vieja.
+ */
 const MENU_APP = [
     '/app/cosas-del-dia' => 'cosas_dia',
     '/app/mapa-colombia' => 'mapa',
@@ -55,20 +63,41 @@ const MENU_APP = [
     '/app/garantias/nueva' => 'garantias',
     '/app/marketing' => 'marketing',
     '/app/marketing/parrilla' => 'marketing_parrilla',
+    '/app/marketing/tablero' => 'marketing_tablero',
+    '/app/marketing/creativos' => 'marketing_material',
+    /*
+     * Gestión Humana entero. Estaban sólo vacantes y empleados, así que las
+     * otras ocho entradas del grupo no las cubría nadie —y es el grupo con más
+     * permisos distintos: el líder de área ve dos cosas, la Junta ve otra, el
+     * colaborador ve una sola, y Gestión Humana ve el resto.
+     */
+    '/app/rrhh/requisiciones' => 'rrhh_requisiciones',
+    '/app/rrhh/mi-equipo' => 'rrhh_requisiciones',
     '/app/rrhh/vacantes' => 'rrhh',
+    '/app/rrhh/ordenes' => 'rrhh_ordenes',
+    '/app/rrhh/contrataciones' => 'rrhh',
     '/app/rrhh/empleados' => 'rrhh',
+    '/app/rrhh/asignaciones' => 'rrhh_asignaciones',
+    '/app/rrhh/novedades' => 'rrhh_novedades',
+    '/app/rrhh/indicadores' => 'rrhh_indicadores',
+    // Las tres que nacieron después y nadie agregó acá: justo las que
+    // manejan plata y separación de funciones.
+    '/app/rrhh/nomina' => 'rrhh_nomina',
+    '/app/rrhh/tesoreria' => 'rrhh_tesoreria',
+    '/app/rrhh/formatos' => 'rrhh',
+    '/app/mi-espacio' => 'portal_colaborador',
     '/app/compras' => 'compras_lista',
     '/app/compras/oc/nueva' => 'compras_gestion',
-    '/app/compras/importacion' => 'compras_gestion',
+    '/app/compras/importacion' => 'compras_importacion',
     '/app/compras/devoluciones' => 'devoluciones_proveedor',
-    '/app/compras/reporte' => 'compras_gestion',
-    '/app/compras/recepcion/nueva' => 'compras_gestion',
+    '/app/compras/reporte' => 'compras_reportes',
+    '/app/compras/recepcion/nueva' => 'compras_recepcion',
     '/app/inventario' => 'bodega',
     '/app/inventario/kardex' => 'bodega_operativa',
     '/app/inventario/conteos' => 'bodega_operativa',
     '/app/inventario/traslados' => 'bodega_operativa',
     '/app/inventario/alertas' => 'bodega_operativa',
-    '/app/inventario/ubicaciones' => 'bodega',
+    '/app/inventario/ubicaciones' => 'ubicaciones',
     '/app/inventario/reporte-stock' => 'bodega_operativa',
     '/app/inventario/importar-cliente' => 'bodega',
     '/app/catalogo/productos' => 'catalogo',
@@ -85,15 +114,25 @@ const MENU_APP = [
     '/app/gastos' => 'gastos',
     '/app/bandeja-importaciones' => 'bandeja_importaciones',
     '/app/roles' => 'configuracion',
-    '/app/reglas' => 'configuracion',
+    '/app/reglas' => 'reglas',
     '/app/empresa' => 'configuracion',
     '/app/plantillas' => 'configuracion',
     '/app/siigo' => 'siigo',
+
 ];
 
+/*
+ * Todos los roles del ERP.
+ *
+ * `GestionHumana`, `LiderArea` y `Colaborador` faltaban: son los tres que
+ * inventó el módulo de Gestión Humana, y sin ellos esta prueba ejercitaba las
+ * doce entradas del grupo con roles que no las tienen. O sea: pasaba sin
+ * probar nada de lo que vino a proteger.
+ */
 const ROLES_ERP = [
     'Aracely', 'Gerencia', 'Gerente', 'Contador', 'Vendedor', 'AdminBodega',
     'Alistador', 'Despachador', 'ServicioCliente', 'Marketing', 'Facturador',
+    'GestionHumana', 'LiderArea', 'Colaborador',
 ];
 
 beforeEach(function () {
@@ -106,9 +145,14 @@ it('no ofrece en el menú nada que responda 403', function () {
 
     foreach (ROLES_ERP as $rol) {
         $u = User::whereHas('roles', fn ($q) => $q->where('name', $rol))->first();
-        if (! $u) {
-            continue;
-        }
+
+        /*
+         * Un rol sin usuario demo se saltaba EN SILENCIO, así que la prueba
+         * pasaba sin haberlo probado y nadie se enteraba. Si falta el usuario,
+         * la prueba se rompe: es la única forma de que la cobertura que esta
+         * prueba promete sea cierta.
+         */
+        expect($u)->not->toBeNull("El rol {$rol} no tiene usuario demo: sin él esta prueba no lo cubre.");
 
         $claves = MenuApp::clavesDe($u);
 
@@ -137,9 +181,14 @@ it('no esconde en el menú pantallas que la persona sí puede abrir', function (
 
     foreach (ROLES_ERP as $rol) {
         $u = User::whereHas('roles', fn ($q) => $q->where('name', $rol))->first();
-        if (! $u) {
-            continue;
-        }
+
+        /*
+         * Un rol sin usuario demo se saltaba EN SILENCIO, así que la prueba
+         * pasaba sin haberlo probado y nadie se enteraba. Si falta el usuario,
+         * la prueba se rompe: es la única forma de que la cobertura que esta
+         * prueba promete sea cierta.
+         */
+        expect($u)->not->toBeNull("El rol {$rol} no tiene usuario demo: sin él esta prueba no lo cubre.");
 
         $claves = MenuApp::clavesDe($u);
 

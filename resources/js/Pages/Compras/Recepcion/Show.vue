@@ -1,13 +1,19 @@
 <script setup>
+import { reactive } from 'vue';
 import { ref } from 'vue';
 import { Head, Link, router } from '@inertiajs/vue3';
-import { ArrowLeft, Truck, Cloud, CloudOff, RefreshCw } from 'lucide-vue-next';
+import { ArrowLeft, Truck, Cloud, CloudOff, RefreshCw, AlertTriangle } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import { useMoney } from '@/composables/useMoney';
 import { fechaCorta } from '@/composables/useFecha';
 import AppConfirmModal from '@/Components/AppConfirmModal.vue';
+import SiguientePaso from '../SiguientePaso.vue';
 
-const props = defineProps({ recepcion: { type: Object, required: true } });
+const props = defineProps({
+    recepcion: { type: Object, required: true },
+    paso: { type: Object, default: null },
+    contenedor: { type: Object, default: null },
+});
 
 // Confirmaciones con el modal propio: el confirm() nativo queda bloqueado
 // dentro del iframe de la app de escritorio y en celular ignora el diseno.
@@ -39,15 +45,27 @@ const reenviarSiigo = () => {
         },
     };
 };
+
+// Lo que llegó revuelto se clasifica después, sin rehacer la recepción.
+const reclasificar = reactive({});
+const pasarAColor = (it) => {
+    const r = reclasificar[it.id] ?? {};
+    router.post(`/app/compras/recepcion/${props.recepcion.id}/reclasificar`, { item_id: it.id, color: r.color, cantidad: r.cantidad }, {
+        preserveScroll: true,
+        onSuccess: () => { reclasificar[it.id] = {}; },
+    });
+};
 </script>
 
 <template>
     <Head :title="`Recepción ${recepcion.numero}`"/>
     <AppLayout>
         <div class="max-w-4xl mx-auto space-y-4">
-            <Link href="/app/compras" class="btn-ghost inline-flex items-center gap-1 text-sm">
-                <ArrowLeft class="h-4 w-4"/> Volver
+            <Link :href="contenedor ? `/app/compras/importacion/${contenedor.id}` : (recepcion.orden_id ? `/app/compras/oc/${recepcion.orden_id}` : '/app/compras')" class="btn-ghost inline-flex items-center gap-1 text-sm">
+                <ArrowLeft class="h-4 w-4"/> {{ contenedor ? `Volver al contenedor ${contenedor.nombre}` : 'Volver a la orden' }}
             </Link>
+
+            <SiguientePaso v-if="paso" :paso="paso"/>
 
             <div class="card p-5">
                 <div class="flex items-start justify-between">
@@ -82,6 +100,28 @@ const reenviarSiigo = () => {
                                 </div>
                             </div>
                         </template>
+                        <!--
+                            Falló de verdad: el job agotó sus reintentos.
+                            Esto antes se veía igual que «Pendiente», así que
+                            una recepción muerta parecía estar en camino y la
+                            persona esperaba para siempre. El motivo ya estaba
+                            escrito en el log de SIIGO; lo que faltaba era
+                            decirlo donde se está mirando.
+                        -->
+                        <template v-else-if="recepcion.siigo_fallo">
+                            <AlertTriangle class="h-5 w-5 text-red-600 shrink-0"/>
+                            <div>
+                                <div class="font-semibold text-red-700">
+                                    No pudo subir a SIIGO
+                                    <span v-if="recepcion.siigo_fallo.intentos > 1"
+                                          class="font-normal text-xs text-surface-500">
+                                        · {{ recepcion.siigo_fallo.intentos }} intentos
+                                    </span>
+                                </div>
+                                <div class="text-xs text-surface-600">{{ recepcion.siigo_fallo.motivo }}</div>
+                                <div class="text-[11px] text-surface-400">{{ recepcion.siigo_fallo.hace }}</div>
+                            </div>
+                        </template>
                         <template v-else>
                             <CloudOff class="h-5 w-5 text-amber-600"/>
                             <div>
@@ -110,6 +150,7 @@ const reenviarSiigo = () => {
                             <th class="text-right p-2">Costo unit</th>
                             <th class="text-right p-2">Subtotal</th>
                             <th class="text-left p-2">Lote</th>
+                            <th class="text-left p-2">Color</th>
                             <th class="text-left p-2">Destino</th>
                             <th class="text-left p-2">Motivo</th>
                             <th class="text-left p-2">Obs</th>
@@ -122,6 +163,7 @@ const reenviarSiigo = () => {
                             <td class="p-2 text-right">{{ money(it.costo_unit) }}</td>
                             <td class="p-2 text-right font-bold">{{ money(it.subtotal) }}</td>
                             <td class="p-2 text-xs">{{ it.lote || '—' }}</td>
+                            <td class="p-2 text-xs">{{ it.color_nombre || '—' }}</td>
                             <td class="p-2">
                                 <!-- LOG-J8 · chip del destino -->
                                 <span class="inline-block px-1.5 py-0.5 rounded text-[10px] font-bold uppercase"
@@ -140,6 +182,15 @@ const reenviarSiigo = () => {
                         </tr>
                     </tbody>
                 </table>
+                <template v-for="it in recepcion.items" :key="`sin-${it.id}`">
+                    <form v-if="it.sin_identificar > 0" @submit.prevent="pasarAColor(it)" class="mt-3 p-3 rounded-lg bg-amber-50 dark:bg-amber-950/40 border-l-4 border-amber-500 flex flex-wrap items-end gap-2 text-sm">
+                        <div class="flex-1 min-w-[12rem]"><b>{{ it.sin_identificar }} sin identificar.</b> Cuando sepa de qué color son, páselas aquí. El total no cambia.</div>
+                        <input v-model="(reclasificar[it.id] ??= {}).color" required maxlength="60" placeholder="Color" class="input w-36 text-sm" :aria-label="`Color para ${it.id}`"/>
+                        <input v-model.number="(reclasificar[it.id] ??= {}).cantidad" required type="number" step="1" min="1" :max="it.sin_identificar" placeholder="Cantidad" class="input w-24 text-sm" :aria-label="`Cantidad para ${it.id}`"/>
+                        <button class="btn-primary text-sm">Pasar al color</button>
+                    </form>
+                </template>
+                <p v-if="$page.props.errors?.reclasificar" class="mt-2 text-sm text-red-600">{{ $page.props.errors.reclasificar }}</p>
             </div>
 
             <div v-if="recepcion.observaciones" class="card p-4">

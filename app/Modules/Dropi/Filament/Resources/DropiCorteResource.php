@@ -35,9 +35,9 @@ class DropiCorteResource extends Resource
 
     protected static ?string $pluralModelLabel = 'Cortes Dropi';
 
-    protected static string|\UnitEnum|null $navigationGroup = 'Dropi';
+    protected static string|\UnitEnum|null $navigationGroup = 'Operación';
 
-    protected static ?int $navigationSort = 1;
+    protected static ?int $navigationSort = 6;
 
     // Fix D1 · matriz Permisos (Contador ve cortes para reportes contables).
     public static function canViewAny(): bool

@@ -38,9 +38,9 @@ class DropiPedidoResource extends Resource
 
     protected static ?string $pluralModelLabel = 'Pedidos Dropi';
 
-    protected static string|\UnitEnum|null $navigationGroup = 'Dropi';
+    protected static string|\UnitEnum|null $navigationGroup = 'Operación';
 
-    protected static ?int $navigationSort = 2;
+    protected static ?int $navigationSort = 4;
 
     protected static ?string $recordTitleAttribute = 'guia';
 
@@ -75,7 +75,10 @@ class DropiPedidoResource extends Resource
     public static function canViewAny(): bool
     {
         $u = auth()->user();
-        return $u && ($u->esAracely() || $u->esAlistador());
+        // Matriz de permisos («Pedidos Dropi»): gerencia, alistador y los
+        //   perfiles creados en la pantalla de Roles, como «Operador Dropi».
+        //   Antes se preguntaba por el NOMBRE del rol y la casilla no servía.
+        return \App\Auth\Permisos::puede($u, 'dropi_pedidos');
     }
 
     public static function canCreate(): bool
@@ -88,7 +91,10 @@ class DropiPedidoResource extends Resource
 
     public static function canEdit($record): bool
     {
-        return auth()->user()?->esAracely() ?? false;
+        // La casilla «Editar» de Pedidos Dropi manda (gerencia, Operador Dropi
+        //   y cualquier perfil creado en Roles). Antes era Aracely por nombre
+        //   de rol y la casilla quedaba sin efecto.
+        return \App\Auth\Permisos::puedeAccion(auth()->user(), 'dropi_pedidos', 'editar');
     }
 
     public static function canDelete($record): bool
@@ -258,7 +264,7 @@ class DropiPedidoResource extends Resource
                     ->icon('heroicon-o-truck')
                     ->button()
                     ->color('warning')
-                    ->visible(fn (DropiPedido $record) => filled($record->dropi_orden_id) && (auth()->user()?->esAracely() ?? false)),
+                    ->visible(fn (DropiPedido $record) => filled($record->dropi_orden_id) && self::puedeCambiarEnDropi()),
             ])
             ->toolbarActions([
                 \Filament\Actions\BulkActionGroup::make([
@@ -272,12 +278,29 @@ class DropiPedidoResource extends Resource
             ]);
     }
 
+    /**
+     * El menú «Dropi» de la fila habla con Dropi de verdad. Antes era
+     * `esAracely()`: un rol creado en Roles no podía tocarlo ni con todas las
+     * casillas marcadas. Ahora es su casilla, y la piden también las acciones
+     * que escriben, para que esconder el botón no sea la única barrera.
+     */
+    protected static function puedeCambiarEnDropi(): bool
+    {
+        return \App\Auth\Permisos::puede(auth()->user(), 'dropi_cambiar_en_dropi');
+    }
+
+    protected static function exigirCambiarEnDropi(): void
+    {
+        abort_unless(self::puedeCambiarEnDropi(), 403, 'Cambiar pedidos en Dropi necesita su permiso.');
+    }
+
     /** La lupa de Dropi: el pedido tal como está ahora en Dropi. Solo lectura. */
     protected static function accionInfoDropi(): \Filament\Actions\Action
     {
         return \Filament\Actions\Action::make('infoDropi')
             ->label('Información en Dropi')
             ->icon('heroicon-o-magnifying-glass')
+            ->visible(fn () => self::puedeCambiarEnDropi())
             ->modalHeading(fn (DropiPedido $record) => 'Orden ' . $record->dropi_orden_id . ' en Dropi')
             ->modalWidth('4xl')
             ->modalContent(function (DropiPedido $record) {
@@ -306,6 +329,7 @@ class DropiPedidoResource extends Resource
         return \Filament\Actions\Action::make('etiquetasDropi')
             ->label('Etiquetas en Dropi')
             ->icon('heroicon-o-tag')
+            ->visible(fn () => self::puedeCambiarEnDropi())
             ->modalHeading(fn (DropiPedido $record) => 'Etiquetas de la orden ' . $record->dropi_orden_id . ' en Dropi')
             ->modalDescription('Los cambios se guardan en Dropi de verdad.')
             // Lo que vio el sync (≤15 s de antigüedad): abre al instante. Al guardar,
@@ -332,6 +356,8 @@ class DropiPedidoResource extends Resource
             ])
             ->modalSubmitActionLabel('Guardar en Dropi')
             ->action(function (DropiPedido $record, array $data) {
+                self::exigirCambiarEnDropi();
+
                 try {
                     $r = \App\Modules\Dropi\Actions\GestionarEtiquetasDropi::run(
                         $record, $data['etiquetas'] ?? [], $data['nueva'] ?? null, $data['color'] ?? null, auth()->id(),
@@ -358,7 +384,7 @@ class DropiPedidoResource extends Resource
             ->label('Actualizar estatus')
             ->icon('heroicon-o-pencil-square')
             ->color('warning')
-            ->visible(fn (DropiPedido $record) => filled($record->dropi_orden_id) && (auth()->user()?->esAracely() ?? false))
+            ->visible(fn (DropiPedido $record) => filled($record->dropi_orden_id) && self::puedeCambiarEnDropi())
             ->modalHeading(fn (DropiPedido $record) => 'Actualizar estatus en Dropi · orden ' . $record->dropi_orden_id)
             ->modalDescription(function (DropiPedido $record) {
                 $actual = \Illuminate\Support\Facades\DB::table('dropi_web_huellas')
@@ -383,6 +409,8 @@ class DropiPedidoResource extends Resource
             ])
             ->modalSubmitActionLabel('Actualizar en Dropi')
             ->action(function (DropiPedido $record, array $data) {
+                self::exigirCambiarEnDropi();
+
                 try {
                     $r = \App\Modules\Dropi\Actions\ActualizarEstatusEnDropi::run($record, $data['estatus'], $data['motivo'] ?? null, auth()->id());
                 } catch (\Throwable $e) {

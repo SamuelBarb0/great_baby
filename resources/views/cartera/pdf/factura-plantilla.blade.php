@@ -29,6 +29,9 @@
         .totales .grand { border-top: 2px solid {{ $cfg['colores']['secundario'] }}; font-weight: 700; font-size: 12pt; color: {{ $cfg['colores']['primario'] }}; }
         .encabezado-extra { text-align: {{ $alignCss }}; font-size: 9pt; color: #4b5563; margin: 6px 0; white-space: pre-wrap; }
         .pie { border-top: 1px solid #d1d5db; margin-top: 24px; padding-top: 8px; font-size: 8pt; color: #6b7280; text-align: center; }
+        .firma { margin-top: 28px; width: 40%; text-align: center; page-break-inside: avoid; }
+        .firma-linea { border-top: 1px solid {{ $cfg['colores']['texto'] }}; margin-top: 4px; padding-top: 4px; font-size: 9pt; font-weight: 700; min-height: 12px; }
+        .firma-cargo { font-size: 8pt; color: #6b7280; }
         .terminos { margin-top: 14px; font-size: 8pt; color: #6b7280; white-space: pre-wrap; padding: 8px; background: #f9fafb; border-left: 3px solid {{ $cfg['colores']['primario'] }}; }
         @if($cfg['watermark_activo'] ?? false)
         .watermark { position: fixed; top: 40%; left: 15%; width: 70%; text-align: center; font-size: 72pt; color: rgba(0,0,0,0.06); font-weight: 900; transform: rotate(-25deg); z-index: -1; }
@@ -141,6 +144,12 @@
         <tr><td>Descuento</td><td style="text-align:right;">-${{ number_format((float)$factura->descuento, 0, ',', '.') }}</td></tr>
         @endif
         <tr class="grand"><td>TOTAL</td><td style="text-align:right;">${{ number_format((float)$factura->total, 0, ',', '.') }}</td></tr>
+        @if(($cfg['mostrar_bloque_retenciones'] ?? true) && (float)$factura->retenciones > 0)
+            @foreach($factura->retencionesAplicadas as $r)
+            <tr><td>{{ ['retefuente' => 'Retefuente', 'reteiva' => 'ReteIVA', 'reteica' => 'ReteICA'][$r->tipo] ?? $r->tipo }} {{ rtrim(rtrim(number_format((float)$r->tarifa_pct, 3, ',', '.'), '0'), ',') }}%</td><td style="text-align:right;">-${{ number_format((float)$r->valor, 0, ',', '.') }}</td></tr>
+            @endforeach
+            <tr><td><strong>Neto a pagar</strong></td><td style="text-align:right;"><strong>${{ number_format((float)$factura->total - (float)$factura->retenciones, 0, ',', '.') }}</strong></td></tr>
+        @endif
         <tr><td>Saldo</td><td style="text-align:right;">${{ number_format((float)$factura->saldo, 0, ',', '.') }}</td></tr>
     </table>
 
@@ -168,6 +177,18 @@
     @if(($cfg['mostrar_bloque_notas'] ?? true) && $factura->observaciones)
         <h2>Observaciones</h2>
         <div class="box">{{ $factura->observaciones }}</div>
+    @endif
+
+    @if(($cfg['mostrar_firma'] ?? false) && (!empty($cfg['firma_url']) || !empty($cfg['firma_nombre'])))
+        <div class="firma">
+            @if(!empty($cfg['firma_url']))
+                <img src="{{ $cfg['firma_url'] }}" style="height:{{ (int) ($cfg['firma_alto_px'] ?? 50) }}px;">
+            @endif
+            <div class="firma-linea">{{ $cfg['firma_nombre'] ?? '' }}</div>
+            @if(!empty($cfg['firma_cargo']))
+                <div class="firma-cargo">{{ $cfg['firma_cargo'] }}</div>
+            @endif
+        </div>
     @endif
 
     @if(!empty($cfg['terminos_condiciones']))

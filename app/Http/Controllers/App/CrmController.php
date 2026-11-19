@@ -21,7 +21,8 @@ class CrmController extends Controller implements HasMiddleware
     {
         return [
             new Middleware(function (Request $r, \Closure $next) {
-                abort_unless($r->user()?->esAracely(), 403);
+                // Casilla: CRM · Segmentacion.
+                   abort_unless(\App\Auth\Permisos::puede($r->user(), 'crm'), 403);
                 return $next($r);
             }),
         ];
@@ -35,6 +36,9 @@ class CrmController extends Controller implements HasMiddleware
             'interaccionesRecientes' => $this->interaccionesRecientes(),
             'comisionesUltimoMes' => $this->comisionesUltimoMes(),
             'tiposInteraccion' => Interaccion::tipos(),
+            'fuentes' => $this->leadsPorFuente(),
+            // Quién puede reescribir la segmentación de todos los clientes.
+            'puede_segmentar' => \App\Auth\Permisos::esRoot($request->user()),
         ]);
     }
 
@@ -63,8 +67,65 @@ class CrmController extends Controller implements HasMiddleware
     /** Correr segmentación manualmente */
     public function segmentarAhora(Request $request): RedirectResponse
     {
+        /*
+         * Ver los segmentos es una cosa; reescribirlos para TODOS los clientes
+         * es otra. La pantalla lo avisa —«recalcula los segmentos de TODOS los
+         * clientes, los previos se sobrescribirán»— y la acción no tenía puerta
+         * propia: colgaba de la de clase. Mientras el CRM fue de Aracely sola
+         * no se notó; al pasar la puerta a la casilla `crm`, que la matriz le
+         * da también al Vendedor y a Servicio al Cliente, el botón habría
+         * quedado al alcance de cualquiera de ellos.
+         */
+        abort_unless(\App\Auth\Permisos::esRoot($request->user()), 403,
+            'Re-segmentar a todos los clientes es de Gerencia.');
+
         $n = SegmentarClientes::run();
         return back()->with('success', "✅ {$n} contactos re-segmentados");
+    }
+
+    /**
+     * MKT-6 · Clientes y ventas por canal de llegada.
+     *
+     * Los contactos se cuentan por SU fuente; los pedidos, por la fuente que
+     * quedó copiada en el pedido al crearlo. «Venta» = facturado o despachado,
+     * igual que en el seguimiento del vendedor.
+     */
+    private function leadsPorFuente(): array
+    {
+        $contactos = \App\Models\Contacto::query()
+            ->where('es_cliente', true)
+            ->selectRaw("COALESCE(fuente, '') as f, COUNT(*) as total")
+            ->groupBy('f')
+            ->pluck('total', 'f');
+
+        $pedidos = \App\Modules\Portal\Models\PedidoCliente::query()
+            ->selectRaw("COALESCE(fuente, '') as f, COUNT(*) as pedidos, COUNT(DISTINCT contacto_id) as clientes_con_pedido")
+            ->selectRaw("COALESCE(SUM(CASE WHEN estado IN ('facturado','despachado') THEN total ELSE 0 END), 0) as ventas")
+            ->groupBy('f')
+            ->get()
+            ->keyBy('f');
+
+        $etiquetas = \App\Models\Contacto::FUENTES + ['' => 'Sin registrar'];
+
+        return collect($etiquetas)
+            ->map(function (string $label, string $clave) use ($contactos, $pedidos) {
+                $p = $pedidos->get($clave);
+                $total = (int) ($contactos[$clave] ?? 0);
+                $conPedido = (int) ($p->clientes_con_pedido ?? 0);
+
+                return [
+                    'fuente' => $clave === '' ? null : $clave,
+                    'label' => $label,
+                    'contactos' => $total,
+                    'clientes_con_pedido' => $conPedido,
+                    'pedidos' => (int) ($p->pedidos ?? 0),
+                    'ventas' => (float) ($p->ventas ?? 0),
+                    'conversion' => $total > 0 ? round(min($conPedido, $total) / $total * 100, 1) : 0,
+                ];
+            })
+            ->filter(fn ($r) => $r['contactos'] > 0 || $r['pedidos'] > 0 || $r['fuente'] !== null)
+            ->values()
+            ->all();
     }
 
     private function segmentosResumen(): array

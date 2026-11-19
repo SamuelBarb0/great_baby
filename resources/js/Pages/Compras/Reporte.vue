@@ -4,6 +4,7 @@ import { Head, router } from '@inertiajs/vue3';
 import { BarChart3, Package, DollarSign, AlertCircle, Cloud, CloudOff, TrendingUp, TrendingDown, Calendar, Filter } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import { useMoney } from '@/composables/useMoney';
+import ReporteContenedores from './ReporteContenedores.vue';
 
 /*
  * COMP-B9 · Reporte de compras con filtros fecha + comparativa mes anterior
@@ -13,6 +14,7 @@ const props = defineProps({
     periodo: { type: Object, required: true },
     kpis: { type: Object, required: true },
     topProveedores: { type: Array, required: true },
+    contenedores: { type: Object, required: true },
     siigo: { type: Object, required: true },
 });
 
@@ -148,6 +150,7 @@ const totalCompras = computed(() => props.topProveedores.reduce((s, p) => s + p.
                     </tbody>
                 </table>
             </div>
+            <ReporteContenedores :reporte="contenedores"/>
         </div>
     </AppLayout>
 </template>

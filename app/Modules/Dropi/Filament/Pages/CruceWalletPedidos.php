@@ -2,6 +2,7 @@
 
 namespace App\Modules\Dropi\Filament\Pages;
 
+use App\Auth\Permisos;
 use App\Modules\Dropi\Services\CruceWalletPedidos as Cruce;
 use BackedEnum;
 use Filament\Pages\Page;
@@ -18,15 +19,20 @@ class CruceWalletPedidos extends Page
 
     protected static ?string $title = 'Cruce wallet ↔ pedidos';
 
-    protected static string|\UnitEnum|null $navigationGroup = 'Dropi';
+    // 9-nov · en «Contabilidad», junto a la wallet: el cruce dice además qué
+    // pagos ya están en el libro (por su recibo de caja) y cuáles no.
+    protected static string|\UnitEnum|null $navigationGroup = 'Contabilidad';
 
     protected static ?int $navigationSort = 7;
 
     protected string $view = 'dropi.pages.cruce-wallet-pedidos';
 
+    /** Quien ve la wallet ve su cruce (antes sólo Aracely: la Contadora no entraba). */
     public static function canAccess(): bool
     {
-        return auth()->user()?->esAracely() ?? false;
+        $u = auth()->user();
+
+        return $u !== null && ($u->esAracely() || Permisos::puede($u, 'dropi_wallet'));
     }
 
     public function cruce(): Cruce
