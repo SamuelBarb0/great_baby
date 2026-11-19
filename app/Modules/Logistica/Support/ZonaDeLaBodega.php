@@ -70,9 +70,19 @@ class ZonaDeLaBodega
      * cosa, manda la regla.
      */
     public const POR_DEFECTO = [
-        'A' => ['1', '2', '3', '4', '5', '6'],
-        'B' => ['6.5', '7', '8', '9', '10', '10.5'],
-        'C' => ['11', '12', '13', '14', '15', 'PARQUEADERO', 'ARSUTEX', 'LOCAL'],
+        // Se entra por el rack 1 y se camina hacia el fondo.
+        '1' => ['1', '2', '3', '4', '5', '6'],
+
+        // El 6.5 está al fondo, justo detrás del 7: se recoge al pasar. El
+        // 10.5 también está al fondo pero mucho más adentro —a la altura del
+        // 12— así que queda de último. Este orden lo propusimos nosotros a
+        // partir del plano; falta que el área lo confirme.
+        '2' => ['7', '6.5', '8', '9', '10', '10.5'],
+
+        // Tal cual lo pidió el área el 19-nov-2026: arranca por el local,
+        // sigue por el parqueadero y vuelve desde el fondo hacia la zona de
+        // alistamiento, con Arsutex entre el 13 y el 12.
+        '3' => ['LOCAL', 'PARQUEADERO', '15', '14', '13', 'ARSUTEX', '12', '11'],
     ];
 
     /**
@@ -127,10 +137,19 @@ class ZonaDeLaBodega
         return $mapa === [] ? self::POR_DEFECTO : $mapa;
     }
 
-    /** Las letras de las zonas, en el orden en que las escribió el área. */
+    /**
+     * Los nombres de las zonas, en el orden en que las escribió el área.
+     *
+     * Van siempre como TEXTO. El área las llama «1», «2» y «3», y PHP
+     * convierte solo las claves numéricas de un arreglo a entero: sin este
+     * `strval` la comparación estricta de `numero()` no encontraba nunca la
+     * zona y todos los responsables salían con el número cero.
+     *
+     * @return array<int, string>
+     */
     public static function letras(): array
     {
-        return array_keys(self::mapa());
+        return array_map('strval', array_keys(self::mapa()));
     }
 
     /** La zona de un rack —«A»—, o null si ese rack no está en el reparto. */
@@ -144,7 +163,7 @@ class ZonaDeLaBodega
 
         foreach (self::mapa() as $letra => $racks) {
             if (in_array($rack, $racks, true)) {
-                return $letra;
+                return (string) $letra;
             }
         }
 
@@ -208,6 +227,47 @@ class ZonaDeLaBodega
             fn ($i) => self::correoDeEtiqueta($i + 1),
             array_keys(self::letras()),
         );
+    }
+
+    /**
+     * En qué puesto del recorrido va este rack dentro de su zona.
+     *
+     * ───────────────────────────────────────────────────────────────────
+     * EL ORDEN DE LA LISTA *ES* EL RECORRIDO
+     *
+     * No se deduce del número del rack. El área lo pidió explícito para la
+     * zona 3 (19-nov-2026) y no es ascendente ni descendente:
+     *
+     *     local → parqueadero → 15 → 14 → 13 → arsutex → 12 → 11
+     *
+     * Las zonas sueltas van intercaladas entre los racks, y el recorrido
+     * arranca por el fondo y vuelve hacia la zona de alistamiento. Ordenar
+     * por número —como se hacía— mandaba a caminar al revés y dejaba el
+     * local de último, cuando el área pidió que fuera lo PRIMERO.
+     *
+     * Así que el orden se lee de la regla tal como está escrita. Para
+     * cambiar el recorrido se reordena la lista en /app/reglas; no hay que
+     * tocar código ni inventar una regla aparte.
+     * ───────────────────────────────────────────────────────────────────
+     */
+    public static function ordenEnElRecorrido(?string $rack): int
+    {
+        if ($rack === null || trim($rack) === '') {
+            return PHP_INT_MAX;
+        }
+
+        $rack = mb_strtoupper(trim($rack));
+
+        foreach (self::mapa() as $racks) {
+            $pos = array_search($rack, $racks, true);
+
+            if ($pos !== false) {
+                return $pos;
+            }
+        }
+
+        // Un rack que nadie repartió se camina de último: no está en la ruta.
+        return PHP_INT_MAX;
     }
 
     /** Los racks de una zona. */
