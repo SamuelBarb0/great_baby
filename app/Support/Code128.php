@@ -2,6 +2,7 @@
 
 namespace App\Support;
 
+use Illuminate\Support\Str;
 use InvalidArgumentException;
 
 /**
@@ -62,9 +63,47 @@ class Code128
         return $modulos;
     }
 
+    /**
+     * Lo que de verdad va en las barras: Code 128 B no tiene tildes ni eñes, así
+     * que «LEÓ» se codifica «LEO». El lector lee «LEO» y la búsqueda por
+     * codigo_barras igual encuentra la variante (la columna es utf8mb4_unicode_ci).
+     */
+    public static function codificable(string $texto): string
+    {
+        return Str::ascii($texto);
+    }
+
+    /** SVG con zona de silencio y el texto debajo; cada módulo mide 1 unidad del viewBox. */
+    public static function svg(string $texto, int $alto = 50): string
+    {
+        $modulos = self::modulos(self::codificable($texto));
+        $silencio = 10;
+        $ancho = count($modulos) + 2 * $silencio;
+        $altoTotal = $alto + 14;
+
+        $barras = '';
+        $inicio = null;
+        foreach ([...$modulos, false] as $i => $barra) {
+            if ($barra && $inicio === null) {
+                $inicio = $i;
+            } elseif (! $barra && $inicio !== null) {
+                $barras .= '<rect x="'.($silencio + $inicio).'" y="0" width="'.($i - $inicio).'" height="'.$alto.'"/>';
+                $inicio = null;
+            }
+        }
+
+        return '<?xml version="1.0" encoding="UTF-8"?>'
+            .'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 '.$ancho.' '.$altoTotal.'" width="'.($ancho * 2).'" height="'.($altoTotal * 2).'" shape-rendering="crispEdges">'
+            .'<rect width="100%" height="100%" fill="#fff"/>'
+            .'<g fill="#000">'.$barras.'</g>'
+            .'<text x="'.($ancho / 2).'" y="'.($alto + 11).'" font-family="monospace" font-size="10" text-anchor="middle" fill="#000">'.htmlspecialchars($texto, ENT_XML1).'</text>'
+            .'</svg>';
+    }
+
     /** PNG con su texto debajo, para el PDF de etiquetas y para el Excel. */
     public static function png(string $texto, int $modulo = 2, int $alto = 70): string
     {
+        $texto = self::codificable($texto);
         $modulos = self::modulos($texto);
         $silencio = 10 * $modulo;
         $ancho = count($modulos) * $modulo + 2 * $silencio;

@@ -310,7 +310,10 @@ class CarteraExtrasController extends Controller implements HasMiddleware
                 'debe' => (float) $m->debe,
                 'haber' => (float) $m->haber,
                 'descripcion' => $m->descripcion,
-                'origen' => $m->origen_type ? class_basename($m->origen_type) . '#' . $m->origen_id : '—',
+                'origen' => $m->origen_type
+                    ? \App\Modules\Contabilidad\Support\OrigenContable::etiqueta($m->origen_type) . ' #' . $m->origen_id
+                    : '—',
+                'origen_url' => \App\Modules\Contabilidad\Support\OrigenContable::urlAsiento($m->origen_type, $m->origen_id),
                 // Hasta hoy los dos ejes existían en la fila pero no se veían
                 // en ningún lado, así que no había forma de revisar a mano si
                 // un asiento había quedado del lado correcto.

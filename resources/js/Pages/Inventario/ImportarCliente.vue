@@ -1,16 +1,25 @@
 <script setup>
 import { ref, computed, watch, nextTick } from 'vue';
 import { Head, useForm } from '@inertiajs/vue3';
-import { Upload, FileSpreadsheet, CheckCircle2, AlertTriangle, Loader2, MapPin } from 'lucide-vue-next';
+import { Upload, FileSpreadsheet, CheckCircle2, AlertTriangle, Loader2, MapPin, Scale, Search, X } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import { avisar } from '@/composables/useAviso';
+import { useMoney } from '@/composables/useMoney';
 
 const props = defineProps({
     bodegas: { type: Array, required: true },
     grupos: { type: Array, default: () => [] },
+    motivos: { type: Array, default: () => [] },
 });
+const { money } = useMoney();
 
 const form = useForm({
+    // Por qué entra la mercancía. Todo ingreso tiene que tener contrapartida:
+    // se le debe a un proveedor, lo aportaron los socios, es el saldo inicial…
+    motivo: '',
+    observacion: '',
+    soporte: '',
+    tercero_id: null,
     archivo: null,
     bodega_id: props.bodegas[0]?.id ?? null,
     hoja: 'Hoja1',
@@ -31,6 +40,41 @@ const destinoEsBodega = computed(() => destino.value?.es_bodega !== false);
 watch(destinoEsBodega, (esBodega) => {
     if (! esBodega) { form.pasillo = ''; form.estante = ''; form.nivel = ''; }
 });
+
+const motivoSel = computed(() => props.motivos.find((m) => m.value === form.motivo) || null);
+
+// Buscador de tercero (proveedor o socio) · mismo endpoint que Cartera.
+const terceroTexto = ref('');
+const terceroSel = ref(null);
+const terceroResultados = ref([]);
+let terceroDeb;
+watch(terceroTexto, (q) => {
+    clearTimeout(terceroDeb);
+    if (terceroSel.value || !q || q.trim().length < 2) { terceroResultados.value = []; return; }
+    terceroDeb = setTimeout(async () => {
+        try {
+            const res = await fetch('/app/api/contactos/buscar?q=' + encodeURIComponent(q.trim()), {
+                credentials: 'same-origin', headers: { Accept: 'application/json' },
+            });
+            terceroResultados.value = res.ok ? await res.json() : [];
+        } catch { terceroResultados.value = []; }
+    }, 300);
+});
+const elegirTercero = (t) => {
+    terceroSel.value = t;
+    form.tercero_id = t.id;
+    terceroTexto.value = `${t.nombre}${t.documento ? ' · ' + t.documento : ''}`;
+    terceroResultados.value = [];
+};
+const quitarTercero = () => {
+    terceroSel.value = null;
+    form.tercero_id = null;
+    terceroTexto.value = '';
+};
+
+const faltaPorque = computed(() => !form.motivo
+    || form.observacion.trim().length < 5
+    || (motivoSel.value?.requiere_tercero && !form.tercero_id));
 
 const dragActive = ref(false);
 const nombreArchivo = computed(() => form.archivo?.name || null);
@@ -60,6 +104,10 @@ const onDrop = (e) => {
 const enviar = (dryRun = false) => {
     if (!form.archivo || !form.bodega_id) {
         avisar('Elegí un archivo y una bodega antes de enviar.', 'warning');
+        return;
+    }
+    if (faltaPorque.value) {
+        avisar('Falta el porqué: elige el motivo, escribe la observación y, si es compra o aporte, el tercero.', 'warning');
         return;
     }
     form.dry_run = dryRun;
@@ -192,6 +240,48 @@ const enviar = (dryRun = false) => {
                         <div v-if="$page.props.flash.importResumen.sin_cat > 0" class="mt-3 p-3 rounded bg-red-100 text-red-900 text-sm">
                             <strong>❌ {{ $page.props.flash.importResumen.sin_cat }}</strong> filas ignoradas por falta de categoría en el Excel.
                         </div>
+                        <!-- Lo contable: dónde queda este ingreso en el libro. -->
+                        <div class="mt-3 p-3 rounded bg-white dark:bg-surface-900 border border-surface-200 dark:border-surface-700 text-sm">
+                            <div class="font-semibold flex items-center gap-1.5 text-surface-800 dark:text-surface-100">
+                                <Scale class="h-4 w-4 text-brand-600"/>
+                                Contabilidad · {{ $page.props.flash.importResumen.motivo }}
+                            </div>
+                            <div class="mt-2 grid sm:grid-cols-2 gap-2 text-xs">
+                                <div class="p-2 rounded bg-blue-50 dark:bg-blue-950/30">
+                                    <div class="text-surface-500">Débito · Inventario (1435)</div>
+                                    <div class="font-mono font-bold text-blue-700 text-base">{{ money($page.props.flash.importResumen.valor) }}</div>
+                                </div>
+                                <div class="p-2 rounded bg-purple-50 dark:bg-purple-950/30">
+                                    <div class="text-surface-500">Crédito · cuenta {{ $page.props.flash.importResumen.cuenta_contrapartida }}</div>
+                                    <div class="font-mono font-bold text-purple-700 text-base">{{ money($page.props.flash.importResumen.valor) }}</div>
+                                </div>
+                            </div>
+                            <div v-if="$page.props.flash.importResumen.columna_costo" class="mt-2 text-xs text-surface-600">
+                                Costo leído de la columna <strong>«{{ $page.props.flash.importResumen.columna_costo }}»</strong>
+                                en {{ $page.props.flash.importResumen.con_costo_excel }} referencias · las demás usan el costo del catálogo.
+                            </div>
+                            <div v-if="($page.props.flash.importResumen.costo_ilegible || []).length" class="mt-2 p-2 rounded bg-red-100 text-red-900 text-xs">
+                                <strong>❌ No entendí el costo</strong> de estas filas (quedaron con el del catálogo):
+                                <div class="mt-1 font-mono text-[11px]">{{ $page.props.flash.importResumen.costo_ilegible.slice(0, 10).join(' · ') }}</div>
+                            </div>
+                            <div v-if="$page.props.flash.importResumen.sin_costo > 0" class="mt-2 p-2 rounded bg-amber-100 text-amber-900 text-xs">
+                                <strong>⚠️ {{ $page.props.flash.importResumen.sin_costo }}</strong> referencias no tienen costo:
+                                su stock {{ $page.props.flash.importResumen.dry_run ? 'entraría' : 'entró' }},
+                                pero <strong>no suman al asiento</strong>. Agrega una columna <strong>COSTO</strong> al Excel
+                                (o ponles costo en el catálogo) antes de cargar si deben valer en el libro.
+                                <div class="mt-1 font-mono text-[11px] text-amber-800">
+                                    {{ ($page.props.flash.importResumen.sin_costo_detalle || []).slice(0, 15).join(' · ') }}
+                                    <span v-if="$page.props.flash.importResumen.sin_costo > 15">…</span>
+                                </div>
+                            </div>
+                            <div v-if="$page.props.flash.importResumen.ya_cargados > 0" class="mt-2 text-xs text-surface-600">
+                                {{ $page.props.flash.importResumen.ya_cargados }} referencias ya se habían cargado en esta bodega y no se repiten.
+                            </div>
+                            <div v-if="$page.props.flash.importResumen.carga" class="mt-2 text-xs">
+                                Documento <a :href="$page.props.flash.importResumen.carga.url" class="font-mono font-semibold text-brand-600 underline">{{ $page.props.flash.importResumen.carga.numero }}</a>
+                                · ahí ves cada referencia y su asiento.
+                            </div>
+                        </div>
                         <div v-if="$page.props.flash.importResumen.dry_run" class="mt-4 text-sm text-blue-800 dark:text-blue-200 font-semibold">
                             ✅ La simulación completó. Ahora presiona <strong>"Cargar inventario definitivo"</strong> para guardar de verdad.
                         </div>
@@ -217,8 +307,67 @@ const enviar = (dryRun = false) => {
             </div>
 
             <div class="card p-6 space-y-4">
+                <!-- El porqué del ingreso. Sin esto el inventario entra «porque se
+                     subió» y el débito al 1435 queda sin contrapartida. -->
                 <div>
-                    <label class="text-sm font-semibold block mb-2">1. Bodega donde cargar el inventario</label>
+                    <label class="text-sm font-semibold block mb-2 flex items-center gap-1.5">
+                        <Scale class="h-4 w-4 text-brand-600"/>
+                        1. ¿Por qué entra esta mercancía?
+                    </label>
+                    <div class="grid sm:grid-cols-2 gap-2">
+                        <label v-for="m in motivos" :key="m.value"
+                               class="flex items-start gap-2 p-3 rounded-lg border cursor-pointer transition-colors"
+                               :class="form.motivo === m.value
+                                   ? 'border-brand-500 bg-brand-50 dark:bg-brand-900/20'
+                                   : 'border-surface-200 dark:border-surface-700 hover:bg-surface-50 dark:hover:bg-surface-800'">
+                            <input type="radio" v-model="form.motivo" :value="m.value" class="mt-1"/>
+                            <span class="text-sm">
+                                <span class="font-semibold block">{{ m.label }}</span>
+                                <span class="text-xs text-surface-500 block">{{ m.ayuda }}</span>
+                                <span class="text-[11px] text-surface-400 block mt-0.5">Débito 1435 · Crédito <span class="font-mono">{{ m.cuenta }}</span></span>
+                            </span>
+                        </label>
+                    </div>
+
+                    <div v-if="motivoSel?.requiere_tercero" class="mt-3 relative">
+                        <label class="text-xs font-semibold block mb-1">
+                            {{ form.motivo === 'compra' ? '¿A qué proveedor se le compró?' : '¿Qué socio la aporta?' }}
+                        </label>
+                        <div class="relative">
+                            <Search class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-surface-400"/>
+                            <input v-model="terceroTexto" :readonly="!!terceroSel" class="input w-full pl-10 pr-10"
+                                   placeholder="Nombre o NIT / cédula" autocomplete="off"/>
+                            <button v-if="terceroSel" type="button" @click="quitarTercero"
+                                    class="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-surface-400 hover:text-red-600" title="Quitar">
+                                <X class="h-4 w-4"/>
+                            </button>
+                        </div>
+                        <div v-if="terceroResultados.length"
+                             class="absolute z-10 left-0 right-0 mt-1 max-h-56 overflow-y-auto rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 shadow-lg">
+                            <button v-for="t in terceroResultados" :key="t.id" type="button" @click="elegirTercero(t)"
+                                    class="w-full text-left px-3 py-2 text-sm hover:bg-surface-50 dark:hover:bg-surface-800 border-b border-surface-100 dark:border-surface-800 last:border-b-0">
+                                <span class="font-semibold">{{ t.nombre }}</span>
+                                <span v-if="t.documento" class="text-xs text-surface-500 ml-1">{{ t.documento }}</span>
+                            </button>
+                        </div>
+                        <p class="text-[11px] text-surface-500 mt-1">Si no aparece, créalo primero en Contactos.</p>
+                    </div>
+
+                    <div class="mt-3 grid sm:grid-cols-3 gap-3">
+                        <div class="sm:col-span-2">
+                            <label class="text-xs font-semibold block mb-1">Observación <span class="text-red-600">*</span></label>
+                            <textarea v-model="form.observacion" rows="2" maxlength="1000" class="input w-full"
+                                      placeholder="Ej: Inventario físico de la bodega Dropi al 17-nov, contado por Aracely"></textarea>
+                        </div>
+                        <div>
+                            <label class="text-xs font-semibold block mb-1">Soporte <span class="font-normal text-surface-400">(opcional)</span></label>
+                            <input v-model="form.soporte" type="text" maxlength="60" class="input w-full" placeholder="Nº factura o acta"/>
+                        </div>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="text-sm font-semibold block mb-2">2. Bodega donde cargar el inventario</label>
                     <select v-model="form.bodega_id" class="input w-full">
                         <optgroup v-for="g in grupos" :key="g" :label="g">
                             <option v-for="b in bodegas.filter((x) => x.grupo === g)" :key="b.id" :value="b.id">
@@ -237,7 +386,7 @@ const enviar = (dryRun = false) => {
                 <div>
                     <label class="text-sm font-semibold block mb-2 flex items-center gap-1.5">
                         <MapPin class="h-4 w-4 text-brand-600"/>
-                        2. ¿En qué posición de la bodega? <span class="text-xs font-normal text-surface-400">(opcional)</span>
+                        3. ¿En qué posición de la bodega? <span class="text-xs font-normal text-surface-400">(opcional)</span>
                     </label>
                     <div v-if="destinoEsBodega" class="grid grid-cols-3 gap-3">
                         <div>
@@ -268,7 +417,7 @@ const enviar = (dryRun = false) => {
                 </div>
 
                 <div>
-                    <label class="text-sm font-semibold block mb-2">3. Nombre de la hoja del Excel</label>
+                    <label class="text-sm font-semibold block mb-2">4. Nombre de la hoja del Excel</label>
                     <input v-model="form.hoja" type="text" class="input w-full" placeholder="Hoja1"/>
                     <p class="text-xs text-surface-500 mt-1">
                         Por defecto <code>Hoja1</code>. Si tu Excel tiene otro nombre (ej. <code>REPORTE</code>), cámbialo aquí.
@@ -276,7 +425,7 @@ const enviar = (dryRun = false) => {
                 </div>
 
                 <div>
-                    <label class="text-sm font-semibold block mb-2">4. Archivo Excel</label>
+                    <label class="text-sm font-semibold block mb-2">5. Archivo Excel</label>
                     <div
                         @dragenter.prevent="dragActive = true"
                         @dragover.prevent="dragActive = true"
@@ -307,7 +456,7 @@ const enviar = (dryRun = false) => {
                 <div class="pt-4 border-t border-surface-200 dark:border-surface-800 flex flex-col sm:flex-row gap-2">
                     <button
                         @click="enviar(true)"
-                        :disabled="!form.archivo || form.processing"
+                        :disabled="!form.archivo || faltaPorque || form.processing"
                         class="btn-ghost flex-1 disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                         <Loader2 v-if="form.processing && form.dry_run" class="h-4 w-4 animate-spin"/>
@@ -315,7 +464,7 @@ const enviar = (dryRun = false) => {
                     </button>
                     <button
                         @click="enviar(false)"
-                        :disabled="!form.archivo || form.processing"
+                        :disabled="!form.archivo || faltaPorque || form.processing"
                         class="btn-primary flex-1 disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                         <Loader2 v-if="form.processing && !form.dry_run" class="h-4 w-4 animate-spin"/>
@@ -331,9 +480,21 @@ const enviar = (dryRun = false) => {
             <div class="card p-4 text-sm text-surface-500 space-y-2">
                 <div class="font-semibold text-surface-700 dark:text-surface-200">¿Qué hace este importador?</div>
                 <ul class="list-disc list-inside space-y-1">
-                    <li>Lee filas de <strong>categoría</strong> (solo columna A con nombre) y <strong>producto</strong> (referencia + descripción + existencia + variación).</li>
+                    <li>Lee filas de <strong>categoría</strong> (solo columna A con nombre) y <strong>producto</strong> (referencia + descripción + existencia + variación, y opcional costo).</li>
                     <li>Crea/actualiza cada producto como <strong>agregado</strong> (colores surtidos).</li>
                     <li>Inserta el stock inicial en el kardex de la bodega elegida (idempotente: puedes re-correr sin duplicar).</li>
+                    <li>
+                        Si el Excel trae una columna <strong>Costo</strong> o <strong>Costo unitario</strong> (de la E en adelante),
+                        ese es el costo de cada referencia en esta carga; acepta <code>45000</code>, <code>$ 45.000</code> o
+                        <code>12.500,50</code>. Si la fila no lo trae, se usa el costo del catálogo. Una columna
+                        «Costo total» se ignora (es cantidad × costo). El costo del Excel llena el catálogo sólo
+                        en productos nuevos o que estaban en 0.
+                    </li>
+                    <li>
+                        Deja un documento <strong>CI-…</strong> con el motivo y la observación, y escribe su
+                        <strong>asiento contable</strong>: débito al inventario (1435) contra la cuenta del motivo.
+                        Es contabilidad interna: no se envía a SIIGO.
+                    </li>
                     <li>
                         Si el Excel trae columnas <strong>Pasillo</strong>, <strong>Estante</strong> o
                         <strong>Nivel</strong> (en cualquier posición, las reconoce por el nombre del encabezado),

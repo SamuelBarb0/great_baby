@@ -365,6 +365,14 @@ class Reglas
         'contable.concepto_retencion_venta' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => 'compras_generales', 'etiqueta' => 'Concepto de retención en ventas', 'descripcion' => 'Regla de Cartera → Retenciones que se usa al facturar: el cliente nos compra mercancía, así que para él es «compras generales».'],
         'contable.centro_costo_default' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => 'GB-01', 'etiqueta' => 'Centro de costo por defecto', 'descripcion' => 'Cuenta / centro de imputación por defecto para asientos'],
 
+        // Contrapartida de las cargas masivas de inventario, una por motivo.
+        // El débito siempre va a la cuenta de inventario del producto (1435);
+        // estas dicen contra qué se acredita según POR QUÉ entró la mercancía.
+        'contable.cta_carga_compra' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '220505', 'etiqueta' => 'Carga de inventario · Compra', 'descripcion' => 'Crédito cuando la mercancía se compró: cuenta por pagar al proveedor (PUC 220505)'],
+        'contable.cta_carga_aporte_socios' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '3105', 'etiqueta' => 'Carga de inventario · Aporte de socios', 'descripcion' => '⚠ Confirmar con la contadora · crédito cuando la mercancía la aportan los socios (capital)'],
+        'contable.cta_carga_saldo_inicial' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '3705', 'etiqueta' => 'Carga de inventario · Inventario inicial', 'descripcion' => '⚠ Confirmar con la contadora · crédito del inventario de apertura (o la cuenta puente de saldos iniciales que use)'],
+        'contable.cta_carga_donacion' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '4295', 'etiqueta' => 'Carga de inventario · Donación', 'descripcion' => '⚠ Confirmar con la contadora · crédito cuando la mercancía se recibe sin pagarla (ingreso diverso)'],
+        'contable.cta_carga_sobrante' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '4295', 'etiqueta' => 'Carga de inventario · Sobrante', 'descripcion' => 'Crédito de mercancía que aparece sin documento (misma cuenta que el sobrante de toma física)'],
         /*
          * ============ Gestión Humana · cuadro de novedades ============
          *

@@ -52,13 +52,6 @@ class MisProductosDropi extends Page
     public const URL_CREAR_EN_DROPI = 'https://app.dropi.co/dashboard/products/add';
 
     /**
-     * «Mis productos» de Dropi: ahí están sus botones de carga y actualización
-     * masiva con la plantilla de Excel (son ventanas dentro de esa lista, no
-     * tienen ruta propia; leído del bundle de app.dropi.co el 7-nov).
-     */
-    public const URL_CARGA_MASIVA_EN_DROPI = 'https://app.dropi.co/dashboard/products';
-
-    /**
      * «Crear producto en Dropi» arriba de la página. Es un enlace: el script de
      * AdminPanelProvider lo abre en una ventana al lado del panel.
      */
@@ -70,13 +63,15 @@ class MisProductosDropi extends Page
                 ->icon('heroicon-o-arrow-top-right-on-square')
                 ->url(self::URL_CREAR_EN_DROPI, shouldOpenInNewTab: true)
                 ->visible(fn (): bool => (bool) (\App\Auth\MenuApp::permisos(auth()->user())['dropi'] ?? false)),
+            // Antes abría la «Carga masiva» de Dropi (plantilla de Excel), que no
+            // aplica los cambios: ahora la carga del ERP, que sí, y los verifica.
             Action::make('cargaMasivaEnDropi')
-                ->label('Carga masiva en Dropi')
+                ->label('Cargar productos y stock (Excel)')
                 ->icon('heroicon-o-arrow-up-tray')
                 ->color('gray')
-                ->tooltip('Abre «Mis productos» de Dropi; ahí usa «Carga masiva» con su plantilla de Excel.')
-                ->url(self::URL_CARGA_MASIVA_EN_DROPI, shouldOpenInNewTab: true)
-                ->visible(fn (): bool => (bool) (\App\Auth\MenuApp::permisos(auth()->user())['dropi'] ?? false)),
+                ->tooltip('Sube el Excel de inventario: vista previa, crea los productos que faltan y carga el stock en Dropi, verificando cada fila.')
+                ->url('/app/dropi/carga-productos')
+                ->visible(fn (): bool => \App\Auth\Permisos::puede(auth()->user(), 'dropi_productos')),
         ];
     }
 

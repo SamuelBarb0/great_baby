@@ -47,6 +47,9 @@ function crearProductoWeb($test, array $extra = [])
         'nombre' => 'Producto de prueba',
         'desglose_stock' => false,
         'stock_directo' => 40,
+        // Desde el 18-nov-2026 el stock inicial dice por qué entra (carga CI-).
+        'stock_motivo' => 'saldo_inicial',
+        'stock_observacion' => 'Conteo de la bodega recién montada',
     ], $extra));
 }
 
@@ -65,6 +68,11 @@ it('deja el stock en la bodega que eligió la persona', function () {
     ])->assertRedirect();
 
     expect(dondeQuedo('GB-ELEGIDA'))->toBe('Z-NUEVA');
+
+    // Y la carga CI- que documenta el porqué queda en esa misma bodega.
+    $mov = InventarioMovimiento::where('producto_id', Producto::where('referencia', 'GB-ELEGIDA')->value('id'))->sole();
+    expect($mov->referencia_tipo)->toBe(\App\Modules\Inventario\Models\CargaInventario::class)
+        ->and(\App\Modules\Inventario\Models\CargaInventario::find($mov->referencia_id)->ubicacion_id)->toBe($this->nueva->id);
 });
 
 it('sin elegir bodega se comporta como antes, en la primera activa', function () {

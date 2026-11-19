@@ -237,23 +237,26 @@ it('ninguna pantalla del panel depende de un nombre de rol', function () {
         ->and(array_values(array_diff($deRoot, $abre($conTodas))))->toBe([]);
 });
 
-it('Productos ofrece «Carga masiva en Dropi» en vez de importar al ERP', function () {
+it('Productos ofrece la carga del ERP a Dropi en vez de las plantillas de Dropi', function () {
     $panel = Filament::getPanel('admin');
     Filament::setCurrentPanel($panel);
 
+    // Las plantillas «Carga masiva» / «Actualización masiva» de Dropi no
+    // aplican los cambios (18-nov-2026): el menú lleva a la carga del ERP.
     $cargaMasiva = fn () => collect($panel->getNavigationItems())
-        ->first(fn ($item) => $item->getLabel() === 'Carga masiva en Dropi');
+        ->first(fn ($item) => $item->getLabel() === 'Cargar productos y stock a Dropi');
 
     expect($cargaMasiva())->not->toBeNull()
-        ->and($cargaMasiva()->getUrl())->toStartWith('https://app.dropi.co/dashboard/products')
+        ->and($cargaMasiva()->getUrl())->toBe('/app/dropi/carga-productos')
         ->and($cargaMasiva()->getGroup())->toBe('Productos')
-        ->and(collect($panel->getPages())->contains(fn ($p) => str_ends_with($p, '\\ImportarProductos')))->toBeFalse();
+        ->and(collect($panel->getNavigationItems())->contains(fn ($i) => str_starts_with((string) $i->getUrl(), 'https://app.dropi.co/dashboard/products')))->toBeFalse()
+        ->and(collect($panel->getPages())->contains(fn ($p) => str_ends_with($p, '\ImportarProductos')))->toBeFalse();
 
-    // La ve quien ve «Mis productos en Dropi», que es su mismo catálogo.
+    // La ve quien puede cambiar productos en Dropi, el mismo permiso de la pantalla.
     $this->actingAs($this->operador);
     expect($cargaMasiva()->isVisible())->toBeFalse();
 
-    $this->rol->givePermissionTo('ver.dropi_mis_productos');
+    $this->rol->givePermissionTo('ver.dropi_productos');
     $this->actingAs($this->operador->fresh());
     expect($cargaMasiva()->isVisible())->toBeTrue();
 });

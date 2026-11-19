@@ -197,6 +197,15 @@ class Producto extends Model implements AuditableContract, HasMedia
     protected static ?int $ubicacionStockInicial = null;
 
     /**
+     * Por qué entra el stock inicial del producto que se está creando (motivo,
+     * observación, soporte, tercero, usuario). Lo pone la ficha con
+     * `conMotivoStockInicial()`; el observer lo usa para abrir la carga CI-.
+     *
+     * @var array{motivo: \App\Modules\Inventario\Enums\MotivoCargaInventario, observacion: string, soporte?: ?string, tercero_id?: ?int, user_id?: ?int}|null
+     */
+    protected static ?array $stockInicial = null;
+
+    /**
      * Corre `$fn` dejando el stock inicial en la ubicación indicada.
      *
      * @template T
@@ -213,6 +222,26 @@ class Producto extends Model implements AuditableContract, HasMedia
             return $fn();
         } finally {
             self::$ubicacionStockInicial = $previo;
+        }
+    }
+
+    /**
+     * Crea el producto dentro de `$fn` con el porqué de su stock inicial.
+     *
+     * @template T
+     *
+     * @param  callable():T  $fn
+     * @return T
+     */
+    public static function conMotivoStockInicial(array $motivo, callable $fn)
+    {
+        $previo = self::$stockInicial;
+        self::$stockInicial = $motivo;
+
+        try {
+            return $fn();
+        } finally {
+            self::$stockInicial = $previo;
         }
     }
 
@@ -291,6 +320,22 @@ class Producto extends Model implements AuditableContract, HasMedia
                 ->exists();
             if ($existe) return;
 
+            // El stock que entra al crear el producto también dice por qué
+            // (motivo, observación, tercero) y queda como una carga CI- con su
+            // asiento, igual que la carga masiva. Quien no pasa motivo (código,
+            // comandos) queda como «Inventario inicial» con la observación que
+            // lo explica, para que nunca haya stock sin documento.
+            $ctx = self::$stockInicial ?? [];
+            $carga = \App\Modules\Inventario\Actions\RegistrarCargaInventario::abrir([
+                'motivo' => $ctx['motivo'] ?? \App\Modules\Inventario\Enums\MotivoCargaInventario::SaldoInicial,
+                'observacion' => $ctx['observacion'] ?? "Stock inicial al crear el producto {$p->referencia} (sin motivo indicado: se creó por código).",
+                'soporte' => $ctx['soporte'] ?? null,
+                'tercero_id' => $ctx['tercero_id'] ?? null,
+                'ubicacion_id' => $bodega->id,
+                'canal' => $ctx ? 'ficha' : 'sistema',
+                'user_id' => $ctx['user_id'] ?? auth()->id(),
+            ]);
+
             \App\Modules\Dropi\Models\InventarioMovimiento::create([
                 'producto_id' => $p->id,
                 'variante_id' => null,
@@ -304,8 +349,13 @@ class Producto extends Model implements AuditableContract, HasMedia
                 // 100% siempre. Medido el 2026-10-13 en el reporte de stock por
                 // bodega, con mercancía adentro y la bodega en $0.
                 'costo_unit' => $p->precio_proveedor ?: null,
+                'referencia_tipo' => \App\Modules\Inventario\Models\CargaInventario::class,
+                'referencia_id' => $carga->id,
+                'user_id' => $ctx['user_id'] ?? auth()->id(),
                 'notas' => $notaMarker,
             ]);
+
+            \App\Modules\Inventario\Actions\RegistrarCargaInventario::cerrar($carga);
         });
     }
 

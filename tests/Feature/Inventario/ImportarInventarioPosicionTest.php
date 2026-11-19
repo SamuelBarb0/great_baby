@@ -69,6 +69,9 @@ function subirExcel(string $path, array $extra = []): \Illuminate\Testing\TestRe
         'archivo' => new \Illuminate\Http\UploadedFile($path, 'inventario.xlsx', null, null, true),
         'bodega_id' => test()->bodega->id,
         'hoja' => 'Hoja1',
+        // Toda carga dice por qué entra; acá no es lo que se prueba.
+        'motivo' => 'saldo_inicial',
+        'observacion' => 'Inventario inicial de prueba',
     ], $extra));
 }
 

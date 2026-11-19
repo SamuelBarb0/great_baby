@@ -2,8 +2,12 @@
 
 namespace App\Console\Commands;
 
+use App\Models\Contacto;
 use App\Modules\Catalogo\Models\Categoria;
 use App\Modules\Dropi\Models\InventarioMovimiento;
+use App\Modules\Inventario\Actions\RegistrarCargaInventario;
+use App\Modules\Inventario\Enums\MotivoCargaInventario;
+use App\Modules\Inventario\Models\CargaInventario;
 use App\Modules\Dropi\Models\InventarioUbicacion;
 use App\Modules\Dropi\Models\Producto;
 use Database\Seeders\CategoriasClienteBebesSeeder;
@@ -22,6 +26,7 @@ use OpenSpout\Reader\XLSX\Reader as XlsxReader;
  * Formato del Excel esperado:
  *   Fila 1: título ("INVENTARIO ACTUAL A ...")  → ignora
  *   Fila 2: headers ("Referencia | Descripcion | Existencia | Variación")
+ *           + opcional una columna «Costo» / «Costo unitario» (de la E en adelante)
  *   Fila 3+:
  *     - Fila con solo col A no vacía → categoría actual (ej "ALIMENTACION")
  *     - Fila con las 4 cols → producto (crea/actualiza como agregado)
@@ -41,7 +46,11 @@ class CargarInventarioClienteExcel extends Command
         {--bodega= : ID de la bodega donde cargar el inventario inicial}
         {--hoja=Hoja1 : Nombre de la hoja del Excel a leer}
         {--dry-run : Solo muestra qué haría, no toca BD}
-        {--force : Requerido en producción para confirmar la corrida}';
+        {--force : Requerido en producción para confirmar la corrida}
+        {--motivo= : Por qué entra la mercancía: compra | aporte_socios | saldo_inicial | donacion | sobrante}
+        {--observacion= : De dónde viene la mercancía (obligatoria)}
+        {--soporte= : Número de factura o documento que respalda el ingreso}
+        {--tercero= : Número de documento del proveedor o socio (obligatorio para compra y aporte)}';
 
     protected $description = 'C-F7 · Carga inventario del cliente Aracely desde Excel (formato REPORTE) creando productos agregados con stock inicial en una bodega.';
 
@@ -71,6 +80,45 @@ class CargarInventarioClienteExcel extends Command
             return self::FAILURE;
         }
 
+        // ─── Por qué entra la mercancía ───────────────────────────
+        //   Igual que en la pantalla: sin motivo el ingreso no tiene
+        //   contrapartida contable. El dry-run no escribe nada y no lo exige.
+        $cargaDatos = null;
+        if (! $dryRun) {
+            $motivo = MotivoCargaInventario::tryFrom((string) $this->option('motivo'));
+            if (! $motivo) {
+                $this->error('--motivo es obligatorio. Opciones: '.implode(', ', array_column(MotivoCargaInventario::cases(), 'value')));
+                return self::FAILURE;
+            }
+            $observacion = trim((string) $this->option('observacion'));
+            if (mb_strlen($observacion) < 5) {
+                $this->error('--observacion es obligatoria: explica de dónde viene la mercancía.');
+                return self::FAILURE;
+            }
+            $terceroId = null;
+            if ($doc = trim((string) $this->option('tercero'))) {
+                $terceroId = Contacto::where('numero_documento', $doc)->value('id');
+                if (! $terceroId) {
+                    $this->error("No hay ningún contacto con documento {$doc}.");
+                    return self::FAILURE;
+                }
+            }
+            if ($motivo->requiereTercero() && ! $terceroId) {
+                $this->error("El motivo «{$motivo->label()}» necesita --tercero (documento del proveedor o socio).");
+                return self::FAILURE;
+            }
+            $cargaDatos = [
+                'motivo' => $motivo,
+                'observacion' => $observacion,
+                'soporte' => trim((string) $this->option('soporte')) ?: null,
+                'tercero_id' => $terceroId,
+                'ubicacion_id' => $bodegaId,
+                'archivo_nombre' => basename($archivo),
+                'canal' => 'cli',
+                'user_id' => null,
+            ];
+        }
+
         // ─── Semilla de categorías (idempotente) ──────────────────
         //   Siempre se corre (incluso en dry-run) porque es idempotente y
         //   sin sembrar no hay categorías para resolver las filas del Excel.
@@ -90,26 +138,43 @@ class CargarInventarioClienteExcel extends Command
         $movsInsertados = 0;
         $filasIgnoradas = 0;
         $sinCategoria = 0;
+        $carga = null;
+        // Columna opcional de costo unitario, reconocida por el encabezado
+        // (igual que en la pantalla de importación).
+        $colCosto = null;
 
         try {
             $callback = function () use (
                 $reader, $hojaNombre, $bodegaId, $dryRun, $catsPorNombre,
                 &$categoriaActual, &$creados, &$actualizados, &$movsInsertados,
-                &$filasIgnoradas, &$sinCategoria
+                &$filasIgnoradas, &$sinCategoria, $cargaDatos, &$carga, &$colCosto
             ) {
                 foreach ($reader->getSheetIterator() as $sheet) {
                     if ($sheet->getName() !== $hojaNombre) continue;
 
                     foreach ($sheet->getRowIterator() as $i => $row) {
-                        if ($i <= 2) continue; // fila 1 (título) y fila 2 (headers)
-
-                        $celdas = array_map(function ($c) {
-                            $v = $c->getValue();
+                        $crudas = array_map(fn ($c) => $c->getValue(), $row->getCells());
+                        $celdas = array_map(function ($v) {
                             // El cliente pone fechas en la fila 1 (título) → openspout devuelve DateTimeImmutable.
                             if ($v instanceof \DateTimeInterface) return $v->format('Y-m-d');
                             return trim((string) $v);
-                        }, $row->getCells());
-                        [$ref, $desc, $existencia, $variacion] = array_pad($celdas, 4, '');
+                        }, $crudas);
+
+                        // fila 1 (título) y fila 2 (headers): solo se busca la columna de costo.
+                        if ($i <= 2) {
+                            foreach ($celdas as $idx => $texto) {
+                                if ($colCosto === null && $idx >= 4 && RegistrarCargaInventario::esEncabezadoCosto($texto)) {
+                                    $colCosto = $idx;
+                                }
+                            }
+                            continue;
+                        }
+
+                        [$ref, $desc, $existencia, $variacion] = array_pad(array_slice($celdas, 0, 4), 4, '');
+                        $crudo = $colCosto !== null ? ($crudas[$colCosto] ?? null) : null;
+                        $costoExcel = (is_int($crudo) || is_float($crudo))
+                            ? ($crudo > 0 ? round((float) $crudo, 4) : null)
+                            : RegistrarCargaInventario::parsearCosto((string) ($crudo ?? ''));
 
                         // Fila vacía completa → siguiente.
                         if ($ref === '' && $desc === '' && $existencia === '') {
@@ -148,7 +213,8 @@ class CargarInventarioClienteExcel extends Command
                         $variacion = $variacion === '' || $variacion === 'NA' ? null : $variacion;
 
                         if ($dryRun) {
-                            $this->line("  [DRY] {$ref} · {$nombreLimpio} · stock={$stock} · cat={$categoriaActual->nombre} · var=".($variacion ?: '—'));
+                            $this->line("  [DRY] {$ref} · {$nombreLimpio} · stock={$stock} · cat={$categoriaActual->nombre} · var=".($variacion ?: '—')
+                                .' · costo='.($costoExcel !== null ? $costoExcel : 'catálogo'));
                             continue;
                         }
 
@@ -176,8 +242,13 @@ class CargarInventarioClienteExcel extends Command
                                 'activo' => true,
                                 'desglose_stock' => false,
                                 'stock_directo' => $stock,
-                                // Solo fijar precio si es creación (evita pisar precio real que Aracely cargó después).
-                                ...($existente ? [] : ['precio_proveedor' => 0]),
+                                // Solo fijar precio si es creación o si estaba en 0
+                                // (evita pisar precio real que Aracely cargó después).
+                                ...(! $existente
+                                    ? ['precio_proveedor' => $costoExcel ?? 0]
+                                    : ($costoExcel !== null && (float) $existente->precio_proveedor <= 0
+                                        ? ['precio_proveedor' => $costoExcel]
+                                        : [])),
                             ],
                         );
 
@@ -193,18 +264,30 @@ class CargarInventarioClienteExcel extends Command
                                 ->where('notas', $notaMarker)
                                 ->exists();
                             if (! $existe) {
+                                if ($cargaDatos !== null && $carga === null) {
+                                    $carga = RegistrarCargaInventario::abrir($cargaDatos);
+                                }
                                 InventarioMovimiento::create([
                                     'producto_id' => $producto->id,
                                     'variante_id' => null,
                                     'ubicacion_id' => $bodegaId,
                                     'tipo' => 'carga_inicial_cliente',
                                     'cantidad' => $stock,
+                                    // Mismo costo que toma la pantalla: sin él la fila
+                                    // no vale nada en el asiento de la carga.
+                                    'costo_unit' => $costoExcel ?? (float) ($producto->precio_proveedor ?: 0),
                                     'notas' => $notaMarker,
+                                    'referencia_tipo' => $carga ? CargaInventario::class : null,
+                                    'referencia_id' => $carga?->id,
                                 ]);
                                 $movsInsertados++;
                             }
                         }
                     }
+                }
+
+                if ($carga !== null) {
+                    $carga = RegistrarCargaInventario::cerrar($carga);
                 }
             };
 
@@ -236,6 +319,15 @@ class CargarInventarioClienteExcel extends Command
                 ['Filas sin categoría (skip)',   $sinCategoria],
             ],
         );
+
+        if ($carga) {
+            $this->info("Documento {$carga->numero} · {$carga->motivo->label()} · asiento por $"
+                .number_format((float) $carga->total_valor, 0, ',', '.')
+                ." contra la cuenta {$carga->cuenta_contrapartida}");
+            if ($carga->referencias_sin_costo > 0) {
+                $this->warn("  ⚠ {$carga->referencias_sin_costo} referencias sin costo: movieron stock pero no entraron al asiento.");
+            }
+        }
 
         return self::SUCCESS;
     }

@@ -7,8 +7,12 @@ use App\Modules\Catalogo\Models\Categoria;
 use App\Modules\Dropi\Models\InventarioMovimiento;
 use App\Modules\Dropi\Models\InventarioUbicacion;
 use App\Modules\Dropi\Models\Producto;
+use App\Modules\Inventario\Actions\RegistrarCargaInventario;
+use App\Modules\Inventario\Enums\MotivoCargaInventario;
+use App\Modules\Inventario\Models\CargaInventario;
 use Database\Seeders\CategoriasClienteBebesSeeder;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 use OpenSpout\Reader\XLSX\Reader as XlsxReader;
@@ -65,6 +69,7 @@ class ImportarInventarioClienteController extends Controller
         return Inertia::render('Inventario/ImportarCliente', [
             'bodegas' => $opciones,
             'grupos' => $opciones->pluck('grupo')->unique()->values(),
+            'motivos' => MotivoCargaInventario::opciones(),
         ]);
     }
 
@@ -81,7 +86,26 @@ class ImportarInventarioClienteController extends Controller
             'pasillo' => ['nullable', 'string', 'max:30'],
             'estante' => ['nullable', 'string', 'max:30'],
             'nivel' => ['nullable', 'string', 'max:30'],
+            // Por qué entra la mercancía. Sin esto el ingreso no tiene
+            // contrapartida contable y no pasa una auditoría.
+            'motivo' => ['required', Rule::enum(MotivoCargaInventario::class)],
+            'observacion' => ['required', 'string', 'min:5', 'max:1000'],
+            'soporte' => ['nullable', 'string', 'max:60'],
+            'tercero_id' => ['nullable', 'integer', 'exists:contactos,id'],
+        ], [
+            'motivo.required' => 'Elige por qué entra esta mercancía.',
+            'observacion.required' => 'Escribe una observación: de dónde viene la mercancía.',
+            'observacion.min' => 'La observación es muy corta: explica de dónde viene la mercancía.',
         ]);
+
+        $motivo = MotivoCargaInventario::from($data['motivo']);
+        if ($motivo->requiereTercero() && empty($data['tercero_id'])) {
+            return back()->withErrors([
+                'tercero_id' => $motivo === MotivoCargaInventario::Compra
+                    ? 'Una compra se le debe a un proveedor: elige a quién.'
+                    : 'Un aporte lo hace un socio: elige quién.',
+            ]);
+        }
 
         $path = $request->file('archivo')->getRealPath();
         $hoja = $data['hoja'] ?: 'Hoja1';
@@ -93,8 +117,18 @@ class ImportarInventarioClienteController extends Controller
             'nivel' => trim((string) ($data['nivel'] ?? '')),
         ];
 
+        $cargaDatos = [
+            'motivo' => $motivo,
+            'observacion' => trim($data['observacion']),
+            'soporte' => trim((string) ($data['soporte'] ?? '')) ?: null,
+            'tercero_id' => isset($data['tercero_id']) ? (int) $data['tercero_id'] : null,
+            'ubicacion_id' => $bodegaId,
+            'archivo_nombre' => $request->file('archivo')->getClientOriginalName(),
+            'canal' => 'web',
+        ];
+
         try {
-            $resumen = $this->cargar($path, $bodegaId, $hoja, $dryRun, $posDefecto);
+            $resumen = $this->cargar($path, $bodegaId, $hoja, $dryRun, $posDefecto, $cargaDatos);
         } catch (\Throwable $e) {
             return back()->withErrors([
                 'archivo' => 'No pude leer el Excel: '.$e->getMessage()
@@ -110,7 +144,11 @@ class ImportarInventarioClienteController extends Controller
             .($resumen['ubicaciones_creadas'] > 0
                 ? ($dryRun ? " · posiciones que se crearían: {$resumen['ubicaciones_creadas']}" : " · posiciones creadas: {$resumen['ubicaciones_creadas']}")
                 : '')
-            .($resumen['pos_ignoradas'] > 0 ? " · ⚠ filas con pasillo/estante/nivel ignorado: {$resumen['pos_ignoradas']}" : '');
+            .($resumen['pos_ignoradas'] > 0 ? " · ⚠ filas con pasillo/estante/nivel ignorado: {$resumen['pos_ignoradas']}" : '')
+            .($resumen['ya_cargados'] > 0 ? " · ya cargados antes (no se repiten): {$resumen['ya_cargados']}" : '')
+            .($resumen['carga']
+                ? " · documento {$resumen['carga']['numero']} · asiento por \$".number_format($resumen['carga']['total_valor'], 0, ',', '.')
+                : '');
 
         // Fix bug feedback UX · usar clave 'success' que sí está compartida por
         // HandleInertiaRequests. Antes usaba 'flash' custom → Vue no la veía y
@@ -130,6 +168,18 @@ class ImportarInventarioClienteController extends Controller
                 'ubicaciones_detalle' => $resumen['ubicaciones_detalle'],
                 'pos_ignoradas' => $resumen['pos_ignoradas'],
                 'columnas_posicion' => $resumen['columnas_posicion'],
+                'ya_cargados' => $resumen['ya_cargados'],
+                'columna_costo' => $resumen['columna_costo'],
+                'con_costo_excel' => $resumen['con_costo_excel'],
+                'costo_ilegible' => $resumen['costo_ilegible'],
+                // Lo contable: cuánto vale lo que entra, cuántas filas no tienen
+                // costo (no entran al asiento) y contra qué cuenta se acredita.
+                'valor' => $resumen['valor'],
+                'sin_costo' => $resumen['sin_costo'],
+                'sin_costo_detalle' => $resumen['sin_costo_detalle'],
+                'motivo' => $motivo->label(),
+                'cuenta_contrapartida' => $motivo->cuentaContrapartida(),
+                'carga' => $resumen['carga'],
                 'dry_run' => $dryRun,
             ]);
     }
@@ -150,10 +200,35 @@ class ImportarInventarioClienteController extends Controller
      * bulto único, así que después nadie sabía en qué pasillo estaban los
      * pañales de recién nacido y el conteo había que hacerlo caminando.
      *
+     * Por qué entró y contra qué cuenta
+     * ─────────────────────────────────
+     * `$cargaDatos` trae el motivo, la observación y el tercero. La carga
+     * (documento CI-…) se abre al escribir el primer movimiento —una re-subida
+     * que no mueve nada no deja documentos vacíos—, cada fila del kardex
+     * cuelga de ella y al final se escribe el asiento 1435 contra la cuenta del
+     * motivo, todo dentro de la misma transacción: o entra el stock con su
+     * asiento, o no entra nada.
+     *
      * @param  array{pasillo:string,estante:string,nivel:string}  $posDefecto
+     * @param  ?array<string,mixed>  $cargaDatos  datos de RegistrarCargaInventario::abrir()
      */
-    protected function cargar(string $path, int $bodegaId, string $hojaNombre, bool $dryRun, array $posDefecto = ['pasillo' => '', 'estante' => '', 'nivel' => '']): array
+    protected function cargar(string $path, int $bodegaId, string $hojaNombre, bool $dryRun, array $posDefecto = ['pasillo' => '', 'estante' => '', 'nivel' => ''], ?array $cargaDatos = null): array
     {
+        $carga = null;
+        $valor = 0.0;
+        $sinCosto = 0;
+        $sinCostoDetalle = [];
+        $yaCargados = 0;
+        $anotarValor = function (string $ref, int $stock, float $costo) use (&$valor, &$sinCosto, &$sinCostoDetalle) {
+            if ($stock <= 0) return;
+            if ($costo > 0) {
+                $valor += round($stock * $costo, 2);
+                return;
+            }
+            $sinCosto++;
+            if (count($sinCostoDetalle) < 50) $sinCostoDetalle[] = $ref;
+        };
+
         // El destino tiene que ser una bodega para poder colgarle posiciones.
         // Si Aracely eligió una posición concreta, la mercancía va ahí tal cual
         // y lo que traiga el Excel se reporta como ignorado — no se inventa un
@@ -170,6 +245,13 @@ class ImportarInventarioClienteController extends Controller
         // extra (totales, fechas) y tomar «la quinta» a ciegas habría metido
         // esa basura como nombre de pasillo, creando ubicaciones inventadas.
         $colPos = ['pasillo' => null, 'estante' => null, 'nivel' => null];
+        // Columna opcional de costo unitario, también por encabezado. Sin ella
+        // todo producto nuevo entraba a costo 0 y la carga no valía nada en el
+        // libro: el stock subía pero el 1435 no se movía.
+        $colCosto = null;
+        $colCostoNombre = null;
+        $conCostoExcel = 0;
+        $costoIlegible = [];
 
         (new CategoriasClienteBebesSeeder())->setContainer(app())->run();
         $catsPorNombre = Categoria::all()->keyBy(fn ($c) => mb_strtoupper(trim($c->nombre)));
@@ -187,17 +269,19 @@ class ImportarInventarioClienteController extends Controller
                 &$categoriaActual, &$creados, &$actualizados, &$movs,
                 &$ignoradas, &$sinCat, &$omitidosGran,
                 $posDefecto, $destinoEsBodega, $codigoBodega, $catBodega,
-                &$cacheUbic, &$ubicacionesCreadas, &$posIgnoradas, &$colPos
+                &$cacheUbic, &$ubicacionesCreadas, &$posIgnoradas, &$colPos,
+                $cargaDatos, &$carga, &$yaCargados, $anotarValor,
+                &$colCosto, &$colCostoNombre, &$conCostoExcel, &$costoIlegible
             ) {
                 foreach ($reader->getSheetIterator() as $sheet) {
                     if ($sheet->getName() !== $hojaNombre) continue;
 
                     foreach ($sheet->getRowIterator() as $i => $row) {
-                        $celdas = array_map(function ($c) {
-                            $v = $c->getValue();
+                        $crudas = array_map(fn ($c) => $c->getValue(), $row->getCells());
+                        $celdas = array_map(function ($v) {
                             if ($v instanceof \DateTimeInterface) return $v->format('Y-m-d');
                             return trim((string) $v);
-                        }, $row->getCells());
+                        }, $crudas);
 
                         // Las dos primeras filas son título + encabezado. De ahí
                         // se saca en qué columna viene cada parte de la posición.
@@ -208,6 +292,10 @@ class ImportarInventarioClienteController extends Controller
                                     if ($colPos[$campo] === null && str_contains($t, $campo)) {
                                         $colPos[$campo] = $idx;
                                     }
+                                }
+                                if ($colCosto === null && $idx >= 4 && RegistrarCargaInventario::esEncabezadoCosto($texto)) {
+                                    $colCosto = $idx;
+                                    $colCostoNombre = $texto;
                                 }
                             }
                             continue;
@@ -244,6 +332,21 @@ class ImportarInventarioClienteController extends Controller
                         $stock = (int) preg_replace('/[^0-9\-]/', '', $existencia);
                         $variacion = ($variacion === '' || $variacion === 'NA') ? null : $variacion;
 
+                        // Costo del Excel: una celda numérica no tiene ambigüedad;
+                        // el texto («$ 45.000») se interpreta en formato colombiano.
+                        // Si no hay o no se entiende, la fila usa el del catálogo.
+                        $costoExcel = null;
+                        if ($colCosto !== null) {
+                            $crudo = $crudas[$colCosto] ?? null;
+                            $costoExcel = (is_int($crudo) || is_float($crudo))
+                                ? ($crudo > 0 ? round((float) $crudo, 4) : null)
+                                : RegistrarCargaInventario::parsearCosto((string) ($crudo ?? ''));
+                            if ($costoExcel === null && trim((string) ($crudo ?? '')) !== '' && count($costoIlegible) < 50) {
+                                $costoIlegible[] = "{$ref}: «{$crudo}»";
+                            }
+                            if ($costoExcel !== null && $stock > 0) $conCostoExcel++;
+                        }
+
                         // La posición se calcula antes del corte de dry-run: la
                         // simulación tiene que poder decir cuántas posiciones
                         // nuevas aparecerían, que es justo lo que se revisa
@@ -266,8 +369,11 @@ class ImportarInventarioClienteController extends Controller
                                 $omitidosGran++;
                             } elseif ($yaExiste) {
                                 $actualizados++;
+                                $anotarValor($ref, $stock, $costoExcel ?? (float) ($yaExiste->precio_proveedor ?: 0));
                             } else {
                                 $creados++;
+                                // Producto nuevo: nace con el costo del Excel, o 0.
+                                $anotarValor($ref, $stock, $costoExcel ?? 0.0);
                             }
 
                             if ($traePos && $stock > 0) {
@@ -298,7 +404,14 @@ class ImportarInventarioClienteController extends Controller
                                 'activo' => true,
                                 'desglose_stock' => false,
                                 'stock_directo' => $stock,
-                                ...($existente ? [] : ['precio_proveedor' => 0]),
+                                // El costo del Excel llena el catálogo sólo donde no
+                                // había uno: producto nuevo o con precio de proveedor
+                                // en 0. Un costo real que Aracely ya cargó no se pisa.
+                                ...(! $existente
+                                    ? ['precio_proveedor' => $costoExcel ?? 0]
+                                    : ($costoExcel !== null && (float) $existente->precio_proveedor <= 0
+                                        ? ['precio_proveedor' => $costoExcel]
+                                        : [])),
                             ],
                         );
                         if ($producto->wasRecentlyCreated) { $creados++; } else { $actualizados++; }
@@ -324,7 +437,16 @@ class ImportarInventarioClienteController extends Controller
                                 ->where('ubicacion_id', $destinoId)
                                 ->where('notas', $marker)
                                 ->exists();
-                            if (! $existeMov) {
+                            if ($existeMov) {
+                                $yaCargados++;
+                            } else {
+                                if ($cargaDatos !== null && $carga === null) {
+                                    $carga = RegistrarCargaInventario::abrir($cargaDatos);
+                                }
+                                // El costo de ESTE lote: el del Excel si vino, si no
+                                // el del catálogo.
+                                $costoUnit = $costoExcel ?? (float) ($producto->precio_proveedor ?: 0);
+                                $anotarValor($ref, $stock, $costoUnit);
                                 InventarioMovimiento::create([
                                     'producto_id' => $producto->id,
                                     'variante_id' => null,
@@ -338,13 +460,22 @@ class ImportarInventarioClienteController extends Controller
                                     // 134 cargas sin contabilizar. Si el producto todavía no
                                     // tiene precio de proveedor queda en 0 y lo completa
                                     // después `php artisan inventario:reparar-kardex`.
-                                    'costo_unit' => (float) ($producto->precio_proveedor ?: 0),
+                                    'costo_unit' => $costoUnit,
                                     'notas' => $marker,
+                                    // El porqué de la entrada vive en la carga.
+                                    'referencia_tipo' => $carga ? CargaInventario::class : null,
+                                    'referencia_id' => $carga?->id,
+                                    'user_id' => auth()->id(),
                                 ]);
                                 $movs++;
                             }
                         }
                     }
+                }
+
+                // Mismo commit que el stock: si el asiento no cuadra, no entra nada.
+                if ($carga !== null) {
+                    $carga = RegistrarCargaInventario::cerrar($carga);
                 }
             };
 
@@ -367,6 +498,19 @@ class ImportarInventarioClienteController extends Controller
                 'ubicaciones_detalle' => array_values($ubicacionesCreadas),
                 'pos_ignoradas' => $posIgnoradas,
                 'columnas_posicion' => array_keys(array_filter($colPos, fn ($v) => $v !== null)),
+                'ya_cargados' => $yaCargados,
+                'columna_costo' => $colCostoNombre,
+                'con_costo_excel' => $conCostoExcel,
+                'costo_ilegible' => $costoIlegible,
+                'valor' => round($valor, 2),
+                'sin_costo' => $sinCosto,
+                'sin_costo_detalle' => $sinCostoDetalle,
+                'carga' => $carga ? [
+                    'id' => $carga->id,
+                    'numero' => $carga->numero,
+                    'total_valor' => (float) $carga->total_valor,
+                    'url' => "/app/inventario/cargas/{$carga->id}",
+                ] : null,
             ];
     }
 

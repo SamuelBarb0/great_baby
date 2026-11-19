@@ -69,6 +69,9 @@ final class Permisos
         //   no le abre nada a nadie, se dan marcando la casilla.
         'dropi_cambiar_en_dropi' => [],
         'dropi_devoluciones_destino' => [],
+        // Crear productos y mover su stock EN Dropi desde el ERP: toca el catálogo
+        //   que ven los dropshippers. Hoy sólo gerencia; dárselo a otro rol es marcar la casilla.
+        'dropi_productos'  => [],
 
         // CARTERA
         'facturas'         => ['Gerente', 'Contador', 'Vendedor'],
@@ -281,7 +284,7 @@ final class Permisos
         //   donde la persona lo va a encontrar. Sólo cambia cómo se agrupan
         //   en la pantalla de Roles, no quién puede qué.
         'Dropi · Operación' => ['dropi_pedidos', 'dropi_cambiar_en_dropi', 'dropi_cortes', 'dropi_devoluciones', 'dropi_devoluciones_destino'],
-        'Dropi · Productos' => ['dropi_mis_productos', 'dropi_vincular_productos'],
+        'Dropi · Productos' => ['dropi_mis_productos', 'dropi_vincular_productos', 'dropi_productos'],
         'Dropi · Dinero' => ['dropi_dashboard', 'dropi_wallet', 'dropi_discrepancias', 'dropi_reportes'],
         'Dropi · Configuración' => ['dropi_conexion', 'dropi_siigo', 'dropi_importar_pedidos'],
         'Cartera y CRM' => ['facturas', 'pagos', 'contactos', 'cartera_dashboard', 'condiciones_credito', 'cobranzas', 'excepciones_credito', 'crm', 'comisiones', 'comisiones_config', 'metodos_pago'],
@@ -317,6 +320,7 @@ final class Permisos
         'dropi_vincular_productos' => 'Vincular con el ERP',
         'dropi_cambiar_en_dropi' => '↳ Botón «Dropi» del pedido: estatus y etiquetas',
         'dropi_devoluciones_destino' => '↳ Cambiar el destino de inventario',
+        'dropi_productos' => 'Productos y stock en Dropi (desde el ERP)',
         'facturas' => 'Facturas de venta',
         'pagos' => 'Pagos recibidos',
         'contactos' => 'Clientes y proveedores',

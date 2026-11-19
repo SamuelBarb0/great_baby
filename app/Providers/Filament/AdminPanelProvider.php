@@ -70,17 +70,20 @@ class AdminPanelProvider extends PanelProvider
             ])
             // «Importar productos» (Excel al catálogo del ERP) salió del panel
             //   el 17-nov: en un panel sólo de Dropi, cargar productos es
-            //   cargarlos EN Dropi. El Excel al ERP sigue en
-            //   /app/dropi/productos/importar. Este enlace abre la lista de
-            //   productos de Dropi, donde está su «Carga masiva», y el script
-            //   de abajo lo abre en una ventana al lado del panel.
+            //   cargarlos EN Dropi.
+            // Este enlace abría la lista de productos de Dropi para usar su
+            //   «Carga masiva» / «Actualización masiva» con plantilla, pero esas
+            //   plantillas no aplican los cambios (18-nov-2026: «cargó con
+            //   errores» y 0 de 89 cambios, sin dejar reintentar). Ahora va a la
+            //   carga del ERP, que crea productos y mueve stock en Dropi fila por
+            //   fila y verifica cada una.
             ->navigationItems([
-                NavigationItem::make('Carga masiva en Dropi')
-                    ->url(self::PREFIJO_PRODUCTOS_DROPI, shouldOpenInNewTab: true)
+                NavigationItem::make('Cargar productos y stock a Dropi')
+                    ->url('/app/dropi/carga-productos')
                     ->icon('heroicon-o-arrow-up-tray')
                     ->group('Productos')
                     ->sort(5)
-                    ->visible(fn (): bool => \App\Auth\Permisos::puede(auth()->user(), 'dropi_mis_productos')),
+                    ->visible(fn (): bool => \App\Auth\Permisos::puede(auth()->user(), 'dropi_productos')),
             ])
             // «Compras» y «Contabilidad» son de la línea Dropi, separadas de las
             //   otras empresas (7-nov): ver Dropi\Filament\Support\PaginaTablaDropi.

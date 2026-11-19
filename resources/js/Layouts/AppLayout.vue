@@ -527,6 +527,7 @@ const groups = [
              * basta con dejarlo decidir.
              */
             { name: '🚚 Abrir módulo Dropi', href: '/admin', icon: LayoutDashboard, external: true, permiso: 'dropi' },
+            { name: 'Productos y stock en Dropi', href: '/app/dropi/carga-productos', icon: Package, permiso: 'dropi_productos' },
         ],
     },
     {

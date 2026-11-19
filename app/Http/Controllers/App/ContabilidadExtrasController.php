@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Modules\Cartera\Models\MovimientoContable;
 use App\Modules\Contabilidad\Support\FiltroEjes;
 use App\Modules\Contabilidad\Models\AsientoManual;
+use App\Modules\Contabilidad\Support\OrigenContable;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controllers\HasMiddleware;
 use Illuminate\Routing\Controllers\Middleware;
@@ -78,7 +79,7 @@ class ContabilidadExtrasController extends Controller implements HasMiddleware
                             number_format((float) $m->debe, 2, '.', ''),
                             number_format((float) $m->haber, 2, '.', ''),
                             mb_substr((string) $m->descripcion, 0, 200),
-                            class_basename((string) $m->origen_type),
+                            OrigenContable::etiqueta($m->origen_type),
                             $m->origen_id,
                         ]);
                     }
@@ -186,7 +187,8 @@ class ContabilidadExtrasController extends Controller implements HasMiddleware
                 'movs' => (int) $r->movs,
             ]),
             'porOrigen' => $porOrigen->map(fn ($r) => [
-                'origen' => $this->origenLabel($r->origen_type),
+                'origen' => OrigenContable::etiqueta($r->origen_type),
+                'clave' => OrigenContable::clave($r->origen_type),
                 'docs' => (int) $r->docs,
                 'volumen' => (float) $r->volumen,
             ]),
@@ -197,8 +199,12 @@ class ContabilidadExtrasController extends Controller implements HasMiddleware
     {
         // Re-audit M5 SEG-A2 · whitelist explícita del tipo + guard id > 0.
         // Re-audit R2 PATRÓN α · toggle propagado también acá.
+        // La whitelist sale de OrigenContable: cualquier origen que el libro
+        // conozca se puede abrir, no sólo facturas, pagos y notas crédito. Antes
+        // un asiento de wallet Dropi o de una carga de inventario no tenía cómo
+        // rastrearse hasta su documento.
         $data = $request->validate([
-            'tipo' => ['nullable', 'string', 'in:factura,pago,nota_credito'],
+            'tipo' => ['nullable', 'string', \Illuminate\Validation\Rule::in(array_keys(OrigenContable::TIPOS))],
             'id' => ['nullable', 'integer', 'min:1'],
             'incluir_anulados' => ['nullable', 'boolean'],
         ]);
@@ -207,11 +213,7 @@ class ContabilidadExtrasController extends Controller implements HasMiddleware
         $id = (int) ($data['id'] ?? 0);
         $incluirAnulados = (bool) ($data['incluir_anulados'] ?? false);
 
-        $tipoClass = [
-            'factura' => \App\Modules\Cartera\Models\FacturaVenta::class,
-            'pago' => \App\Modules\Cartera\Models\PagoVenta::class,
-            'nota_credito' => \App\Modules\Cartera\Models\NotaCredito::class,
-        ][$tipo] ?? null;
+        $tipoClass = OrigenContable::clase($tipo);
 
         $meta = null;
         $movs = [];
@@ -219,8 +221,13 @@ class ContabilidadExtrasController extends Controller implements HasMiddleware
         if ($tipoClass && $id > 0) {
             // Info del documento origen (siempre withTrashed — el documento puede
             // estar anulado pero queremos mostrar el header + badge "anulado").
-            $origen = $tipoClass::query()->withTrashed()->find($id);
-            if ($origen) {
+            $usaSoftDeletes = in_array(\Illuminate\Database\Eloquent\SoftDeletes::class, class_uses_recursive($tipoClass), true);
+            $origen = ($usaSoftDeletes ? $tipoClass::query()->withTrashed() : $tipoClass::query())->find($id);
+            if ($origen && ! OrigenContable::vaASiigo($tipo)) {
+                // Contabilidad interna (cargas, wallet, devoluciones Dropi…):
+                // no hay documento SIIGO que mostrar, sí el porqué.
+                $meta = OrigenContable::resumen($tipo, $origen);
+            } elseif ($origen) {
                 // Sprint 3 · F.3 · badge SIIGO del documento origen (factura/pago/NC).
                 //   factura → siigo_id + cufe (factura electrónica DIAN)
                 //   pago    → siigo_id (voucher SIIGO)
@@ -230,12 +237,7 @@ class ContabilidadExtrasController extends Controller implements HasMiddleware
                 $syncAt = $origen->siigo_sync_at ?? $origen->emitida_at ?? null;
                 $cufe = $origen->cufe ?? null;
 
-                $meta = [
-                    'numero' => $origen->numero ?? ($origen->referencia ?? "#{$id}"),
-                    'fecha' => optional($origen->fecha_emision ?? $origen->fecha ?? $origen->created_at)->toDateString(),
-                    'tercero' => $origen->contacto?->nombre_completo ?? '—',
-                    'total' => (float) ($origen->total ?? $origen->monto_recibido ?? $origen->valor ?? 0),
-                    'anulado' => $origen->deleted_at !== null,
+                $meta = OrigenContable::resumen($tipo, $origen) + [
                     // F.3 · info SIIGO del origen
                     'siigo_id' => $siigoId,
                     'siigo_numero' => $siigoNumero,
@@ -291,6 +293,7 @@ class ContabilidadExtrasController extends Controller implements HasMiddleware
 
         return Inertia::render('Contabilidad/ReporteDetalle', [
             'tipo' => $tipo, 'id' => $id, 'incluir_anulados' => $incluirAnulados,
+            'tipos' => OrigenContable::opciones(),
             'meta' => $meta,
             'movimientos' => $movs,
             'anulados_count' => $anuladosCount,
@@ -581,9 +584,6 @@ class ContabilidadExtrasController extends Controller implements HasMiddleware
     }
 
     /**
-     * Mapa FQCN → etiqueta legible. Re-audit M5 UX-M3.
-     */
-    /**
      * Cuántos documentos deberían estar en SIIGO y cuántos están de verdad.
      *
      * La cuenta vive en `CoberturaSiigo` porque Discrepancias muestra el mismo
@@ -594,16 +594,5 @@ class ContabilidadExtrasController extends Controller implements HasMiddleware
     private function coberturaSiigo(string $desde, string $hasta): array
     {
         return \App\Modules\Contabilidad\Support\CoberturaSiigo::calcular();
-    }
-
-    private function origenLabel(?string $fqcn): string
-    {
-        return match ($fqcn) {
-            \App\Modules\Cartera\Models\FacturaVenta::class => 'Factura de venta',
-            \App\Modules\Cartera\Models\PagoVenta::class => 'Recibo de caja',
-            \App\Modules\Cartera\Models\NotaCredito::class => 'Nota crédito',
-            \App\Modules\Dropi\Models\DropiDevolucion::class => 'Devolución Dropi',
-            default => class_basename($fqcn ?? ''),
-        };
     }
 }

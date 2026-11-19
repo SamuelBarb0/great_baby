@@ -18,6 +18,7 @@ use App\Modules\Dropi\Enums\CategoriaUbicacion;
 use App\Modules\Dropi\Models\InventarioMovimiento;
 use App\Modules\Dropi\Models\InventarioUbicacion;
 use App\Modules\Dropi\Models\Producto;
+use App\Modules\Dropi\Models\ProductoVariante;
 use App\Support\Code128;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
@@ -90,6 +91,19 @@ it('Code 128 calcula el control como dice la norma y arranca y termina bien', fu
 it('Code 128 rechaza lo que no sabe codificar', function () {
     Code128::simbolos('niño');
 })->throws(InvalidArgumentException::class);
+
+it('las barras de un código con tilde salen en ASCII y el escáner igual encuentra la variante', function () {
+    // Los diseños como «LEÓ» generan códigos con tilde; Code 128 B no la tiene.
+    expect(Code128::codificable('AND2512-79/154-02LEÓ-6M'))->toBe('AND2512-79/154-02LEO-6M')
+        ->and(substr(Code128::png('AND2512-79/154-02LEÓ-6M'), 1, 3))->toBe('PNG')
+        ->and(Code128::svg('AND2512-79/154-02LEÓ-6M'))->toContain('<rect x="')->toContain('LEÓ');
+
+    // Lo que lee la pistola («LEO») encuentra la variante guardada con «LEÓ»
+    // (codigo_barras es utf8mb4_unicode_ci), igual que hace ProcesarEscaneoEmpaque.
+    $p = ($this->producto)('AND2512-79/154', ['desglose_stock' => true]);
+    $v = ProductoVariante::create(['producto_id' => $p->id, 'codigo_barras' => 'AND2512-79/154-02LEÓ-6M']);
+    expect(ProductoVariante::where('codigo_barras', Code128::codificable($v->codigo_barras))->value('id'))->toBe($v->id);
+});
 
 it('una referencia alterna es el mismo producto, y no se puede repetir en otro', function () {
     $oso = ($this->producto)('AB-0085');

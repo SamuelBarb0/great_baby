@@ -216,6 +216,8 @@ final class MenuApp
             // El módulo Dropi se opera desde /admin, que ahora es sólo Dropi.
             'dropi' => Permisos::puedeAccederPanel($u),
 
+            // DropiCargaProductosController · puede('dropi_productos')
+            'dropi_productos' => $puede('dropi_productos'),
         ];
     }
 

@@ -109,9 +109,11 @@ it('el panel Dropi está organizado en Operación, Productos, Dinero y Configura
     $this->actingAs($this->aracely)->get('/admin/mis-productos-dropi')->assertOk()
         ->assertSee('Crear producto en Dropi')
         ->assertSee('https://app.dropi.co/dashboard/products/add', false)
-        // La carga masiva es la lista de Dropi: ahí están sus botones de plantilla.
-        ->assertSee('Carga masiva en Dropi')
-        ->assertSee('href="https://app.dropi.co/dashboard/products"', false)
+        // La carga masiva ya no manda a las plantillas de Dropi (no aplicaban
+        // los cambios, 18-nov-2026): va a la carga del ERP.
+        ->assertSee('Cargar productos y stock (Excel)')
+        ->assertSee('/app/dropi/carga-productos', false)
+        ->assertDontSee('href="https://app.dropi.co/dashboard/products"', false)
         // El script abre en ventana todo lo que cuelga de /dashboard/products.
         ->assertSee('"https:\/\/app.dropi.co\/dashboard\/products"', false);
 
