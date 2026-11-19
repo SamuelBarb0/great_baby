@@ -317,6 +317,19 @@ class DropiWebAuth
         return $sesion->estado;
     }
 
+    /**
+     * Id del usuario de Dropi con el que está abierta la sesión (claim `sub`).
+     * La web lo manda como `user_id` al guardar un producto; no es el dueño
+     * del producto (la cuenta proveedora), es quien hace el cambio.
+     */
+    public function usuarioId(): ?int
+    {
+        $token = $this->sesion()->tokenVigente();
+        $sub = $token ? ($this->claims($token)['sub'] ?? null) : null;
+
+        return is_numeric($sub) ? (int) $sub : null;
+    }
+
     /** Claims del JWT sin verificar firma: solo se usan para leer exp y el tipo. */
     protected function claims(string $jwt): array
     {

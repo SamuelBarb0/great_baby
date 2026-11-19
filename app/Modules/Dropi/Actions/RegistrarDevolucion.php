@@ -63,7 +63,7 @@ class RegistrarDevolucion
             //   generan movimiento de kardex. `reingresaInventario()`
             //   centraliza la decisión.
             $movimientos = $destino->reingresaInventario()
-                ? $this->reingresarInventario($pedido, $destino, $userId)
+                ? $this->reingresarInventario($pedido, $devolucion, $destino, $userId)
                 : 0;
 
             // Cambio de estado del pedido a través de la state machine central.
@@ -82,7 +82,7 @@ class RegistrarDevolucion
         });
     }
 
-    protected function reingresarInventario(DropiPedido $pedido, DestinoDevolucion $destino, int $userId): int
+    protected function reingresarInventario(DropiPedido $pedido, DropiDevolucion $devolucion, DestinoDevolucion $destino, int $userId): int
     {
         $ubicacion = InventarioUbicacion::query()
             ->where('categoria', $destino->categoriaUbicacion()->value)
@@ -95,27 +95,33 @@ class RegistrarDevolucion
 
         $movimientos = 0;
         foreach ($pedido->items as $item) {
-            if (! $item->variante_id) {
+            $cantidad = (int) $item->cantidad;
+            // Granular (por variante) o agregado (solo producto): el empaque
+            // descuenta los dos, así que la devolución tiene que reingresar los
+            // dos. Antes saltaba los agregados y su stock no volvía.
+            if ((! $item->variante_id && ! $item->producto_id) || $cantidad <= 0) {
                 continue;
             }
 
-            // Re-audit DR-ε (FUNC-C5) · idempotencia por (variante, pedido) —
-            //   antes: retry job creaba duplicado del ingreso. Ahora firstOrCreate
-            //   con clave (referencia_tipo='devolucion', referencia_id, variante).
-            $creado = InventarioMovimiento::firstOrCreate(
-                [
-                    'referencia_tipo' => 'devolucion',
-                    'referencia_id' => $pedido->id,
-                    'variante_id' => $item->variante_id,
-                ],
-                [
-                    'ubicacion_id' => $ubicacion->id,
-                    'tipo' => 'ingreso',
-                    'cantidad' => (int) $item->cantidad,
-                    'user_id' => $userId,
-                    'notas' => "Devolución guía {$pedido->guia} → {$destino->label()}",
-                ]
-            );
+            // Idempotente por (devolución, variante | producto agregado). El
+            // movimiento apunta al documento de devolución, no al pedido: desde
+            // el kardex se llega a la devolución y de ahí al pedido.
+            $clave = [
+                'referencia_tipo' => DropiDevolucion::class,
+                'referencia_id' => $devolucion->id,
+            ] + ($item->variante_id
+                ? ['variante_id' => $item->variante_id]
+                : ['variante_id' => null, 'producto_id' => $item->producto_id]);
+
+            $creado = InventarioMovimiento::firstOrCreate($clave, [
+                'producto_id' => $item->producto_id,
+                'ubicacion_id' => $ubicacion->id,
+                'tipo' => 'ingreso',
+                'cantidad' => $cantidad,
+                'user_id' => $userId,
+                'notas' => mb_substr("Devolución guía {$pedido->guia} → {$destino->label()}"
+                    .($devolucion->notas ? " · {$devolucion->notas}" : ''), 0, 255),
+            ]);
             if ($creado->wasRecentlyCreated) $movimientos++;
         }
 

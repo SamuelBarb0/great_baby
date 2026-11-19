@@ -32,6 +32,8 @@ return [
         // Primer día que se importa de la wallet. Cada movimiento genera su
         // asiento contable, así que no se trae la historia anterior.
         'wallet_desde' => env('DROPI_WALLET_DESDE', '2026-09-01'),
+        // Bodega de Dropi donde el ERP carga stock (Mimitos, Bucaramanga).
+        'bodega_id' => (int) env('DROPI_WEB_BODEGA_ID', 10548),
     ],
 
     'mock' => [

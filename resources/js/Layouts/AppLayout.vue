@@ -331,6 +331,7 @@ const groups = [
         items: [
             // El módulo Dropi se opera en /admin, que quedó siendo sólo Dropi.
             { name: '🚚 Abrir módulo Dropi', href: '/admin/dropi-pedidos', icon: LayoutDashboard, external: true, permiso: 'dropi' },
+            { name: 'Productos y stock en Dropi', href: '/app/dropi/carga-productos', icon: Package, permiso: 'dropi_productos' },
         ],
     },
     {

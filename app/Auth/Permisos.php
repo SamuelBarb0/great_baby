@@ -44,6 +44,9 @@ final class Permisos
         'dropi_devoluciones' => ['Gerente', 'Alistador', 'ServicioCliente'],
         'dropi_discrepancias' => ['Gerente', 'Contador'],
         'dropi_reportes'   => ['Gerente', 'Contador'],
+        // Crear productos y mover su stock EN Dropi desde el ERP: toca el catálogo
+        //   que ven los dropshippers. Hoy sólo gerencia; dárselo a otro rol es marcar la casilla.
+        'dropi_productos'  => [],
 
         // CARTERA
         'facturas'         => ['Gerente', 'Contador', 'Vendedor'],
@@ -162,7 +165,7 @@ final class Permisos
      */
     public const GRUPOS = [
         'Operación' => ['torre_control', 'estacion_empaque', 'vista_alistador', 'escanner_camara', 'inventario_vivo'],
-        'Dropi' => ['dropi_dashboard', 'dropi_pedidos', 'dropi_cortes', 'dropi_wallet', 'dropi_devoluciones', 'dropi_discrepancias', 'dropi_reportes'],
+        'Dropi' => ['dropi_dashboard', 'dropi_pedidos', 'dropi_cortes', 'dropi_wallet', 'dropi_devoluciones', 'dropi_discrepancias', 'dropi_reportes', 'dropi_productos'],
         'Cartera y CRM' => ['facturas', 'pagos', 'contactos', 'cartera_dashboard', 'condiciones_credito', 'cobranzas', 'excepciones_credito', 'crm', 'comisiones', 'comisiones_config', 'metodos_pago'],
         'Contabilidad' => ['contabilidad', 'libro_diario', 'reportes_contables'],
         'Compras' => ['compras_oc', 'compras_recepcion', 'compras_importacion', 'compras_reportes'],
@@ -186,6 +189,7 @@ final class Permisos
         'dropi_devoluciones' => 'Devoluciones Dropi',
         'dropi_discrepancias' => 'Discrepancias Dropi',
         'dropi_reportes' => 'Reportes Dropi',
+        'dropi_productos' => 'Productos y stock en Dropi',
         'facturas' => 'Facturas de venta',
         'pagos' => 'Pagos recibidos',
         'contactos' => 'Clientes y proveedores',

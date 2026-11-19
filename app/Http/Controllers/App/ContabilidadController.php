@@ -3,7 +3,9 @@
 namespace App\Http\Controllers\App;
 
 use App\Http\Controllers\Controller;
+use App\Models\Contacto;
 use App\Modules\Cartera\Models\MovimientoContable;
+use App\Modules\Contabilidad\Support\OrigenContable;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controllers\HasMiddleware;
 use Illuminate\Routing\Controllers\Middleware;
@@ -33,11 +35,28 @@ class ContabilidadController extends Controller implements HasMiddleware
             'desde' => ['nullable', 'date'],
             'hasta' => ['nullable', 'date', 'after_or_equal:desde'],
             'incluir_anulados' => ['nullable', 'boolean'],
+            // Balance acumulado: desde el primer asiento del libro hasta `hasta`.
+            'acumulado' => ['nullable', 'boolean'],
+            // Filtrar por un tercero y/o abrir cada cuenta por tercero.
+            'tercero_id' => ['nullable', 'integer', 'exists:contactos,id'],
+            'agrupar_tercero' => ['nullable', 'boolean'],
         ]);
 
-        $desde = $data['desde'] ?? now('America/Bogota')->startOfMonth()->toDateString();
+        $desdeElegido = $data['desde'] ?? now('America/Bogota')->startOfMonth()->toDateString();
         $hasta = $data['hasta'] ?? now('America/Bogota')->toDateString();
         $incluirAnulados = (bool) ($data['incluir_anulados'] ?? false);
+        $acumulado = (bool) ($data['acumulado'] ?? false);
+        $terceroId = isset($data['tercero_id']) ? (int) $data['tercero_id'] : null;
+        $agruparTercero = (bool) ($data['agrupar_tercero'] ?? false);
+        $desde = $acumulado ? null : $desdeElegido;
+
+        $base = fn () => MovimientoContable::query()
+            ->when($incluirAnulados, fn ($q) => $q->withTrashed())
+            ->when($desde, fn ($q) => $q->where('fecha', '>=', $desde))
+            ->where('fecha', '<=', $hasta)
+            ->when($terceroId, fn ($q) => $q
+                ->where('tercero_type', Contacto::class)
+                ->where('tercero_id', $terceroId));
 
         // Re-audit R4 SEG-M1 · bitácora consulta con anulados (dato sensible DIAN).
         if ($incluirAnulados) {
@@ -47,11 +66,21 @@ class ContabilidadController extends Controller implements HasMiddleware
                 ]);
         }
 
+        $tercero = $terceroId ? Contacto::find($terceroId, ['id', 'nombre_completo', 'razon_social', 'numero_documento']) : null;
+
         return Inertia::render('Contabilidad/Index', [
-            'filtros' => ['desde' => $desde, 'hasta' => $hasta, 'incluir_anulados' => $incluirAnulados],
-            'kpis' => $this->kpis($desde, $hasta, $incluirAnulados),
-            'porCuenta' => $this->balanceComprobacion($desde, $hasta, $incluirAnulados),
-            'movimientosRecientes' => $this->movimientosRecientes($desde, $hasta, 50, $incluirAnulados),
+            'filtros' => [
+                'desde' => $desdeElegido, 'hasta' => $hasta, 'incluir_anulados' => $incluirAnulados,
+                'acumulado' => $acumulado, 'tercero_id' => $terceroId, 'agrupar_tercero' => $agruparTercero,
+                'tercero' => $tercero ? [
+                    'id' => $tercero->id,
+                    'nombre' => $tercero->nombreDisplay(),
+                    'documento' => $tercero->numero_documento,
+                ] : null,
+            ],
+            'kpis' => $this->kpis($base),
+            'porCuenta' => $this->balanceComprobacion($base, $agruparTercero),
+            'movimientosRecientes' => $this->movimientosRecientes($base, 50),
         ]);
     }
 
@@ -63,11 +92,9 @@ class ContabilidadController extends Controller implements HasMiddleware
      *
      * Re-audit M5 DATOS-A3 · 1 sola query para los 3 KPIs (antes 3 full-scans).
      */
-    private function kpis(string $desde, string $hasta, bool $incluirAnulados = false): array
+    private function kpis(\Closure $base): array
     {
-        $r = MovimientoContable::query()
-            ->when($incluirAnulados, fn ($q) => $q->withTrashed())
-            ->whereBetween('fecha', [$desde, $hasta])
+        $r = $base()
             ->selectRaw('COALESCE(SUM(debe),0) d, COALESCE(SUM(haber),0) h, COUNT(*) n')
             ->first();
 
@@ -84,29 +111,44 @@ class ContabilidadController extends Controller implements HasMiddleware
         ];
     }
 
-    private function balanceComprobacion(string $desde, string $hasta, bool $incluirAnulados = false): array
+    /**
+     * Sumas y saldos por cuenta. Con `$agruparTercero` cada cuenta se abre en
+     * una fila por tercero (proveedor, cliente, socio): es el «cuánto le debo a
+     * quién» que la contadora pedía mirar directo en el balance. Las líneas sin
+     * tercero quedan juntas como «Sin tercero».
+     */
+    private function balanceComprobacion(\Closure $base, bool $agruparTercero = false): array
     {
-        return MovimientoContable::query()
-            ->when($incluirAnulados, fn ($q) => $q->withTrashed())
-            ->whereBetween('fecha', [$desde, $hasta])
-            ->selectRaw('cuenta_puc, SUM(debe) as debe, SUM(haber) as haber, SUM(debe - haber) as saldo')
-            ->groupBy('cuenta_puc')
+        $grupo = $agruparTercero ? ['cuenta_puc', 'tercero_type', 'tercero_id'] : ['cuenta_puc'];
+
+        $filas = $base()
+            ->selectRaw(implode(', ', $grupo).', SUM(debe) as debe, SUM(haber) as haber, SUM(debe - haber) as saldo')
+            ->groupBy($grupo)
             ->orderBy('cuenta_puc')
-            ->get()
-            ->map(fn ($r) => [
-                'cuenta_puc' => $r->cuenta_puc,
-                'debe' => (float) $r->debe,
-                'haber' => (float) $r->haber,
-                'saldo' => (float) $r->saldo,
-            ])->all();
+            ->get();
+
+        $nombres = $agruparTercero
+            ? Contacto::query()
+                ->whereIn('id', $filas->where('tercero_type', Contacto::class)->pluck('tercero_id')->filter()->unique())
+                ->get(['id', 'nombre_completo', 'razon_social', 'numero_documento'])
+                ->mapWithKeys(fn ($c) => [$c->id => trim($c->nombreDisplay().' · '.($c->numero_documento ?? ''), ' ·')])
+            : collect();
+
+        return $filas->map(fn ($r) => [
+            'cuenta_puc' => $r->cuenta_puc,
+            'tercero' => $agruparTercero
+                ? ($r->tercero_id ? ($nombres[$r->tercero_id] ?? class_basename((string) $r->tercero_type).' #'.$r->tercero_id) : 'Sin tercero')
+                : null,
+            'debe' => (float) $r->debe,
+            'haber' => (float) $r->haber,
+            'saldo' => (float) $r->saldo,
+        ])->all();
     }
 
-    private function movimientosRecientes(string $desde, string $hasta, int $limit = 50, bool $incluirAnulados = false): array
+    private function movimientosRecientes(\Closure $base, int $limit = 50): array
     {
-        return MovimientoContable::query()
-            ->when($incluirAnulados, fn ($q) => $q->withTrashed())
+        return $base()
             ->with(['user:id,name'])
-            ->whereBetween('fecha', [$desde, $hasta])
             ->orderByDesc('fecha')->orderByDesc('id')
             ->limit($limit)
             ->get()
@@ -117,7 +159,8 @@ class ContabilidadController extends Controller implements HasMiddleware
                 'debe' => (float) $m->debe,
                 'haber' => (float) $m->haber,
                 'descripcion' => $m->descripcion,
-                'origen' => class_basename($m->origen_type ?? ''),
+                'origen' => $m->origen_type ? OrigenContable::etiqueta($m->origen_type) : '',
+                'origen_url' => OrigenContable::urlAsiento($m->origen_type, $m->origen_id),
                 'usuario' => $m->user?->name,
                 // Re-audit M5 PATRÓN A · flag anulado explícito para pintar badge en UI.
                 'anulado' => $m->deleted_at !== null,

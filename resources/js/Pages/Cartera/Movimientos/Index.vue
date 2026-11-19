@@ -72,7 +72,10 @@ const diferencia = computed(() => props.totales.diferencia);
                             <td class="p-2 text-right" :class="m.debe > 0 ? 'text-emerald-600 font-bold' : 'text-surface-300'">{{ m.debe > 0 ? money(m.debe) : '—' }}</td>
                             <td class="p-2 text-right" :class="m.haber > 0 ? 'text-red-600 font-bold' : 'text-surface-300'">{{ m.haber > 0 ? money(m.haber) : '—' }}</td>
                             <td class="p-2 text-xs">{{ m.descripcion }}</td>
-                            <td class="p-2 text-xs font-mono">{{ m.origen }}</td>
+                            <td class="p-2 text-xs">
+                                <a v-if="m.origen_url" :href="m.origen_url" class="text-brand-600 hover:underline" title="Ver el asiento completo y su documento">{{ m.origen }}</a>
+                                <span v-else>{{ m.origen }}</span>
+                            </td>
                         </tr>
                     </tbody>
                 </table>

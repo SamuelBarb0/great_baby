@@ -8,6 +8,7 @@ use App\Modules\Catalogo\Models\CatalogoGrupo;
 use App\Modules\Catalogo\Models\CatalogoLinea;
 use App\Modules\Catalogo\Models\CatalogoSubgrupo;
 use App\Modules\Dropi\Models\Producto;
+use App\Modules\Inventario\Enums\MotivoCargaInventario;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\DB;
@@ -118,7 +119,41 @@ class ProductosController extends Controller implements HasMiddleware
             'catalogos' => $this->catalogosParaForm(),
             'precios_lista' => $this->preciosPorLista($producto),
             'listo_para_vender' => $this->listoParaVender($producto),
+            'cargas_dropi' => $this->cargasDropi($producto),
         ]);
+    }
+
+    /**
+     * Últimas veces que el ERP creó este producto o movió su stock en Dropi
+     * (pantalla «Productos y stock en Dropi»). Se encuentra por el id de
+     * Dropi enlazado o por la referencia de la fila del Excel.
+     */
+    private function cargasDropi(Producto $producto): array
+    {
+        $ops = \App\Modules\Dropi\Models\DropiCargaOperacion::query()
+            ->with('carga:id,numero,concepto,modo,created_at')
+            ->whereIn('estado', ['ok', 'error'])
+            ->where(function ($q) use ($producto) {
+                $q->where('ref_excel', $producto->referencia);
+                if ($producto->dropi_sku && ctype_digit((string) $producto->dropi_sku)) {
+                    $q->orWhere('dropi_producto_id', (int) $producto->dropi_sku);
+                }
+            })
+            ->latest('id')->limit(10)->get();
+
+        return $ops->map(fn ($o) => [
+            'carga_id' => $o->carga_id,
+            'numero' => $o->carga?->numero,
+            'concepto' => $o->carga?->concepto,
+            'fecha' => $o->procesado_at?->timezone('America/Bogota')->format('d/m/Y H:i'),
+            'tipo' => $o->tipo,
+            'estado' => $o->estado,
+            'dropi_id' => $o->dropi_producto_id,
+            'lineas' => collect($o->detalle['lineas'] ?? [])
+                ->filter(fn ($l) => ($l['movimiento'] ?? null) !== null)
+                ->map(fn ($l) => ['etiqueta' => $l['etiqueta'], 'movimiento' => $l['movimiento'], 'unidades' => $l['unidades'] ?? 0, 'antes' => $l['antes'] ?? null, 'despues' => $l['despues'] ?? null])
+                ->values()->all(),
+        ])->all();
     }
 
     public function crearForm(): Response
@@ -126,6 +161,8 @@ class ProductosController extends Controller implements HasMiddleware
         return Inertia::render('Catalogo/ProductoShow', [
             'producto' => null,
             'catalogos' => $this->catalogosParaForm(),
+            // Por qué entra el stock inicial (mismos motivos que la carga masiva).
+            'motivos_stock' => MotivoCargaInventario::opciones(),
         ]);
     }
 
@@ -227,6 +264,35 @@ class ProductosController extends Controller implements HasMiddleware
             'siigo_account_group_override' => ['nullable', 'integer', 'min:1'],
         ]);
 
+        // Producto nuevo con stock inicial: el ingreso dice por qué entra y
+        // queda como carga CI- con su asiento (ver Producto::booted).
+        $porqueStock = null;
+        if (! ($producto && $producto->exists) && empty($data['desglose_stock']) && (float) ($data['stock_directo'] ?? 0) > 0) {
+            $p = $r->validate([
+                'stock_motivo' => ['required', \Illuminate\Validation\Rule::enum(MotivoCargaInventario::class)],
+                'stock_observacion' => ['required', 'string', 'min:5', 'max:1000'],
+                'stock_soporte' => ['nullable', 'string', 'max:60'],
+                'stock_tercero_id' => ['nullable', 'integer', 'exists:contactos,id'],
+            ], [
+                'stock_motivo.required' => 'Elige por qué entra este stock inicial.',
+                'stock_observacion.required' => 'Escribe de dónde viene este stock.',
+                'stock_observacion.min' => 'La observación es muy corta: explica de dónde viene el stock.',
+            ]);
+            $motivo = MotivoCargaInventario::from($p['stock_motivo']);
+            if ($motivo->requiereTercero() && empty($p['stock_tercero_id'])) {
+                throw \Illuminate\Validation\ValidationException::withMessages(['stock_tercero_id' => $motivo === MotivoCargaInventario::Compra
+                    ? 'Una compra se le debe a un proveedor: elige a quién.'
+                    : 'Un aporte lo hace un socio: elige quién.']);
+            }
+            $porqueStock = [
+                'motivo' => $motivo,
+                'observacion' => $p['stock_observacion'],
+                'soporte' => $p['stock_soporte'] ?? null,
+                'tercero_id' => isset($p['stock_tercero_id']) ? (int) $p['stock_tercero_id'] : null,
+                'user_id' => $r->user()?->id,
+            ];
+        }
+
         $accesorios = $data['accesorios'] ?? [];
         $sustitutos = $data['sustitutos'] ?? [];
         $impuestosIds = $data['impuestos_ids'] ?? null;
@@ -235,9 +301,11 @@ class ProductosController extends Controller implements HasMiddleware
 
         // FASE F2.A1 (ALTO) · envolver save + syncs en transacción para evitar
         // estados parciales si falla el 2º sync y que el Observer ya haya encolado.
-        \DB::transaction(function () use (&$producto, $data, $accesorios, $sustitutos, $impuestosIds, $variantes) {
+        \DB::transaction(function () use (&$producto, $data, $accesorios, $sustitutos, $impuestosIds, $variantes, $porqueStock) {
             if ($producto && $producto->exists) {
                 $producto->fill($data)->save();
+            } elseif ($porqueStock) {
+                $producto = Producto::conMotivoStockInicial($porqueStock, fn () => Producto::create($data + ['activo' => true]));
             } else {
                 $producto = Producto::create($data + ['activo' => true]);
             }

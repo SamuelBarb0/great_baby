@@ -283,7 +283,10 @@ class CarteraExtrasController extends Controller implements HasMiddleware
                 'debe' => (float) $m->debe,
                 'haber' => (float) $m->haber,
                 'descripcion' => $m->descripcion,
-                'origen' => $m->origen_type ? class_basename($m->origen_type) . '#' . $m->origen_id : '—',
+                'origen' => $m->origen_type
+                    ? \App\Modules\Contabilidad\Support\OrigenContable::etiqueta($m->origen_type) . ' #' . $m->origen_id
+                    : '—',
+                'origen_url' => \App\Modules\Contabilidad\Support\OrigenContable::urlAsiento($m->origen_type, $m->origen_id),
             ]),
             'filtros' => ['desde' => $desde, 'hasta' => $hasta, 'cuenta' => $cuenta ?: null, 'cuentas' => $cuentasMulti->isNotEmpty() ? $cuentasMulti->join(',') : null, 'incluir_anulados' => $incluirAnulados],
             'totales' => [

@@ -129,6 +129,8 @@ class InventarioGestionController extends Controller implements HasMiddleware
                         'referencia_id' => $m->referencia_id,
                         'referencia_label' => $this->labelReferencia($m->referencia_tipo, $m->referencia_id),
                         'referencia_link' => $this->linkReferencia($m->referencia_tipo, $m->referencia_id),
+                        // Del kardex al libro: el asiento que generó este documento.
+                        'asiento_url' => \App\Modules\Contabilidad\Support\OrigenContable::urlAsiento($m->referencia_tipo, $m->referencia_id),
                         'notas' => $m->notas,
                         'siigo_journal_id' => $m->siigo_journal_id,
                         'siigo_sync_hace' => $m->siigo_sync_at?->diffForHumans(),
@@ -206,8 +208,31 @@ class InventarioGestionController extends Controller implements HasMiddleware
             'Traslado' => "Traslado #{$id}",
             'TomaFisica' => "Toma física #{$id}",
             'DropiPedido' => "Pedido Dropi #{$id}",
+            'CargaInventario' => 'Carga '.(\App\Modules\Inventario\Models\CargaInventario::whereKey($id)->value('numero') ?? "#{$id}"),
+            // Movimientos de pedidos Dropi: el kardex los guardaba con un texto
+            // (no la clase), y se veían como «dropi_pedido_egreso #123».
+            \App\Modules\Dropi\Listeners\DescontarInventarioAlEmpacar::REFERENCIA_TIPO => 'Empaque · guía '.$this->guiaPedido($id),
+            \App\Modules\Dropi\Listeners\RevertirEgresoAlDesempacar::REFERENCIA_TIPO => 'Reverso de empaque · guía '.$this->guiaPedido($id),
+            'devolucion' => 'Devolución · guía '.$this->guiaPedido($id), // históricos: id = pedido
+            'DropiDevolucion' => 'Devolución · guía '.$this->guiaPedido($this->pedidoDeDevolucion($id)),
+            \App\Modules\Inventario\Actions\DescontarStockPorDespacho::REFERENCIA_TIPO => "Despacho pedido B2B #{$id}",
             default => class_basename($tipo) . " #{$id}",
         };
+    }
+
+    /** @var array<int, string> */
+    private array $guias = [];
+
+    private function guiaPedido(?int $pedidoId): string
+    {
+        if (! $pedidoId) return '—';
+
+        return $this->guias[$pedidoId] ??= (string) (\App\Modules\Dropi\Models\DropiPedido::whereKey($pedidoId)->value('guia') ?? "pedido #{$pedidoId}");
+    }
+
+    private function pedidoDeDevolucion(int $devolucionId): ?int
+    {
+        return \App\Modules\Dropi\Models\DropiDevolucion::whereKey($devolucionId)->value('pedido_id');
     }
 
     /**
@@ -221,6 +246,11 @@ class InventarioGestionController extends Controller implements HasMiddleware
             'FacturaVenta' => "/app/cartera/facturas/{$id}",
             'Traslado' => "/app/inventario/traslados/{$id}",
             'TomaFisica' => "/app/inventario/conteos/{$id}",
+            'CargaInventario' => "/app/inventario/cargas/{$id}",
+            \App\Modules\Dropi\Listeners\DescontarInventarioAlEmpacar::REFERENCIA_TIPO,
+            \App\Modules\Dropi\Listeners\RevertirEgresoAlDesempacar::REFERENCIA_TIPO,
+            'devolucion' => "/app/dropi/pedidos/{$id}/editar",
+            'DropiDevolucion' => ($p = $this->pedidoDeDevolucion($id)) ? "/app/dropi/pedidos/{$p}/editar" : null,
             default => null,
         };
     }

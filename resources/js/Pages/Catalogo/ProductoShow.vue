@@ -21,6 +21,10 @@ const props = defineProps({
     precios_lista: { type: Array, default: () => [] },
     // Qué le falta al producto para poder venderse y costearse.
     listo_para_vender: { type: Object, default: () => ({}) },
+    // Por qué entra el stock inicial de un producto nuevo (motivos de la carga de inventario).
+    motivos_stock: { type: Array, default: () => [] },
+    // Cargas del ERP a Dropi que tocaron este producto (Productos y stock en Dropi).
+    cargas_dropi: { type: Array, default: () => [] },
 });
 
 const esNuevo = !props.producto;
@@ -65,6 +69,11 @@ const form = useForm({
     // cuando el user guardaba sin agregar variantes.
     desglose_stock: props.producto?.desglose_stock ?? false,
     stock_directo: props.producto?.stock_directo || 0,
+    // Solo al crear con stock: el ingreso queda como carga CI- con su asiento.
+    stock_motivo: null,
+    stock_observacion: '',
+    stock_soporte: '',
+    stock_tercero_id: null,
     // Pestaña 2: Comercial
     impuesto_id: props.producto?.impuesto_id || null,
     precio_proveedor: props.producto?.precio_proveedor || 0,
@@ -109,6 +118,33 @@ const form = useForm({
     // FASE F2.A4 · override por producto del grupo SIIGO
     siigo_account_group_override: props.producto?.siigo_account_group_override || null,
 });
+
+// ── Por qué entra el stock inicial (solo producto nuevo con stock) ──
+const pideMotivoStock = computed(() => esNuevo && !form.desglose_stock && Number(form.stock_directo) > 0);
+const motivoStockSel = computed(() => props.motivos_stock.find((m) => m.value === form.stock_motivo) || null);
+const stockTerceroTexto = ref('');
+const stockTerceroSel = ref(null);
+const stockTerceroResultados = ref([]);
+let stockTerceroDeb = null;
+watch(stockTerceroTexto, (q) => {
+    clearTimeout(stockTerceroDeb);
+    if (stockTerceroSel.value || !q || q.trim().length < 2) { stockTerceroResultados.value = []; return; }
+    stockTerceroDeb = setTimeout(async () => {
+        try {
+            const res = await fetch('/app/api/contactos/buscar?q=' + encodeURIComponent(q.trim()), {
+                credentials: 'same-origin', headers: { Accept: 'application/json' },
+            });
+            stockTerceroResultados.value = res.ok ? await res.json() : [];
+        } catch { stockTerceroResultados.value = []; }
+    }, 300);
+});
+const elegirStockTercero = (t) => {
+    stockTerceroSel.value = t;
+    form.stock_tercero_id = t.id;
+    stockTerceroTexto.value = `${t.nombre}${t.documento ? ' · ' + t.documento : ''}`;
+    stockTerceroResultados.value = [];
+};
+const quitarStockTercero = () => { stockTerceroSel.value = null; form.stock_tercero_id = null; stockTerceroTexto.value = ''; };
 
 // QA-FIX #14 · Cascada Línea → Grupo → Subgrupo → Clase con filtros LOCALES
 // (todo el árbol viene precargado desde el controller — ver catalogosParaForm).
@@ -632,6 +668,22 @@ const matrizDisenos = ref([]);
                 Avisa, no bloquea: crear el producto y ponerle precio después
                 es una forma legítima de trabajar.
             -->
+            <!-- Cargas del ERP a Dropi de este producto -->
+            <details v-if="producto && cargas_dropi.length" class="card px-4 py-3">
+                <summary class="text-sm font-semibold cursor-pointer">Stock en Dropi desde el ERP · {{ cargas_dropi.length }} carga(s)</summary>
+                <ul class="mt-2 divide-y divide-surface-100 dark:divide-surface-800 text-sm">
+                    <li v-for="c in cargas_dropi" :key="`${c.carga_id}-${c.fecha}`" class="py-2">
+                        <Link :href="`/app/dropi/carga-productos/${c.carga_id}`" class="font-mono text-brand-600 hover:underline">{{ c.numero }}</Link>
+                        <span class="text-surface-500"> · {{ c.fecha }} · {{ c.concepto }}</span>
+                        <span v-if="c.estado === 'error'" class="ml-1 text-xs text-red-600">con error</span>
+                        <span v-if="c.tipo === 'crear'" class="ml-1 text-xs text-emerald-700">creado en Dropi #{{ c.dropi_id }}</span>
+                        <div class="text-xs text-surface-500">
+                            <span v-for="(l, i) in c.lineas" :key="i" class="mr-3">{{ l.etiqueta }}: {{ l.movimiento === 'NINGUNO' ? 'sin cambio' : `${l.movimiento} ${l.unidades}` }}<template v-if="l.antes !== null"> ({{ l.antes }} → {{ l.despues }})</template></span>
+                        </div>
+                    </li>
+                </ul>
+            </details>
+
             <div v-if="producto && (listo_para_vender.sin_costo || listo_para_vender.sin_precio || listo_para_vender.variantes_sin_precio)"
                  class="rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-900/20 px-4 py-3">
                 <div class="flex items-start gap-2">
@@ -839,6 +891,41 @@ const matrizDisenos = ref([]);
                         <label class="text-xs font-semibold text-surface-600">Stock inicial</label>
                         <input v-model="form.stock_directo" type="number" min="0" class="input w-40"/>
                         <p class="text-[10px] text-surface-500 mt-1">Cantidad de unidades que tienes hoy en bodega.</p>
+
+                        <!-- Por qué entra: el ingreso queda como carga CI- con su asiento -->
+                        <div v-if="pideMotivoStock" class="mt-3 rounded-lg border border-surface-200 dark:border-surface-700 p-3 space-y-2">
+                            <p class="text-xs font-semibold">¿Por qué entra este stock? <span class="font-normal text-surface-500">Queda como documento de carga y asiento contable.</span></p>
+                            <div class="grid sm:grid-cols-2 gap-2">
+                                <label v-for="m in motivos_stock" :key="m.value" class="flex gap-2 rounded border p-2 cursor-pointer text-xs"
+                                       :class="form.stock_motivo === m.value ? 'border-brand-500 bg-brand-50 dark:bg-brand-900/20' : 'border-surface-200 dark:border-surface-700'">
+                                    <input v-model="form.stock_motivo" type="radio" :value="m.value" class="mt-0.5"/>
+                                    <span><strong>{{ m.label }}</strong> <span class="text-surface-500">· cuenta {{ m.cuenta }}</span><br/>{{ m.ayuda }}</span>
+                                </label>
+                            </div>
+                            <div v-if="form.errors.stock_motivo" class="text-xs text-red-600">{{ form.errors.stock_motivo }}</div>
+                            <div v-if="motivoStockSel?.requiere_tercero" class="relative">
+                                <label class="text-xs font-semibold text-surface-600">{{ form.stock_motivo === 'compra' ? 'Proveedor' : 'Socio' }}</label>
+                                <div class="flex gap-2">
+                                    <input v-model="stockTerceroTexto" type="search" :readonly="!!stockTerceroSel" placeholder="Nombre o documento" class="input w-full"/>
+                                    <button v-if="stockTerceroSel" type="button" class="btn btn-ghost text-xs" @click="quitarStockTercero">Cambiar</button>
+                                </div>
+                                <ul v-if="stockTerceroResultados.length" class="absolute z-10 mt-1 w-full max-h-48 overflow-y-auto rounded border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 text-sm">
+                                    <li v-for="t in stockTerceroResultados" :key="t.id">
+                                        <button type="button" class="w-full text-left px-3 py-1.5 hover:bg-surface-50 dark:hover:bg-surface-800" @click="elegirStockTercero(t)">{{ t.nombre }} <span class="text-xs text-surface-500">{{ t.documento }}</span></button>
+                                    </li>
+                                </ul>
+                                <div v-if="form.errors.stock_tercero_id" class="text-xs text-red-600">{{ form.errors.stock_tercero_id }}</div>
+                            </div>
+                            <div>
+                                <label class="text-xs font-semibold text-surface-600">Observación</label>
+                                <textarea v-model="form.stock_observacion" rows="2" maxlength="1000" placeholder="De dónde viene este stock (ej: conteo de bodega del 18-nov)" class="input w-full"></textarea>
+                                <div v-if="form.errors.stock_observacion" class="text-xs text-red-600">{{ form.errors.stock_observacion }}</div>
+                            </div>
+                            <div>
+                                <label class="text-xs font-semibold text-surface-600">Soporte <span class="font-normal text-surface-500">(opcional: factura, acta…)</span></label>
+                                <input v-model="form.stock_soporte" type="text" maxlength="60" class="input w-60"/>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>

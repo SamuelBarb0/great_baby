@@ -134,6 +134,9 @@ const tipoColor = (t, cantidad) => {
                                     {{ m.referencia_label }} <ExternalLink class="h-3 w-3"/>
                                 </Link>
                                 <span v-else class="text-surface-400">{{ m.referencia_label }}</span>
+                                <Link v-if="m.asiento_url" :href="m.asiento_url" class="block text-[11px] text-purple-600 hover:underline">
+                                    Ver asiento
+                                </Link>
                             </td>
                             <td class="p-2 text-center" :title="`Asiento SIIGO · ${m.siigo_sync_hace || 'pendiente'}`">
                                 {{ iconoSiigo(m.siigo_color) }}

@@ -215,6 +215,8 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     // Importador Excel del cliente Aracely (formato REPORTE · productos agregados)
     Route::get('/inventario/importar-cliente', [\App\Http\Controllers\App\ImportarInventarioClienteController::class, 'show'])->name('app.inventario.importar.cliente');
     Route::post('/inventario/importar-cliente', [\App\Http\Controllers\App\ImportarInventarioClienteController::class, 'procesar'])->middleware('throttle:30,1')->name('app.inventario.importar.cliente.procesar');
+    // Documento de cada carga masiva: motivo, referencias y su asiento contable.
+    Route::get('/inventario/cargas/{carga}', [\App\Http\Controllers\App\CargasInventarioController::class, 'show'])->middleware('throttle:60,1')->name('app.inventario.cargas.show');
     // Re-audit M3 PATRÓN θ (SEG-A3) · throttle en /app/inventario/* — antes sin
     //   límite; kardex agregaba 500 movs, reporte-stock hacía SUM group by sobre
     //   todo el kardex. Un actor autenticado saturaba la DB con requests.
@@ -351,6 +353,21 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     // Dropi · Reportes/Inventario/Import (DRP-C)
     Route::get('/dropi/inventario-en-vivo', [\App\Http\Controllers\App\DropiReportesController::class, 'inventarioEnVivo'])->name('app.dropi.inventario');
     Route::get('/dropi/reportes', [\App\Http\Controllers\App\DropiReportesController::class, 'reportes'])->name('app.dropi.reportes');
+    // Dropi · crear productos y cargar su stock desde el ERP (reemplaza las plantillas de Dropi).
+    Route::get('/dropi/carga-productos', [\App\Http\Controllers\App\DropiCargaProductosController::class, 'index'])->name('app.dropi.carga-productos.index');
+    Route::post('/dropi/carga-productos/excel', [\App\Http\Controllers\App\DropiCargaProductosController::class, 'previsualizar'])->middleware('throttle:10,1')->name('app.dropi.carga-productos.excel');
+    Route::post('/dropi/carga-productos/individual', [\App\Http\Controllers\App\DropiCargaProductosController::class, 'individual'])->middleware('throttle:30,1')->name('app.dropi.carga-productos.individual');
+    Route::post('/dropi/carga-productos/individual-crear', [\App\Http\Controllers\App\DropiCargaProductosController::class, 'individualCrear'])->middleware('throttle:30,1')->name('app.dropi.carga-productos.individual-crear');
+    Route::get('/dropi/carga-productos/buscar', [\App\Http\Controllers\App\DropiCargaProductosController::class, 'buscar'])->middleware('throttle:60,1')->name('app.dropi.carga-productos.buscar');
+    Route::get('/dropi/carga-productos/{carga}', [\App\Http\Controllers\App\DropiCargaProductosController::class, 'show'])->name('app.dropi.carga-productos.show');
+    Route::put('/dropi/carga-productos/{carga}', [\App\Http\Controllers\App\DropiCargaProductosController::class, 'guardarCarga'])->name('app.dropi.carga-productos.guardar');
+    Route::put('/dropi/carga-productos/{carga}/operaciones/{op}', [\App\Http\Controllers\App\DropiCargaProductosController::class, 'actualizarOperacion'])->name('app.dropi.carga-productos.operacion');
+    Route::put('/dropi/carga-productos/{carga}/operaciones/{op}/razon', [\App\Http\Controllers\App\DropiCargaProductosController::class, 'guardarRazon'])->name('app.dropi.carga-productos.razon');
+    Route::get('/dropi/carga-productos/{carga}/excel', [\App\Http\Controllers\App\DropiCargaProductosController::class, 'exportar'])->middleware('throttle:20,1')->name('app.dropi.carga-productos.exportar');
+    Route::post('/dropi/carga-productos/{carga}/leer', [\App\Http\Controllers\App\DropiCargaProductosController::class, 'leer'])->middleware('throttle:120,1')->name('app.dropi.carga-productos.leer');
+    Route::post('/dropi/carga-productos/{carga}/confirmar', [\App\Http\Controllers\App\DropiCargaProductosController::class, 'confirmar'])->name('app.dropi.carga-productos.confirmar');
+    Route::post('/dropi/carga-productos/{carga}/procesar', [\App\Http\Controllers\App\DropiCargaProductosController::class, 'procesar'])->middleware('throttle:60,1')->name('app.dropi.carga-productos.procesar');
+    Route::post('/dropi/carga-productos/{carga}/reintentar', [\App\Http\Controllers\App\DropiCargaProductosController::class, 'reintentar'])->name('app.dropi.carga-productos.reintentar');
     Route::get('/dropi/productos/importar', [\App\Http\Controllers\App\DropiReportesController::class, 'importarForm'])->name('app.dropi.productos.importar');
     Route::post('/dropi/productos/importar', [\App\Http\Controllers\App\DropiReportesController::class, 'importarProcesar'])->name('app.dropi.productos.importar.procesar');
     Route::get('/catalogo', [\App\Http\Controllers\App\CatalogoController::class, 'index'])->name('app.catalogo.index');

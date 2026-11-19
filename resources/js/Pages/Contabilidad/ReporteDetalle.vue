@@ -12,6 +12,7 @@ const props = defineProps({
     meta: { type: Object, default: null },
     incluir_anulados: { type: Boolean, default: false },
     anulados_count: { type: Number, default: 0 },
+    tipos: { type: Array, default: () => [] },
 });
 const { money } = useMoney();
 
@@ -102,6 +103,21 @@ const tieneMeta = computed(() => props.meta && props.meta.numero);
                     </div>
                     <p class="text-[11px] text-surface-500 mt-1">Para consultar asientos de pagos o notas crédito, entra desde el módulo Cartera y click en el número.</p>
                 </div>
+                <!-- Cualquier origen del libro se puede abrir por tipo + número
+                     interno: cargas de inventario, wallet Dropi, despachos… -->
+                <div class="flex flex-wrap items-end gap-2">
+                    <div>
+                        <label class="block text-xs font-semibold text-surface-600 dark:text-surface-300 mb-1">Origen</label>
+                        <select v-model="tipo" class="input">
+                            <option v-for="t in tipos" :key="t.value" :value="t.value">{{ t.label }}</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-surface-600 dark:text-surface-300 mb-1">ID interno</label>
+                        <input v-model.number="id" type="number" min="1" class="input w-28" placeholder="Ej: 12"/>
+                    </div>
+                    <button type="button" class="btn-ghost" :disabled="!id" @click="consultar">Ver asiento</button>
+                </div>
                 <!-- Re-audit R4 UX-B3 · paridad visual con Index/Panel (Eye/EyeOff). -->
                 <label class="flex items-center gap-2 text-xs font-semibold cursor-pointer select-none"
                        title="Incluye asientos revertidos por corrección o anulación (retención legal 5 años).">
@@ -114,7 +130,7 @@ const tieneMeta = computed(() => props.meta && props.meta.numero);
 
             <div v-if="tieneMeta" class="card p-4">
                 <div class="text-xs uppercase tracking-widest font-bold text-brand-600 mb-2 flex items-center gap-2">
-                    Documento origen
+                    Documento origen · {{ meta.origen }}
                     <span v-if="meta.anulado" class="text-[10px] font-bold text-red-600 uppercase bg-red-50 dark:bg-red-950/40 px-2 py-0.5 rounded">Documento anulado</span>
                 </div>
                 <div class="flex flex-wrap gap-4 text-sm">
@@ -123,10 +139,23 @@ const tieneMeta = computed(() => props.meta && props.meta.numero);
                     <div v-if="meta.tercero !== '—'"><span class="text-surface-500">Tercero:</span> {{ meta.tercero }}</div>
                     <div v-if="meta.total"><span class="text-surface-500">Total:</span> <span class="font-bold">{{ money(meta.total) }}</span></div>
                 </div>
+                <div v-if="meta.detalle" class="mt-2 text-sm text-surface-700 dark:text-surface-300">
+                    <span class="text-surface-500">Por qué:</span> {{ meta.detalle }}
+                </div>
+                <a v-if="meta.url_documento" :href="meta.url_documento" class="mt-2 inline-flex items-center gap-1 text-sm text-brand-600 hover:underline">
+                    Abrir el documento <ExternalLink class="h-3 w-3"/>
+                </a>
 
                 <!-- Sprint 3 · F.3 · badge SIIGO del documento origen -->
                 <div class="mt-3 pt-3 border-t flex items-start gap-3">
-                    <template v-if="meta.siigo_id">
+                    <template v-if="meta.va_siigo === false">
+                        <FileSearch class="h-5 w-5 text-surface-500 mt-0.5 flex-shrink-0"/>
+                        <div class="flex-1 text-sm">
+                            <div class="font-semibold text-surface-700 dark:text-surface-200">Contabilidad interna</div>
+                            <div class="text-xs text-surface-500 mt-1">Este asiento vive sólo en el ERP: no se envía a SIIGO.</div>
+                        </div>
+                    </template>
+                    <template v-else-if="meta.siigo_id">
                         <Cloud class="h-5 w-5 text-emerald-600 mt-0.5 flex-shrink-0"/>
                         <div class="flex-1 text-sm">
                             <div class="font-semibold text-emerald-700 flex items-center gap-2">

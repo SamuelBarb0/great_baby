@@ -59,6 +59,15 @@ class Reglas
         'contable.cta_retefuente_default' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '236575', 'etiqueta' => 'Cuenta autorretenciones por defecto', 'descripcion' => '⚠ Confirmar concepto específico con Silvia (2365xx según naturaleza)'],
         'contable.centro_costo_default' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => 'GB-01', 'etiqueta' => 'Centro de costo por defecto', 'descripcion' => 'Cuenta / centro de imputación por defecto para asientos'],
 
+        // Contrapartida de las cargas masivas de inventario, una por motivo.
+        // El débito siempre va a la cuenta de inventario del producto (1435);
+        // estas dicen contra qué se acredita según POR QUÉ entró la mercancía.
+        'contable.cta_carga_compra' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '220505', 'etiqueta' => 'Carga de inventario · Compra', 'descripcion' => 'Crédito cuando la mercancía se compró: cuenta por pagar al proveedor (PUC 220505)'],
+        'contable.cta_carga_aporte_socios' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '3105', 'etiqueta' => 'Carga de inventario · Aporte de socios', 'descripcion' => '⚠ Confirmar con la contadora · crédito cuando la mercancía la aportan los socios (capital)'],
+        'contable.cta_carga_saldo_inicial' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '3705', 'etiqueta' => 'Carga de inventario · Inventario inicial', 'descripcion' => '⚠ Confirmar con la contadora · crédito del inventario de apertura (o la cuenta puente de saldos iniciales que use)'],
+        'contable.cta_carga_donacion' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '4295', 'etiqueta' => 'Carga de inventario · Donación', 'descripcion' => '⚠ Confirmar con la contadora · crédito cuando la mercancía se recibe sin pagarla (ingreso diverso)'],
+        'contable.cta_carga_sobrante' => ['grupo' => 'contable', 'tipo' => 'string', 'valor' => '4295', 'etiqueta' => 'Carga de inventario · Sobrante', 'descripcion' => 'Crédito de mercancía que aparece sin documento (misma cuenta que el sobrante de toma física)'],
+
         // ============ CRM · segmentación ============
         'crm.vip_min_ventas' => ['grupo' => 'crm', 'tipo' => 'float', 'valor' => '5000000', 'etiqueta' => 'Ventas anuales mínimas para VIP (COP)', 'descripcion' => ''],
         'crm.dormido_dias' => ['grupo' => 'crm', 'tipo' => 'int', 'valor' => 90, 'etiqueta' => 'Días sin compra para marcar Dormido', 'descripcion' => ''],

@@ -1,0 +1,506 @@
+[00:00] inventario para poder empezar a hacer pruebas con el que ellos hicieron ellos
+[00:04] hicieron en una tableta donde hay toda la plantillita y mirar si los subo por
+[00:11] productos o por donde los subo.
+[00:14] Esa maldita es de pronto tú nos puedes compartir pantalla y explicarles un poquito
+[00:20] cómo se hace en una parte de edro.
+[00:23] Sí dale perfecto entonces señala y me viste cuando ves mi pantalla por favor.
+[00:29] Sí, sí, Samuel ahí, vamos super bien.
+[00:32] Ah vale perfecto, listo entonces para entonces el inventario para cuando vayas a cargar pues todo eso
+[00:37] entonces en la parte de la izquierda en productos te aparece aquí lo que es el botón de carga masiva en
+[00:42] dropy.
+[00:43] Entonces lo que hace.
+[00:44] Ok esperamente entonces colocó acá producto entonces en productos cierto.
+[00:49] Ah sí en productos.
+[00:50] En cargas, espérame yo apunto acá carga masiva.
+[00:56] Podemos grabar la sesión o en la ida qué pena.
+[01:00] Sí parece así.
+[01:01] Y te pasamos el videito tú tienes para grabarse no?
+[01:05] Sí sí sí.
+[01:07] El computador te acasino agua.
+[01:10] Ah sí grabando de hecho.
+[01:11] Jenny, ¿sabes qué tengo que pasarle también tolo de la parte contable que me gustaría mucho que me apareciera
+[01:17] por ejemplo el balance acumulado que yo lo pueda filtar por terceros agrupado.
+[01:25] Dropy cierto de dropy.
+[01:27] Sí o sea esto lo voy a necesitar para todos sí porque acuérdese que internamente son como separados.
+[01:34] Sí serían como tres empresas la contabilidad.
+[01:38] Sí.
+[01:39] Listo entonces ahí ya cuando le das a carga masiva te abrirá.
+[01:43] Espérame que me fui.
+[01:45] Ok esperamos otra vez.
+[01:47] Te abrí el cosito está acá de dropy.
+[01:50] Espérame espérame otra vez.
+[01:52] Nos devolvemos que es que nos está mirando.
+[01:55] Ok listo entonces.
+[01:57] Entonces ahí la parte izquierda en productos te aparece pues el botón de carga masiva en dropy.
+[02:02] Entonces qué va a hacer este botón?
+[02:04] Sí.
+[02:06] Te va a enviar directamente y pese a la pestaña los productos en dropy y ya cuando tú quieras
+[02:11] pues digamos crear todos los productos le das aquí en carga masiva.
+[02:14] Entonces ahí.
+[02:16] Ahí es para crearlos.
+[02:18] Para crearlos y subir pues todos los productos.
+[02:21] Y el inventario también los subo ahí.
+[02:23] Sí lo mismo.
+[02:25] Lo mismo ahí.
+[02:27] Y ya digamos si quieren ver pues los productos ya después cargados.
+[02:32] Entonces ahora pues ya después de hacer todo el proceso se van a mis productos en dropy.
+[02:37] Y le dan aquí en ah bueno no si no estoy mal a que se sincroniza automáticamente.
+[02:42] Entonces ahí no hay problema.
+[02:44] Entonces lo puedes hacer desde ahí o desde aquí mismo en mis productos.
+[02:50] Para el tema de la carga.
+[02:55] Y eso queda en inventario mas no en contabilidad.
+[02:58] Exacto.
+[03:02] Entonces listo ahí super bien.
+[03:06] Ok.
+[03:07] Entonces ya queda un inventario y en contabilidad también si yo quiero ver una 14 me queda ahí porque como no tiene
+[03:15] una contrapartida Jennifer.
+[03:19] O eso es operativo o como funciona digamos.
+[03:27] Si lo que anteriormente yo en el otro sistema para yo subir los productos pues primero tenía que crearlos.
+[03:35] Y para yo subir el stop pues me tocaba hacerlo por compra para subir el stop.
+[03:40] No así como tan directo de acá.
+[03:43] Ah no es que.
+[03:44] Entonces ahí perdóname.
+[03:46] Pues igual la carga lo que lo que hacemos es directamente abrir dropy porque digamos con el tema de la pipa subo
+[03:51] problemas y pues preferimos mejor que lo hagan ahí directo en dropy a podernos inventar alguna cosa que
+[03:57] después deje de funcionar con el tiempo si hacen algún cambio.
+[04:01] Entonces lo que hacemos es redirigirlos a dropy y pues a ella lo pueden usar como si como si no hubiera
+[04:07] problema básicamente.
+[04:10] Mujum.
+[04:11] Bien entonces cuando nos lo pusiamos a ingresar digamos ahí estoy creando el producto y poniéndole las cantidades.
+[04:17] Certo.
+[04:18] Sí.
+[04:19] Pero por ejemplo nosotros anteriormente obviamente si si había un ingreso tocaba decir por qué como para qué.
+[04:27] Sí.
+[04:28] Entonces ejemplo si yo ingreso digamos ingresó una factura entonces voy a crear los productos primero los creaba
+[04:37] y luego ingresaba la factura para que esa factura me generara inventario.
+[04:42] Mujum.
+[04:43] Entonces no sé acá como como se hace entonces contablemente me generaba una cuenta por pagar
+[04:49] y me generaba un inventario.
+[04:52] Sí.
+[04:53] Entonces me manejaba la cuenta de inventario venta que era inventario una catorce venta que era una cuatro.
+[05:03] Sí.
+[05:04] Sí.
+[05:05] Posto que era una seis.
+[05:07] Certo.
+[05:08] Ok.
+[05:09] Entonces mi pregunta es si yo lo subo así como ya no tengo que irme yo o sea ejemplo digamos
+[05:18] que no sea el inventario sino una compra que hice voy a crear los productos y subo todos
+[05:23] los productos.
+[05:24] Mujum.
+[05:25] Ah bueno aquí ya sería en la parte entonces de compras yo.
+[05:31] Sí pero la idea es no subir la manual ni crear los productos manual.
+[05:35] Certo.
+[05:36] Aquí más que todo sería pues para.
+[05:38] No sé.
+[05:39] Es que como soy confundida lo que pasa es que me confundó mucho a eso porque porque
+[05:45] como lo mío era tan manual.
+[05:48] Entendido.
+[05:49] Entonces.
+[05:50] Entonces ejemplo con.
+[05:54] Ejemplo con el sistema.
+[05:58] Ejemplo.
+[05:59] Si yo.
+[06:00] Yo creaba los productos eso se me lo dejaba crear me tocaba uno por uno crear los para
+[06:05] maestrizarlo uno por uno.
+[06:07] Pero si yo le iba a meter le iba a ingresar cantidades.
+[06:12] Yo tenía que decir por qué iba a ingresar esas cantidades de dónde si fue que compre
+[06:16] si fue que me lo regalaron o sea por qué me van a ingresar esas cantidades.
+[06:21] Entonces lo hacía por una compra.
+[06:24] Yo siempre lo hacía por una compra o como ahora pues solamente me metí el inventario
+[06:32] para poder hacer.
+[06:34] Para poder hacer pruebas.
+[06:37] Pero normalmente en el anterior sistema yo no podía meter el inventario así de
+[06:42] chévere me decía bueno es inventario a qué pertenece si es una inversión.
+[06:47] Si.
+[06:48] Si mira.
+[06:50] Ahorita lo que se arregló que mañana la reunión con el con Don Jorge es que al
+[07:00] momento digamos de la última factura que se utiliza en China al momento de subir al
+[07:06] contínuero como es inventario esa es la factura que compras va a subir el sistema la va a leer
+[07:15] y Don Jorge ya la tiene ahí y el automáticamente va a crear los productos y
+[07:22] demás y Don Jorge cuando llegue el contenedor solamente le dice aceptar y puede decir no sé
+[07:30] me llegaron 100 teros 50 para la bodega de dropy y 50 para la bodega de la
+[07:36] distribuidora y se crean automáticamente solamente necesitas visto bueno o de
+[07:42] pronto si llegaron cosas dañadas o algo así y lo puede hacer inmediatamente ahí.
+[07:47] Si es como funciona porque ejemplo digamos la factura de China viene 100
+[07:52] por ciento cargada a la comercializadora.
+[07:55] Entonces generaría como una cuenta por cobrar a dropy de la comercializadora.
+[08:00] Si depender movimientos que haga un porqué digamos el recoge la factura y ya quedan
+[08:08] los productos creados en un borrador por la serie y si el no aceptar y el
+[08:15] mismo los distribuye a las bodegas nadie va a poder ver ese producto si él no le
+[08:20] aceptar y no manda los productos a donde sea el ese producto va a quedar ahí como
+[08:27] un borrador en la nube y ya el darle a aceptar se va a actualizar el stock o se
+[08:33] va a crear el producto nuevo y el esto que nambulados es automático.
+[08:38] Pero eso digamos cada movimiento genera un asiento contable o ya de soportar
+[08:42] allá en la nube.
+[08:44] Esas mi pregunta digamos que asiento contable genera al ingresar todos esos
+[08:49] productos que voy a ingresar.
+[08:51] Yo sé que va a ser un borrador si si.
+[08:54] Entonces un momento.
+[08:56] Entonces todos esos productos de dropy.
+[08:58] Bueno los de dropy no tengo las cuentas pero la señora Aracely si medio
+[09:04] los de la distribuidora me tocaría no tocaría mirar a cuáles son las cuentas
+[09:10] que va a dar dropy.
+[09:14] Son las mismas.
+[09:16] Si todo se maneja igual porque no pasa nada.
+[09:19] Lo único que vamos a tener es cuente pues de los que en sí tienen una
+[09:23] cuenta puente por ejemplo la cuenta puente es por ejemplo o la cuenta de
+[09:28] tránsito de inventario por ejemplo es la mercancía que sale de bodega pero
+[09:33] todavía no está facturado sino que está en tránsito.
+[09:36] Por ejemplo que están repartiendo entonces yo necesito saber contablemente
+[09:41] cuánto tengo en esa cuenta tránsito que por ejemplo si yo lo miro por una
+[09:46] torre control se que hay 50 paquetes.
+[09:49] Si cuánto suma pero por ejemplo yo me quiero ir a contabilidad o mirar un
+[09:53] balance acumulado.
+[09:55] Yo quiero mirar en esa cuenta de tránsito por cobrar que está sin
+[10:01] falta.
+[10:03] Igualmente las contabilidades quedan separadas porque cada una tiene
+[10:07] su resolución.
+[10:09] Si, si toda la contabilidad tanto los informes financieros todo eso
+[10:14] internos.
+[10:16] Y nosotros podemos mirar que tú digas no quiero saber el balance
+[10:21] de todo mi año y quiero que se me fusionen las tres contabilidades
+[10:26] y me muestren un solo archivo.
+[10:29] Y faltaría hacer esa parte pero eso se puede hacer.
+[10:32] Igualmente cada uno muestra lo que afecta y demás.
+[10:38] Igualmente en Greadbaby hay una parte que yo puse de
+[10:44] configuraciones de reglas porque digamos habrán cuentas nuevas
+[10:51] más adelante o que se manejen muy esporadicamente pero sí o sí
+[10:55] si se van a necesitar y tú puedas configurar el carrero.
+[11:00] Jennifer pues mira yo quiero empezar subiendo el inventario
+[11:06] para poder empezar y poder como empezar a revisar y
+[11:11] a testearlo.
+[11:13] Pero entonces sí tengo muchísimas preguntas.
+[11:16] Una es que cuando yo subo todos sus productos y se invitar
+[11:20] a inventario contablemente a donde se me dirige o sea dónde
+[11:23] puedo ver yo ese movimiento que hice y ingrese y que dije
+[11:26] hay un inventario.
+[11:29] ¿Sí me entiendes?
+[11:30] Sí.
+[11:31] O sea cómo funciona, cómo funciona porque la idea es no
+[11:34] de chavilla.
+[11:35] ¿Esto sería directamente así?
+[11:37] ¿Cierto Samuel?
+[11:38] No porque ese es internamente ejemplo es internamente
+[11:43] no lo necesitaría para Sigo porque pues Sigo entraría
+[11:47] con un inventario ya no con lo que tiene fiscalmente
+[11:51] ellos.
+[11:52] Ellos ya entienden, ya ellos en su contabilidad que tienen
+[11:57] en Ari ya tienen un inventario que cuando ya nos pasemos
+[12:02] digamos directamente a Sigo pues deben hacer ese traslado
+[12:05] de ese monto inventario que ya está Gray Baby ahí porque
+[12:10] este inventario que va a montar acá.
+[12:12] Eso lo he dado.
+[12:13] El Ari ya lo tiene o sea Ari tributariamente ya lo tiene
+[12:18] este es el mío, este es el interno mío.
+[12:21] Entonces esa parte interna como yo tengo una
+[12:27] contabilidad interna, yo tengo unos movimientos
+[12:30] interna entonces yo sé que cada movimiento pues tiene
+[12:33] que haber un debe o una ver, ¿Cierto?
+[12:35] Sí claro un debe y una ver.
+[12:38] Así sea operativamente.
+[12:41] Operativo siento.
+[12:43] O sea que él se me mueva las cuentas.
+[12:46] Entonces como yo voy a meter un inventario así de
+[12:49] chévere.
+[12:50] Obviamente cuando yo haya metido el inventario real pues
+[12:54] obviamente yo voy a hacer en voy a hacer en voy a hacer
+[13:00] un traslado de cuentas o voy a hacer un traslado de
+[13:04] ¿Cómo se le dice?
+[13:06] Inicio de cuentas.
+[13:08] Inicio de cuentas, sí.
+[13:09] Entonces voy a iniciar con tantos millones unas
+[13:12] cuentas, voy a ingresar con activos capital pasivo, sí.
+[13:17] Cuentos por cobrar.
+[13:19] Entonces yo lo conectaría como todo eso.
+[13:22] Entonces mi inventario.
+[13:24] Sí, entonces por ejemplo lo primero que voy a molestarlos
+[13:28] es que voy a meter ese inventario, ¿Sí?
+[13:30] Voy a meterlo, voy a ingresarlo, voy a voy a probarlo.
+[13:34] Ya te confirmó las cuentas que se afectan y esperame
+[13:37] porque es que yo soy un poquito olvidada ahí,
+[13:41] porque todo lo tengo anotado, ya lo estoy buscando.
+[13:43] Sí, entonces por ejemplo yo sé que un producto pues afecta
+[13:47] muchas cuentas, ¿Sí?
+[13:48] Porque va a tener un movimiento de inventario, va a tener
+[13:50] un movimiento de venta, va a tener un costo, va a tener
+[13:53] una evolución de compras o una evolución de ventas, ¿Cierto?
+[13:56] Claro.
+[13:57] Pero como lo vamos a ingresar así el inventario
+[14:01] normalmente debe ser no sé ingresar un inventario
+[14:05] por 200 millones de pesos.
+[14:08] Entonces uno dice eso es que eso es inversión,
+[14:12] eso es capital, o eso a quien se le debe o por qué
+[14:16] lo ingresó, ¿Sí?
+[14:17] Sí, me voy a mostrar más o menos.
+[14:19] Entonces yo voy a empezar con eso, ¿Sí?
+[14:23] Pero no en realidad, yo tengo muchas preguntas,
+[14:25] pero voy a ingresar inventar eso.
+[14:28] Entonces necesito la plantillita, ¿Cómo lo hago?
+[14:32] ¿Qué plantillita uso para poderlo ingresar ahí?
+[14:35] ¿Sacueres que usted me habló de una plantilla para Excel?
+[14:38] Siempre usarla misma.
+[14:39] Estamos todos diciendo que está la plantilla Excel
+[14:41] para poder cargar masivamente los productos.
+[14:44] Ah, eso es aquí mismo te la dope, entonces
+[14:47] cuando te metas, entonces ahí carga masiva
+[14:49] en dropy, ¿No?
+[14:50] Se te abre todo lo de dropy.
+[14:51] Entonces ya cuando…
+[14:52] Muéseme, ¿Y cómo la hago?
+[14:54] Y ya…
+[14:55] Muéseme, entonces…
+[14:56] Porque son como por ahí unas 100,
+[14:59] 150 casillitas porque vienen con variación
+[15:02] y todo.
+[15:03] Ok, entonces abrimos la carga masiva y entonces
+[15:06] aquí carga masiva otra vez y acá arriba
+[15:09] te aparece descargar pues el archivo de plantilla.
+[15:12] Entonces ahí tú lo descargas sin problema
+[15:14] y pues digamos ya ahorita cuando lo hagas aquí
+[15:17] pues aquí van a aparecer todos los campos
+[15:19] que tiene.
+[15:21] Entonces los atributos, el idea en la bodega,
+[15:24] el stock y pues todo lo demás referente
+[15:27] pues al peso, la longitud del ancho y el alto.
+[15:30] ¿Esto lo puede emitir mientras?
+[15:32] Sí, eso lo puede ir haciendo igual,
+[15:34] esto es directamente con dropy entonces…
+[15:36] Y no necesitamos costo, no necesitamos costo
+[15:40] solo cantidad.
+[15:42] Sí.
+[15:43] Ni precio de venta, ¿En qué momento le ha
+[15:46] uno costo y precio de venta?
+[15:47] Eso ya sería ahí mismo, acá mismo ya en dropy
+[15:50] ya que pues aquí es donde pues de una desincerta
+[15:53] y ya después se… pues se hace ese tipo
+[15:57] del precio, ya se hace ese precio de venta.
+[15:59] Por ejemplo hagamos uno, hagamos una, ¿sí?
+[16:01] Sí.
+[16:02] Espérame, espérame.
+[16:04] Dos conguitas, primero así,
+[16:06] para que me hagamos una de las bebés
+[16:14] y eso…
+[16:15] Sí, te quedan, te quedan el día de hoy.
+[16:17] Sí, también, pero más o menos te estará por arriba.
+[16:19] Y con tu, voy y…
+[16:21] y te voy a dar la apresa, por favor.
+[16:34] Y lo que vamos a hacer es así,
+[16:36] y lo estoy dando, es que no tengo tu parte.
+[16:38] Hola, yo lo voy a dar las coordenadas
+[16:40] con esa cosita, tú podrías por favor
+[16:42] y llamar al niño al celular
+[16:46] de Orea, por favor.
+[16:48] Es el 317.
+[16:51] Sí, mira, en el debe está la 1430.
+[17:30] ¿Pero qué no está?
+[17:32] Me intermeda, ¿los?
+[17:34] ¿Para poder verlo?
+[17:36] ¿Listo?
+[17:37] ¿Listo?
+[17:38] Ah, ahora sí.
+[17:39] Soy enclosa, no tiene un cargador de iPhone.
+[17:41] Ah, ahora sí que pena.
+[17:43] Nos faltaba aquí que es que no
+[17:45] han cargado todas las celdas,
+[17:46] pero ahora sí.
+[17:47] Ya con el tema del precio,
+[17:48] entonces esos son todos los campos,
+[17:50] o sea, estas toda la plantilla.
+[17:52] ¿Precio, ese precio qué quiere decir?
+[17:54] Es el precio como tal del producto
+[17:56] y ya el precio sugerido, pero es el precio
+[17:58] al que se vendería.
+[17:59] ¿Pero esto es el costo o es el precio
+[18:01] como tal para la vinta?
+[18:03] Sí, es el precio como tal para la vinta.
+[18:05] Acá no a costo.
+[18:07] No, aquí no, aquí no.
+[18:09] Bueno, acá, irían precio y luego
+[18:11] precio sugerido, es el...
+[18:12] O sea, el precio si es el costo
+[18:13] y el precio sugerido ya es el que
+[18:15] se vendería.
+[18:17] Qué pena dice me cruzó
+[18:19] las cosas y pues igual aquí ya...
+[18:21] Ya, aquí ya, ya podemos hacer.
+[18:24] No sé si digamos podría intentar
+[18:26] poner este así sin problemas
+[18:28] para ver cómo nos daría acá.
+[18:31] Debería saber, espérame.
+[18:35] Acabo un problema acá con esto.
+[18:38] Ah, vale.
+[18:40] Es igual a cualquier cosa
+[18:42] con cualquier problema que tengas
+[18:44] y igual ahí te lo haces
+[18:45] a ver el propio dropy.
+[18:57] Atributos, puedo coló...
+[18:58] Ah bueno, le colocó ahí color negro,
+[19:00] verde, sí.
+[19:02] Sí, exacto.
+[19:04] ¿Y eso qué quiere decir?
+[19:05] Combinaciones, combinaciones.
+[19:09] Es igual no habría la necesidad
+[19:11] de rellenar, hay unos campos que...
+[19:13] No todos los campos se tienen que rellenar,
+[19:15] claro está, solo como los
+[19:17] necesarios que necesita dropy
+[19:19] o pues digamos cuando ustedes los han importado
+[19:21] antes ya esos datos los pueden
+[19:23] usar aquí.
+[19:25] Ok, ejemplo ingeniero,
+[19:27] digamos yo voy a ingresar
+[19:29] muchos productos que quizás ya están creados.
+[19:31] Si ya están creados,
+[19:33] ¿los omiten?
+[19:34] Si ya están creados.
+[19:35] ¿Sólo meten las cantidades?
+[19:36] Si, si ya están creados
+[19:38] entonces en este caso acá cerramos
+[19:40] entonces ya no sería carga masiva
+[19:42] sino que sería actualización masiva.
+[19:44] Aquí también te da una plantilla igual.
+[19:46] Pero no sé...
+[19:48] no sé cuáles están creados y cuáles no.
+[19:51] O no sé si te pasa una plantilla
+[19:53] y ustedes me lo suben para yo poder...
+[19:56] porque hay unos que como...
+[19:58] inventaron inicial, no sé...
+[20:00] yo se hicieron inventar y hay unos que ya están creados
+[20:02] otros que trajeron de bodega
+[20:04] entonces hay como una mezcla de todo.
+[20:06] Ah, no entonces pues si,
+[20:08] si quieres entonces...
+[20:10] osea que nos pasara esa plantilla.
+[20:12] ¿Te la paso así como yo la tengo?
+[20:14] Si, si, así,
+[20:16] así sabríamos como...
+[20:18] como le ganan importar y como cargar y pues así
+[20:20] lo contrastamos con este...
+[20:22] con este que con este excel
+[20:24] nos da dropy.
+[20:26] Y después de eso tengo que hacer
+[20:28] una compra o ya no tengo que hacer una compra?
+[20:30] No, ella no tendría que hacer una compra
+[20:32] ya digamos aquí lo que haría
+[20:34] pues el R.P. es que actualiza
+[20:36] las cantidades de lo que entonces
+[20:38] ya está aquí o el nuevo producto.
+[20:42] Doña Leyda,
+[20:44] estén bien mensajito
+[20:46] con mi...
+[20:48] a detalle de las cuentas que se alteran
+[20:50] un momento de subir mercancía
+[20:52] y no sé
+[20:54] de pronto tú nos puedas llevar
+[20:56] y me falta alguna o algo así
+[20:58] para poder
+[21:00] duplicar esto
+[21:02] en la parte de dropy, vale?
+[21:06] Si porque todavía no me queda así
+[21:08] como super claro digamos cuando no
+[21:10] su... su alimentario así tan directo
+[21:12] digamos yo lo entiendo
+[21:14] que uno la pueda crear
+[21:16] y pueda subir cantidad de sí.
+[21:18] Pero por ejemplo...
+[21:20] probablemente también debe tener
+[21:22] un movimiento...
+[21:24] Si no sabe a quién se lo compre
+[21:26] ejemplos ahorita voy a subir ese
+[21:28] archivo excel
+[21:30] 100 millones de precios
+[21:32] el meso de alimentario pero no sabe a quién
+[21:34] se lo compre.
+[21:36] Tal cual.
+[21:38] Y ahí que...
+[21:40] Primero que todo voy a hacer ese excel
+[21:42] con las cantidades variaciones y...
+[21:44] el que nosotros tenemos, ¿sí?
+[21:47] Sí, exacto.
+[21:51] ¿Puedes ver?
+[21:53] Sí.
+[21:55] Yo tengo muchas preguntas pero
+[21:57] voy a iniciar con eso para poder
+[21:59] pasar, pasar porque no me confundo
+[22:01] y necesito empezarle a leer orma dropy
+[22:03] porque necesito facturar esas semanas.
+[22:05] Si, si así ya nos...
+[22:07] así ya podemos ir viendo que va
+[22:09] faltando en el camino y...
+[22:11] y pues hace mucho mejor
+[22:13] para poder seguir comprando más.
+[22:15] Mmm-hmm.
+[22:17] Igualmente tal vez hay unas cosas que nos
+[22:19] están que tan... tan entendibles
+[22:21] pero pues igual mientras uno la va usando
+[22:23] ya... ya deben teniendo mucho más.
+[22:25] Sí, lo que yo quiero
+[22:27] es entenderlo como internamente, ¿sí?
+[22:29] Cómo se mueven las cuentas,
+[22:31] cómo puedo yo mirar, porque pues yo era
+[22:33] la que hacía las auditorías, ¿sí?
+[22:35] Entonces yo era la que manejaba
+[22:37] todo el tema contable, entonces sí
+[22:39] quiero entender todas esas conexiones
+[22:41] que sí cuando yo muevo algo operativamente
+[22:43] donde se me conecta contablemente,
+[22:45] cómo puedo mirarlo, si
+[22:47] se me conecta, no se me conecta.
+[22:49] Perfecto.
+[22:51] Sí.
+[22:53] Que todo tenga un...
+[22:55] no, se suba porque se subió
+[22:57] y ya, sino que tenga un contra.
+[22:59] Entonces si se suba es porque
+[23:01] si me ingresa un inventario es porque
+[23:03] se lo dejo a alguien o porque lo pague
+[23:05] de algún lado.
+[23:07] No, que se me suba porque así es chévere
+[23:09] y quedo alimentado el sistema, no,
+[23:11] sino que tiene que haber un...
+[23:13] un por qué se sube.
+[23:15] ¿Pero que funciona, sí?
+[23:17] No.
+[23:19] Legalmente, sí o sí tiene que ser así.
+[23:21] O sí, no,
+[23:23] estamos en la bada de activos.
+[23:25] Nada.
+[23:27] No, y más internamente, más que
+[23:29] obviamente si yo lo quiero enviar a Cigo
+[23:31] pues me imagino que yo tendré
+[23:33] no sé, un...
+[23:35] un moblito por ahí que diga enviar a Cigo.
+[23:37] Sí.
+[23:39] Sí.
+[23:41] Igual aquí con la parte de la resolución
+[23:43] cualquier cosa.
+[23:45] Aquí está todo el Cigo de Dropi.
+[23:47] Listo.
+[23:49] Yo lo que voy a hacer es probar
+[23:51] para poderle seguir haciendo muchas preguntas.
+[23:53] Y si lo entiendo, hasta que entiendan.
+[23:55] No te preocupes, es la idea.
+[23:57] Listo.
+[23:59] Malaya, estoy súper pendiente
+[24:01] y cualquier cosita
+[24:03] yo...
+[24:05] al ingeniero Michael o al ingeniero Samuel
+[24:07] yo les transmito rápido
+[24:09] y les pido respuesta a un gente
+[24:11] que pueda que podamos
+[24:13] agilizar, ¿vale?
+[24:15] Ay, sí, ingeniera, le agradezco
+[24:17] un montón, voy a estar mejor dicho
+[24:19] este es mi meta, o sea, mi meta es esta semana
+[24:21] no sé cómo lo va a lograr, pero lo tengo que lograr.
+[24:23] Claro que sí.
+[24:25] Y aquí estamos.
+[24:27] No importa la hora, aquí estamos.
+[24:29] Bueno, ingeniera, acá le fue.
+[24:31] Un abrazo.
+[24:33] Bueno, significa de usted bendiga, feliz tarde
+[24:35] y estamos atenticos ahí.
+[24:37] Bueno, que estés muy bien, chaito.
+[24:39] Hasta el meco.
+[24:41] Hasta el meco.
+[24:45] Dios, al tanto.
