@@ -6,7 +6,6 @@ use App\Modules\Dropi\Enums\DestinoDevolucion;
 use App\Modules\Dropi\Listeners\DescontarInventarioAlEmpacar;
 use App\Modules\Dropi\Models\DropiCargaOperacion;
 use App\Modules\Dropi\Models\DropiCargaProducto;
-use App\Modules\Dropi\Models\DropiDevolucion;
 use App\Modules\Dropi\Models\DropiPedido;
 use App\Modules\Dropi\Models\DropiPedidoItem;
 use App\Modules\Dropi\Models\InventarioMovimiento;
@@ -40,7 +39,9 @@ function trzAgregado(string $ref = 'AGR-1'): Producto
 
 // ───────────────────────── B · devolución ─────────────────────────
 
-it('la devolución reingresa los productos agregados y apunta al documento de devolución', function () {
+// Desde main, el reingreso se ancla al pedido (`'devolucion'` + pedido_id) para que
+// un reintento no duplique el ingreso; el motivo vive en la devolución, no en el movimiento.
+it('la devolución reingresa los productos agregados y apunta al pedido devuelto', function () {
     $agregado = trzAgregado();
     DropiPedidoItem::create(['pedido_id' => $this->pedido->id, 'producto_id' => $agregado->id, 'variante_id' => null, 'cantidad' => 2, 'precio_proveedor_unit' => 1000]);
 
@@ -49,10 +50,11 @@ it('la devolución reingresa los productos agregados y apunta al documento de de
     $mov = InventarioMovimiento::where('producto_id', $agregado->id)->whereNull('variante_id')->sole();
     expect($r['movimientos'])->toBe(1)
         ->and((int) $mov->cantidad)->toBe(2)
-        ->and($mov->referencia_tipo)->toBe(DropiDevolucion::class)
-        ->and($mov->referencia_id)->toBe($r['devolucion']->id)
+        ->and($mov->referencia_tipo)->toBe('devolucion')
+        ->and($mov->referencia_id)->toBe($this->pedido->id)
         ->and($mov->ubicacion_id)->toBe($this->bodega->id)
-        ->and($mov->notas)->toContain('GUIA-TRZ-1')->toContain('Cliente no estaba');
+        ->and($mov->notas)->toContain('GUIA-TRZ-1')
+        ->and($r['devolucion']->notas)->toContain('Cliente no estaba');
 });
 
 it('la devolución reingresa también los granulares, una vez por variante', function () {
@@ -63,7 +65,7 @@ it('la devolución reingresa también los granulares, una vez por variante', fun
     $r = RegistrarDevolucion::run('GUIA-TRZ-1', DestinoDevolucion::Reingreso, $this->gerente->id);
 
     expect($r['movimientos'])->toBe(1)
-        ->and((int) InventarioMovimiento::where('variante_id', $v->id)->where('referencia_tipo', DropiDevolucion::class)->sum('cantidad'))->toBe(3);
+        ->and((int) InventarioMovimiento::where('variante_id', $v->id)->where('referencia_tipo', 'devolucion')->sum('cantidad'))->toBe(3);
 });
 
 it('una baja total no reingresa stock', function () {
