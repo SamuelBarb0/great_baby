@@ -9,7 +9,7 @@
  *  · El libro contable abre filtrado a los asientos de un movimiento, aunque
  *    sea de otro mes (su filtro de fecha arranca en «este mes»).
  *  · La Contadora, que ve la wallet, ahora también ve el cruce.
- *  · «Contabilidad Dropi» concilia la wallet con su cuenta 111015.
+ *  · «Contabilidad Dropi» concilia la wallet con su cuenta (contable.cta_dropi_wallet).
  */
 
 use App\Auth\Permisos;
@@ -100,11 +100,11 @@ beforeEach(function () {
     // Pedido facturado SIN recibo → «recibo pendiente».
     $this->fSinRecibo = walletContFactura('DRP-2');
     $this->movSinRecibo = walletContMov('web:2', 'pago_guia', 40000, walletContPedido('102', $this->fSinRecibo->id));
-    // Sanción del mes pasado → asiento propio (5395 / 111015).
+    // Sanción del mes pasado → asiento propio (sanciones / billetera).
     $this->movSancion = walletContMov('web:3', 'indemnizacion', -15000, null, now()->subMonth()->startOfMonth()->addDays(2)->toDateString());
-    // Pago de un pedido sin factura → asiento propio (111015 / CxC).
+    // Pago de un pedido sin factura → asiento propio (billetera / anticipo).
     $this->movSinFactura = walletContMov('web:4', 'pago_guia', 30000, walletContPedido('104'));
-    // Tipo «Otro» → sin asiento.
+    // Tipo «Otro» → también se asienta desde el 19-nov (otros ingresos).
     $this->movOtro = walletContMov('web:5', 'otro', 7000);
 
     $this->contadora = User::factory()->create(['name' => 'Contadora']);
@@ -137,14 +137,14 @@ it('dice cómo llegó cada movimiento al libro', function () {
         'web:2' => DropiWalletMovimiento::CONTABLE_RECIBO_PENDIENTE,
         'web:3' => DropiWalletMovimiento::CONTABLE_ASENTADO,
         'web:4' => DropiWalletMovimiento::CONTABLE_ASENTADO,
-        'web:5' => DropiWalletMovimiento::CONTABLE_SIN_ASIENTO,
+        'web:5' => DropiWalletMovimiento::CONTABLE_ASENTADO,
     ]);
-    expect($this->movOtro->fresh()->estadoContable())->toBe(DropiWalletMovimiento::CONTABLE_SIN_ASIENTO);
+    expect($this->movOtro->fresh()->estadoContable())->toBe(DropiWalletMovimiento::CONTABLE_ASENTADO);
 });
 
 it('un asiento reversado deja el movimiento sin asiento', function () {
-    // Cambiar el tipo a «Otro» reversa el asiento y no crea uno nuevo.
-    $this->movSancion->update(['tipo' => 'otro']);
+    // Un movimiento corregido a cero reversa el asiento y no crea uno nuevo.
+    $this->movSancion->update(['monto' => 0]);
 
     expect($this->movSancion->fresh()->estadoContable())->toBe(DropiWalletMovimiento::CONTABLE_SIN_ASIENTO);
 });
@@ -181,15 +181,17 @@ it('el libro abre en los asientos de un movimiento aunque sea del mes pasado', f
         ->toContain('filters%5Bmovimiento%5D%5Bid%5D='.$this->movSancion->id);
 });
 
-it('concilia la wallet con la cuenta 111015 y explica la diferencia', function () {
+it('concilia la wallet con la cuenta de la billetera y explica la diferencia', function () {
     $w = app(ContabilidadDropi::class)->delMes(now('America/Bogota')->format('Y-m'))['wallet'];
 
     // Wallet: 50.000 + 40.000 − 15.000 + 30.000 + 7.000 = 112.000.
-    // Libro 111015: −15.000 (sanción) + 30.000 (pago sin factura) = 15.000; el
-    // recibo de web:1 se creó sin eventos, así que tampoco está en el libro.
+    // Libro (billetera): −15.000 (sanción) + 30.000 (pago sin factura) + 7.000
+    // («Otro») = 22.000; el recibo de web:1 se creó sin eventos, así que
+    // tampoco está en el libro.
     expect($w['saldo_wallet'])->toBe(112000.0)
-        ->and($w['saldo_contable'])->toBe(15000.0)
-        ->and($w['diferencia'])->toBe(97000.0)
-        // Pendientes: el recibo que falta (40.000) y el «Otro» (7.000).
-        ->and($w['pendientes'])->toBe(['n' => 2, 'monto' => 47000.0]);
+        ->and($w['cuenta'])->toBe((string) setting('contable.cta_dropi_wallet'))
+        ->and($w['saldo_contable'])->toBe(22000.0)
+        ->and($w['diferencia'])->toBe(90000.0)
+        // Pendiente: sólo el recibo que falta (40.000); el «Otro» ya se asienta.
+        ->and($w['pendientes'])->toBe(['n' => 1, 'monto' => 40000.0]);
 });

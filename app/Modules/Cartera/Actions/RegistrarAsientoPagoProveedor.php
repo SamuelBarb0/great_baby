@@ -146,9 +146,12 @@ class RegistrarAsientoPagoProveedor
     {
         $recepcion = $pago->recepcion_id ? RecepcionCompra::find($pago->recepcion_id) : null;
 
-        return $recepcion?->orden?->esImportacion()
-            ? setting('contable.cta_proveedores_exterior')
-            : setting('contable.cta_proveedores_default');
+        // La compra de Dropi se cancela en la misma cuenta de Dropi en que la
+        // abonó su recepción; para Great Baby, la regla de siempre.
+        return \App\Modules\Dropi\Support\CuentasDropi::proveedores(
+            $recepcion ?? ($pago->orden_compra_id ? \App\Modules\Compras\Models\OrdenCompra::find($pago->orden_compra_id) : null),
+            (bool) $recepcion?->orden?->esImportacion(),
+        );
     }
 
     /** Los dos ejes salen de la compra que se está pagando. */

@@ -57,14 +57,15 @@ class RegistrarAsientoNota
         $texto = "Nota crédito {$nc->numeroCompleto()} — factura {$factura->numero}";
 
         $lineas = [[
-            'cuenta_puc' => setting('contable.cta_devolucion_default'),
+            // Dropi tiene su propia cuenta; para Great Baby es la regla de siempre.
+            'cuenta_puc' => \App\Modules\Dropi\Support\CuentasDropi::devolucion($factura),
             'debe' => $baseNota, 'haber' => 0,
             'descripcion' => $texto,
         ]];
 
         if ($ivaNota > 0.009) {
             $lineas[] = [
-                'cuenta_puc' => setting('contable.cta_iva_venta_default'),
+                'cuenta_puc' => \App\Modules\Dropi\Support\CuentasDropi::ivaVenta($factura),
                 'debe' => $ivaNota, 'haber' => 0,
                 'descripcion' => $texto.' · IVA',
             ];
@@ -107,7 +108,7 @@ class RegistrarAsientoNota
 
         if ($ivaNota > 0.009) {
             $lineas[] = [
-                'cuenta_puc' => setting('contable.cta_iva_venta_default'),
+                'cuenta_puc' => \App\Modules\Dropi\Support\CuentasDropi::ivaVenta($factura),
                 'debe' => 0, 'haber' => $ivaNota,
                 'descripcion' => $texto.' · IVA',
             ];

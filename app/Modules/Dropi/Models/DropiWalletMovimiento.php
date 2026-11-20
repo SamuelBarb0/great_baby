@@ -70,9 +70,11 @@ class DropiWalletMovimiento extends Model implements AuditableContract
      *                      para no acreditar la CxC dos veces. Un reverso
      *                      (monto <= 0) borra ese recibo: también es «por recibo».
      *  · recibo_pendiente  pago de un pedido facturado SIN su recibo: la plata
-     *                      entró a la wallet pero ni la cuenta 111015 ni la
-     *                      cartera lo saben.
-     *  · sin_asiento       tipo «Otro», o un movimiento cuyo asiento se reversó.
+     *                      entró a la wallet pero ni la billetera del libro
+     *                      (contable.cta_dropi_wallet) ni la cartera lo saben.
+     *  · sin_asiento       un movimiento en cero, o uno cuyo asiento se reversó.
+     *                      Desde el 19-nov el tipo «Otro» también se asienta
+     *                      (contable.cta_dropi_otro_salida / _entrada).
      */
     public const CONTABLE_ASENTADO = 'asentado';
 
@@ -89,7 +91,7 @@ class DropiWalletMovimiento extends Model implements AuditableContract
             self::CONTABLE_ASENTADO => ['Asentado', 'success', 'Tiene su asiento en el libro contable.'],
             self::CONTABLE_POR_RECIBO => ['Por recibo de caja', 'info', 'Pedido facturado: lo asienta el recibo de caja de su factura.'],
             self::CONTABLE_RECIBO_PENDIENTE => ['Recibo pendiente', 'danger', 'Pedido facturado sin recibo de caja: el pago no ha llegado a la contabilidad.'],
-            self::CONTABLE_SIN_ASIENTO => ['Sin asiento', 'warning', 'No genera asiento (tipo «Otro») o su asiento se reversó.'],
+            self::CONTABLE_SIN_ASIENTO => ['Sin asiento', 'warning', 'No genera asiento (monto en cero) o su asiento se reversó.'],
         ];
     }
 
@@ -110,8 +112,11 @@ class DropiWalletMovimiento extends Model implements AuditableContract
             WHEN {$t}.tipo = 'pago_guia' AND EXISTS (SELECT 1 FROM dropi_pedidos p
                 WHERE p.id = {$t}.pedido_id AND p.deleted_at IS NULL AND p.factura_venta_id IS NOT NULL)
             THEN CASE
-                WHEN {$t}.monto <= 0 OR EXISTS (SELECT 1 FROM pagos_venta pv WHERE pv.deleted_at IS NULL
-                    AND pv.medio_pago = 'wallet_dropi' AND pv.referencia = SUBSTR({$t}.dropi_movimiento_id, 1, 60))
+                WHEN {$t}.monto <= 0 OR EXISTS (SELECT 1 FROM pagos_venta pv WHERE
+                    -- Con o sin borrar: un recibo que un reverso 1009 deshizo
+                    -- se reversa con contra-asiento (20-nov), así que el pago
+                    -- SÍ llegó al libro; contarlo como pendiente era falso.
+                    pv.medio_pago = 'wallet_dropi' AND pv.referencia = SUBSTR({$t}.dropi_movimiento_id, 1, 60))
                 THEN '".self::CONTABLE_POR_RECIBO."'
                 ELSE '".self::CONTABLE_RECIBO_PENDIENTE."' END
             WHEN {$asientos('NOT LIKE')} > {$asientos('LIKE')} THEN '".self::CONTABLE_ASENTADO."'

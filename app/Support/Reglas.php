@@ -154,6 +154,41 @@ class Reglas
         'dropi.auto_nota_credito' => ['grupo' => 'dropi', 'tipo' => 'bool', 'valor' => '1', 'etiqueta' => 'Auto-generar Nota Crédito al devolver', 'descripcion' => 'Al marcar DropiPedido como Devuelto emite NC'],
         'dropi.auto_nc_envia_siigo' => ['grupo' => 'dropi', 'tipo' => 'bool', 'valor' => '1', 'etiqueta' => 'Auto-enviar NC a SIIGO', 'descripcion' => ''],
 
+        /*
+         * Las cuentas contables de Dropi (19-nov-2026). SÓLO DROPI.
+         *
+         * Dropi lleva sus propias cuentas y no toca las del ERP: las facturas,
+         * cobros y notas crédito de la línea Dropi pasan por el mismo código
+         * que las de Great Baby, pero cuando el documento es de Dropi la
+         * cuenta sale de acá. Las del ERP (contable.cta_*_default) quedan
+         * como están.
+         *
+         * Antes la wallet iba a la 111015, que NO EXISTE en el PUC de Great
+         * Baby (la billetera es la 11100501), y el resto a grupos que no
+         * admiten movimiento (1110, 4295, 5195, 5395, 4175, 240805, 2805) o a
+         * una cuenta equivocada (530525 es «Diferencia en cambio», no
+         * comisiones). Todas las de acá son HOJAS del PUC.
+         *
+         * Las claves empiezan por `contable.` a propósito: es lo único que la
+         * pantalla de Reglas le deja ver y editar a la Contadora, y lo que pasa
+         * por la validación de cuenta hoja (`cuentaAgrupadora()`). Se muestran
+         * bajo el título Dropi por el grupo.
+         */
+        'contable.cta_dropi_wallet' => ['grupo' => 'dropi', 'tipo' => 'string', 'valor' => '11100501', 'etiqueta' => 'Dropi · Billetera virtual', 'descripcion' => 'PUC 11100501 Billetera Virtual Dropi. Todo lo que entra o sale de la wallet pasa por acá; su saldo tiene que ser el de la wallet.'],
+        'contable.cta_dropi_banco_retiro' => ['grupo' => 'dropi', 'tipo' => 'string', 'valor' => '11200501', 'etiqueta' => 'Dropi · Banco al que llegan los retiros de la wallet', 'descripcion' => 'PUC 11200501 Bancolombia Great Baby **2664. ⚠ Confirmar con Silvia que los retiros de Dropi llegan a esta cuenta.'],
+        'contable.cta_dropi_flete' => ['grupo' => 'dropi', 'tipo' => 'string', 'valor' => '51355001', 'etiqueta' => 'Dropi · Fletes de garantía', 'descripcion' => 'PUC 51355001 Transporte, fletes y acarreos.'],
+        'contable.cta_dropi_comision_tarjeta' => ['grupo' => 'dropi', 'tipo' => 'string', 'valor' => '53051501', 'etiqueta' => 'Dropi · Comisión de tarjeta', 'descripcion' => 'PUC 53051501 Comisiones (gasto financiero). Antes iba a 530525, que es «Diferencia en cambio».'],
+        'contable.cta_dropi_sancion' => ['grupo' => 'dropi', 'tipo' => 'string', 'valor' => '53952001', 'etiqueta' => 'Dropi · Sanciones e indemnizaciones que cobra Dropi', 'descripcion' => 'PUC 53952001 Multas, sanciones y litigios. Lo que Dropi DESCUENTA de la wallet por incumplimiento o indemnización de una orden.'],
+        'contable.cta_dropi_indemnizacion' => ['grupo' => 'dropi', 'tipo' => 'string', 'valor' => '42950502', 'etiqueta' => 'Dropi · Indemnizaciones a favor', 'descripcion' => 'PUC 42950502 Otros ingresos. Lo que Dropi le PAGA a Great Baby por una indemnización.'],
+        'contable.cta_dropi_anticipo' => ['grupo' => 'dropi', 'tipo' => 'string', 'valor' => '28050501', 'etiqueta' => 'Dropi · Pagos sin factura y sobrepagos (anticipo)', 'descripcion' => 'PUC 28050501 Anticipos de clientes. Un pago de guía que llega antes de que el pedido se facture queda acá; al facturar se cruza con la factura y vuelve a cero. También lo que Dropi paga de más.'],
+        'contable.cta_dropi_otro_salida' => ['grupo' => 'dropi', 'tipo' => 'string', 'valor' => '53959501', 'etiqueta' => 'Dropi · Otros cobros sin clasificar', 'descripcion' => 'PUC 53959501 Otros gastos diversos. Para los códigos de wallet que el ERP todavía no conoce (tipo «Otro»). ⚠ Revisar con Silvia cada código nuevo.'],
+        'contable.cta_dropi_otro_entrada' => ['grupo' => 'dropi', 'tipo' => 'string', 'valor' => '42950502', 'etiqueta' => 'Dropi · Otros abonos sin clasificar', 'descripcion' => 'PUC 42950502 Otros ingresos. Para los abonos de wallet con un código que el ERP todavía no conoce (tipo «Otro»).'],
+        'contable.cta_dropi_iva_venta' => ['grupo' => 'dropi', 'tipo' => 'string', 'valor' => '24080501', 'etiqueta' => 'Dropi · IVA generado en las ventas', 'descripcion' => 'PUC 24080501 IVA generado en ventas 19%. Lo usan la factura y la nota crédito de Dropi; las de Great Baby siguen con la regla de Contabilidad.'],
+        'contable.cta_dropi_devolucion' => ['grupo' => 'dropi', 'tipo' => 'string', 'valor' => '41750501', 'etiqueta' => 'Dropi · Devolución en ventas', 'descripcion' => 'PUC 41750501 Devolución en ventas. La usa la nota crédito de una devolución de Dropi.'],
+        'contable.cta_dropi_proveedores' => ['grupo' => 'dropi', 'tipo' => 'string', 'valor' => '22050501', 'etiqueta' => 'Dropi · Proveedores nacionales', 'descripcion' => 'PUC 22050501 Proveedores nacionales. La deuda de una compra de Dropi; la recepción la abona y el pago al proveedor la cancela en la MISMA cuenta.'],
+        'contable.cta_dropi_proveedores_exterior' => ['grupo' => 'dropi', 'tipo' => 'string', 'valor' => '22100501', 'etiqueta' => 'Dropi · Proveedores del exterior', 'descripcion' => 'PUC 22100501 Proveedores del exterior. La deuda de una importación de Dropi.'],
+        'contable.cta_dropi_iva_compra' => ['grupo' => 'dropi', 'tipo' => 'string', 'valor' => '24081001', 'etiqueta' => 'Dropi · IVA descontable en compras', 'descripcion' => 'PUC 24081001 IVA descontable por compras 19%. ⚠ Si Dropi compra algo gravado al 5 %, su hoja es la 24081003: confirmar con Silvia.'],
+
         // ============ CATÁLOGO ============
         'catalogo.preservar_codigo_china' => ['grupo' => 'catalogo', 'tipo' => 'bool', 'valor' => '1', 'etiqueta' => 'Preservar consecutivo China en re-import', 'descripcion' => 'Si el SKU existe reusa el código de barras; no lo pisa'],
         'catalogo.bloquear_cambio_codigo' => ['grupo' => 'catalogo', 'tipo' => 'bool', 'valor' => '1', 'etiqueta' => 'Bloquear cambio manual de código de barras', 'descripcion' => 'Evita duplicados accidentales'],
@@ -552,6 +587,7 @@ class Reglas
         'siigo.doc_type_nota_credito' => ['grupo' => 'siigo', 'tipo' => 'int', 'valor' => 0, 'etiqueta' => 'SIIGO · Tipo documento Nota crédito (venta)', 'descripcion' => 'ID del document-type NC. Sin esto SIIGO rechaza toda nota crédito'],
         'siigo.doc_type_nota_debito' => ['grupo' => 'siigo', 'tipo' => 'int', 'valor' => 0, 'etiqueta' => 'SIIGO · Tipo documento Nota débito (venta)', 'descripcion' => 'ID del document-type ND. Sin esto SIIGO rechaza toda nota débito'],
         'siigo.doc_type_asiento_manual' => ['grupo' => 'siigo', 'tipo' => 'int', 'valor' => 0, 'etiqueta' => 'SIIGO · Tipo documento Asiento manual', 'descripcion' => 'ID del comprobante contable (CC) para asientos manuales. Si queda en 0 se usa el de Gasto'],
+        'siigo.doc_type_wallet_dropi' => ['grupo' => 'siigo', 'tipo' => 'int', 'valor' => 0, 'etiqueta' => 'SIIGO · Tipo documento Wallet Dropi', 'descripcion' => 'ID del comprobante contable (CC) con el que viajan los movimientos de la wallet de Dropi (fletes, comisiones, sanciones, retiros, anticipos). Si queda en 0 se usa el de Asiento manual.'],
 
         // Centro de costo de las compras. SIIGO lo exige en algunas cuentas.
         'siigo.cost_center_compras' => ['grupo' => 'siigo', 'tipo' => 'int', 'valor' => 0, 'etiqueta' => 'SIIGO · Centro de costo de compras', 'descripcion' => 'ID del centro de costo para facturas de compra. 0 = no se manda'],

@@ -95,7 +95,8 @@ class RegistrarAsientoContable
             if ((float) $factura->impuestos > 0) {
                 $lineas[] = [
                     'fecha' => $factura->fecha_emision,
-                    'cuenta_puc' => setting('contable.cta_iva_venta_default'), 'tercero_type' => $terceroTipo, 'tercero_id' => $factura->contacto_id,
+                    // Dropi tiene su propia cuenta de IVA; para Great Baby es la regla de siempre.
+                    'cuenta_puc' => \App\Modules\Dropi\Support\CuentasDropi::ivaVenta($factura), 'tercero_type' => $terceroTipo, 'tercero_id' => $factura->contacto_id,
                     'debe' => 0, 'haber' => (float) $factura->impuestos,
                     'origen_type' => FacturaVenta::class, 'origen_id' => $factura->id,
                     'descripcion' => "IVA factura {$factura->numero}",
@@ -374,7 +375,7 @@ class RegistrarAsientoContable
             $cuentaCaja = match ($pago->medio_pago) {
                 'efectivo' => setting('contable.cta_caja_default'),
                 // 9.3 · el pago de Dropi entra a la wallet, no al banco.
-                'wallet_dropi' => \App\Modules\Dropi\Listeners\RegistrarAsientoWalletDropi::CUENTA_WALLET,
+                'wallet_dropi' => \App\Modules\Dropi\Listeners\RegistrarAsientoWalletDropi::cuentaWallet(),
                 default => setting('contable.cta_bancos_default'),
             };
             $userId = auth()->id();
@@ -443,7 +444,12 @@ class RegistrarAsientoContable
             // SOBREPAGO → 2805 anticipos
             $sobrepago = round($recibido - $aplicado - max($dif, 0), 2);
             if ($sobrepago > 0.009) {
-                $lineas[] = $linea('2805', 0, $sobrepago,
+                // Lo que Dropi paga de más va a su cuenta de anticipos (hoja
+                // del PUC); el resto de cobros, como siempre.
+                $cuentaAnticipo = $pago->medio_pago === 'wallet_dropi'
+                    ? (string) setting('contable.cta_dropi_anticipo')
+                    : '2805';
+                $lineas[] = $linea($cuentaAnticipo, 0, $sobrepago,
                     "Sobrepago cliente — anticipo a favor por \${$sobrepago}", DestinoFiscal::Interno);
             }
 

@@ -127,10 +127,10 @@
             $cuadraWallet = abs($w['diferencia']) <= 0.01;
         @endphp
         <x-filament::section>
-            <x-slot name="heading">Wallet Dropi vs. cuenta 111015 · al {{ $d['periodo']['corte'] }}</x-slot>
+            <x-slot name="heading">Wallet Dropi vs. cuenta {{ $w['cuenta'] ?? '' }} · al {{ $d['periodo']['corte'] }}</x-slot>
             <x-slot name="description">Lo que dice la wallet contra lo que dice el libro. Una diferencia se explica casi siempre por los movimientos pendientes.</x-slot>
             <div style="{{ $fila }}"><span>Saldo de la wallet (movimientos importados)</span><span>{{ $money($w['saldo_wallet']) }}</span></div>
-            <div style="{{ $fila }}"><span>Saldo de la cuenta 111015 en el libro</span><span>{{ $money($w['saldo_contable']) }}</span></div>
+            <div style="{{ $fila }}"><span>Saldo de la cuenta {{ $w['cuenta'] ?? '' }} Billetera Dropi en el libro</span><span>{{ $money($w['saldo_contable']) }}</span></div>
             <div style="{{ $total }}">
                 <span>Diferencia</span>
                 <span style="color:{{ $cuadraWallet ? '#059669' : '#dc2626' }};">{{ $cuadraWallet ? '✓ Cuadra' : $money($w['diferencia']) }}</span>

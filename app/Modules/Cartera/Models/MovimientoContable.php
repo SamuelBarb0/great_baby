@@ -120,6 +120,25 @@ class MovimientoContable extends Model implements AuditableContract
      * como pendiente para siempre. Ahora pendiente = lo que SÍ debe ir y
      * todavía no fue.
      */
+    /**
+     * Las líneas que siguen valiendo: ni son una reversa `[REVERSA #id]` ni
+     * fueron reversadas por una. Lo que se reversa con contra-asiento (la
+     * wallet de Dropi, sus recibos, la reparación de devoluciones) no se
+     * borra, así que «¿ya tiene asiento?» se responde con esto y no con
+     * `exists()`.
+     */
+    public function scopeVivas($q)
+    {
+        $t = $this->getTable();
+
+        return $q->where(fn ($w) => $w->whereNull("{$t}.descripcion")->orWhere("{$t}.descripcion", 'not like', '[REVERSA%'))
+            ->whereNotExists(fn ($r) => $r->selectRaw('1')->from("{$t} as rv")
+                ->whereColumn('rv.origen_type', "{$t}.origen_type")
+                ->whereColumn('rv.origen_id', "{$t}.origen_id")
+                ->whereNull('rv.deleted_at')
+                ->whereRaw("rv.descripcion LIKE CONCAT('[REVERSA #', {$t}.id, ']%')"));
+    }
+
     public function scopePendienteDeSiigo($q)
     {
         return $q->where('destino_fiscal', DestinoFiscal::Siigo->value)
