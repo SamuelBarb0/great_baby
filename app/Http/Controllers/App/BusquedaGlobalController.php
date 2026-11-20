@@ -159,8 +159,6 @@ class BusquedaGlobalController extends Controller implements HasMiddleware
                 'puede' => fn () => $u?->esEquipoBodega() || $u?->esContable()],
             ['nombre' => 'Registrar devolución Dropi', 'url' => '/app/dropi/devolucion/registrar', 'kw' => ['devol', 'dropi'],
                 'puede' => fn () => \App\Auth\Permisos::puede($u, 'dropi_devoluciones')],
-            ['nombre' => 'Escáner cámara', 'url' => '/app/dropi/escaner-camara', 'kw' => ['escan', 'camara'],
-                'puede' => fn () => \App\Auth\Permisos::puede($u, 'escanner_camara')],
             ['nombre' => 'Nueva garantía', 'url' => '/app/garantias/nueva', 'kw' => ['garan', 'ticket'],
                 'puede' => fn () => \App\Auth\Permisos::puede($u, 'garantias')],
             ['nombre' => 'Estación de empaque', 'url' => '/app/estacion-empaque', 'kw' => ['empaque', 'estacion'],

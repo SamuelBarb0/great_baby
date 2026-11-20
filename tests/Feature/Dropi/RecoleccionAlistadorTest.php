@@ -241,12 +241,12 @@ it('la estación de empaque del panel deja confirmar sin foto cuando la regla es
     expect($p->fresh()->estado)->toBe(EstadoPedidoDropi::Empacado);
 });
 
-it('el panel enlaza al escaneo de guías de Dropi para entregar a la transportadora', function () {
-    $item = fn () => collect(Filament::getPanel('admin')->getNavigationItems())->first(fn ($i) => $i->getLabel() === 'Escanear guías en Dropi');
+it('el panel enlaza a Dropi para el escaneo de la entrega a la transportadora', function () {
+    $item = fn () => collect(Filament::getPanel('admin')->getNavigationItems())->first(fn ($i) => $i->getLabel() === 'Escaneo Dropi');
 
     $this->actingAs($this->aracely);
     expect($item())->not->toBeNull()
-        ->and($item()->getUrl())->toBe('https://app.dropi.co/dashboard/settings/pickups')
+        ->and($item()->getUrl())->toBe('https://app.dropi.co/dashboard/home')
         ->and($item()->shouldOpenUrlInNewTab())->toBeTrue()
         ->and($item()->isVisible())->toBeTrue();
 
@@ -264,4 +264,20 @@ it('el escáner de despacho no ofrece despachar un pedido que todavía no se emp
     $p->transicionar(EstadoPedidoDropi::Alistando, 'manual', $this->aracely->id);
     $p->transicionar(EstadoPedidoDropi::Empacado, 'manual', $this->aracely->id);
     expect($this->postJson('/dropi/escaner/analizar', ['guia' => 'G-1'])->json('accion'))->toBe('despachar');
+});
+
+it('el escáner de guías por cámara sale del menú y del buscador: la entrega se escanea en Dropi', function () {
+    $this->actingAs($this->aracely);
+
+    $menu = collect(Filament::getPanel('admin')->getNavigationItems())->map(fn ($i) => $i->getLabel());
+    expect($menu)->not->toContain('Escáner cámara')
+        ->and($menu)->toContain('Escaneo Dropi')
+        ->and(json_encode($this->getJson('/app/buscar?q=camara')->json()))->not->toContain('escaner-camara');
+});
+
+it('las dos estaciones de empaque traen el botón para escanear con la cámara', function () {
+    expect(file_get_contents(resource_path('views/dropi/pages/estacion-empaque.blade.php')))->toContain('gbCamaraCodigos.abrir')
+        ->and(file_get_contents(resource_path('js/Pages/EstacionEmpaque.vue')))->toContain('gbCamaraCodigos.abrir')
+        ->and(file_exists(public_path('js/gb-camara-codigos.js')))->toBeTrue()
+        ->and(file_exists(public_path('js/vendor/zxing-0.21.3.min.js')))->toBeTrue();
 });

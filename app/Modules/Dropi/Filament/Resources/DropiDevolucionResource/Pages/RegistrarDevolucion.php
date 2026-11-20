@@ -98,7 +98,14 @@ class RegistrarDevolucion extends Page implements HasForms
             if (! $i->variante_id && ! $i->producto_id) continue;
             $clave = \App\Modules\Inventario\Support\CostoPromedio::clave($i->variante_id, $i->producto_id);
             $codigo = $i->variante_id ? $i->variante?->codigo_barras : ($i->producto?->referencia);
-            $out[$clave] ??= ['referencia' => $refs[$clave], 'esperadas' => $esperados[$clave], 'codigos' => []];
+            $producto = $i->variante?->producto ?? $i->producto;
+            $out[$clave] ??= [
+                'referencia' => $refs[$clave],
+                // Nombre y variante: «AND2512-79/154» solo no le dice nada a quien abre la caja.
+                'nombre' => trim(($producto?->nombre ?? '') . ' ' . trim(($i->variante?->color_nombre ?? '') . ' ' . ($i->variante?->talla ?? ''))),
+                'esperadas' => $esperados[$clave],
+                'codigos' => [],
+            ];
             if ($codigo) $out[$clave]['codigos'][] = strtoupper(trim($codigo));
         }
 
