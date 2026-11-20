@@ -107,7 +107,7 @@ class ProcesarEscaneoEmpaque
 
                 return [
                     'tipo' => 'pedido_abierto',
-                    'mensaje' => "Pedido {$codigo} abierto — {$pedido->items->count()} ítems para empacar",
+                    'mensaje' => "Pedido {$codigo} abierto — {$pedido->items->count()} " . ($pedido->items->count() === 1 ? 'ítem' : 'ítems') . ' para empacar',
                     'pedido_id' => $pedido->id,
                     'sonido' => 'ok',
                 ];
@@ -162,16 +162,16 @@ class ProcesarEscaneoEmpaque
             // C-F2 R2 · Match polimórfico: buscar item por variante_id O producto_id.
             if ($variante) {
                 $item = $pedido?->items->firstWhere('variante_id', $variante->id);
-                $etiquetaSujeto = "variante {$codigo}";
+                $etiquetaSujeto = "La variante {$codigo}";
             } else {
                 $item = $pedido?->items->first(fn ($i) => $i->variante_id === null && $i->producto_id === $productoAgregado->id);
-                $etiquetaSujeto = "producto agregado {$productoAgregado->referencia}";
+                $etiquetaSujeto = "El producto agregado {$productoAgregado->referencia}";
             }
 
             if (! $item) {
                 return [
                     'tipo' => 'error',
-                    'mensaje' => "La {$etiquetaSujeto} no está en el pedido actual.",
+                    'mensaje' => "{$etiquetaSujeto} no está en el pedido actual.",
                     'sonido' => 'error',
                 ];
             }

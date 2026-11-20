@@ -8,6 +8,12 @@
     <style>
         @media (max-width: 900px) {
             .estacion-panel-top { grid-template-columns: 1fr !important; }
+            /* Las dos métricas lado a lado: apiladas empujaban el pedido activo fuera de la pantalla. */
+            .estacion-metricas { grid-template-rows: none !important; grid-template-columns: 1fr 1fr; }
+        }
+        /* Celular: el campo del escáner se lee completo (a 1.5rem se cortaba el texto guía). */
+        @media (max-width: 480px) {
+            #scan-input { font-size: 1rem !important; letter-spacing: 0 !important; padding: .85rem 1rem !important; }
         }
     </style>
     {{-- Panel superior: escáner + métricas en vivo --}}
@@ -54,7 +60,7 @@
                        autofocus
                        autocomplete="off"
                        inputmode="text"
-                       placeholder="Escanea guía o código de variante…"
+                       placeholder="Escanea guía o producto…"
                        style="width:100%;padding:1rem 1.25rem;font-size:1.5rem;font-family:ui-monospace,'Courier New',monospace;background:#0f172a;color:#f59e0b;border:2px solid #b45309;border-radius:.75rem;outline:none;letter-spacing:2px;font-weight:600;"
                        onfocus="this.style.borderColor='#f59e0b';this.style.boxShadow='0 0 0 3px rgba(245,158,11,.2)';"
                        onblur="this.style.borderColor='#b45309';this.style.boxShadow='';">
@@ -71,7 +77,7 @@
         </div>
 
         {{-- Métricas del día --}}
-        <div style="display:grid;grid-template-rows:1fr 1fr;gap:.75rem;">
+        <div class="estacion-metricas" style="display:grid;grid-template-rows:1fr 1fr;gap:.75rem;">
             <div style="padding:1rem 1.25rem;background:rgba(16,185,129,.1);border-left:4px solid #10b981;border-radius:.75rem;">
                 <div style="font-size:.7rem;color:#9ca3af;text-transform:uppercase;">Empacados hoy</div>
                 <div style="font-size:2.5rem;font-weight:800;color:#10b981;line-height:1;">{{ $m['mis_empaques_hoy'] }}</div>
@@ -143,12 +149,20 @@
                     <div style="padding:.75rem 1rem;background:{{ $isPicked ? 'rgba(16,185,129,.18)' : '#0f172a' }};border-left:3px solid {{ $isPicked ? '#10b981' : '#6b7280' }};border-radius:.5rem;">
                         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:.5rem;">
                             <div style="flex:1;min-width:0;">
-                                <div style="font-weight:600;color:#e5e7eb;">{{ $it->variante?->producto?->nombre ?? '—' }}</div>
-                                <div style="font-size:.8rem;color:#9ca3af;">{{ $it->variante?->color_nombre }}@if($it->variante?->talla) · T{{ $it->variante->talla }}@endif</div>
-                                <div style="font-family:monospace;font-size:.72rem;color:#cbd5e1;margin-top:.25rem;">{{ $it->variante?->codigo_barras ?? '—' }}</div>
+                                {{-- Un ítem es de una variante o de un producto agregado (sin variantes):
+                                     el agregado se escanea por su referencia (ProcesarEscaneoEmpaque). --}}
+                                <div style="font-weight:600;color:#e5e7eb;">{{ ($it->variante?->producto ?? $it->producto)?->nombre ?? $it->sku_dropi }}</div>
+                                @if($it->variante)
+                                    <div style="font-size:.8rem;color:#9ca3af;">{{ $it->variante->color_nombre }}@if($it->variante->talla) · T{{ $it->variante->talla }}@endif</div>
+                                @endif
+                                <div style="font-family:monospace;font-size:.72rem;color:#cbd5e1;margin-top:.25rem;">{{ $it->variante?->codigo_barras ?? $it->producto?->referencia ?? '—' }}</div>
                             </div>
                             <div style="text-align:right;">
                                 <div style="font-size:1.25rem;font-weight:700;color:#f59e0b;">×{{ $it->cantidad ?? 1 }}</div>
+                                {{-- Lo escaneado de esta línea, para que una de varias unidades no parezca sin tocar. --}}
+                                @if(! $isPicked && (int) $it->cantidad_pickeada > 0)
+                                    <div style="font-size:.75rem;color:#10b981;font-weight:700;">{{ (int) $it->cantidad_pickeada }} de {{ $it->cantidad }}</div>
+                                @endif
                                 <div style="font-size:1.5rem;">{{ $isPicked ? '✅' : '⏳' }}</div>
                             </div>
                         </div>
@@ -176,7 +190,7 @@
                     <div style="padding:.6rem .75rem;background:#1e293b;border-left:3px solid #3b82f6;border-radius:.4rem;">
                         <div style="font-family:ui-monospace,monospace;font-weight:700;color:#93c5fd;font-size:.85rem;">{{ $q['guia'] }}</div>
                         <div style="font-size:.8rem;color:#e5e7eb;">{{ \Illuminate\Support\Str::limit($q['cliente'], 22) }}</div>
-                        <div style="font-size:.7rem;color:#9ca3af;">{{ $q['ciudad'] }} · {{ $q['items'] }} ítems</div>
+                        <div style="font-size:.7rem;color:#9ca3af;">{{ $q['ciudad'] }} · {{ $q['items'] }} {{ $q['items'] === 1 ? 'ítem' : 'ítems' }}</div>
                     </div>
                 @endforeach
             </div>

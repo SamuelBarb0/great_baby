@@ -91,6 +91,17 @@ class EscanerController extends Controller implements HasMiddleware
             ]);
         }
 
+        // Sólo se despacha lo empacado (despachar() lo exige): una guía todavía
+        //   sin empacar no puede ofrecerse como «lista», el botón fallaba después.
+        if ($pedido->estado !== EstadoPedidoDropi::Empacado) {
+            return response()->json([
+                'accion' => 'sin_empacar', 'pedido_id' => $pedido->id, 'guia' => $guia,
+                'titulo' => '⏳ Todavía no está empacado',
+                'detalle' => "Estado actual: {$ctx['estado']}. Empácalo en la Estación de Empaque antes de despacharlo.",
+                'color' => 'warning', 'context' => $ctx,
+            ]);
+        }
+
         return response()->json([
             'accion' => 'despachar', 'pedido_id' => $pedido->id, 'guia' => $guia,
             'titulo' => '✅ Listo para despachar',

@@ -135,7 +135,7 @@ class VistaAlistador extends Page
             ->where('corte_id', $this->corteId)
             ->whereIn('estado', [EstadoPedidoDropi::Pending, EstadoPedidoDropi::Alistando])
             ->whereNotIn('id', $bloqueadosPorOtros)
-            ->with('items')
+            ->with(['items.variante.producto', 'items.producto'])
             ->orderBy('created_at')
             ->limit(20)
             ->get();
