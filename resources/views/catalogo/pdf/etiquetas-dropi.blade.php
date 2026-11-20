@@ -5,7 +5,7 @@
     @php
         // Medidas del rollo (mm) que fija el controlador; el margen lateral es lo
         // que sobra del ancho del papel tras las columnas y sus separaciones.
-        $margen = ($rollo['ancho'] - $rollo['columnas'] * $rollo['etiqueta'] - ($rollo['columnas'] - 1) * $rollo['separacion']) / 2;
+        $margen = round(($rollo['ancho'] - $rollo['columnas'] * $rollo['etiqueta'] - ($rollo['columnas'] - 1) * $rollo['separacion']) / 2, 3);
     @endphp
     <style>
         {{-- Etiquetas de «Mis productos en Dropi»: el nombre del producto arriba
@@ -13,8 +13,8 @@
              misma imagen), que es lo que lee la pistola de empaque. Sin QR ni
              precio. Es el diseño de la plantilla de BarTender de la bodega
              (20-nov-2026). Las del catálogo siguen en etiquetas-lote.
-             El rollo de la térmica SAT TT460 trae 3 etiquetas de 32,5 × 25 mm
-             por fila: cada página es una fila completa del rollo.
+             El rollo de la térmica SAT TT460 trae 3 etiquetas de 32,49 × 25 mm
+             por fila, sin separación: cada página es una fila completa del rollo.
              DomPDF no entiende flex ni grid: el acomodo va en tabla. --}}
         * { box-sizing:border-box; margin:0; padding:0; }
         @page { margin: 0; }
@@ -31,7 +31,7 @@
         <table class="fila{{ $loop->last ? '' : ' salto' }}">
             <tr>
                 @for($i = 0; $i < $rollo['columnas']; $i++)
-                    @if($i > 0)<td class="separacion"></td>@endif
+                    @if($i > 0 && $rollo['separacion'] > 0)<td class="separacion"></td>@endif
                     <td class="etiqueta">
                         @isset($fila[$i])
                             {{-- Dos renglones como máximo: un nombre largo no debe empujar las barras fuera de la etiqueta. --}}
