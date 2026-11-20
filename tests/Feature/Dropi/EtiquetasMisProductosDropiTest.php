@@ -88,9 +88,9 @@ it('el PDF lleva el código del ERP: el de la variante o la referencia del agreg
     });
 
     $pdf = $this->get(route('catalogo.etiquetas.dropi', 1))->assertOk()->assertHeader('content-type', 'application/pdf');
-    // Cada página es una fila completa del rollo de la SAT TT460: 104 × 25 mm
-    // (3 etiquetas de 32,5 mm a 3 mm, como la plantilla de BarTender de la bodega).
-    expect($pdf->getContent())->toContain('/MediaBox [0.000 0.000 294.803 70.866]');
+    // Cada página es una fila completa del rollo de la SAT TT460: 100 × 25 mm
+    // (3 columnas de 32,49 mm sin separación, como la plantilla de BarTender de la bodega).
+    expect($pdf->getContent())->toContain('/MediaBox [0.000 0.000 283.465 70.866]');
     $this->get(route('catalogo.etiquetas.dropi', 2))->assertOk();
 
     // La variación sin vincular (Rosa 6M) no sale; la vinculada lleva el código de la variante.
@@ -101,10 +101,11 @@ it('el PDF lleva el código del ERP: el de la variante o la referencia del agreg
 });
 
 it('las etiquetas de Dropi llevan el nombre y el código de barras; las del catálogo siguen completas', function () {
-    $rollo = ['ancho' => 104, 'alto' => 25, 'columnas' => 3, 'etiqueta' => 32.5, 'separacion' => 3];
+    $rollo = ['ancho' => 100, 'alto' => 25, 'columnas' => 3, 'etiqueta' => 32.49, 'separacion' => 0];
     $dropi = view('catalogo.pdf.etiquetas-dropi', ['rollo' => $rollo, 'etiquetas' => [['codigo' => '899', 'barras' => 'data:image/png;base64,AAA', 'nombre' => 'Carro lanzador', 'detalle' => 'Azul', 'precio' => 12000]]])->render();
     // Como la plantilla de BarTender: nombre arriba (en mayúsculas por CSS) y barras; sin QR, variación ni precio.
-    expect($dropi)->toContain('alt="899"')->toContain('Carro lanzador')->toContain('width: 32.5mm')->toContain('width: 30.5mm; height: 12mm;')
+    expect($dropi)->toContain('alt="899"')->toContain('Carro lanzador')->toContain('width: 32.49mm')->toContain('margin-left: 1.265mm')
+        ->toContain('width: 30.49mm; height: 12mm;')->not->toContain('class="separacion"')
         ->not->toContain('QR')->not->toContain('Azul')->not->toContain('12.000');
 
     // Un nombre muy largo se corta para no empujar las barras fuera de la etiqueta; sin nombre, solo barras.

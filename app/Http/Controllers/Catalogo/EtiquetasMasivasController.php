@@ -18,13 +18,14 @@ use Symfony\Component\HttpFoundation\Response;
 class EtiquetasMasivasController extends Controller
 {
     /**
-     * Rollo de la térmica SAT TT460 para las etiquetas de Dropi, en mm: 3
-     * etiquetas de 32,5 × 25 por fila, a 3 mm entre columnas. Son las medidas
-     * de la plantilla de BarTender con la que ya imprime la bodega
-     * (GREATBABY.btw, 20-nov-2026). El ancho del papel (104) es el de las tres
-     * columnas y sus separaciones; si la impresión se corre, se ajusta aquí.
+     * Rollo de la térmica SAT TT460 para las etiquetas de Dropi, en mm: papel
+     * de 100 × 25 con 3 columnas de 32,49 y sin separación entre ellas (el
+     * blanco que se ve entre etiquetas ya va dentro de cada columna); lo que
+     * sobra, 1,27 por lado, es el margen. Leído en Configurar página de la
+     * plantilla de BarTender de la bodega (GREATBABY.btw, 20-nov-2026). El
+     * driver de la impresora debe tener el mismo papel de 100 × 25.
      */
-    private const ROLLO_DROPI = ['ancho' => 104, 'alto' => 25, 'columnas' => 3, 'etiqueta' => 32.5, 'separacion' => 3];
+    private const ROLLO_DROPI = ['ancho' => 100, 'alto' => 25, 'columnas' => 3, 'etiqueta' => 32.49, 'separacion' => 0];
 
     /** Alto máximo (mm) del código de barras: lo que dejan libre los 25 mm tras dos renglones de nombre. */
     private const BARRAS_ALTO_MAX = 14;
