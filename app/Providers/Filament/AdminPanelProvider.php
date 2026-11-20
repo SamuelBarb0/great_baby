@@ -28,9 +28,6 @@ class AdminPanelProvider extends PanelProvider
     /** La lista (carga masiva), crear (`/add`) y editar (`/edit?id=`) cuelgan de aquí. */
     private const PREFIJO_PRODUCTOS_DROPI = 'https://app.dropi.co/dashboard/products';
 
-    /** Donde se escanean las guías que se le entregan a la transportadora. */
-    public const RECOLECCIONES_DROPI = 'https://app.dropi.co/dashboard/settings/pickups';
-
     public function panel(Panel $panel): Panel
     {
         return $panel
@@ -87,24 +84,6 @@ class AdminPanelProvider extends PanelProvider
                     ->group('Productos')
                     ->sort(5)
                     ->visible(fn (): bool => \App\Auth\Permisos::puede(auth()->user(), 'dropi_productos')),
-                // El catálogo del ERP, para quien no tiene cuenta en Dropi
-                //   (reunión del 19-nov-2026). Es el de la app, no el
-                //   ProductoResource de Filament, que sigue oculto.
-                NavigationItem::make('Catálogo de productos')
-                    ->url('/app/catalogo/productos')
-                    ->icon('heroicon-o-book-open')
-                    ->group('Productos')
-                    ->sort(6)
-                    ->visible(fn (): bool => \App\Auth\Permisos::puede(auth()->user(), 'productos')),
-                // La entrega a la transportadora: todas las guías se escanean
-                //   en las recolecciones de Dropi (reunión del 19-nov-2026).
-                //   Va en pestaña aparte con la sesión de Dropi de la persona.
-                NavigationItem::make('Escanear guías en Dropi')
-                    ->url(self::RECOLECCIONES_DROPI, shouldOpenInNewTab: true)
-                    ->icon('heroicon-o-truck')
-                    ->group('Operación')
-                    ->sort(3)
-                    ->visible(fn (): bool => \App\Modules\Dropi\Filament\Pages\VistaAlistador::canAccess()),
             ])
             // «Compras» y «Contabilidad» son de la línea Dropi, separadas de las
             //   otras empresas (7-nov): ver Dropi\Filament\Support\PaginaTablaDropi.

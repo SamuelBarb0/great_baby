@@ -3,16 +3,12 @@
 namespace App\Modules\Dropi\Filament\Resources\DropiPedidoResource\Pages;
 
 use App\Modules\Dropi\Actions\SincronizarDropiWeb;
-use App\Modules\Dropi\Enums\EstadoPedidoDropi;
 use App\Modules\Dropi\Exceptions\DropiSesionNoDisponible;
 use App\Modules\Dropi\Filament\Resources\DropiPedidoResource;
-use App\Modules\Dropi\Models\DropiPedido;
 use Filament\Actions\Action;
 use Filament\Actions\CreateAction;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ListRecords;
-use Filament\Schemas\Components\Tabs\Tab;
-use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\RateLimiter;
 
@@ -72,25 +68,6 @@ class ListDropiPedidos extends ListRecords
                         ->send();
                 }),
             // "Crear Pedido" removido: los pedidos entran solo por Excel (ver canCreate()).
-        ];
-    }
-
-    /**
-     * Pestañas por etapa de la bodega (reunión del 19-nov-2026: «quiero ver los
-     * pendientes»). «Todos» queda primero y por defecto, como estaba la lista.
-     */
-    public function getTabs(): array
-    {
-        $etapa = fn (string $nombre, array $estados) => Tab::make($nombre)
-            ->modifyQueryUsing(fn (Builder $query) => $query->whereIn('estado', $estados))
-            ->badge(fn () => DropiPedido::query()->whereIn('estado', $estados)->count());
-
-        return [
-            'todos' => Tab::make('Todos'),
-            'nuevos' => $etapa('Nuevos', [EstadoPedidoDropi::Pending, EstadoPedidoDropi::PendienteInventario]),
-            'por_empacar' => $etapa('Por empacar', [EstadoPedidoDropi::Alistando]),
-            'empacados' => $etapa('Empacados', [EstadoPedidoDropi::Empacado]),
-            'despachados' => $etapa('Despachados', [EstadoPedidoDropi::Despachado]),
         ];
     }
 

@@ -1050,11 +1050,6 @@ Route::middleware(['web', 'auth'])->group(function () {
             ->name('dropi.plantilla.productos');
     });
 
-    // Recolección del corte en PDF: sin datos del comprador, así que la baja
-    //   quien entra a la Vista del Alistador (el controlador lo verifica).
-    Route::get('/dropi/recoleccion/{corte}/pdf', [\App\Http\Controllers\Dropi\RecoleccionPdfController::class, 'descargar'])
-        ->name('dropi.recoleccion.pdf');
-
     // P9 · escáner con throttle para evitar despacho masivo o enumeración de guías.
     Route::post('/dropi/escaner/analizar', [EscanerController::class, 'analizar'])
         ->middleware('throttle:60,1')->name('dropi.escaner.analizar');

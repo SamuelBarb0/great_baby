@@ -9,8 +9,6 @@ use App\Modules\Dropi\Models\DropiAlistadorLock;
 use App\Modules\Dropi\Models\DropiCorte;
 use App\Modules\Dropi\Models\DropiEstadoBitacora;
 use App\Modules\Dropi\Models\DropiPedido;
-use App\Modules\Dropi\Models\DropiRecoleccionMarca;
-use App\Modules\Dropi\Support\RecoleccionDelCorte;
 use BackedEnum;
 use Filament\Actions\Action;
 use Filament\Notifications\Notification;
@@ -68,47 +66,45 @@ class VistaAlistador extends Page
     }
 
     /**
-     * §5, §6 modo recolección — totales por producto en el corte, en el orden
-     * del recorrido de la bodega y con el «chulito» de quien ya recogió cada
-     * referencia (ver RecoleccionDelCorte).
+     * §5, §6 modo recolección — totales por producto en el corte.
      */
     public function getRecoleccionProperty(): array
     {
-        return $this->corteId ? app(RecoleccionDelCorte::class)->conMarcas($this->corteId) : [];
-    }
-
-    /**
-     * Marca o desmarca una referencia del corte como recogida. La marca guarda
-     * el total que pedía el corte en ese momento; es compartida entre tablets.
-     */
-    public function marcarRecogido(string $sku): void
-    {
-        if (! static::canAccess() || ! $this->corteId) {
-            return;
+        if (! $this->corteId) {
+            return [];
         }
 
-        $total = app(RecoleccionDelCorte::class)->totales($this->corteId)[$sku]['total_unidades'] ?? null;
-        if ($total === null) {
-            Notification::make()->title('Esa referencia ya no está por recoger en este corte.')->warning()->send();
-
-            return;
-        }
-
-        $marca = DropiRecoleccionMarca::query()
+        $pedidos = DropiPedido::query()
             ->where('corte_id', $this->corteId)
-            ->where('sku_dropi', $sku)
-            ->first();
+            ->whereNotIn('estado', [
+                EstadoPedidoDropi::Empacado, EstadoPedidoDropi::Despachado,
+                EstadoPedidoDropi::Entregado, EstadoPedidoDropi::Pagado,
+                EstadoPedidoDropi::CanceladoDropi, EstadoPedidoDropi::CanceladoGb,
+                EstadoPedidoDropi::Devuelto,
+            ])
+            ->with(['items.variante.producto'])
+            ->get();
 
-        if ($marca && $marca->cantidad >= $total) {
-            $marca->delete();
-
-            return;
+        $grupos = [];
+        foreach ($pedidos as $ped) {
+            foreach ($ped->items as $it) {
+                $key = $it->sku_dropi;
+                $grupos[$key] ??= [
+                    'sku' => $key,
+                    'producto' => $it->variante?->producto?->nombre ?? 'SKU sin match',
+                    'referencia' => $it->variante?->producto?->referencia ?? '—',
+                    'variante' => trim(
+                        ($it->variante?->color_nombre ?? '') . ' ' . ($it->variante?->diseno_nombre ?? '')
+                        . ' ' . ($it->variante?->talla ?? '')
+                    ),
+                    'total_unidades' => 0,
+                    'ubicacion_sugerida' => $it->ubicacionAsignada?->codigo ?? '—',
+                ];
+                $grupos[$key]['total_unidades'] += (int) $it->cantidad;
+            }
         }
 
-        DropiRecoleccionMarca::query()->updateOrCreate(
-            ['corte_id' => $this->corteId, 'sku_dropi' => $sku],
-            ['cantidad' => $total, 'marcado_por' => auth()->id(), 'marcado_at' => now()],
-        );
+        return array_values($grupos);
     }
 
     /**
@@ -128,19 +124,13 @@ class VistaAlistador extends Page
             ->where('heartbeat_at', '>=', now()->subMinutes(10))
             ->pluck('pedido_id');
 
-        // Los 20 más viejos, como antes (nadie se queda esperando), pero en
-        //   el orden de la ruta de la bodega: reunión del 19-nov-2026, «hacer
-        //   lo mismo para el empaque».
-        $cola = DropiPedido::query()
+        return DropiPedido::query()
             ->where('corte_id', $this->corteId)
             ->whereIn('estado', [EstadoPedidoDropi::Pending, EstadoPedidoDropi::Alistando])
             ->whereNotIn('id', $bloqueadosPorOtros)
-            ->with('items')
             ->orderBy('created_at')
             ->limit(20)
             ->get();
-
-        return new Collection(app(RecoleccionDelCorte::class)->ordenarPorRuta($cola)->all());
     }
 
     /**

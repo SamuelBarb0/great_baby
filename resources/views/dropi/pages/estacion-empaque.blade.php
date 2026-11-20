@@ -110,7 +110,7 @@
                     @endif
                     <button type="button" onclick="window.abrirCamara()"
                             style="padding:.75rem 1.25rem;background:{{ $registroActivo?->foto_path ? '#374151' : 'linear-gradient(90deg,#f59e0b,#b45309)' }};color:white;border:0;border-radius:.5rem;font-weight:700;font-size:.95rem;cursor:pointer;box-shadow:0 4px 12px rgba(245,158,11,.35);">
-                        📸 {{ $registroActivo?->foto_path ? 'Cambiar foto' : (setting('empaque.foto_obligatoria', true) ? 'Foto paquete' : 'Foto (opcional)') }}
+                        📸 {{ $registroActivo?->foto_path ? 'Cambiar foto' : 'Foto paquete' }}
                     </button>
                     {{-- Capa de seguridad: manda la ubicación del equipo con la confirmación (ver Trazabilidad). --}}
                     <button type="button"
@@ -137,7 +137,7 @@
                 </div>
             </div>
 
-            <div style="margin-top:1rem;display:grid;grid-template-columns:repeat(auto-fill,minmax(min(280px,100%),1fr));gap:.75rem;">
+            <div style="margin-top:1rem;display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:.75rem;">
                 @foreach($p->items as $it)
                     @php $isPicked = ! is_null($it->pickeado_at ?? null); @endphp
                     <div style="padding:.75rem 1rem;background:{{ $isPicked ? 'rgba(16,185,129,.18)' : '#0f172a' }};border-left:3px solid {{ $isPicked ? '#10b981' : '#6b7280' }};border-radius:.5rem;">
@@ -171,7 +171,7 @@
             <div style="font-size:.75rem;color:#3b82f6;text-transform:uppercase;letter-spacing:2px;font-weight:700;margin-bottom:.6rem;">
                 🎯 Cola sugerida ({{ count($cola) }})
             </div>
-            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(min(220px,100%),1fr));gap:.5rem;">
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:.5rem;">
                 @foreach($cola as $q)
                     <div style="padding:.6rem .75rem;background:#1e293b;border-left:3px solid #3b82f6;border-radius:.4rem;">
                         <div style="font-family:ui-monospace,monospace;font-weight:700;color:#93c5fd;font-size:.85rem;">{{ $q['guia'] }}</div>
