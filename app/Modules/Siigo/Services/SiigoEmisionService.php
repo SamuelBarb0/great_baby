@@ -1225,6 +1225,17 @@ class SiigoEmisionService
             if ($delMetodo) {
                 return (int) $delMetodo;
             }
+
+            // Un cobro desde la wallet de Dropi NO cae al tipo general: ese
+            // tipo de pago apunta al banco, y en SIIGO la plata entraría a
+            // Bancolombia cuando está en la billetera (19-nov). Mejor frenar
+            // con el motivo que asentar en la cuenta equivocada.
+            if ($p->medio_pago === 'wallet_dropi') {
+                throw new RuntimeException(
+                    'Falta el tipo de pago de SIIGO de la «Wallet Dropi» (Cartera → Métodos de pago). '
+                    .'Créelo en SIIGO apuntando a la cuenta 11100501 Billetera Virtual Dropi y elíjalo en el método.'
+                );
+            }
         }
 
         return (int) setting('siigo.payment_type_recibo', 0)

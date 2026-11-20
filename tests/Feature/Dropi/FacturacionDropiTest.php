@@ -177,7 +177,7 @@ it('un pedido sin productos vinculados se despacha igual: queda la remisión, si
         ->and(DropiRemision::where('pedido_id', $p->id)->exists())->toBeTrue();
 });
 
-it('el pago de Dropi cierra la factura con un solo crédito al 1305, y el reverso la reabre', function () {
+it('el pago de Dropi cierra la factura con un solo crédito a la cartera, y el reverso la reabre', function () {
     $p = facDespachar(facPedido('F-7'), $this->user->id);
     $p->transicionar(EstadoPedidoDropi::Entregado, 'api');
 
@@ -192,7 +192,7 @@ it('el pago de Dropi cierra la factura con un solo crédito al 1305, y el revers
     // La CxC se acredita una sola vez (el recibo), no también desde la wallet.
     $creditoCxC = (float) MovimientoContable::where('cuenta_puc', (string) setting('contable.cta_cxc_default'))->sum('haber');
     expect($creditoCxC)->toBe(119000.0)
-        ->and((float) MovimientoContable::where('cuenta_puc', '111015')->sum('debe'))->toBe(119000.0);
+        ->and((float) MovimientoContable::where('cuenta_puc', (string) setting('contable.cta_dropi_wallet'))->sum('debe'))->toBe(119000.0);
 
     // Dropi corrige el estado de la guía y reversa el pago.
     app(ConciliarWalletDropi::class)->conciliar([pagoDropi($p, 7002, -119000, '1009')]);
@@ -200,7 +200,7 @@ it('el pago de Dropi cierra la factura con un solo crédito al 1305, y el revers
         ->and((float) FacturaVenta::find($f->id)->saldo)->toBe(119000.0);
 });
 
-it('9.2 · una sanción de Dropi (salida) es gasto 5395 con Dropi como tercero, no ingreso', function () {
+it('9.2 · una sanción de Dropi (salida) es gasto de sanciones con Dropi como tercero, no ingreso', function () {
     Reglas::set('dropi.nit_tercero', '901.111.222-3');
 
     DropiWalletMovimiento::create([
@@ -209,10 +209,10 @@ it('9.2 · una sanción de Dropi (salida) es gasto 5395 con Dropi como tercero, 
     ]);
 
     $lineas = MovimientoContable::where('origen_type', DropiWalletMovimiento::class)->get();
-    $gasto = $lineas->firstWhere('cuenta_puc', '5395');
+    $gasto = $lineas->firstWhere('cuenta_puc', (string) setting('contable.cta_dropi_sancion'));
     expect($gasto)->not->toBeNull()
         ->and((float) $gasto->debe)->toBe(15000.0)
-        ->and($lineas->firstWhere('cuenta_puc', '4295'))->toBeNull()
+        ->and($lineas->firstWhere('cuenta_puc', (string) setting('contable.cta_dropi_indemnizacion')))->toBeNull()
         ->and(App\Models\Contacto::find($gasto->tercero_id)?->numero_documento)->toBe('9011112223');
 });
 

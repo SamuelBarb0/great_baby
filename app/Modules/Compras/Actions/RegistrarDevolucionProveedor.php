@@ -82,7 +82,8 @@ class RegistrarDevolucionProveedor
             //    IVA: si lo había, también se reversa 2408 crédito contra 2205.
             $terceroType = \App\Models\Contacto::class;
             MovimientoContable::create([
-                'fecha' => $ts, 'cuenta_puc' => setting('contable.cta_proveedores_default'),
+                // Si la compra es de Dropi, sus cuentas; si no, las de siempre.
+                'fecha' => $ts, 'cuenta_puc' => \App\Modules\Dropi\Support\CuentasDropi::proveedores($d->recepcion),
                 'tercero_type' => $terceroType, 'tercero_id' => $d->proveedor_id,
                 'debe' => $d->total, 'haber' => 0,
                 'origen_type' => DevolucionProveedor::class, 'origen_id' => $d->id,
@@ -90,16 +91,29 @@ class RegistrarDevolucionProveedor
                 'user_id' => $userId,
             ]);
             $ctaInv = $d->ubicacion?->ctaInventarioEfectiva() ?? (string) setting('contable.cta_inventario_default');
-            MovimientoContable::create([
-                'fecha' => $ts, 'cuenta_puc' => $ctaInv,
-                'debe' => 0, 'haber' => $d->subtotal,
-                'origen_type' => DevolucionProveedor::class, 'origen_id' => $d->id,
-                'descripcion' => "Devolución {$d->numero} · baja inventario",
-                'user_id' => $userId,
-            ]);
+            // Dropi: sale de la cuenta de inventario de la familia de cada
+            // producto, la misma a la que entró en la recepción.
+            $porCuenta = [$ctaInv => (float) $d->subtotal];
+            if (\App\Modules\Dropi\Support\CuentasDropi::esDropi($d->recepcion)) {
+                $porCuenta = [];
+                foreach ($items as $it) {
+                    $prod = \App\Modules\Dropi\Support\CuentasDropi::productoDe($it->producto_id, $it->variante_id);
+                    $cta = (string) (\App\Modules\Dropi\Support\CuentasDropi::inventario($prod) ?: $ctaInv);
+                    $porCuenta[$cta] = round(($porCuenta[$cta] ?? 0) + round((float) $it->cantidad * (float) $it->costo_unit, 2), 2);
+                }
+            }
+            foreach ($porCuenta as $cta => $valor) {
+                MovimientoContable::create([
+                    'fecha' => $ts, 'cuenta_puc' => $cta,
+                    'debe' => 0, 'haber' => $valor,
+                    'origen_type' => DevolucionProveedor::class, 'origen_id' => $d->id,
+                    'descripcion' => "Devolución {$d->numero} · baja inventario",
+                    'user_id' => $userId,
+                ]);
+            }
             if ($d->iva > 0) {
                 MovimientoContable::create([
-                    'fecha' => $ts, 'cuenta_puc' => setting('contable.cta_iva_compra_default'),
+                    'fecha' => $ts, 'cuenta_puc' => \App\Modules\Dropi\Support\CuentasDropi::ivaCompra($d->recepcion),
                     'debe' => 0, 'haber' => $d->iva,
                     'origen_type' => DevolucionProveedor::class, 'origen_id' => $d->id,
                     'descripcion' => "Devolución {$d->numero} · reversa IVA",

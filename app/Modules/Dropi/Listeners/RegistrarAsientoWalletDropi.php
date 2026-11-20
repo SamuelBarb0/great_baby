@@ -5,26 +5,65 @@ namespace App\Modules\Dropi\Listeners;
 use App\Modules\Cartera\Models\MovimientoContable;
 use App\Modules\Dropi\Enums\TipoMovimientoWallet;
 use App\Modules\Dropi\Models\DropiWalletMovimiento;
-use Illuminate\Database\Eloquent\Events\Created;
 use Illuminate\Support\Facades\DB;
 
 /**
- * P4 · Cada movimiento wallet Dropi genera un asiento contable de partida doble.
- * Idempotente por (origen_type, origen_id): la limpieza previa borra asientos
- * pasados del mismo movimiento antes de recrearlos.
+ * Cada movimiento de la wallet de Dropi genera su asiento de partida doble.
  *
- * Cuentas PUC usadas:
- *   111015 · Wallet Dropi (sub-analítica de bancos)
- *   1305   · CxC Dropi por guía cobrada
- *   1110   · Bancos GB (retiros)
- *   4295   · Otros ingresos (indemnizaciones)
- *   5195   · Gastos de flete/transporte
- *   530525 · Comisiones bancarias/tarjetas
- *   5395   · Otros gastos operacionales (sanciones)
+ * ── La regla, en una línea ─────────────────────────────────────────────────
+ *
+ *   La wallet es una cuenta de banco más (11100501). Lo que ENTRA la debita,
+ *   lo que SALE la acredita, y la otra pata va a la cuenta del concepto.
+ *
+ *   | Movimiento                       | Contrapartida (regla)             |
+ *   |----------------------------------|-----------------------------------|
+ *   | Pago de guía SIN factura         | contable.cta_dropi_anticipo   28050501     |
+ *   | Pago de guía CON factura         | (lo asienta su recibo de caja)    |
+ *   | Retiro a banco / retiro negado   | contable.cta_dropi_banco_retiro 11200501   |
+ *   | Flete de garantía                | contable.cta_dropi_flete      51355001     |
+ *   | Comisión de tarjeta              | contable.cta_dropi_comision_tarjeta 53051501 |
+ *   | Indemnización que sale (sanción) | contable.cta_dropi_sancion    53952001     |
+ *   | Indemnización que entra          | contable.cta_dropi_indemnizacion 42950502  |
+ *   | Otro que sale / que entra        | contable.cta_dropi_otro_salida / _entrada  |
+ *
+ * ── Por qué el SIGNO manda (19-nov-2026) ───────────────────────────────────
+ *
+ * Antes cada tipo tenía la dirección fija y se asentaba `abs($monto)`. Dropi
+ * manda reversos con el mismo tipo y el signo opuesto, así que:
+ *   · un «retiro negado» (1021, la plata VUELVE a la wallet) se asentaba como
+ *     OTRO retiro: la wallet bajaba dos veces y el banco subía por plata que
+ *     nunca llegó;
+ *   · el reverso de un flete o de una comisión se asentaba como otro cobro;
+ *   · un reverso de pago (1009) de un pedido sin factura se asentaba como otro
+ *     pago.
+ * Con la dirección tomada del signo, un reverso deshace exactamente lo que
+ * hizo el movimiento original.
+ *
+ * ── Por qué el pago sin factura va a ANTICIPO y no a la cartera ────────────
+ *
+ * Abonarlo a 13050501 sin una factura que la hubiera cargado dejaba la cartera
+ * de Dropi en NEGATIVO. La plata que Dropi paga por un pedido que todavía no se
+ * facturó es un anticipo del cliente: al facturar, FacturarPedidoDropi cruza
+ * esos pagos con la factura (recibo de caja) y este mismo listener reversa el
+ * anticipo — la 28050501 vuelve a cero y la factura queda pagada.
+ *
+ * ── Historia ───────────────────────────────────────────────────────────────
+ *
+ * Nunca borra: si el movimiento ya tenía asiento, primero escribe la reversa
+ * (marcada `[REVERSA #id]`) y después el nuevo. Las cuentas salen de las reglas
+ * `contable.cta_dropi_*` (pantalla de Reglas), no de literales: antes la wallet iba a la
+ * 111015, que no existe en el PUC de Great Baby.
+ *
+ * Lo que este listener escribe viaja a SIIGO como comprobante contable
+ * (PushAsientoDropiASiigo), con Dropi como tercero.
  */
 class RegistrarAsientoWalletDropi
 {
-    public const CUENTA_WALLET = '111015';
+    /** La cuenta de la billetera, según la regla. */
+    public static function cuentaWallet(): string
+    {
+        return (string) setting('contable.cta_dropi_wallet');
+    }
 
     /**
      * Usuario del ERP al que se atribuye el asiento: el del ajuste manual
@@ -45,96 +84,160 @@ class RegistrarAsientoWalletDropi
 
     public function handle(DropiWalletMovimiento $mov): void
     {
-        DB::transaction(function () use ($mov) {
-            // Re-audit DR-θ (FUNC-M2) · antes: HARD-DELETE de asientos previos
-            //   → si el mov cambió tras cerrar contabilidad del periodo, el
-            //   libro mayor se corrompía sin traza. Ahora: si ya existe
-            //   asiento previo para este movimiento, generamos AJUSTE INVERSO
-            //   (contra-partida) y luego el nuevo. Nunca borrar historial.
-            $previos = MovimientoContable::query()
-                ->where('origen_type', DropiWalletMovimiento::class)
-                ->where('origen_id', $mov->id)
-                ->orderBy('id')
-                ->get();
+        $escribio = DB::transaction(function () use ($mov) {
+            $escribio = $this->reversarPrevios($mov);
 
-            if ($previos->isNotEmpty()) {
-                foreach ($previos as $p) {
-                    // No re-invertir asientos que ya fueron reversados (marca en descripcion).
-                    if (str_starts_with((string) $p->descripcion, '[REVERSA]')) continue;
-                    // Chequeo idempotente: si ya existe la reversa de este id, saltar.
-                    $yaReversado = MovimientoContable::query()
-                        ->where('origen_type', DropiWalletMovimiento::class)
-                        ->where('origen_id', $mov->id)
-                        ->where('descripcion', 'LIKE', '[REVERSA #' . $p->id . ']%')
-                        ->exists();
-                    if ($yaReversado) continue;
-
-                    MovimientoContable::create([
-                        'fecha' => now(),
-                        'cuenta_puc' => $p->cuenta_puc,
-                        'debe' => (float) $p->haber,   // invertido
-                        'haber' => (float) $p->debe,   // invertido
-                        'origen_type' => DropiWalletMovimiento::class,
-                        'origen_id' => $mov->id,
-                        'descripcion' => '[REVERSA #' . $p->id . '] ' . ($p->descripcion ?? ''),
-                        'user_id' => auth()->id(),
-                    ]);
-                }
+            $lineas = $this->lineasPara($mov);
+            if ($lineas) {
+                MovimientoContable::registrarAsientoAtomico($lineas);
+                $escribio = true;
             }
 
-            $tipo = $mov->tipo instanceof TipoMovimientoWallet
-                ? $mov->tipo
-                : TipoMovimientoWallet::tryFrom((string) $mov->tipo);
-            if (! $tipo) return;
-
-            $fecha = $mov->fecha;
-            $monto = (float) $mov->monto;
-
-            [$debe, $haber, $desc] = $this->cuentasPara($tipo, $monto, $mov);
-
-            if (! $debe || ! $haber) return;
-
-            // 9.2 · lo que cobra o paga Dropi (fletes de garantía, tarjeta,
-            // sanciones, indemnizaciones) se asienta con Dropi como tercero.
-            $dropi = in_array($tipo, [
-                TipoMovimientoWallet::FleteGarantia, TipoMovimientoWallet::Tarjeta, TipoMovimientoWallet::Indemnizacion,
-            ], true) ? self::terceroDropi() : null;
-            $tercero = $dropi
-                ? ['tercero_type' => \App\Models\Contacto::class, 'tercero_id' => $dropi->id]
-                : ['tercero_type' => null, 'tercero_id' => null];
-
-            MovimientoContable::create([
-                'fecha' => $fecha,
-                'cuenta_puc' => $debe,
-                ...$tercero,
-                'debe' => abs($monto), 'haber' => 0,
-                'origen_type' => DropiWalletMovimiento::class,
-                'origen_id' => $mov->id,
-                'descripcion' => $desc,
-                // N5 seg · en contexto de cron auth()->id() es null.
-                'user_id' => self::usuarioDelAsiento($mov),
-            ]);
-            MovimientoContable::create([
-                'fecha' => $fecha,
-                'cuenta_puc' => $haber,
-                ...$tercero,
-                'debe' => 0, 'haber' => abs($monto),
-                'origen_type' => DropiWalletMovimiento::class,
-                'origen_id' => $mov->id,
-                'descripcion' => $desc,
-                // N5 seg · en contexto de cron auth()->id() es null.
-                'user_id' => self::usuarioDelAsiento($mov),
-            ]);
+            return $escribio;
         });
+
+        if ($escribio) {
+            $id = $mov->id;
+            DB::afterCommit(fn () => \App\Modules\Siigo\Jobs\PushAsientoDropiASiigo::dispatch(DropiWalletMovimiento::class, $id));
+        }
+    }
+
+    /**
+     * Las dos líneas del asiento, o [] si este movimiento no se asienta acá.
+     *
+     * @return array<int,array<string,mixed>>
+     */
+    public function lineasPara(DropiWalletMovimiento $mov): array
+    {
+        $tipo = $mov->tipo instanceof TipoMovimientoWallet
+            ? $mov->tipo
+            : TipoMovimientoWallet::tryFrom((string) $mov->tipo);
+        $monto = round((float) $mov->monto, 2);
+
+        if (! $tipo || abs($monto) < 0.01) {
+            return [];
+        }
+
+        [$contra, $desc] = $this->contrapartida($tipo, $monto, $mov);
+        if (! $contra) {
+            return [];
+        }
+
+        $entra = $monto > 0;
+        $valor = abs($monto);
+        $wallet = self::cuentaWallet();
+        $dropi = self::terceroDropi();
+        $base = [
+            'fecha' => $mov->fecha,
+            'tercero_type' => $dropi ? \App\Models\Contacto::class : null,
+            'tercero_id' => $dropi?->id,
+            'origen_type' => DropiWalletMovimiento::class,
+            'origen_id' => $mov->id,
+            'descripcion' => $desc,
+            'user_id' => self::usuarioDelAsiento($mov),
+        ];
+
+        return [
+            [...$base, 'cuenta_puc' => $entra ? $wallet : $contra, 'debe' => $valor, 'haber' => 0],
+            [...$base, 'cuenta_puc' => $entra ? $contra : $wallet, 'debe' => 0, 'haber' => $valor],
+        ];
+    }
+
+    /**
+     * La cuenta del otro lado de la wallet y la descripción del asiento.
+     *
+     * @return array{0:string,1:string}  ['' , ''] = no se asienta acá
+     */
+    protected function contrapartida(TipoMovimientoWallet $tipo, float $monto, DropiWalletMovimiento $mov): array
+    {
+        $ref = $mov->pedido?->guia ? "guía {$mov->pedido->guia}" : 'wallet Dropi';
+        $entra = $monto > 0;
+
+        // El pago de un pedido facturado lo asienta su recibo de caja (PagoVenta
+        // `wallet_dropi`, ConciliarWalletDropi::registrarCobro). Si también se
+        // asentara acá, la wallet se debitaría dos veces.
+        if ($tipo === TipoMovimientoWallet::PagoGuia && $mov->pedido?->factura_venta_id) {
+            return ['', ''];
+        }
+
+        $cta = fn (string $clave) => (string) setting('contable.cta_dropi_'.$clave);
+
+        return match ($tipo) {
+            TipoMovimientoWallet::PagoGuia => [$cta('anticipo'), $entra
+                ? "Pago Dropi sin factura (anticipo) — {$ref}"
+                : "Reverso de pago Dropi sin factura — {$ref}"],
+            TipoMovimientoWallet::RetiroBanco => [$cta('banco_retiro'), $entra
+                ? 'Retiro de la wallet Dropi negado: vuelve a la wallet'
+                : 'Retiro de la wallet Dropi al banco'],
+            TipoMovimientoWallet::Indemnizacion => $entra
+                ? [$cta('indemnizacion'), "Indemnización a favor — {$ref}"]
+                : [$cta('sancion'), "Sanción / indemnización cobrada por Dropi — {$ref}"],
+            TipoMovimientoWallet::FleteGarantia => [$cta('flete'), $entra
+                ? "Reverso de flete de garantía Dropi — {$ref}"
+                : "Flete de garantía Dropi — {$ref}"],
+            TipoMovimientoWallet::Tarjeta => [$cta('comision_tarjeta'), $entra
+                ? "Reverso de comisión de tarjeta Dropi — {$ref}"
+                : "Comisión de tarjeta Dropi — {$ref}"],
+            TipoMovimientoWallet::Otro => $entra
+                ? [$cta('otro_entrada'), 'Abono Dropi sin clasificar · '.($mov->categoria ?: 'sin código')]
+                : [$cta('otro_salida'), 'Cobro Dropi sin clasificar · '.($mov->categoria ?: 'sin código')],
+        };
+    }
+
+    /**
+     * Escribe la reversa de las líneas vivas del movimiento. Nunca borra.
+     *
+     * @return bool true si escribió alguna reversa
+     */
+    protected function reversarPrevios(DropiWalletMovimiento $mov): bool
+    {
+        $previos = MovimientoContable::query()
+            ->where('origen_type', DropiWalletMovimiento::class)
+            ->where('origen_id', $mov->id)
+            ->orderBy('id')
+            ->get();
+
+        $escribio = false;
+        foreach ($previos as $p) {
+            // Una reversa no se vuelve a reversar, ni se reversa dos veces una línea.
+            if (str_starts_with((string) $p->descripcion, '[REVERSA')) {
+                continue;
+            }
+            $yaReversado = $previos->contains(
+                fn ($o) => str_starts_with((string) $o->descripcion, '[REVERSA #'.$p->id.']')
+            );
+            if ($yaReversado) {
+                continue;
+            }
+
+            MovimientoContable::create([
+                'fecha' => now()->toDateString(),
+                'cuenta_puc' => $p->cuenta_puc,
+                'tercero_type' => $p->tercero_type,
+                'tercero_id' => $p->tercero_id,
+                'debe' => (float) $p->haber,
+                'haber' => (float) $p->debe,
+                'origen_type' => DropiWalletMovimiento::class,
+                'origen_id' => $mov->id,
+                'descripcion' => '[REVERSA #'.$p->id.'] '.($p->descripcion ?? ''),
+                'linea_negocio' => $p->linea_negocio,
+                'destino_fiscal' => $p->destino_fiscal,
+                'user_id' => auth()->id(),
+            ]);
+            $escribio = true;
+        }
+
+        return $escribio;
     }
 
     /**
      * Dropi como tercero contable, con el NIT de la regla `dropi.nit_tercero`.
-     * Sin NIT configurado no se inventa uno: el asiento sale sin tercero.
+     * Sin NIT configurado no se inventa uno: el asiento sale sin tercero (y no
+     * puede viajar a SIIGO, que exige tercero por línea en un comprobante).
      */
     public static function terceroDropi(): ?\App\Models\Contacto
     {
-        $nit = preg_replace('/\D/', '', (string) setting('dropi.nit_tercero', ''));
+        $nit = preg_replace('/\D/', '', (string) setting('dropi.nit_tercero'));
         if ($nit === '') {
             return null;
         }
@@ -143,51 +246,5 @@ class RegistrarAsientoWalletDropi
             ['numero_documento' => $nit],
             ['tipo_documento' => 'NIT', 'nombre_completo' => 'DROPI S.A.S.', 'razon_social' => 'DROPI S.A.S.', 'activo' => true],
         );
-    }
-
-    /**
-     * @return array{0:string,1:string,2:string}  [cuentaDebe, cuentaHaber, descripcion]
-     */
-    protected function cuentasPara(TipoMovimientoWallet $tipo, float $monto, DropiWalletMovimiento $mov): array
-    {
-        $ref = $mov->pedido?->guia ? "guía {$mov->pedido->guia}" : 'wallet Dropi';
-
-        // 9.3 · el pago de un pedido facturado lo asienta su recibo de caja
-        // (PagoVenta `wallet_dropi`, ver ConciliarWalletDropi::registrarCobro):
-        // si también se asentara aquí, el 1305 se acreditaría dos veces.
-        if ($tipo === TipoMovimientoWallet::PagoGuia && $mov->pedido?->factura_venta_id) {
-            return ['', '', ''];
-        }
-
-        return match ($tipo) {
-            // Ingreso del cliente final vía Dropi → aumenta wallet, cancela CxC.
-            /*
-             * La CxC sale de la MISMA regla que usa la factura.
-             *
-             * Estaba escrita a mano como '1305'. Mientras la regla también
-             * valía '1305' coincidían de casualidad; el 2026-11-05 la regla
-             * pasó a '13050501' —la subcuenta que sí recibe movimiento— y de
-             * haber quedado esto quieto, la factura habría cargado la deuda en
-             * una cuenta y el pago la habría abonado en otra: la cartera de
-             * Dropi no se cerraba nunca.
-             */
-            TipoMovimientoWallet::PagoGuia => [self::CUENTA_WALLET, (string) setting('contable.cta_cxc_default'), "Pago wallet Dropi — {$ref}"],
-            // Retiro a banco físico: sale de wallet, entra a bancos.
-            TipoMovimientoWallet::RetiroBanco => ['1110', self::CUENTA_WALLET, 'Retiro wallet Dropi → banco GB'],
-            // 9.2 · Casi todas las «indemnizaciones» de la wallet son SALIDAS
-            // (1052 «salida por indemnización orden», 1041 «por incumplimiento»):
-            // Dropi le cobra a Great Baby. Antes se asentaban siempre como
-            // ingreso 4295 (con el monto en positivo): una sanción pagada
-            // figuraba como plata ganada. Salida = gasto por sanción.
-            TipoMovimientoWallet::Indemnizacion => $monto < 0
-                ? ['5395', self::CUENTA_WALLET, "Sanción Dropi — {$ref}"]
-                : [self::CUENTA_WALLET, '4295', "Indemnización a favor — {$ref}"],
-            // Flete garantía: gasto operativo.
-            TipoMovimientoWallet::FleteGarantia => ['5195', self::CUENTA_WALLET, "Flete garantía Dropi — {$ref}"],
-            // Comisión tarjeta: gasto financiero.
-            TipoMovimientoWallet::Tarjeta => ['530525', self::CUENTA_WALLET, "Comisión tarjeta Dropi — {$ref}"],
-            // Otro: sin asiento por ahora (queda solo el registro wallet).
-            TipoMovimientoWallet::Otro => ['', '', ''],
-        };
     }
 }
