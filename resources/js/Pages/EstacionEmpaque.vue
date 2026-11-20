@@ -94,6 +94,35 @@ const escanear = () => {
     });
 };
 
+// Cámara: lee el código de barras y lo manda por el mismo camino que la pistola.
+//   El lector vive en public/js/gb-camara-codigos.js (lo comparte la estación del
+//   Panel Dropi) y su ventana queda fuera de Vue, así que sigue abierta aunque la
+//   página se vuelva a pintar después de cada escaneo (preserveState: false).
+const cargarLectorCamara = () => window.gbCamaraCodigos
+    ? Promise.resolve()
+    : new Promise((ok, mal) => {
+        const s = document.createElement('script');
+        s.src = '/js/gb-camara-codigos.js';
+        s.onload = ok;
+        s.onerror = () => mal(new Error('No cargó el lector de la cámara.'));
+        document.head.appendChild(s);
+    });
+const escanearConCamara = async () => {
+    try {
+        await cargarLectorCamara();
+    } catch (e) {
+        doFlash('error');
+        hablar('No se pudo abrir la cámara');
+        window.alert(e.message + ' Usa la pistola o escribe el código.');
+        return;
+    }
+    window.gbCamaraCodigos.abrir({
+        alLeer: (codigo) => router.post('/app/estacion-empaque/escanear',
+            { codigo: String(codigo).replace(/\s+/g, '').toUpperCase() },
+            { preserveScroll: true, preserveState: false }),
+    });
+};
+
 // Guards contra doble-click / doble-Enter en botones críticos.
 const procesandoFoto = ref(false);
 const procesandoConfirmar = ref(false);
@@ -179,7 +208,7 @@ const toggleFullscreen = () => {
 // evita robar foco al modal de cancelar y disparar Escape imposible + escaneos accidentales).
 onMounted(() => scanInput.value?.focus());
 useIntervalFn(() => {
-    if (modalCamara.value || modalCancelar.value) return;
+    if (modalCamara.value || modalCancelar.value || window.gbCamaraCodigos?.abierta()) return;
     if (document.activeElement !== scanInput.value && scanInput.value) {
         scanInput.value.focus();
     }
@@ -229,13 +258,18 @@ const fmtTime = (s) => {
                             </button>
                         </div>
                     </div>
-                    <form @submit.prevent="escanear">
+                    <form @submit.prevent="escanear" class="flex gap-2 items-stretch">
                         <input ref="scanInput"
                                v-model="form.codigo"
                                type="text"
                                autocomplete="off"
-                               placeholder="Escanea guía o código de variante…"
-                               class="w-full px-5 py-4 text-2xl font-bold font-mono tracking-widest bg-slate-950 text-brand-500 border-2 border-brand-700 rounded-xl focus:outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-500/20 placeholder:text-brand-800/60"/>
+                               placeholder="Escanea guía o producto…"
+                               class="flex-1 min-w-0 w-full px-5 py-4 text-2xl font-bold font-mono tracking-widest bg-slate-950 text-brand-500 border-2 border-brand-700 rounded-xl focus:outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-500/20 placeholder:text-brand-800/60"/>
+                        <button type="button" @click="escanearConCamara"
+                                title="Escanear con cámara" aria-label="Escanear con cámara"
+                                class="flex-shrink-0 inline-flex items-center gap-2 px-4 rounded-xl border-2 border-brand-700 bg-slate-900 text-brand-500 font-bold hover:bg-slate-800">
+                            <Camera class="h-5 w-5"/><span class="hidden sm:inline">Cámara</span>
+                        </button>
                     </form>
 
                     <!-- Resultado del último escaneo -->

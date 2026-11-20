@@ -29,6 +29,13 @@ class EscannerCamara extends Page
 
     protected static ?string $navigationLabel = 'Escáner cámara';
 
+    /**
+     * Fuera del menú desde el 20-nov-2026: la entrega a la transportadora se
+     * escanea en Dropi («Escaneo Dropi»), y la lectura por cámara se pasó a la
+     * Estación de Empaque. La pantalla sigue en su dirección por si hace falta.
+     */
+    protected static bool $shouldRegisterNavigation = false;
+
     protected static ?string $title = 'Escáner de guías por cámara';
 
     protected static string|\UnitEnum|null $navigationGroup = 'Operación';

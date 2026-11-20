@@ -13,7 +13,8 @@
         }
         /* Celular: el campo del escáner se lee completo (a 1.5rem se cortaba el texto guía). */
         @media (max-width: 480px) {
-            #scan-input { font-size: 1rem !important; letter-spacing: 0 !important; padding: .85rem 1rem !important; }
+            #scan-input { font-size: 1rem !important; letter-spacing: 0 !important; padding: .85rem 1rem !important; min-width: 0; }
+            .estacion-camara-texto { display: none; }
         }
     </style>
     {{-- Panel superior: escáner + métricas en vivo --}}
@@ -52,7 +53,7 @@
             </div>
 
             {{-- Un solo camino: wire:submit del form. Adiós Enter duplicado. --}}
-            <form wire:submit.prevent="escanear">
+            <form wire:submit.prevent="escanear" class="estacion-escaner" style="display:flex;gap:.5rem;align-items:stretch;">
                 <label for="scan-input" class="sr-only" style="position:absolute;left:-9999px;">Código de guía o variante</label>
                 <input id="scan-input"
                        type="text"
@@ -61,10 +62,20 @@
                        autocomplete="off"
                        inputmode="text"
                        placeholder="Escanea guía o producto…"
-                       style="width:100%;padding:1rem 1.25rem;font-size:1.5rem;font-family:ui-monospace,'Courier New',monospace;background:#0f172a;color:#f59e0b;border:2px solid #b45309;border-radius:.75rem;outline:none;letter-spacing:2px;font-weight:600;"
+                       style="flex:1;min-width:0;width:100%;padding:1rem 1.25rem;font-size:1.5rem;font-family:ui-monospace,'Courier New',monospace;background:#0f172a;color:#f59e0b;border:2px solid #b45309;border-radius:.75rem;outline:none;letter-spacing:2px;font-weight:600;"
                        onfocus="this.style.borderColor='#f59e0b';this.style.boxShadow='0 0 0 3px rgba(245,158,11,.2)';"
                        onblur="this.style.borderColor='#b45309';this.style.boxShadow='';">
+                {{-- Lo que lee la cámara entra por el mismo camino que la pistola (public/js/gb-camara-codigos.js). --}}
+                <button type="button"
+                        x-data
+                        x-on:click="window.gbCamaraCodigos.abrir({ alLeer: (c) => { $wire.codigo = c; $wire.escanear(); } })"
+                        title="Escanear con cámara"
+                        aria-label="Escanear con cámara"
+                        style="flex-shrink:0;padding:0 1rem;background:#1f2937;color:#f59e0b;border:2px solid #b45309;border-radius:.75rem;font-weight:700;font-size:.9rem;cursor:pointer;white-space:nowrap;">
+                    📷 <span class="estacion-camara-texto">Cámara</span>
+                </button>
             </form>
+            <script src="{{ asset('js/gb-camara-codigos.js') }}" defer></script>
 
             @if($ultimoResultado)
                 <div style="margin-top:.75rem;padding:.75rem 1rem;border-radius:.5rem;font-weight:600;
@@ -404,7 +415,8 @@
             const inp = document.querySelector('input[wire\\:model="codigo"]');
             if (inp && document.activeElement !== inp
                 && !document.querySelector('.fi-modal-window')
-                && document.getElementById('modal-camara')?.style.display !== 'flex') {
+                && document.getElementById('modal-camara')?.style.display !== 'flex'
+                && !(window.gbCamaraCodigos && window.gbCamaraCodigos.abierta())) {
                 inp.focus({ preventScroll: true });
             }
         }, 2000);

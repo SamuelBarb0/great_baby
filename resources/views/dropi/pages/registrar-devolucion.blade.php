@@ -19,7 +19,13 @@
                             @foreach($pedido->items as $it)
                                 <li style="padding:.75rem;background:rgba(156,163,175,.1);border-radius:.5rem;margin-bottom:.375rem;">
                                     <span style="display:inline-block;min-width:2.75rem;height:2.75rem;line-height:2.75rem;text-align:center;border-radius:9999px;background:#f59e0b;color:#fff;font-weight:700;margin-right:.75rem;">{{ $it->cantidad }}</span>
-                                    <span style="font-family:ui-monospace,monospace;font-size:.9rem;">{{ $it->sku_dropi }}</span>
+                                    @php
+                                    // Variante o producto agregado: el nombre es lo que se reconoce; el SKU de Dropi queda de apoyo.
+                                    $prodIt = $it->variante?->producto ?? $it->producto;
+                                    $varIt = trim(($it->variante?->color_nombre ?? '') . ' ' . ($it->variante?->talla ?? ''));
+                                @endphp
+                                    <span style="font-weight:600;">{{ $prodIt?->nombre ?? $it->sku_dropi }}</span>@if($varIt !== '') <span style="color:#9ca3af;">· {{ $varIt }}</span>@endif
+                                    <span style="font-family:ui-monospace,monospace;font-size:.75rem;color:#9ca3af;margin-left:.5rem;">{{ $it->sku_dropi }}</span>
                                 </li>
                             @endforeach
                         </ul>
@@ -49,7 +55,7 @@
                     <ul style="margin-top:.75rem;list-style:none;padding:0;">
                         @foreach($renglones as $clave => $r)
                             <li style="display:flex;align-items:center;gap:.75rem;padding:.5rem 0;border-bottom:1px solid rgba(156,163,175,.15);">
-                                <span style="flex:1;font-family:ui-monospace,monospace;">{{ $r['referencia'] }}</span>
+                                <span style="flex:1;"><strong>{{ $r['nombre'] }}</strong> <span style="font-family:ui-monospace,monospace;font-size:.85rem;color:#9ca3af;">{{ $r['referencia'] }}</span></span>
                                 <button type="button" wire:click="ajustar('{{ $clave }}', -1)" aria-label="Quitar una unidad" style="padding:.1rem .6rem;border:1px solid rgba(156,163,175,.4);border-radius:.375rem;">−</button>
                                 <strong style="min-width:3.5rem;text-align:center;color:{{ ($recibidos[$clave] ?? 0) === $r['esperadas'] ? '#059669' : '#d97706' }};">{{ $recibidos[$clave] ?? 0 }}/{{ $r['esperadas'] }}</strong>
                                 <button type="button" wire:click="ajustar('{{ $clave }}', 1)" aria-label="Sumar una unidad" style="padding:.1rem .6rem;border:1px solid rgba(156,163,175,.4);border-radius:.375rem;">+</button>

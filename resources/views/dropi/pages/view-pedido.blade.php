@@ -44,7 +44,13 @@
                         <div style="display:flex;align-items:center;gap:1rem;padding:.75rem;border:1px solid rgba(156,163,175,.2);border-radius:.5rem;">
                             <div style="width:2.75rem;height:2.75rem;border-radius:9999px;background:#f59e0b;color:#fff;font-weight:700;display:flex;align-items:center;justify-content:center;">{{ $it->cantidad }}</div>
                             <div style="flex:1;min-width:0;">
-                                <div style="font-family:ui-monospace,monospace;font-weight:600;">{{ $it->sku_dropi }}</div>
+                                @php
+                                    // Variante o producto agregado: el nombre es lo que se reconoce; el SKU de Dropi queda de apoyo.
+                                    $prodIt = $it->variante?->producto ?? $it->producto;
+                                    $varIt = trim(($it->variante?->color_nombre ?? '') . ' ' . ($it->variante?->talla ?? ''));
+                                @endphp
+                                <div style="font-weight:600;">{{ $prodIt?->nombre ?? $it->sku_dropi }}@if($varIt !== '') <span style="font-weight:400;color:#9ca3af;">· {{ $varIt }}</span>@endif</div>
+                                <div style="font-family:ui-monospace,monospace;font-size:.75rem;color:#9ca3af;">{{ $it->sku_dropi }}</div>
                                 <div style="font-size:.85rem;color:#9ca3af;">${{ number_format((float) $it->precio_proveedor_unit, 0, ',', '.') }} c/u</div>
                             </div>
                             <div style="font-weight:700;">${{ number_format($it->subtotal(), 0, ',', '.') }}</div>

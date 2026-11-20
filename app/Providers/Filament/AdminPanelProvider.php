@@ -28,8 +28,8 @@ class AdminPanelProvider extends PanelProvider
     /** La lista (carga masiva), crear (`/add`) y editar (`/edit?id=`) cuelgan de aquí. */
     private const PREFIJO_PRODUCTOS_DROPI = 'https://app.dropi.co/dashboard/products';
 
-    /** Donde se escanean las guías que se le entregan a la transportadora. */
-    public const RECOLECCIONES_DROPI = 'https://app.dropi.co/dashboard/settings/pickups';
+    /** Dropi, para escanear allá las guías que se le entregan a la transportadora. */
+    public const DROPI_ESCANEO = 'https://app.dropi.co/dashboard/home';
 
     public function panel(Panel $panel): Panel
     {
@@ -97,10 +97,10 @@ class AdminPanelProvider extends PanelProvider
                     ->sort(6)
                     ->visible(fn (): bool => \App\Auth\Permisos::puede(auth()->user(), 'productos')),
                 // La entrega a la transportadora: todas las guías se escanean
-                //   en las recolecciones de Dropi (reunión del 19-nov-2026).
-                //   Va en pestaña aparte con la sesión de Dropi de la persona.
-                NavigationItem::make('Escanear guías en Dropi')
-                    ->url(self::RECOLECCIONES_DROPI, shouldOpenInNewTab: true)
+                //   en Dropi (reunión del 19-nov-2026). Solo abre Dropi, en
+                //   pestaña aparte con la sesión de Dropi de la persona.
+                NavigationItem::make('Escaneo Dropi')
+                    ->url(self::DROPI_ESCANEO, shouldOpenInNewTab: true)
                     ->icon('heroicon-o-truck')
                     ->group('Operación')
                     ->sort(3)
