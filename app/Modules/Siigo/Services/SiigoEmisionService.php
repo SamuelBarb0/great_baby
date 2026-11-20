@@ -1709,8 +1709,33 @@ class SiigoEmisionService
         //   4295 = Diversos (aprovechamientos para sobrantes)
         //   El 5195 anterior era "transportes/fletes" — cuenta incorrecta que
         //   dejaba la contabilidad del ERP divergente del asiento SIIGO.
-        $ctaPerdida  = (string) setting('siigo.cta_perdida_inventario_default', '5299');
-        $ctaSobrante = (string) setting('siigo.cta_sobrante_inventario_default', '4295');
+        /*
+         * UN SOLO par de cuentas para un solo hecho.
+         *
+         * El ajuste de una toma física genera dos asientos: el local, que
+         * escribe `CerrarTomaFisica`, y el que viaja a SIIGO, que se arma
+         * acá. Cada uno leía SU PROPIO par de reglas —`contable.*` allá,
+         * `siigo.*` acá— para decidir exactamente lo mismo.
+         *
+         * Hoy los cuatro valores coinciden por casualidad, así que nadie lo
+         * nota. El día que el contador corrija una de las dos parejas en la
+         * pantalla de Reglas —y va a tener que corregirlas, porque la 5299 no
+         * existe y la 4295 es agrupadora— el libro local y SIIGO quedan
+         * contabilizando el mismo faltante en cuentas distintas, y la
+         * conciliación no cuadra sin que nada avise.
+         *
+         * Manda `contable.*`, que es el par que usa el asiento local. Las
+         * reglas `siigo.*` quedan como respaldo para quien ya las tuviera
+         * configuradas distinto, y nada más.
+         *
+         * Sin default literal en la llamada: la clave está registrada, y un
+         * literal acá le ganaría al valor que el contador deje en la pantalla
+         * mientras no exista la fila.
+         */
+        $ctaPerdida = (string) (setting('contable.cta_faltante_inventario')
+            ?: setting('siigo.cta_perdida_inventario_default'));
+        $ctaSobrante = (string) (setting('contable.cta_sobrante_inventario')
+            ?: setting('siigo.cta_sobrante_inventario_default'));
 
         // ajuste_toma_fisica · firma según el signo del movimiento:
         //   cantidad > 0 (sobrante contado) → DB cta_inv ubicación / CR 4295

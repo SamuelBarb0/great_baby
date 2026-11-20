@@ -7,6 +7,7 @@ use App\Modules\Dropi\Enums\CategoriaUbicacion;
 use App\Modules\Dropi\Models\DropiPedido;
 use App\Modules\Dropi\Models\DropiPedidoItem;
 use App\Modules\Dropi\Models\InventarioMovimiento;
+use App\Modules\Dropi\Models\InventarioUbicacion;
 use App\Modules\Dropi\Models\Producto;
 use App\Modules\Dropi\Models\ProductoVariante;
 use App\Modules\Inventario\Support\BodegaDeSalida;
@@ -164,7 +165,14 @@ class SalidaInventarioDropi
 
         $costos = [];
         foreach (array_unique(array_values($bodegas)) as $ubi) {
-            $costos[$ubi] = CostoPromedio::porUbicacion($sujetos, $ubi);
+            // El costo se pregunta por la bodega Y sus estantes. Si la
+            // mercancia entro directo a un rack, la fila de la sede no tiene
+            // entradas propias y el costo daba CERO: el egreso del kardex y
+            // el asiento de costo de ventas se escribian en cero.
+            $costos[$ubi] = CostoPromedio::porUbicaciones(
+                $sujetos,
+                InventarioUbicacion::laSedeYSusPosiciones($ubi),
+            );
         }
 
         $unidades = 0;
@@ -186,19 +194,30 @@ class SalidaInventarioDropi
             $costoUnit = $costos[$ubicacionId][$clave] ?? 0.0;
             $esAgregado = $item->variante_id === null;
 
-            InventarioMovimiento::create([
-                'variante_id' => $item->variante_id,
-                'producto_id' => $item->producto_id,
-                'ubicacion_id' => $ubicacionId,
-                'tipo' => 'egreso',
-                // Negativo: SUM(cantidad) es el saldo físico.
-                'cantidad' => -$cantidad,
-                'costo_unit' => $costoUnit,
-                'referencia_tipo' => self::EGRESO,
-                'referencia_id' => $pedido->id,
-                'user_id' => $userId,
-                'notas' => "Empaque guía {$pedido->guia}".($esAgregado ? ' · AGREGADO' : ''),
-            ]);
+            /*
+             * El egreso baja DEL ESTANTE del que se tomó, no de la sede.
+             *
+             * Escribirlo todo contra la fila de la sede dejaba la sede en
+             * negativo y el estante intacto: el sistema seguiría diciendo que
+             * hay quince unidades en `R12-S1-N1` después de haberlas empacado,
+             * y nadie se entera hasta el conteo físico. Es el mismo arreglo
+             * que lleva el despacho B2B.
+             */
+            foreach ($this->repartirEgreso($item, $ubicacionId, $cantidad) as $ubi => $cuanto) {
+                InventarioMovimiento::create([
+                    'variante_id' => $item->variante_id,
+                    'producto_id' => $item->producto_id,
+                    'ubicacion_id' => $ubi,
+                    'tipo' => 'egreso',
+                    // Negativo: SUM(cantidad) es el saldo físico.
+                    'cantidad' => -$cuanto,
+                    'costo_unit' => $costoUnit,
+                    'referencia_tipo' => self::EGRESO,
+                    'referencia_id' => $pedido->id,
+                    'user_id' => $userId,
+                    'notas' => "Empaque guía {$pedido->guia}".($esAgregado ? ' · AGREGADO' : ''),
+                ]);
+            }
             $unidades += $cantidad;
 
             if ($costoUnit > 0) {
@@ -302,12 +321,75 @@ class SalidaInventarioDropi
 
     private function saldoBloqueado(DropiPedidoItem $item, int $ubicacionId): int
     {
-        $q = InventarioMovimiento::query()->where('ubicacion_id', $ubicacionId);
-        $item->variante_id
+        // Medir solo la fila de la sede dejaba el empaque frenado con «no hay
+        // saldo» teniendo las cajas en el rack, a tres metros.
+        $q = InventarioMovimiento::query()
+            ->whereIn('ubicacion_id', InventarioUbicacion::laSedeYSusPosiciones($ubicacionId));
+
+        return $this->conSujeto($q, $item)->lockForUpdate()->get(['cantidad'])->sum('cantidad');
+    }
+
+    /**
+     * Cuánto baja de cada ubicación de esa bodega.
+     *
+     * Se toma primero de las posiciones con más saldo y la sede queda de
+     * última, que es la que absorbe lo que nunca estuvo ubicado en ningún
+     * estante. Misma regla que el despacho B2B, para que las dos salidas
+     * dejen el kardex igual.
+     *
+     * @return array<int, int>  [ubicacion_id => cuánto]
+     */
+    private function repartirEgreso(DropiPedidoItem $item, int $sedeId, int $cantidad): array
+    {
+        $ubicaciones = InventarioUbicacion::laSedeYSusPosiciones($sedeId);
+
+        $saldos = $this->conSujeto(
+            InventarioMovimiento::query()->whereIn('ubicacion_id', $ubicaciones),
+            $item,
+        )
+            ->groupBy('ubicacion_id')
+            ->selectRaw('ubicacion_id, SUM(cantidad) as saldo')
+            ->pluck('saldo', 'ubicacion_id');
+
+        $orden = collect($ubicaciones)
+            ->filter(fn ($u) => $u !== $sedeId && (int) ($saldos[$u] ?? 0) > 0)
+            ->sortByDesc(fn ($u) => (int) $saldos[$u])
+            ->push($sedeId)
+            ->values();
+
+        $reparto = [];
+        $falta = $cantidad;
+
+        foreach ($orden as $u) {
+            if ($falta <= 0) {
+                break;
+            }
+
+            $disponible = $u === $sedeId ? $falta : min($falta, (int) ($saldos[$u] ?? 0));
+
+            if ($disponible > 0) {
+                $reparto[$u] = $disponible;
+                $falta -= $disponible;
+            }
+        }
+
+        // Si nada tenía saldo, el egreso entero va contra la sede: es el
+        // comportamiento de antes, y `$faltantes` ya lo reportó arriba.
+        return $reparto ?: [$sedeId => $cantidad];
+    }
+
+    /**
+     * El filtro por variante o por producto agregado.
+     *
+     * Un producto sólo cuenta como agregado si el movimiento NO trae
+     * variante; si no, el saldo de las variantes se sumaría dos veces. Se
+     * repetía en tres consultas, así que vive acá una sola vez.
+     */
+    private function conSujeto($q, DropiPedidoItem $item)
+    {
+        return $item->variante_id
             ? $q->where('variante_id', $item->variante_id)
             : $q->where('producto_id', $item->producto_id)->whereNull('variante_id');
-
-        return (int) $q->lockForUpdate()->get(['cantidad'])->sum('cantidad');
     }
 
     private function referencia(DropiPedidoItem $item): string
