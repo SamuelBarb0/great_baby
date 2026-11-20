@@ -92,12 +92,15 @@ class EstacionEmpaque extends Page
             return;
         }
 
-        // Bloqueo: exigir foto del paquete cerrado antes de confirmar
+        // Bloqueo: exigir foto del paquete cerrado antes de confirmar, si la
+        //   regla lo pide. Es la misma regla que respeta la estación de la app
+        //   (EstacionEmpaqueController); acá estaba fija y la bodega pidió
+        //   poder confirmar sin foto (reunión del 19-nov-2026).
         $registro = EmpaqueRegistro::where('pedido_id', $this->pedidoActivoId)
             ->where('estado', 'en_curso')
             ->latest('inicio_at')->first();
 
-        if (! $registro?->foto_path) {
+        if ((bool) setting('empaque.foto_obligatoria', true) && ! $registro?->foto_path) {
             Notification::make()
                 ->title('Falta la foto del paquete')
                 ->body('Toma una foto del paquete cerrado antes de confirmar (evidencia contra reclamos).')
