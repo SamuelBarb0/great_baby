@@ -22,6 +22,8 @@ class EstacionEmpaque extends Page
 
     protected static ?string $navigationLabel = '📦 Estación de Empaque';
 
+    protected static ?string $title = 'Estación de Empaque';
+
     protected static string|\UnitEnum|null $navigationGroup = 'Operación';
 
     protected static ?int $navigationSort = 1;
@@ -189,19 +191,24 @@ class EstacionEmpaque extends Page
      */
     public function proximosPedidos(int $limit = 5): array
     {
-        return DropiPedido::query()
+        // Los 20 más viejos (nadie se queda esperando) en el orden de la ruta
+        //   de la bodega, igual que la cola de la Vista del Alistador.
+        $cola = DropiPedido::query()
             ->whereIn('estado', [EstadoPedidoDropi::Pending, EstadoPedidoDropi::Alistando])
             ->when($this->pedidoActivoId, fn ($q) => $q->where('id', '!=', $this->pedidoActivoId))
-            ->withCount('items')
+            ->with('items')
             ->orderBy('created_at', 'asc')
-            ->limit($limit)
-            ->get()
+            ->limit(20)
+            ->get();
+
+        return app(\App\Modules\Dropi\Support\RecoleccionDelCorte::class)->ordenarPorRuta($cola)
+            ->take($limit)
             ->map(fn ($p) => [
                 'id' => $p->id,
                 'guia' => (string) $p->guia,
                 'cliente' => (string) $p->cliente_nombre,
                 'ciudad' => (string) $p->cliente_ciudad,
-                'items' => (int) $p->items_count,
+                'items' => $p->items->count(),
             ])
             ->toArray();
     }
@@ -250,7 +257,7 @@ class EstacionEmpaque extends Page
             return null;
         }
 
-        return DropiPedido::with(['items.variante.producto', 'corte'])->find($this->pedidoActivoId);
+        return DropiPedido::with(['items.variante.producto', 'items.producto', 'corte'])->find($this->pedidoActivoId);
     }
 
     /**

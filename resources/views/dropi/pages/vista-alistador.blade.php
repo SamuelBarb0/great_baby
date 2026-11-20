@@ -54,8 +54,15 @@
     {{-- Celular: las cifras del corte en una columna y las acciones del pedido a lo ancho. --}}
     <style>
         @media (max-width: 480px) {
-            .alistador-cifras { grid-template-columns: minmax(0,1fr) !important; width: 100%; }
+            /* Las tres cifras siguen en fila, más compactas: apiladas empujaban la lista fuera de la pantalla. */
+            .alistador-cifras { gap: .5rem !important; width: 100%; }
+            .alistador-cifras > div { padding: .5rem .25rem !important; }
             .alistador-acciones { width: 100%; flex-direction: row !important; justify-content: space-between; align-items: center !important; }
+            .alistador-acciones > div:first-child { text-align: left !important; }
+            .alistador-sufijo { display: none; }
+            /* El botón del PDF baja debajo del texto en vez de apretarlo contra una columna. */
+            .alistador-seccion .fi-section-header { flex-wrap: wrap; }
+            .alistador-seccion .fi-section-header-after-ctn { width: 100%; }
         }
         /* Lo ya recogido se apaga, pero el chulito queda vivo para que se lea de lejos. */
         .alistador-hecha td:not(.alistador-chulito), .alistador-hecha > div > div:not(.alistador-chulito), .alistador-hecha > div > span { opacity: .55; }
@@ -65,16 +72,16 @@
     {{-- Selector de modo con tabs --}}
     <x-filament::tabs style="margin-top:1.5rem;">
         <x-filament::tabs.item :active="$modo === 'recoleccion'" wire:click="cambiarModo('recoleccion')" icon="heroicon-o-clipboard-document-list">
-            Recolección · {{ count($recoleccion) }} refs
+            Recolección · {{ count($recoleccion) }}<span class="alistador-sufijo"> refs</span>
         </x-filament::tabs.item>
         <x-filament::tabs.item :active="$modo === 'empaque'" wire:click="cambiarModo('empaque')" icon="heroicon-o-cube">
-            Empaque · {{ $empaque->count() }} pedidos
+            Empaque · {{ $empaque->count() }}<span class="alistador-sufijo"> pedidos</span>
         </x-filament::tabs.item>
     </x-filament::tabs>
 
     {{-- MODO RECOLECCIÓN --}}
     @if($modo === 'recoleccion')
-        <x-filament::section style="margin-top:1rem;">
+        <x-filament::section class="alistador-seccion" style="margin-top:1rem;">
             <x-slot name="heading">Modo Recolección</x-slot>
             <x-slot name="description">Ve el total de unidades por referencia, en el orden del recorrido de la bodega, para pasar una sola vez. Toca cada referencia cuando la recojas: queda marcada para todos. Cuando termines, cambia a Empaque.</x-slot>
             @if($corte)
@@ -107,7 +114,7 @@
                     <table style="width:100%;border-collapse:collapse;">
                         <thead>
                             <tr style="border-bottom:1px solid rgba(156,163,175,.2);">
-                                <th style="text-align:center;padding:.75rem;font-size:.7rem;text-transform:uppercase;color:#9ca3af;">Recogido</th>
+                                <th style="width:9.5rem;text-align:center;padding:.75rem;font-size:.7rem;text-transform:uppercase;color:#9ca3af;">Recogido</th>
                                 <th style="text-align:left;padding:.75rem;font-size:.7rem;text-transform:uppercase;color:#9ca3af;">SKU</th>
                                 <th style="text-align:left;padding:.75rem;font-size:.7rem;text-transform:uppercase;color:#9ca3af;">Producto</th>
                                 <th style="text-align:left;padding:.75rem;font-size:.7rem;text-transform:uppercase;color:#9ca3af;">Variante</th>
@@ -137,17 +144,22 @@
                     </table>
                 </div>
 
-                {{-- Móvil (<768px): cards apiladas para leer sin scroll horizontal --}}
+                {{-- Móvil y tablet vertical (<1024px): cards apiladas; la tabla de 7 columnas no cabe --}}
                 <div class="alistador-tabla-movil" style="display:none;">
                     @foreach($recoleccion as $g)
                         <div wire:key="rec-movil-{{ $g['sku'] }}" wire:click="marcarRecogido(@js($g['sku']))"
                              style="padding:1rem;border:1px solid {{ $g['marcada'] ? 'rgba(34,197,94,.5)' : 'rgba(156,163,175,.2)' }};border-radius:.75rem;margin-bottom:.5rem;cursor:pointer;{{ $g['marcada'] ? 'background:rgba(34,197,94,.08);' : '' }}" class="{{ $g['marcada'] ? 'alistador-hecha' : '' }}">
                             <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;">
-                                <div class="alistador-chulito" style="flex-shrink:0;">@include('dropi.pages.partials.chulito-recoleccion', ['g' => $g])</div>
+                                <div class="alistador-chulito" style="flex-shrink:0;">@include('dropi.pages.partials.chulito-recoleccion', ['g' => $g, 'compacto' => true])</div>
                                 <div style="flex:1;min-width:0;">
                                     <div style="font-weight:700;font-size:1rem;">{{ $g['producto'] }}</div>
                                     <div style="font-size:.8rem;color:#9ca3af;margin-top:.25rem;">{{ $g['variante'] ?: '—' }}</div>
                                     <div style="font-family:ui-monospace,monospace;font-size:.7rem;color:#6b7280;margin-top:.25rem;word-break:break-all;">{{ $g['sku'] }}</div>
+                                    @if($g['marcada'])
+                                        <div style="font-size:.75rem;color:#16a34a;font-weight:600;margin-top:.35rem;">✓ {{ $g['marcada_por'] ?? '—' }} · {{ $g['marcada_at'] }}</div>
+                                    @elseif($g['faltan'] > 0)
+                                        <div style="font-size:.75rem;color:#f59e0b;font-weight:600;margin-top:.35rem;">Faltan {{ $g['faltan'] }} por recoger</div>
+                                    @endif
                                 </div>
                                 <span style="display:inline-flex;align-items:center;justify-content:center;min-width:3rem;height:3rem;border-radius:9999px;background:#f59e0b;color:white;font-weight:700;font-size:1.25rem;flex-shrink:0;">{{ $g['total_unidades'] }}</span>
                             </div>
@@ -159,7 +171,7 @@
                 </div>
 
                 <style>
-                    @media (max-width: 767px) {
+                    @media (max-width: 1023px) {
                         .alistador-tabla-desktop { display: none !important; }
                         .alistador-tabla-movil { display: block !important; }
                     }
@@ -194,9 +206,14 @@
                                     </div>
                                     <div style="margin-top:.5rem;">
                                         @foreach($pedido->items as $it)
-                                            <span style="display:inline-block;font-size:.75rem;padding:.25rem .5rem;background:rgba(156,163,175,.15);border-radius:.25rem;margin-right:.25rem;margin-bottom:.25rem;">
-                                                {{ $it->cantidad }}× <span style="font-family:ui-monospace,monospace;">{{ $it->sku_dropi }}</span>
-                                                @if($ubic = $ubicacionesEmpaque[$it->id] ?? null)<span style="color:#9ca3af;"> · 📍 {{ $ubic }}</span>@endif
+                                            @php
+                                                // El nombre es lo que reconoce quien empaca; el SKU de Dropi queda de apoyo.
+                                                $prodItem = $it->variante?->producto ?? $it->producto;
+                                                $varItem = trim(($it->variante?->color_nombre ?? '') . ' ' . ($it->variante?->talla ?? ''));
+                                            @endphp
+                                            <span title="{{ $it->sku_dropi }}" style="display:inline-block;font-size:.75rem;padding:.25rem .5rem;background:rgba(156,163,175,.15);border-radius:.25rem;margin-right:.25rem;margin-bottom:.25rem;">
+                                                <strong>{{ $it->cantidad }}×</strong> {{ $prodItem?->nombre ?? $it->sku_dropi }}@if($varItem !== '') <span style="color:#9ca3af;">· {{ $varItem }}</span>@endif
+                                                @if($ubic = $ubicacionesEmpaque[$it->id] ?? null)<span style="color:#9ca3af;white-space:nowrap;"> · 📍 <span style="font-family:ui-monospace,monospace;">{{ $ubic }}</span></span>@endif
                                             </span>
                                         @endforeach
                                     </div>

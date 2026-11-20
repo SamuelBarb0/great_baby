@@ -253,3 +253,15 @@ it('el panel enlaza al escaneo de guías de Dropi para entregar a la transportad
     $this->actingAs(User::factory()->create());
     expect($item()->isVisible())->toBeFalse();
 });
+
+it('el escáner de despacho no ofrece despachar un pedido que todavía no se empacó', function () {
+    $p = pedidoEnCorte('G-1', [['SKU-899', 1]]);
+    $this->actingAs($this->aracely);
+
+    $r = $this->postJson('/dropi/escaner/analizar', ['guia' => 'G-1'])->assertOk()->json();
+    expect($r['accion'])->toBe('sin_empacar')->and($r['titulo'])->toContain('no está empacado');
+
+    $p->transicionar(EstadoPedidoDropi::Alistando, 'manual', $this->aracely->id);
+    $p->transicionar(EstadoPedidoDropi::Empacado, 'manual', $this->aracely->id);
+    expect($this->postJson('/dropi/escaner/analizar', ['guia' => 'G-1'])->json('accion'))->toBe('despachar');
+});

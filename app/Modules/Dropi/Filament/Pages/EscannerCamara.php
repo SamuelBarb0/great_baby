@@ -91,6 +91,18 @@ class EscannerCamara extends Page
             ];
         }
 
+        // Sólo se despacha lo empacado: una guía todavía sin empacar no puede
+        //   ofrecerse como «lista» (mismo criterio que EscanerController).
+        if ($estado !== EstadoPedidoDropi::Empacado) {
+            return [
+                'accion' => 'sin_empacar',
+                'pedido_id' => $pedido->id, 'guia' => $guia,
+                'titulo' => '⏳ Todavía no está empacado',
+                'detalle' => "Estado actual: {$ctx['estado']}. Empácalo en la Estación de Empaque antes de despacharlo.",
+                'color' => 'warning', 'context' => $ctx,
+            ];
+        }
+
         return [
             'accion' => 'despachar',
             'pedido_id' => $pedido->id, 'guia' => $guia,
