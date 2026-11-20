@@ -3,6 +3,7 @@ import { ref, computed } from 'vue';
 import { Head, router } from '@inertiajs/vue3';
 import { TrendingUp, Lock } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
+import { useEscClose } from '@/composables/useEscClose';
 
 const props = defineProps({
     tipo: { type: String, required: true },
@@ -30,7 +31,8 @@ const cambiarVista = (tipo) =>
 
 /* ──────────── Capturar una celda ──────────── */
 
-const editando = ref(null);   // { conceptoId, periodo }
+const editando = ref(null);
+useEscClose(editando);   // { conceptoId, periodo }
 const valor = ref(null);
 const guardando = ref(false);
 

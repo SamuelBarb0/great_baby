@@ -11,6 +11,7 @@ import PestanasSeccion from '@/Components/PestanasSeccion.vue';
 import { pestanasLibro } from '@/composables/usePestanasContables';
 import { useMoney } from '@/composables/useMoney';
 import AppConfirmModal from '@/Components/AppConfirmModal.vue';
+import { useEscClose } from '@/composables/useEscClose';
 
 /*
  * La fecha de HOY en Colombia, no en UTC.
@@ -54,6 +55,7 @@ const filtrar = () => {
 };
 
 const modal = ref(false);
+useEscClose(modal);
 const procesando = ref(false);
 const nuevo = reactive({
     fecha: hoyBogota(),

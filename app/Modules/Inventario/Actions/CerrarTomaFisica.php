@@ -74,7 +74,11 @@ class CerrarTomaFisica
             //   explícitamente, y en ese caso queda auditado.
             $esRoot = $u->hasRole('Aracely') || $u->hasRole('Gerencia');
             if (! $esRoot && $toma->creada_por && $toma->creada_por === $u->id) {
-                $permitirAuto = (bool) (function_exists('setting') ? setting('inventario.permitir_cerrar_propia_toma', false) : false);
+                // Sin default en la llamada: la clave ya está registrada en
+                // `Reglas::DEFAULTS` (apagada), y un literal acá volvería a
+                // ganarle al valor registrado mientras no exista la fila —que
+                // es exactamente como empezó el lío de las cuentas contables.
+                $permitirAuto = (bool) (function_exists('setting') ? setting('inventario.permitir_cerrar_propia_toma') : false);
                 if (! $permitirAuto) {
                     abort(403, 'Segregación de funciones: quien crea una toma física no puede cerrarla. Solicita a Gerencia/Aracely.');
                 }
@@ -112,16 +116,32 @@ class CerrarTomaFisica
 
             foreach ($toma->items as $it) {
                 if ($it->cantidad_contada === null) continue;
-                $diff = (int) $it->diferencia;
-                if ($diff === 0) continue;
 
-                // PATRÓN H (arrastre M2) · abort si diferencia no es entera.
-                if ($diff !== (int) $diff || abs($diff - round($diff)) > 0.0001) {
+                /*
+                 * PATRÓN H (arrastre M2) · abort si la diferencia no es entera.
+                 *
+                 * La guarda se medía SOBRE EL VALOR YA TRUNCADO: `$diff` venía
+                 * de un `(int)` dos líneas arriba, así que `$diff !== (int)
+                 * $diff` era imposible y la guarda nunca frenó nada. Un conteo
+                 * de 10,5 contra un sistema de 10 —que la columna admite,
+                 * porque es `decimal:4` y el controlador lo valida como
+                 * `numeric`— pasaba de largo, el kardex se ajustaba en 0 y la
+                 * toma se cerraba diciendo que todo cuadró.
+                 *
+                 * Ahora se mide el valor CRUDO, antes de truncarlo.
+                 */
+                $crudo = (float) $it->diferencia;
+
+                if (abs($crudo - round($crudo)) > 0.0001) {
                     $etiqueta = $it->esAgregado() ? "producto {$it->producto_id}" : "variante {$it->variante_id}";
                     throw new InvalidArgumentException(
-                        "Kardex no soporta fraccionarios · {$etiqueta} diff={$diff}."
+                        "Kardex no soporta fraccionarios · {$etiqueta} diff={$crudo}. "
+                        .'Corregí la cantidad contada a un número entero antes de cerrar.'
                     );
                 }
+
+                $diff = (int) $it->diferencia;
+                if ($diff === 0) continue;
 
                 $itemsConDiferencia++;
                 $valorAjuste += round($diff * (float) $it->costo_unit, 2);

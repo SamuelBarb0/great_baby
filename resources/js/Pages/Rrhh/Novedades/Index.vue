@@ -20,6 +20,7 @@ import { Head, router } from '@inertiajs/vue3';
 import { ClipboardList, Plus, Download, AlertTriangle, Paperclip, Trash2, Pencil } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import AppConfirmModal from '@/Components/AppConfirmModal.vue';
+import { useEscClose } from '@/composables/useEscClose';
 
 /*
  * La fecha de HOY en Colombia, no en UTC.
@@ -54,6 +55,7 @@ const num = (v) => (v == null ? '—' : Number(v).toLocaleString('es-CO', { maxi
 
 /* ── alta y edición ──────────────────────────────────────────────────────── */
 const modal = ref(false);
+useEscClose(modal);
 const editando = ref(null);
 
 const vacio = () => ({

@@ -24,7 +24,7 @@ use Illuminate\Support\Facades\Hash;
  * Fix demo B1 · Seeder orquestador idempotente para tener el sistema
  *   con datos consistentes en TODOS los módulos para la demo:
  *
- *   - Users con demo1234
+ *   - Users con una clave que se pasa por --clave o se genera al azar
  *   - 3 traslados (Borrador, EnTránsito, Recibido) con items
  *   - 2 tomas físicas (En Conteo + Ajustada)
  *   - Kardex saludable en 3 ubicaciones
@@ -35,7 +35,7 @@ use Illuminate\Support\Facades\Hash;
  */
 class DemoResetCommand extends Command
 {
-    protected $signature = 'demo:reset {--force : Ejecutar sin confirmación}';
+    protected $signature = 'demo:reset {--force : Ejecutar sin confirmación} {--clave= : Clave para los usuarios de demo; sin ella se genera una y se muestra}';
 
     protected $description = 'Deja el sistema con datos consistentes para demo. Idempotente.';
 
@@ -45,7 +45,7 @@ class DemoResetCommand extends Command
             return self::SUCCESS;
         }
 
-        $this->info('=== FASE 1: Users con demo1234 ===');
+        $this->info('=== FASE 1: Usuarios de demo ===');
         $this->sembrarUsers();
 
         $this->info('=== FASE 2: Kardex saludable ===');
@@ -63,15 +63,45 @@ class DemoResetCommand extends Command
         $this->info('=== FASE 6: Cliente Portal B2B ===');
         $this->sembrarClienteB2B();
 
-        $this->info(PHP_EOL . '✅ Demo lista. Credenciales: demo1234');
+        $this->info(PHP_EOL . '✅ Demo lista.');
+        $this->warn('   Clave de los 7 usuarios: ' . $this->claveDeEstaCorrida());
+        $this->line('   Se muestra una sola vez. Anotala ahora: no queda escrita en ninguna parte.');
         $this->tabla();
 
         return self::SUCCESS;
     }
 
+    /** La clave de esta corrida. Se decide una vez y se muestra al final. */
+    protected ?string $claveDemo = null;
+
+    /**
+     * La clave de los usuarios de demo NO vive en el código.
+     *
+     * ───────────────────────────────────────────────────────────────────────
+     * POR QUÉ
+     *
+     * Estaba escrita a mano acá, dentro de un `Hash::make()`. El repositorio
+     * `michcardenas/great_baby` es PÚBLICO, así que esa clave estaba
+     * publicada en internet junto con los siete correos que la usan —
+     * `aracely@`, `gerente@`, `contador@`…— y junto con la dirección del
+     * sistema. Cualquiera que encontrara el repo tenía la lista completa.
+     *
+     * Ahora se pasa por `--clave`, o se genera una al azar y se muestra UNA
+     * VEZ en pantalla. Lo que no se puede es que vuelva a quedar escrita.
+     * ───────────────────────────────────────────────────────────────────────
+     */
+    protected function claveDeEstaCorrida(): string
+    {
+        if ($this->claveDemo === null) {
+            $this->claveDemo = (string) ($this->option('clave') ?: \Illuminate\Support\Str::password(14, true, true, false));
+        }
+
+        return $this->claveDemo;
+    }
+
     protected function sembrarUsers(): void
     {
-        $pwd = Hash::make('demo1234');
+        $pwd = Hash::make($this->claveDeEstaCorrida());
         $perfiles = [
             ['aracely@greatbaby.com', 'Aracely Sánchez (dueña)', 'Aracely'],
             ['gerente@greatbaby.com', 'Gerente General', 'Gerente'],
@@ -88,7 +118,7 @@ class DemoResetCommand extends Command
             $u->save();
             if (! $u->hasRole($rol)) $u->assignRole($rol);
         }
-        $this->line('  · 7 users listos con demo1234');
+        $this->line('  · 7 usuarios listos');
     }
 
     protected function sembrarKardex(): void
@@ -236,27 +266,35 @@ class DemoResetCommand extends Command
             $c = Contacto::first();
             if (! $c) return;
         }
-        $c->password = Hash::make('demo1234');
+        $c->password = Hash::make($this->claveDeEstaCorrida());
         $c->portal_habilitado = 1;
         $c->save();
-        $this->line("  · Cliente B2B '{$c->email_portal_key}' con demo1234");
+        $this->line("  · Cliente B2B '{$c->email_portal_key}' listo");
     }
 
     protected function tabla(): void
     {
+        /*
+         * La tabla no lleva la clave escrita: la lee de esta corrida.
+         *
+         * Antes repetia la misma clave fija ocho veces, asi que el repo publico
+         * traia la lista completa de correos CON su clave al lado. Ahora sale
+         * una sola vez, arriba, y la tabla solo dice a quien se le aplico.
+         */
         $this->newLine();
         $this->table(
-            ['Perfil', 'Email', 'Contraseña'],
+            ['Perfil', 'Email'],
             [
-                ['Aracely (dueña)', 'aracely@greatbaby.com', 'demo1234'],
-                ['Gerente', 'gerente@greatbaby.com', 'demo1234'],
-                ['Contador', 'contador@greatbaby.com', 'demo1234'],
-                ['Vendedor', 'vendedor@greatbaby.com', 'demo1234'],
-                ['Alistador', 'alistador@greatbaby.com', 'demo1234'],
-                ['SAC', 'sac@greatbaby.com', 'demo1234'],
-                ['Gerencia', 'gerencia@greatbaby.com', 'demo1234'],
-                ['Portal B2B', 'cliente.demo@greatbaby.com', 'demo1234'],
+                ['Aracely (duena)', 'aracely@greatbaby.com'],
+                ['Gerente', 'gerente@greatbaby.com'],
+                ['Contador', 'contador@greatbaby.com'],
+                ['Vendedor', 'vendedor@greatbaby.com'],
+                ['Alistador', 'alistador@greatbaby.com'],
+                ['SAC', 'sac@greatbaby.com'],
+                ['Gerencia', 'gerencia@greatbaby.com'],
+                ['Portal B2B', 'cliente.demo@greatbaby.com'],
             ]
         );
+        $this->line('   Los ocho con la misma clave de arriba.');
     }
 }

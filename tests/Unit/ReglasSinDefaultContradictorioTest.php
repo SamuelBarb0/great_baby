@@ -151,7 +151,10 @@ it('toda clave que el código consulta está registrada en Reglas::DEFAULTS', fu
         'empresa.rango_hasta_nd',
         'cartera.token_publico_dias_vida',
         'credito.bloquear_por_factura_vencida',
-        'inventario.permitir_cerrar_propia_toma',
+        // `inventario.permitir_cerrar_propia_toma` salió de esta lista el
+        // 19-nov: ya está registrada, así que Gerencia por fin puede verla en
+        // /app/reglas. Antes el código prometía un bypass «que sólo Gerencia
+        // puede activar» y no había forma de activarlo.
         'siigo.iva_pct_default',
     ];
 

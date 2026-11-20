@@ -35,9 +35,6 @@ use Illuminate\Validation\ValidationException;
 class CrearPedidoCliente
 {
     /**
-     * @param  list<array{variante_id?:int|null, producto_id?:int|null, cantidad:int}>  $items
-     */
-    /**
      * Que nadie pida más de lo que hay para vender.
      *
      * @param  array<int,array<string,mixed>>  $items
@@ -89,6 +86,7 @@ class CrearPedidoCliente
     }
 
     /**
+     * @param  list<array{variante_id?:int|null, producto_id?:int|null, cantidad:int}>  $items
      * @param  array<string,float>  $preciosPactados  Precio por «variante-{id}» o «producto-{id}»
      *                                                que pisa al de la lista. Lo usa la conversión
      *                                                de una cotización, y nada más.

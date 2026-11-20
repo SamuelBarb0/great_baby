@@ -5,6 +5,7 @@ import { Wallet, Plus, Pencil, X, CalendarCheck } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import PestanasSeccion from '@/Components/PestanasSeccion.vue';
 import { pestanasConfigContable } from '@/composables/usePestanasContables';
+import { useEscClose } from '@/composables/useEscClose';
 
 const props = defineProps({
     cajas: { type: Array, required: true },
@@ -18,6 +19,7 @@ const props = defineProps({
 });
 
 const modal = ref(false);
+useEscClose(modal);
 const procesando = ref(false);
 const alternando = ref(null);
 

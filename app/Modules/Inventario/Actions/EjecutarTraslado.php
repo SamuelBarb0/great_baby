@@ -7,6 +7,7 @@ use App\Modules\Inventario\Enums\EstadoTraslado;
 use App\Modules\Inventario\Models\Traslado;
 use App\Modules\Inventario\Models\TrasladoItem;
 use App\Modules\Inventario\Services\StockService;
+use App\Modules\Inventario\Support\CostoPromedio;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 use Lorisleiva\Actions\Concerns\AsAction;
@@ -135,8 +136,31 @@ class EjecutarTraslado
             }
 
             $ts = now();
+
+            /*
+             * Lo que costaba en el origen, para que el destino lo herede.
+             *
+             * Mover una caja de sitio no le cambia lo que costó, pero el
+             * traslado escribía su entrada SIN costo. En el destino, el
+             * promedio ponderado se calcula sobre las entradas: seis mil
+             * unidades entrando en cero contra nueve mil a dieciocho mil
+             * dejaban el estante valorizado en diez mil novecientos — y de ahí
+             * sale el costo con el que después se despacha y se asienta.
+             *
+             * Se mide ANTES de escribir la salida, que es cuando el origen
+             * todavía tiene el saldo que se está moviendo.
+             */
+            $costosDelOrigen = CostoPromedio::porUbicacion(
+                $items->map(fn ($it) => [
+                    'variante_id' => $it->variante_id,
+                    'producto_id' => $it->producto_id,
+                ])->all(),
+                $traslado->origen_id,
+            );
+
             foreach ($items as $it) {
                 $cant = (int) $it->cantidad_solicitada;
+                $costo = $costosDelOrigen[CostoPromedio::clave($it->variante_id, $it->producto_id)] ?? null;
                 // C-F2 R2 · Mov polimórfico:
                 //   variante_id NULL para agregados, producto_id auto por hook.
                 InventarioMovimiento::create([
@@ -145,6 +169,7 @@ class EjecutarTraslado
                     'ubicacion_id' => $traslado->origen_id,
                     'tipo' => 'traslado_salida',
                     'cantidad' => -$cant,
+                    'costo_unit' => $costo,
                     'referencia_tipo' => Traslado::class,
                     'referencia_id' => $traslado->id,
                     'user_id' => auth()->id(),
@@ -200,8 +225,29 @@ class EjecutarTraslado
             }
 
             $ts = now();
+
+            /*
+             * El costo viaja con la mercancía, y se lee de la SALIDA.
+             *
+             * `enviar()` ya lo midió contra el origen y lo dejó escrito en el
+             * movimiento `traslado_salida`. Volver a medirlo acá daría otra
+             * cosa —el origen ya quedó sin esas unidades— y guardar el número
+             * en la tabla del traslado pediría una migración para algo que el
+             * kardex ya sabe.
+             */
+            $costosEnViaje = InventarioMovimiento::query()
+                ->where('referencia_tipo', Traslado::class)
+                ->where('referencia_id', $traslado->id)
+                ->where('tipo', 'traslado_salida')
+                ->get()
+                ->mapWithKeys(fn ($m) => [
+                    CostoPromedio::clave($m->variante_id, $m->producto_id) => $m->costo_unit,
+                ])
+                ->all();
+
             foreach ($items as $it) {
                 $cant = (int) $it->cantidad_solicitada;
+                $costo = $costosEnViaje[CostoPromedio::clave($it->variante_id, $it->producto_id)] ?? null;
                 // C-F2 R2 · Mov polimórfico (variante_id NULL para agregados).
                 InventarioMovimiento::create([
                     'variante_id' => $it->variante_id,
@@ -209,6 +255,7 @@ class EjecutarTraslado
                     'ubicacion_id' => $traslado->destino_id,
                     'tipo' => 'traslado_entrada',
                     'cantidad' => $cant,
+                    'costo_unit' => $costo,
                     'referencia_tipo' => Traslado::class,
                     'referencia_id' => $traslado->id,
                     'user_id' => auth()->id(),

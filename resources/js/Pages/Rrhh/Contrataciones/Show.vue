@@ -13,6 +13,7 @@ import {
 } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import AppConfirmModal from '@/Components/AppConfirmModal.vue';
+import { useEscClose } from '@/composables/useEscClose';
 
 const props = defineProps({
     contratacion: { type: Object, required: true },
@@ -52,12 +53,14 @@ const guardarAcuerdo = () => enviar('/acuerdo', { ...acuerdo });
 
 /* examen médico */
 const modalExamen = ref(false);
+useEscClose(modalExamen);
 const examen = reactive({ resultado: 'apto', observacion: '' });
 const examenExigeObs = computed(() => examen.resultado !== 'apto');
 const guardarExamen = () => enviar('/examen', { ...examen }, { onSuccess: () => (modalExamen.value = false) });
 
 /* afiliaciones */
 const modalAfiliacion = ref(null);
+useEscClose(modalAfiliacion);
 const entidad = ref('');
 const guardarAfiliacion = () => enviar('/afiliacion',
     { campo: modalAfiliacion.value.campo, entidad: entidad.value },
@@ -65,6 +68,7 @@ const guardarAfiliacion = () => enviar('/afiliacion',
 
 /* documentos */
 const modalDoc = ref(false);
+useEscClose(modalDoc);
 const doc = reactive({ tipo: 'cedula', nombre: '', fecha_vencimiento: null });
 const archivo = ref(null);
 const subirDoc = () => {
@@ -100,6 +104,7 @@ const completar = () => {
     };
 };
 const modalCancelar = ref(false);
+useEscClose(modalCancelar);
 const motivo = ref('');
 const cancelar = () => enviar('/cancelar', { motivo: motivo.value },
     { onSuccess: () => { modalCancelar.value = false; motivo.value = ''; } });

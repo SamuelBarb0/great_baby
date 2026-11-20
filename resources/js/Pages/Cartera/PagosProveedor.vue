@@ -38,6 +38,7 @@ const filtrar = () => {
 };
 
 const modal = ref(false);
+useEscClose(modal);
 const proc = ref(false);
 
 /*
@@ -180,6 +181,7 @@ const abrir = () => {
 // QA-FIX #11 · preview desde motor REAL vía API (evita hardcodes que mienten
 // si Aracely edita las reglas de retenciones).
 import { watch } from 'vue';
+import { useEscClose } from '@/composables/useEscClose';
 
 /*
  * La fecha de HOY en Colombia, no en UTC.

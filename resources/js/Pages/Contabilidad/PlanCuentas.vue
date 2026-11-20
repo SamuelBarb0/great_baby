@@ -8,6 +8,7 @@ import AppLayout from '@/Layouts/AppLayout.vue';
 import PestanasSeccion from '@/Components/PestanasSeccion.vue';
 import { pestanasConfigContable } from '@/composables/usePestanasContables';
 import AppConfirmModal from '@/Components/AppConfirmModal.vue';
+import { useEscClose } from '@/composables/useEscClose';
 
 const props = defineProps({
     // Eliminar e importar son de gerencia. Antes los botones salian para
@@ -46,6 +47,7 @@ const filtrar = () => {
 
 // Modal crear/editar
 const editando = ref(null);
+useEscClose(editando);
 const form = useForm({
     codigo: '', nombre: '', naturaleza: 'debito',
     permite_movimiento: false, siigo_cuenta_id: '', activa: true,

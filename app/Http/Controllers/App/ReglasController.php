@@ -40,6 +40,74 @@ class ReglasController extends Controller implements HasMiddleware
         ];
     }
 
+    /**
+     * Qué reglas de cuenta apuntan hoy a una cuenta que no recibe movimiento.
+     *
+     * Devuelve, por clave: qué le pasa a esa cuenta y qué hijas suyas sí
+     * admiten movimiento, para que el contador elija sin salir de la
+     * pantalla. Si el plan de cuentas todavía no está cargado —instalación
+     * nueva— no se inventa nada: devuelve vacío.
+     *
+     * @param  array<string, array<int, array>>  $grupos
+     * @return array<string, array{estado:string, nombre:?string, hijas:array}>
+     */
+    private function cuentasQueNoSirven(array $grupos): array
+    {
+        try {
+            $plan = \DB::table('plan_cuentas')
+                ->get(['codigo', 'nombre', 'permite_movimiento'])
+                ->keyBy('codigo');
+        } catch (\Throwable) {
+            return [];
+        }
+
+        if ($plan->isEmpty()) {
+            return [];
+        }
+
+        $salida = [];
+
+        foreach ($grupos as $reglas) {
+            foreach ($reglas as $regla) {
+                $clave = $regla['clave'] ?? '';
+
+                // Sólo las que son una cuenta. El resto de reglas —días,
+                // porcentajes, interruptores— no tienen nada que ver acá.
+                if (! str_contains($clave, 'cta_') && ! str_contains($clave, 'cuenta')) {
+                    continue;
+                }
+
+                $valor = trim((string) ($regla['valor'] ?? ''));
+
+                if ($valor === '') {
+                    continue;
+                }
+
+                $cuenta = $plan->get($valor);
+
+                if ($cuenta && $cuenta->permite_movimiento) {
+                    continue;
+                }
+
+                $salida[$clave] = [
+                    'estado' => $cuenta ? 'agrupadora' : 'no_existe',
+                    'nombre' => $cuenta?->nombre,
+                    // Las hijas que sí reciben movimiento, para elegir.
+                    'hijas' => $cuenta
+                        ? $plan->filter(fn ($x) => $x->codigo !== $valor
+                            && str_starts_with($x->codigo, $valor)
+                            && $x->permite_movimiento)
+                            ->take(25)
+                            ->map(fn ($x) => ['codigo' => $x->codigo, 'nombre' => $x->nombre])
+                            ->values()->all()
+                        : [],
+                ];
+            }
+        }
+
+        return $salida;
+    }
+
     /** ¿Entra a todo, o sólo al grupo contable? */
     private function veTodo(Request $r): bool
     {
@@ -82,6 +150,20 @@ class ReglasController extends Controller implements HasMiddleware
         return Inertia::render('Reglas', [
             'grupos' => $grupos,
             'soloContable' => ! $this->veTodo($r),
+            /*
+             * Las cuentas que hoy no sirven, marcadas en la propia casilla.
+             *
+             * `Reglas::set()` ya impide GUARDAR una cuenta agrupadora. Lo que
+             * no miraba nadie es el valor de fábrica: las reglas nacieron con
+             * cuentas de cuatro dígitos —1435, 4135, 6135— que en el plan real
+             * de Great Baby son grupos y no reciben movimiento, y otras dos
+             * que ni existen. Son 21 de 79.
+             *
+             * El contador las encontró de a una, cuando un asiento no cuadró.
+             * Acá salen todas juntas, en la pantalla donde se arreglan, con
+             * las cuentas hijas que sí admiten movimiento para elegir.
+             */
+            'cuentasQueNoSirven' => $this->cuentasQueNoSirven($grupos),
             'gruposLabels' => [
                 'empaque' => '📦 Estación de Empaque',
                 'dashboard' => '📊 Torre de Control',
@@ -115,6 +197,8 @@ class ReglasController extends Controller implements HasMiddleware
                 'siigo.doc_type_egreso' => 'RP',
                 'siigo.doc_type_asiento' => 'CC',
                 'siigo.doc_type_asiento_manual' => 'CC',
+                // Dropi · la wallet viaja como comprobante contable (CC).
+                'siigo.doc_type_wallet_dropi' => 'CC',
                 'siigo.doc_type_gasto' => 'CC',
                 'siigo.doc_type_conciliacion' => 'CC',
                 'siigo.resolucion_fv_default_id' => 'FV',

@@ -4,7 +4,7 @@ import { Link, usePage } from '@inertiajs/vue3';
 import { useEventListener } from '@vueuse/core';
 import {
     LayoutDashboard, Package, ShoppingCart, Warehouse, Calculator,
-    FileText, Users, Truck, Settings, Bell, Search, LogOut,
+    FileText, Users, Truck, Settings, Bell, Search, LogOut, KeyRound,
     Menu as MenuIcon, X, ChevronDown, Home, BarChart3, MessageSquare,
     Boxes, Camera, Scissors, Wallet, MapPin, AlertTriangle, Radio, Upload,
     Undo2, ScanLine, Tag, Layers, CreditCard, LayoutGrid, Images, Rocket, ClipboardList, RefreshCw,
@@ -742,6 +742,13 @@ const visibleGroups = computed(() => groups
                             <div class="font-medium">{{ user?.name }}</div>
                             <div class="text-xs text-surface-500">{{ user?.es_aracely ? 'Gerencia' : (user?.roles?.[0] || 'Operario') }}</div>
                         </div>
+                        <!-- Cambiar la propia contraseña. Va acá, al lado del
+                             nombre, porque es donde la gente la busca: hasta hoy
+                             no existía en ninguna parte y había que pedirle a
+                             alguien que la cambiara a mano. -->
+                        <Link href="/app/mi-clave" class="btn-ghost p-2" title="Mi contraseña" aria-label="Mi contraseña">
+                            <KeyRound class="h-4 w-4"/>
+                        </Link>
                         <Link href="/logout" method="post" as="button" class="btn-ghost p-2" title="Cerrar sesión" aria-label="Cerrar sesión">
                             <LogOut class="h-4 w-4"/>
                         </Link>

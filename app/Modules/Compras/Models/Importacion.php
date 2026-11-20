@@ -163,7 +163,18 @@ class Importacion extends Model implements AuditableContract
     public function cuantoFaltaParaLlegar(): ?array
     {
         if ($this->fecha_llegada) {
-            $dias = (int) round($this->fecha_llegada->diffInDays(now()));
+            /*
+             * Días de calendario, no horas redondeadas.
+             *
+             * `fecha_llegada` viene casteada a `date` —medianoche— y se
+             * comparaba contra `now()`, que trae hora: a partir del mediodía
+             * del mismo día que llegó, `round(0.6)` daba 1 y el panel decía
+             * «Llegó hace 1 día» de un contenedor que estaba descargándose. La
+             * rama hermana de abajo ya lo hacía bien con `startOfDay()`.
+             */
+            $dias = (int) round(
+                $this->fecha_llegada->copy()->startOfDay()->diffInDays(now()->startOfDay())
+            );
 
             return [
                 'dias' => $dias,

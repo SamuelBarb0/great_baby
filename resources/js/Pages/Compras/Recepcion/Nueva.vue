@@ -4,6 +4,7 @@ import { Head, Link, router } from '@inertiajs/vue3';
 import { Truck, Save, ArrowLeft, AlertTriangle, FileText } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import { useMoney } from '@/composables/useMoney';
+import { useEscClose } from '@/composables/useEscClose';
 
 const props = defineProps({
     oc: { type: Object, default: null },
@@ -66,6 +67,7 @@ const procesando = ref(false);
  * botón para resolverla sin salir de acá.
  */
 const linea = ref(null);
+useEscClose(linea);
 const buscando = ref(false);
 const encontrados = ref([]);
 const guardandoProducto = ref(false);
@@ -166,37 +168,7 @@ if (claveConteo) {
         const guardado = JSON.parse(localStorage.getItem(claveConteo) || 'null');
         if (Array.isArray(guardado)) {
             const base = Object.fromEntries(form.items.map(i => [i.orden_item_id, i]));
-            
-/*
- * Las posiciones que se le pueden ofrecer a este renglón.
- *
- * Dependen del destino elegido: cada par (oficina, almacén) resuelve a una
- * bodega, y sólo los estantes DE ESA bodega son un destino válido. Sin destino
- * elegido la mercancía va a la bodega de la orden, y ahí tampoco hay posición
- * que elegir hasta que se sepa a cuál.
- *
- * El servidor vuelve a comprobarlo al guardar: esto es comodidad, no candado.
- */
-const posicionesDe = (fila) => {
-    if (! fila?.destino_ingreso) return [];
-    const d = props.destinos.find(x => x.valor === fila.destino_ingreso);
-    if (! d?.bodega_id) return [];
-    return props.posiciones[d.bodega_id] || [];
-};
-
-/*
- * Cambiar de destino limpia la posición: un estante de la bodega anterior no
- * existe en la nueva, y el servidor lo rechazaría al guardar.
- */
-watch(() => form.items.map(f => f.destino_ingreso).join('|'), () => {
-    form.items.forEach((f) => {
-        if (f.posicion_ingreso && ! posicionesDe(f).some(p => p.id === f.posicion_ingreso)) {
-            f.posicion_ingreso = '';
-        }
-    });
-});
-
-const destinosValidos = new Set(props.destinos.map(d => d.valor));
+            const destinosValidos = new Set(props.destinos.map(d => d.valor));
 
             /*
              * Lo guardado se revisa contra la orden de HOY antes de pintarlo.
@@ -260,6 +232,85 @@ const destinosValidos = new Set(props.destinos.map(d => d.valor));
         } catch { /* ídem */ }
     }, { deep: true });
 }
+
+/*
+ * Las posiciones que se le pueden ofrecer a este renglón.
+ *
+ * Dependen del destino elegido: cada par (oficina, almacén) resuelve a una
+ * bodega, y sólo los estantes DE ESA bodega son un destino válido. Sin destino
+ * elegido la mercancía va a la bodega de la orden, y ahí tampoco hay posición
+ * que elegir hasta que se sepa a cuál.
+ *
+ * El servidor vuelve a comprobarlo al guardar: esto es comodidad, no candado.
+ */
+/** La bodega a la que resuelve el destino de este renglón, o cadena vacía. */
+const destinoDe = (fila) => {
+    if (! fila?.destino_ingreso) return '';
+
+    const d = props.destinos.find((x) => x.valor === fila.destino_ingreso);
+
+    return d?.bodega_id ? String(d.bodega_id) : '';
+};
+
+/** Lo que se ve escrito en la casilla: el código, no el id. */
+const codigoDePosicion = (fila) => {
+    if (! fila?.posicion_ingreso) return '';
+
+    const p = posicionesDe(fila).find((x) => x.id === fila.posicion_ingreso);
+
+    return p ? p.codigo : '';
+};
+
+/** Lo que el usuario escribe en texto se guarda como id. */
+const erroresDePosicion = reactive({});
+
+const ponerPosicion = (fila, texto) => {
+    const escrito = (texto || '').trim().toUpperCase();
+
+    delete erroresDePosicion[fila.orden_item_id];
+
+    if (! escrito) {
+        fila.posicion_ingreso = '';
+
+        return;
+    }
+
+    const p = posicionesDe(fila).find((x) => x.codigo.toUpperCase() === escrito);
+
+    if (p) {
+        fila.posicion_ingreso = p.id;
+
+        return;
+    }
+
+    /*
+     * Un estante que no existe no se guarda a medias.
+     *
+     * El servidor lo rechazaría igual, pero recién al confirmar: después de
+     * contar un contenedor entero. Se dice acá, en el renglón, en el momento.
+     */
+    fila.posicion_ingreso = '';
+    erroresDePosicion[fila.orden_item_id] = `No existe el estante «${escrito}» en esta bodega.`;
+};
+
+const posicionesDe = (fila) => {
+    if (! fila?.destino_ingreso) return [];
+    const d = props.destinos.find(x => x.valor === fila.destino_ingreso);
+    if (! d?.bodega_id) return [];
+    return props.posiciones[d.bodega_id] || [];
+};
+
+/*
+ * Cambiar de destino limpia la posición: un estante de la bodega anterior no
+ * existe en la nueva, y el servidor lo rechazaría al guardar.
+ */
+watch(() => form.items.map(f => f.destino_ingreso).join('|'), () => {
+    form.items.forEach((f) => {
+        if (f.posicion_ingreso && ! posicionesDe(f).some(p => p.id === f.posicion_ingreso)) {
+            f.posicion_ingreso = '';
+        }
+    });
+});
 
 // Otro color dentro de la misma línea: de China llega agrupado.
 const otroColor = (it, color = '') => {
@@ -501,6 +552,18 @@ const guardar = () => {
 
                 <datalist id="colores-recepcion"><option v-for="c in oc.colores" :key="c" :value="c"/></datalist>
 
+                <!--
+                    Los estantes de cada bodega, UNA SOLA VEZ para toda la pantalla.
+
+                    Antes cada renglón dibujaba su propio `<select>` con las 436
+                    posiciones: tres líneas eran mil trescientas opciones y una orden
+                    de cuarenta pasaba de diecisiete mil. Acá son 436 y las comparten
+                    todos los renglones, sin importar cuántos sean.
+                -->
+                <datalist v-for="(lista, bodegaId) in posiciones" :key="`pos-${bodegaId}`" :id="`posiciones-${bodegaId}`">
+                    <option v-for="p in lista" :key="p.id" :value="p.codigo">{{ p.nombre }}</option>
+                </datalist>
+
                 <div v-if="conReparto.length" class="p-3 rounded-lg bg-surface-50 dark:bg-surface-900 border-l-4 border-surface-400 text-sm">
                     <b>Total por referencia.</b> Cada color puede subir o bajar; lo que importa es que el total cuadre.
                     <div v-for="c in conReparto" :key="c.referencia" :class="c.contado !== c.esperado ? 'text-amber-700 dark:text-amber-400 font-semibold' : ''">
@@ -667,14 +730,33 @@ const guardar = () => {
                                             ahorra el traslado posterior.
                                             Sólo aparece si esa bodega tiene posiciones cargadas.
                                         -->
-                                        <select v-if="posicionesDe(it).length"
-                                                v-model="it.posicion_ingreso"
-                                                :disabled="it.es_componente || it.clasificacion !== 'apto'"
-                                                class="input text-xs w-full mt-1"
-                                                :aria-label="`Posición dentro de la bodega para ${it.descripcion}`">
-                                            <option value="">Sin posición · entra a la bodega</option>
-                                            <option v-for="p in posicionesDe(it)" :key="p.id" :value="p.id">{{ p.codigo }}</option>
-                                        </select>
+                                        <!--
+                                            Se escribe el estante, no se busca en una lista de 436.
+
+                                            Era un `<select>` con TODAS las posiciones de la bodega,
+                                            y se dibujaba uno POR RENGLÓN: con las tres líneas de un
+                                            contenedor chico ya eran mil trescientas opciones, y con
+                                            una orden de cuarenta líneas pasaban de diecisiete mil.
+                                            Además, encontrar «R12-S1-N1» entre 436 con la rueda del
+                                            ratón es peor que teclearlo.
+
+                                            Ahora es una casilla con `list`: se escribe «R12» y el
+                                            navegador propone. El `<datalist>` es UNO SOLO para toda
+                                            la pantalla, al final del formulario.
+                                        -->
+                                        <input v-if="posicionesDe(it).length"
+                                               :value="codigoDePosicion(it)"
+                                               @change="ponerPosicion(it, $event.target.value)"
+                                               @blur="ponerPosicion(it, $event.target.value)"
+                                               :disabled="it.es_componente || it.clasificacion !== 'apto'"
+                                               :list="`posiciones-${destinoDe(it)}`"
+                                               class="input text-xs w-full mt-1"
+                                               placeholder="Estante · opcional"
+                                               :aria-label="`Posición dentro de la bodega para ${it.descripcion}`"/>
+                                        <p v-if="posicionesDe(it).length && erroresDePosicion[it.orden_item_id]"
+                                           class="text-[10px] text-red-600 mt-0.5">
+                                            {{ erroresDePosicion[it.orden_item_id] }}
+                                        </p>
 
                                         <button v-if="!it.es_componente && it.clasificacion === 'apto'"
                                                 type="button" @click="otroDestino(it)"

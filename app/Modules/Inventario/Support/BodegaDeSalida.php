@@ -69,18 +69,55 @@ class BodegaDeSalida
             return [];
         }
 
+        /*
+         * El saldo se busca TAMBIÉN en los estantes, y se le acredita a su sede.
+         *
+         * Lo que se DEVUELVE sigue siendo una sede —por lo que dice el
+         * comentario de arriba—, pero buscar el saldo sólo en la fila de la
+         * sede dejaba ciega a esta clase en cuanto alguien usara las
+         * posiciones para lo que son: la mercancía recibida directo a
+         * `R12-S1-N1` no aparecía por ningún lado, `resolver()` devolvía
+         * vacío, y el despacho se rendía con «no se pudo determinar de qué
+         * bodega salió». Inventario que no baja, costo de ventas que no se
+         * causa: exactamente el defecto que esta clase existe para evitar,
+         * reaparecido por la puerta de al lado.
+         *
+         * `$deQuienEs` mapea cada ubicación —sede o estante— a la sede que
+         * responde por ella.
+         */
+        $deQuienEs = array_combine($elegibles, $elegibles);
+
+        InventarioUbicacion::query()
+            ->where('activa', true)
+            ->whereIn('bodega_id', $elegibles)
+            // El estante también tiene que ser del tipo que se despacha. Una
+            // posición de cuarentena o de avería vive dentro de una bodega de
+            // venta, y su saldo no es vendible por estar donde está.
+            ->when($categorias, fn ($q) => $q->whereIn('categoria', $categorias))
+            ->get(['id', 'bodega_id'])
+            ->each(function ($u) use (&$deQuienEs) {
+                $deQuienEs[(int) $u->id] = (int) $u->bodega_id;
+            });
+
+        $donde = array_keys($deQuienEs);
+
         $out = [];
 
-        $saldos = function ($campo, array $ids) use ($elegibles) {
+        $saldos = function ($campo, array $ids) use ($donde) {
             if (! $ids) {
                 return collect();
             }
+            /*
+             * Sin `having > 0` por ubicación: ahora cada sede puede venir
+             * repartida en varios estantes, y uno en negativo —un ajuste, una
+             * devolución mal ubicada— tiene que restar del total de su sede en
+             * vez de desaparecer de la cuenta.
+             */
             $q = InventarioMovimiento::query()
                 ->whereIn($campo, $ids)
-                ->whereIn('ubicacion_id', $elegibles)
+                ->whereIn('ubicacion_id', $donde)
                 ->selectRaw("{$campo} as sujeto, ubicacion_id, SUM(cantidad) as saldo")
-                ->groupBy($campo, 'ubicacion_id')
-                ->havingRaw('SUM(cantidad) > 0');
+                ->groupBy($campo, 'ubicacion_id');
 
             // Un producto sólo cuenta como agregado si el movimiento no tiene
             // variante; si no, el saldo de las variantes se sumaría dos veces.
@@ -92,13 +129,31 @@ class BodegaDeSalida
         };
 
         foreach ([['variante_id', $variantes, 'v'], ['producto_id', $productos, 'p']] as [$campo, $ids, $pre]) {
-            $saldos($campo, $ids)
+            // Lo de cada estante se suma al de su sede: el alistador no
+            // camina a «un estante», camina a una bodega y adentro busca.
+            $porSede = [];
+
+            foreach ($saldos($campo, $ids) as $r) {
+                $sede = $deQuienEs[(int) $r->ubicacion_id] ?? null;
+
+                if (! $sede) {
+                    continue;
+                }
+
+                $porSede[$r->sujeto][$sede] = ($porSede[$r->sujeto][$sede] ?? 0) + (int) $r->saldo;
+            }
+
+            foreach ($porSede as $sujeto => $sedes) {
                 // La bodega con más existencias de esa referencia: es de donde
-                // el alistador la habría tomado.
-                ->sortByDesc('saldo')
-                ->each(function ($r) use (&$out, $pre) {
-                    $out["{$pre}:{$r->sujeto}"] ??= (int) $r->ubicacion_id;
-                });
+                // el alistador la habría tomado. Las que quedaron en cero o en
+                // negativo no son candidatas.
+                arsort($sedes);
+                $mejor = array_key_first(array_filter($sedes, fn ($s) => $s > 0));
+
+                if ($mejor !== null) {
+                    $out["{$pre}:{$sujeto}"] ??= (int) $mejor;
+                }
+            }
         }
 
         return $out;

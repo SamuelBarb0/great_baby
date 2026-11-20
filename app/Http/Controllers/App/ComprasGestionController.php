@@ -973,15 +973,6 @@ class ComprasGestionController extends Controller implements HasMiddleware
     }
 
     /**
-     * Los pares (oficina, almacén) que admiten mercancía del contenedor.
-     *
-     * Se resuelven acá y no en el Vue para que la pantalla no tenga que
-     * repetir la regla, y para que si el área la cambia desde el catálogo, la
-     * lista cambie sola.
-     *
-     * @return array<int, array{valor:string, label:string, oficina_id:int, almacen_id:int}>
-     */
-    /**
      * Las posiciones activas de cada bodega: [bodega_id => [{id, codigo, nombre}]].
      *
      * Van indexadas por su bodega porque la pantalla solo puede ofrecer las de
@@ -1004,6 +995,15 @@ class ComprasGestionController extends Controller implements HasMiddleware
             ->all();
     }
 
+    /**
+     * Los pares (oficina, almacén) que admiten mercancía del contenedor.
+     *
+     * Se resuelven acá y no en el Vue para que la pantalla no tenga que
+     * repetir la regla, y para que si el área la cambia desde el catálogo, la
+     * lista cambie sola.
+     *
+     * @return array<int, array{valor:string, label:string, oficina_id:int, almacen_id:int}>
+     */
     private function destinosDeIngreso(): array
     {
         $destinos = [];

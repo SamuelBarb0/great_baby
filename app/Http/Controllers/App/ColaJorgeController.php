@@ -137,6 +137,19 @@ class ColaJorgeController extends Controller implements HasMiddleware
             'alistador' => $p->alistador ? ['id' => $p->alistador->id, 'name' => $p->alistador->name] : null,
             'asignado_at' => $p->alistado_asignado_at?->format('H:i'),
             'inicio_at' => $p->alistado_inicio_at?->format('H:i'),
+            /*
+             * El instante completo, no sólo la hora del reloj.
+             *
+             * El cronómetro de «En alistamiento» armaba la hora de arranque
+             * sobre la fecha de HOY, porque acá sólo iba «16:30». Un pedido
+             * que alguien tomó ayer a las cuatro y media y nunca cerró
+             * amanecía diciendo «0 min» — justo el pedido olvidado que la
+             * columna existe para delatar.
+             *
+             * En segundos Unix: la pantalla no tiene que adivinar ni la fecha
+             * ni la zona horaria.
+             */
+            'inicio_ts' => $p->alistado_inicio_at?->timestamp,
             'fin_at' => $p->alistado_fin_at?->format('H:i'),
             // En segundos, y la pantalla decide cómo leerlo. `diffInMinutes`
             // devuelve FLOTANTE en Carbon 3, así que un alistamiento de 19

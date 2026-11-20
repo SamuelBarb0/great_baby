@@ -9,6 +9,7 @@ import PestanasSeccion from '@/Components/PestanasSeccion.vue';
 import { pestanasNotas } from '@/composables/usePestanasContables';
 import { useMoney } from '@/composables/useMoney';
 import AppConfirmModal from '@/Components/AppConfirmModal.vue';
+import { useEscClose } from '@/composables/useEscClose';
 
 const props = defineProps({
     filtros: { type: Object, required: true },
@@ -40,6 +41,7 @@ const filtrar = () => {
 };
 
 const modal = ref(false);
+useEscClose(modal);
 const form = reactive({ factura_id: null, valor: 0, motivo: '' });
 const buscar = ref('');
 const facturasEncontradas = ref([]);

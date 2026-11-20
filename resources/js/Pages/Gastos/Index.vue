@@ -6,6 +6,7 @@ import { Receipt, Plus, CheckCircle, XCircle, CreditCard, BookOpen } from 'lucid
 import AppLayout from '@/Layouts/AppLayout.vue';
 import Paginacion from '@/Components/Paginacion.vue';
 import AppConfirmModal from '@/Components/AppConfirmModal.vue';
+import { useEscClose } from '@/composables/useEscClose';
 
 /*
  * La fecha de HOY en Colombia, no en UTC.
@@ -39,6 +40,7 @@ const props = defineProps({
  * genera asiento y el contador tiene que poder ver —y corregir— contra que.
  */
 const modalContable = ref(null);
+useEscClose(modalContable);
 const formContable = ref({ cuenta_puc: '', destino: 'siigo', linea: 'great_baby', motivo: '' });
 const guardandoContable = ref(false);
 
@@ -69,6 +71,7 @@ const badgeDestino = (color) => ({
 }[color] || 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200');
 
 const modal = ref(false);
+useEscClose(modal);
 const form = reactive({
     fecha: hoyBogota(),
     categoria: 'papeleria', descripcion: '', monto: 0, proveedor: '', factura_ref: '',
@@ -87,6 +90,7 @@ const cuentaDeLaCategoria = computed(
     () => props.catalogoGastos.find((t) => t.valor === form.categoria)?.cuenta || '',
 );
 const modalRech = ref(null);
+useEscClose(modalRech);
 const motivoRech = ref('');
 const procesando = ref(false);
 
@@ -130,6 +134,7 @@ const rechazar = () => {
  * transferencia no se pregunta nada, que es el caso más común.
  */
 const modalPagar = ref(null);
+useEscClose(modalPagar);
 const cajaElegida = ref(null);
 
 const marcarPagado = (g) => {

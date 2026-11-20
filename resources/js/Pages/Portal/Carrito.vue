@@ -3,12 +3,14 @@ import { ref, computed, onMounted } from 'vue';
 import { Head, Link, router } from '@inertiajs/vue3';
 import { ShoppingCart, Trash2, Send, Package } from 'lucide-vue-next';
 import PortalLayout from '@/Layouts/PortalLayout.vue';
+import { useEscClose } from '@/composables/useEscClose';
 
 const items = ref([]);
 const notas = ref('');
 const enviando = ref(false);
 const errorMsg = ref('');
 const modalVaciar = ref(false);
+useEscClose(modalVaciar);
 
 const cargar = () => {
     try { items.value = JSON.parse(sessionStorage.getItem('portal.carrito') || '[]'); }

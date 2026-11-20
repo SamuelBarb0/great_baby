@@ -18,6 +18,7 @@ import {
     MessageSquare, Trash2, Heart,
 } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
+import { useEscClose } from '@/composables/useEscClose';
 
 /*
  * La fecha de HOY en Colombia, no en UTC.
@@ -56,6 +57,7 @@ const verDescartados = ref(false);
 
 /* ── alta de candidato ───────────────────────────────────────────── */
 const modalNuevo = ref(false);
+useEscClose(modalNuevo);
 const nuevo = reactive({ nombre: '', documento: '', email: '', telefono: '', fuente: 'caja_compensacion', notas: '' });
 const archivo = ref(null);
 
@@ -96,6 +98,7 @@ const mover = (c, etapa) => {
 };
 
 const modalAntecedentes = ref(null);
+useEscClose(modalAntecedentes);
 const resultadoAnt = ref('');
 
 /*
@@ -125,6 +128,7 @@ const guardarAntecedentes = () => accion(
 );
 
 const modalValoracion = ref(null);
+useEscClose(modalValoracion);
 const val = reactive({ valoracion: 'apto', observacion: '' });
 const exigeObs = computed(() => props.valoraciones.find((v) => v.valor === val.valoracion)?.exige_observacion);
 const guardarValoracion = () => accion(
@@ -142,6 +146,7 @@ const guardarValoracion = () => accion(
  * separarse.
  */
 const modalEntrevista = ref(null);
+useEscClose(modalEntrevista);
 const tipoEntrevista = ref('saber_hacer');
 const entrevista = reactive({
     fecha: '', entrevistador_nombre: '', entrevistador_cargo: '',
@@ -267,6 +272,7 @@ const guardarEntrevista = () => {
  * ruta aparte que revisa permiso y deja anotado quién lo leyó.
  */
 const modalPrueba = ref(null);
+useEscClose(modalPrueba);
 const prueba = reactive({
     instrumento: 'minimult', instrumento_otro: '', fecha_aplicacion: '',
     profesional_nombre: '', profesional_tarjeta: '', concepto: 'apto', observaciones: '',
@@ -333,6 +339,7 @@ const contratar = (c) => {
 };
 
 const modalDescarte = ref(null);
+useEscClose(modalDescarte);
 const motivoDescarte = ref('');
 const guardarDescarte = () => accion(
     `/app/rrhh/candidatos/${modalDescarte.value.id}/descartar`,

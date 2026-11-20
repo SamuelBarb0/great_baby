@@ -4,6 +4,7 @@ import { Head, Link, router } from '@inertiajs/vue3';
 import { FileText, ArrowLeft, Send, CheckCircle, XCircle, ShoppingCart, Clock } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import { useMoney } from '@/composables/useMoney';
+import { useEscClose } from '@/composables/useEscClose';
 
 const props = defineProps({ cotizacion: { type: Object, required: true } });
 
@@ -11,6 +12,7 @@ const { money: fmtCOP } = useMoney();
 
 const procesando = ref(false);
 const modalRechazo = ref(false);
+useEscClose(modalRechazo);
 const motivo = ref('');
 
 const COLOR = {

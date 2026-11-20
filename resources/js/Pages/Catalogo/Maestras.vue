@@ -4,10 +4,12 @@ import { Head, router } from '@inertiajs/vue3';
 import { Tag, Plus, Edit2, Trash2 } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import AppConfirmModal from '@/Components/AppConfirmModal.vue';
+import { useEscClose } from '@/composables/useEscClose';
 
 const props = defineProps({ marcas: Array, categorias: Array, colores: Array });
 const tab = ref('marcas');
 const modal = ref(null);
+useEscClose(modal);
 const form = reactive({});
 const procesando = ref(false);
 // PROD-11 · reemplazo de confirm() nativo (bloqueado en iframes y con UX pobre).

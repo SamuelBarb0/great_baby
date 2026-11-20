@@ -65,6 +65,7 @@ const showFlash = ({ type = 'info', message }) => {
 };
 
 import { watch as vueWatch } from 'vue';
+import { useEscClose } from '@/composables/useEscClose';
 // FASE F4 · el watch anterior solo apagaba `flashVisible` tras 7s pero NO
 // reseteaba `flashLocal`; eso dejaba el toast viejo pegado como primera
 // opción del computed, pisando flashes nuevos del controller cuando
@@ -133,7 +134,8 @@ const toggleTodos = () => {
 };
 
 // Modal de confirmación propio · reemplaza confirm/prompt (bloqueados en iframe del app).
-const modalBulk = ref(null);  // { titulo, mensaje, requierePct, pctValor, onConfirmar, color }
+const modalBulk = ref(null);
+useEscClose(modalBulk);  // { titulo, mensaje, requierePct, pctValor, onConfirmar, color }
 // Fix Tailwind JIT · `text-${color}-700` interpolado NO se genera en el
 // build porque el JIT escanea strings literales, no concatenaciones. Mapa
 // estático de las clases que efectivamente usamos aquí.
@@ -227,6 +229,7 @@ const bulkEliminar = abrirBulkEliminar;
 
 const importandoDeSiigo = ref(false);
 const modalImportar = ref(false);
+useEscClose(modalImportar);
 const codeImport = ref('');
 const resultadoImport = ref(null);  // {ok, mensaje}
 
@@ -346,6 +349,7 @@ const consultarEstadoSync = async () => {
 
 // FASE G · Importar Excel SIIGO
 const modalImportarExcel = ref(false);
+useEscClose(modalImportarExcel);
 const archivoImport = ref(null);
 const importandoExcel = ref(false);
 const resumenImport = ref(null);
@@ -387,6 +391,7 @@ const confirmarImportarExcel = async () => {
 // con lo que SIIGO tenga. Antes de disparar el job pedimos confirmación
 // explícita y recordamos que para ver qué va a cambiar hay un reporte global.
 const modalReconciliar = ref(false);
+useEscClose(modalReconciliar);
 const abrirConfirmarReconciliar = () => {
     if (sincronizandoTodo.value) return;
     modalReconciliar.value = true;
@@ -894,7 +899,12 @@ onUnmounted(() => { if (typeof stopNav === 'function') stopNav(); });
         </div>
 
         <!-- Modal · Importar producto desde SIIGO por código -->
-        <div v-if="modalImportar" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+        <!-- Era el único modal del ERP sin NINGUNA salida: ni Escape ni fondo.
+             En una tablet, con el teclado en pantalla abierto por el autofocus,
+             la tarjeta se desborda y los botones ✕ y Cancelar quedan fuera de
+             cuadro: la única salida era recargar la página. -->
+        <div v-if="modalImportar" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 overflow-y-auto"
+             @click.self="modalImportar = false">
             <div class="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 space-y-4">
                 <div class="flex items-start justify-between gap-3">
                     <h3 class="text-lg font-bold flex items-center gap-2">

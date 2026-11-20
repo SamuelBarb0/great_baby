@@ -2,8 +2,10 @@
 import { ref, onMounted, onBeforeUnmount } from 'vue';
 import { router } from '@inertiajs/vue3';
 import { Bell } from 'lucide-vue-next';
+import { useEscClose } from '@/composables/useEscClose';
 
 const abierto = ref(false);
+useEscClose(abierto);
 const eventos = ref([]);
 const noLeidas = ref(0);
 let ultimoCheck = new Date().toISOString();

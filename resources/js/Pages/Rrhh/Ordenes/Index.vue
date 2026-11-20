@@ -10,6 +10,7 @@ import { ref, reactive } from 'vue';
 import { Head, router } from '@inertiajs/vue3';
 import { BadgeCheck, Check, X, Printer, Pencil, AlertTriangle } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
+import { useEscClose } from '@/composables/useEscClose';
 
 const props = defineProps({
     ordenes: { type: Object, required: true },
@@ -41,6 +42,7 @@ const enviar = (url, datos, extra = {}) => {
 
 /* autorizar · la Junta puede bajar el salario propuesto */
 const modalAutorizar = ref(null);
+useEscClose(modalAutorizar);
 const salarioAutorizado = ref(null);
 const notaAutorizacion = ref('');
 const autorizar = () => enviar(`/app/rrhh/ordenes/${modalAutorizar.value.id}/autorizar`,
@@ -59,6 +61,7 @@ const autorizar = () => enviar(`/app/rrhh/ordenes/${modalAutorizar.value.id}/aut
  * toca.
  */
 const modalFormato = ref(null);
+useEscClose(modalFormato);
 const formato = reactive({
     area: '', fecha_inicio: '', horario: '', ciudad: '',
     periodicidad_pago: null, salario_propuesto: null, observaciones: '',
@@ -92,6 +95,7 @@ const guardarFormato = () => {
 
 /* negar · siempre con motivo */
 const modalNegar = ref(null);
+useEscClose(modalNegar);
 const motivo = ref('');
 const negar = () => enviar(`/app/rrhh/ordenes/${modalNegar.value.id}/negar`,
     { motivo: motivo.value },

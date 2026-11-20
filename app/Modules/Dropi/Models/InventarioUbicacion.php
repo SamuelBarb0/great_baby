@@ -70,6 +70,61 @@ class InventarioUbicacion extends Model
     }
 
     /**
+     * Una sede Y sus estantes: donde hay que buscar el saldo de esa bodega.
+     *
+     * ───────────────────────────────────────────────────────────────────────
+     * POR QUÉ ESTO VIVE ACÁ Y NO ESCRITO EN CADA SITIO
+     *
+     * Una bodega y sus racks son el mismo lugar físico. Desde que la
+     * mercancía puede entrar directo a `R12-S1-N1`, preguntarle el saldo
+     * SÓLO a la fila de la sede devuelve cero sobre mercancía que está ahí, a
+     * tres metros.
+     *
+     * Ese mismo descuido apareció cuatro veces en sitios distintos —el
+     * descuento por despacho, el cálculo del costo, la deducción de la bodega
+     * de salida y el buscador de la devolución a proveedor— y cada vez con su
+     * propia consulta. Acá hay una sola, para que la quinta no exista.
+     *
+     * Las posiciones van PRIMERO, igual que en la hoja de picking: se toma
+     * del estante y lo que quedó suelto en la sede es el último recurso.
+     * ───────────────────────────────────────────────────────────────────────
+     *
+     * ───────────────────────────────────────────────────────────────────────
+     * POR DEFECTO SÓLO LO VENDIBLE, Y ESO NO ES UN DETALLE
+     *
+     * Dentro de la bodega principal hay cuatro posiciones que NO son
+     * estantería: el local, el parqueadero, Arsutex y la zona de
+     * alistamiento. Las tres primeras son donde se descarga un contenedor
+     * antes de subirlo a los racks; la cuarta es donde se juntan los pedidos
+     * a medio armar.
+     *
+     * La mercancía está ahí de verdad —se ve en el kardex— pero no se puede
+     * ofrecer: está sin contar, o ya está apartada para un pedido. Por eso
+     * nacen con categoría `cuarentena` y `disponible_para_venta` en falso.
+     *
+     * La primera versión de este helper las devolvía todas, y con eso el
+     * despacho podía sacar cajas del montón que acababa de bajar del camión.
+     * Ahora hay que PEDIR explícitamente las no vendibles: el caso peligroso
+     * es el que cuesta escribir, no el que sale solo.
+     * ───────────────────────────────────────────────────────────────────────
+     *
+     * @param  bool  $sóloVendibles  false trae también cuarentena, avería y garantía
+     * @return list<int>
+     */
+    public static function laSedeYSusPosiciones(int $sedeId, bool $sóloVendibles = true): array
+    {
+        $hijas = static::query()
+            ->where('bodega_id', $sedeId)
+            ->where('activa', true)
+            ->when($sóloVendibles, fn ($q) => $q->where('disponible_para_venta', true))
+            ->pluck('id')
+            ->map(fn ($x) => (int) $x)
+            ->all();
+
+        return [...$hijas, $sedeId];
+    }
+
+    /**
      * Dónde está parada la mercancía, en palabras:
      * «Pasillo 4 · Estante 6 · Nivel 3».
      */

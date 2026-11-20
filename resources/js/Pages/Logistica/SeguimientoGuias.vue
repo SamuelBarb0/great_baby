@@ -12,6 +12,7 @@ import { ref } from 'vue';
 import { Head, router } from '@inertiajs/vue3';
 import { Truck, ExternalLink, PackageCheck } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
+import { useEscClose } from '@/composables/useEscClose';
 
 const props = defineProps({
     guias: { type: Array, required: true },
@@ -38,6 +39,7 @@ const TONOS = {
 // Marcar entregado · la nota es obligatoria: sin saber quién recibió, una
 // guía «entregada» no sirve para reclamarle nada a nadie.
 const entregando = ref(null);
+useEscClose(entregando);
 const nota = ref('');
 const fecha = ref('');
 const guardando = ref(false);

@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, reactive } from 'vue';
+import { ref, computed, reactive, watch } from 'vue';
 import { Head, router } from '@inertiajs/vue3';
 import { Warehouse, Plus, Pencil, Trash2, Power, PowerOff, Cloud, CloudOff, Upload, FileText, Receipt, RefreshCw, Star, UserPlus, ShieldCheck, AlertTriangle } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
@@ -32,6 +32,7 @@ const props = defineProps({
 });
 
 const modal = ref(null);
+useEscClose(modal);
 
 /*
  * Escape cierra el modal.
@@ -249,6 +250,39 @@ const ubicacionesFiltradas = computed(() => {
     });
 });
 
+/*
+ * La tabla pinta de a tandas, no las 491 de una.
+ *
+ * Con el plano cargado esta pantalla pasó a 491 renglones, y cada uno traía
+ * un `<select>` de responsables adentro: cerca de 3.400 `<option>` en el DOM
+ * de golpe. Abrirla congelaba el navegador varios segundos y escribir en el
+ * buscador lo volvía a congelar en cada tecla — y es LA pantalla donde el
+ * jefe de bodega asigna quién responde por cada rack.
+ *
+ * El filtro sigue corriendo sobre la lista COMPLETA: lo que se recorta es lo
+ * que se dibuja, no lo que se busca. Así, buscar «R12» encuentra el rack 12
+ * aunque esté en el renglón 300.
+ */
+const POR_TANDA = 60;
+const cuantasPintar = ref(POR_TANDA);
+
+const visibles = computed(() => ubicacionesFiltradas.value.slice(0, cuantasPintar.value));
+const faltanPorPintar = computed(() => ubicacionesFiltradas.value.length - visibles.value.length);
+
+// Cada búsqueda nueva empieza por arriba: si no, se buscaba algo y la tabla
+// seguía mostrando la tanda vieja ya desplazada.
+watch(buscar, () => { cuantasPintar.value = POR_TANDA; });
+
+/*
+ * El `<select>` de responsable se dibuja SÓLO en la fila que se está
+ * editando.
+ *
+ * Es lo que más pesaba: siete opciones por fila, en todas las filas, para una
+ * casilla que se usa de a una. El resto del tiempo se ve el nombre, que es lo
+ * que uno viene a leer.
+ */
+const editandoResponsable = ref(null);
+
 const reintentosDelSelect = ref({});
 
 /** Vuelve a pedir sólo los datos del encabezado, sin recargar la página. */
@@ -287,6 +321,7 @@ const enviarASiigo = async (u) => {
 
 // FIX-S0 · Modal persistente con password generado (antes se perdía con el flash).
 const credencialGenerada = ref(null);
+useEscClose(credencialGenerada);
 const copiarCredencial = async () => {
     if (!credencialGenerada.value) return;
     try {
@@ -581,7 +616,7 @@ const crearAdminBodega = async () => {
                         </tr>
                     </thead>
                     <tbody class="divide-y">
-                        <tr v-for="u in ubicacionesFiltradas" :key="u.id"
+                        <tr v-for="u in visibles" :key="u.id"
                             :class="[!u.activa && 'opacity-50 bg-surface-50/50', 'hover:bg-surface-50']">
                             <td class="p-2 font-mono font-bold"
                                 :class="u.importada_de_siigo ? 'text-surface-400' : 'text-brand-600'">{{ u.codigo }}</td>
@@ -649,10 +684,12 @@ const crearAdminBodega = async () => {
                                      los días del jefe de bodega: se hace acá mismo, en la
                                      fila, sin abrir el formulario completo (que además toca
                                      SIIGO y el PUC y es de Gerencia). -->
-                                <select v-if="puedeAsignar(u)"
+                                <select v-if="puedeAsignar(u) && editandoResponsable === u.id"
                                         :key="`resp-${u.id}-${reintentosDelSelect[u.id] || 0}`"
                                         :value="u.responsable_user_id"
-                                        @change="asignarResponsable(u, $event.target.value)"
+                                        @change="asignarResponsable(u, $event.target.value); editandoResponsable = null"
+                                        @blur="editandoResponsable = null"
+                                        autofocus
                                         class="input text-xs py-1 w-full max-w-[14rem]"
                                         :aria-label="`Responsable de ${u.nombre}`">
                                     <option :value="''">— sin responsable —</option>
@@ -660,6 +697,24 @@ const crearAdminBodega = async () => {
                                         {{ c.name }}<template v-if="c.roles.length"> · {{ c.roles[0] }}</template>
                                     </option>
                                 </select>
+
+                                <!-- Mientras no se esté editando se muestra el nombre y
+                                     punto. El desplegable se dibuja al pulsar: dibujarlo
+                                     en las 491 filas metía 3.400 opciones en el DOM para
+                                     una casilla que se usa de a una. -->
+                                <button v-else-if="puedeAsignar(u)"
+                                        type="button"
+                                        @click="editandoResponsable = u.id"
+                                        class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-brand-50 dark:hover:bg-brand-950/40 group"
+                                        :title="`Cambiar quién responde por ${u.nombre}`">
+                                    <template v-if="u.responsable_nombre">
+                                        <ShieldCheck class="h-3 w-3 text-violet-600"/>
+                                        <span class="text-violet-700 dark:text-violet-300">{{ u.responsable_nombre }}</span>
+                                    </template>
+                                    <span v-else class="text-surface-400">— sin responsable —</span>
+                                    <Pencil class="h-3 w-3 text-surface-300 group-hover:text-brand-600"/>
+                                </button>
+
                                 <template v-else>
                                     <span v-if="u.responsable_nombre" class="inline-flex items-center gap-1 bg-violet-50 text-violet-700 px-1.5 py-0.5 rounded">
                                         <ShieldCheck class="h-3 w-3"/> {{ u.responsable_nombre }}
@@ -712,6 +767,32 @@ const crearAdminBodega = async () => {
                         </tr>
                     </tbody>
                 </table>
+
+                <!--
+                    Lo que falta por pintar, dicho con todas las letras.
+
+                    Una tabla que se corta sola y no avisa es peor que una
+                    lenta: quien busca su rack y no lo ve concluye que no
+                    existe. Acá se dice cuántas quedan y se traen de a tandas.
+                -->
+                <div v-if="faltanPorPintar > 0"
+                     class="p-4 border-t border-surface-200 dark:border-surface-800 text-center space-y-2">
+                    <p class="text-xs text-surface-500">
+                        Se muestran <b>{{ visibles.length }}</b> de {{ ubicacionesFiltradas.length }}.
+                        <template v-if="buscar"> Afiná la búsqueda para llegar antes a la tuya.</template>
+                        <template v-else> Escribí arriba para encontrar una en particular.</template>
+                    </p>
+                    <div class="flex items-center justify-center gap-2 flex-wrap">
+                        <button type="button" class="btn-ghost text-sm min-h-11"
+                                @click="cuantasPintar += POR_TANDA">
+                            Ver {{ Math.min(POR_TANDA, faltanPorPintar) }} más
+                        </button>
+                        <button type="button" class="btn-ghost text-sm min-h-11 text-surface-500"
+                                @click="cuantasPintar = ubicacionesFiltradas.length">
+                            Ver las {{ ubicacionesFiltradas.length }}
+                        </button>
+                    </div>
+                </div>
             </div>
 
             <!-- Modal crear/editar -->
@@ -946,7 +1027,10 @@ const crearAdminBodega = async () => {
             <div v-if="credencialGenerada" class="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
                 <div class="bg-white rounded-xl shadow-2xl max-w-md w-full p-5 border-2 border-violet-500">
                     <h3 class="text-lg font-bold text-violet-700 flex items-center gap-2 mb-3">
-                        <ShieldCheck class="h-5 w-5"/> Credenciales del Admin Bodega
+                        <!-- Decía «del Admin Bodega» siempre, aunque a la persona
+                             se le hubiera dado el papel de alistador o despachador:
+                             quien lee el cartel creía que se equivocó de opción. -->
+                        <ShieldCheck class="h-5 w-5"/> Credenciales de {{ credencialGenerada.nombre }}
                     </h3>
                     <p class="text-xs text-surface-600 mb-3">
                         El usuario fue creado. Guardá o envíale estas credenciales ahora:

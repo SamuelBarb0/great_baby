@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Modules\Dropi\Models\InventarioMovimiento;
 use App\Modules\Dropi\Models\InventarioUbicacion;
 use App\Modules\Dropi\Models\ProductoVariante;
+use App\Modules\Inventario\Enums\EstadoTomaFisica;
 use App\Modules\Inventario\Models\AlertaStockConfig;
 use App\Modules\Inventario\Support\CostoPromedio;
 use App\Modules\Dropi\Models\Producto;
@@ -956,10 +957,21 @@ class InventarioGestionController extends Controller implements HasMiddleware
          */
         $this->autorizarToma($toma);
 
-        if ($toma->estado !== 'borrador') {
+        /*
+         * Se compara contra el ENUM, no contra el texto.
+         *
+         * `TomaFisica` castea `estado` a `EstadoTomaFisica`, así que
+         * `$toma->estado !== 'borrador'` comparaba un objeto con una cadena:
+         * SIEMPRE verdadero. El botón de la papelera —que la pantalla sólo
+         * muestra cuando la toma está en borrador y sin contar— nunca borró
+         * nada, y devolvía el mensaje de «esta está …» con el estado impreso
+         * como objeto.
+         */
+        if ($toma->estado !== EstadoTomaFisica::Borrador) {
             return back()->with('flash', [
                 'type' => 'error',
-                'message' => "Solo se pueden eliminar tomas en BORRADOR. Esta está {$toma->estado} · usa Anular.",
+                'message' => 'Solo se pueden eliminar tomas en BORRADOR. Esta está '
+                    .$toma->estado->label().' · usa Anular.',
             ]);
         }
         $contados = $toma->items()->whereNotNull('cantidad_contada')->count();
