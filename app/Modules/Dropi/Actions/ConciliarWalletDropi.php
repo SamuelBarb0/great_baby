@@ -162,51 +162,20 @@ class ConciliarWalletDropi
     /**
      * 9.3 · El pago de Dropi cierra la factura del pedido: un recibo de caja
      * (PagoVenta, medio `wallet_dropi`) aplicado a ella. Su asiento es wallet
-     * 111015 contra 1305, el mismo que antes hacía el movimiento de wallet; por
+     * (contable.cta_dropi_wallet) contra cartera, el mismo que antes hacía el movimiento de wallet; por
      * eso RegistrarAsientoWalletDropi ya no asienta los pagos de pedidos
-     * facturados (si no, el 1305 se acreditaba dos veces). El observer del
+     * facturados (si no, la wallet se debitaba dos veces). La regla vive en CobroWalletDeFactura. El observer del
      * pago baja el saldo de la factura y manda el recibo a SIIGO.
      */
     protected function registrarCobro(DropiPedido $pedido, float $monto, CarbonImmutable $fecha, ?string $movId): void
     {
-        if (! $pedido->factura_venta_id) {
-            return;
-        }
-        $factura = \App\Modules\Cartera\Models\FacturaVenta::find($pedido->factura_venta_id);
-        if (! $factura) {
-            return;
-        }
-        if ($movId && \App\Modules\Cartera\Models\PagoVenta::where('referencia', $movId)->exists()) {
-            return;
-        }
-
-        $aplicado = min($monto, max(0, (float) $factura->saldo));
-        \App\Modules\Cartera\Models\PagoVenta::create([
-            'factura_id' => $factura->id,
-            'contacto_id' => $factura->contacto_id,
-            'fecha' => $fecha->toDateString(),
-            'monto_recibido' => $monto,
-            'monto_aplicado' => $aplicado,
-            'diferencia' => round($aplicado - $monto, 2),
-            'medio_pago' => 'wallet_dropi',
-            'referencia' => $movId ? mb_substr($movId, 0, 60) : null,
-            'banco' => 'Wallet Dropi',
-            'notas' => "Pago Dropi guía {$pedido->guia}",
-        ]);
+        CobroWalletDeFactura::registrar($pedido, $monto, $fecha->toDateString(), $movId);
     }
 
     /** Un reverso 1009 de Dropi deshace el recibo: la factura vuelve a quedar por cobrar. */
     protected function reversarCobro(DropiPedido $pedido, float $monto): void
     {
-        if (! $pedido->factura_venta_id) {
-            return;
-        }
-        $pago = \App\Modules\Cartera\Models\PagoVenta::where('factura_id', $pedido->factura_venta_id)
-            ->where('medio_pago', 'wallet_dropi')
-            ->orderByRaw('ABS(monto_recibido - ?) ASC', [$monto])
-            ->orderByDesc('id')
-            ->first();
-        $pago?->delete();
+        CobroWalletDeFactura::reversar($pedido, $monto);
     }
 
     /** Primero por la orden de Dropi (la wallet real la trae en cada movimiento); la guía, de respaldo. */
@@ -277,7 +246,12 @@ class ConciliarWalletDropi
                     ['pedido_id' => $pedido->id, 'tipo' => 'categoria_explicita'],
                     [
                         'monto_esperado' => 0,
-                        'monto_recibido' => $monto,
+                        // En valor absoluto (20-nov): una sanción es una SALIDA
+                        // y llega en negativo, y `ck_sancion_montos_positivos`
+                        // la rechazaba. Como va en la misma transacción que el
+                        // movimiento, se deshacía TODO: la sanción no quedaba
+                        // ni en la wallet ni en el libro, sólo en el log.
+                        'monto_recibido' => abs($monto),
                         'diferencia' => abs($monto),
                         'detectada_at' => now(),
                     ],

@@ -340,8 +340,8 @@ class SalidaInventarioDropi
         $lineas = [];
         foreach ($asiento as $a) {
             $producto = $a['producto'];
-            $ctaCosto = $producto?->cta('costo') ?? setting('contable.cta_costo_default');
-            $ctaInv = $producto?->cta('inventario') ?? setting('contable.cta_inventario_default');
+            $ctaCosto = \App\Modules\Dropi\Support\CuentasDropi::costo($producto);
+            $ctaInv = \App\Modules\Dropi\Support\CuentasDropi::inventario($producto);
             $ref = $producto?->referencia ?? $a['sku'] ?? 'sin referencia';
             $valor = $a['valor'];
 

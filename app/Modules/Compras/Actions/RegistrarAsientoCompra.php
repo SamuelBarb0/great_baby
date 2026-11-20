@@ -47,9 +47,10 @@ class RegistrarAsientoCompra
              * balance no cuadra. Cambiarla es del contador, no del
              * programador.
              */
-            $cuentaProveedor = $orden->esImportacion()
-                ? setting('contable.cta_proveedores_exterior')
-                : setting('contable.cta_proveedores_default');
+            // Dropi lleva sus propias cuentas (hojas del PUC); para Great Baby
+            // CuentasDropi devuelve la regla de siempre.
+            $esDropi = \App\Modules\Dropi\Support\CuentasDropi::esDropi($recepcion);
+            $cuentaProveedor = \App\Modules\Dropi\Support\CuentasDropi::proveedores($recepcion, $orden->esImportacion());
             $cuentaInventario = $orden->esImportacion()
                 ? setting('contable.cta_inventario_transito')
                 : setting('contable.cta_inventario_default');
@@ -70,21 +71,23 @@ class RegistrarAsientoCompra
 
             $movs = 0;
 
-            MovimientoContable::create([
-                'fecha' => $recepcion->fecha_recepcion,
-                'cuenta_puc' => $cuentaInventario,
-                'tercero_type' => $terceroTipo, 'tercero_id' => $orden->proveedor_id,
-                'debe' => round($totalRecibido, 2), 'haber' => 0,
-                'origen_type' => RecepcionCompra::class, 'origen_id' => $recepcion->id,
-                'descripcion' => "Recepción {$recepcion->numero} — OC {$orden->numero}",
-                'user_id' => auth()->id(),
-            ]);
-            $movs++;
+            foreach ($this->inventarioPorCuenta($recepcion, (string) $cuentaInventario, $totalRecibido, $esDropi && ! $orden->esImportacion()) as $cuenta => $valor) {
+                MovimientoContable::create([
+                    'fecha' => $recepcion->fecha_recepcion,
+                    'cuenta_puc' => $cuenta,
+                    'tercero_type' => $terceroTipo, 'tercero_id' => $orden->proveedor_id,
+                    'debe' => $valor, 'haber' => 0,
+                    'origen_type' => RecepcionCompra::class, 'origen_id' => $recepcion->id,
+                    'descripcion' => "Recepción {$recepcion->numero} — OC {$orden->numero}",
+                    'user_id' => auth()->id(),
+                ]);
+                $movs++;
+            }
 
             if ($ivaProporcion > 0.01) {
                 MovimientoContable::create([
                     'fecha' => $recepcion->fecha_recepcion,
-                    'cuenta_puc' => setting('contable.cta_iva_compra_default'),
+                    'cuenta_puc' => \App\Modules\Dropi\Support\CuentasDropi::ivaCompra($recepcion),
                     'tercero_type' => $terceroTipo, 'tercero_id' => $orden->proveedor_id,
                     'debe' => round($ivaProporcion, 2), 'haber' => 0,
                     'origen_type' => RecepcionCompra::class, 'origen_id' => $recepcion->id,
@@ -107,6 +110,43 @@ class RegistrarAsientoCompra
 
             return $movs;
         });
+    }
+
+    /**
+     * El débito de inventario de una recepción, por cuenta.
+     *
+     * Para Great Baby (y para lo que entra en tránsito) es UNA línea a la
+     * cuenta de siempre, igual que antes. Para una compra nacional de Dropi se
+     * parte por la familia de cada producto (143501 alimentación, 143504
+     * juguetería…): es de donde la venta de Dropi saca el costo, y si la
+     * compra entrara al grupo 1435 el inventario de cada familia quedaría en
+     * negativo. La suma da EXACTO el total: el redondeo lo absorbe la mayor.
+     *
+     * @return array<string,float>
+     */
+    private function inventarioPorCuenta(RecepcionCompra $recepcion, string $cuentaGeneral, float $total, bool $porFamilia): array
+    {
+        if (! $porFamilia) {
+            return [$cuentaGeneral => round($total, 2)];
+        }
+
+        $porCuenta = [];
+        foreach ($recepcion->items as $item) {
+            $producto = \App\Modules\Dropi\Support\CuentasDropi::productoDe($item->producto_id, $item->variante_id);
+            $cuenta = (string) (\App\Modules\Dropi\Support\CuentasDropi::inventario($producto) ?: $cuentaGeneral);
+            $porCuenta[$cuenta] = round(($porCuenta[$cuenta] ?? 0) + (float) $item->subtotal, 2);
+        }
+        if (! $porCuenta) {
+            return [$cuentaGeneral => round($total, 2)];
+        }
+
+        $resto = round($total - array_sum($porCuenta), 2);
+        if (abs($resto) >= 0.01) {
+            $mayor = (string) array_search(max($porCuenta), $porCuenta, true);
+            $porCuenta[$mayor] = round($porCuenta[$mayor] + $resto, 2);
+        }
+
+        return $porCuenta;
     }
 
     /**

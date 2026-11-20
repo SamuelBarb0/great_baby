@@ -115,6 +115,8 @@ class ReglasController extends Controller implements HasMiddleware
                 'siigo.doc_type_egreso' => 'RP',
                 'siigo.doc_type_asiento' => 'CC',
                 'siigo.doc_type_asiento_manual' => 'CC',
+                // Dropi · la wallet viaja como comprobante contable (CC).
+                'siigo.doc_type_wallet_dropi' => 'CC',
                 'siigo.doc_type_gasto' => 'CC',
                 'siigo.doc_type_conciliacion' => 'CC',
                 'siigo.resolucion_fv_default_id' => 'FV',

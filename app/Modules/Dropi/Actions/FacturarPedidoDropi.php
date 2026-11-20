@@ -187,6 +187,12 @@ class FacturarPedidoDropi
 
             DB::table('dropi_pedidos')->where('id', $p->id)->update(['factura_venta_id' => $factura->id]);
 
+            // Si Dropi ya había pagado el pedido, ese pago estaba como anticipo
+            // (no había factura que cobrar): pasa a recibo de caja de ESTA
+            // factura y el anticipo se reversa. Sin esto la factura quedaba
+            // pendiente para siempre aunque la plata ya estuviera en la wallet.
+            CobroWalletDeFactura::cruzarPrevios($p);
+
             if ($factura->es_electronica) {
                 $id = $factura->id;
                 DB::afterCommit(fn () => \App\Jobs\ReintentarEmisionDian::dispatch($id)->onQueue('siigo'));

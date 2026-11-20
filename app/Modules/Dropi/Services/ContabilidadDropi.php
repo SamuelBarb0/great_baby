@@ -141,21 +141,21 @@ class ContabilidadDropi
     }
 
     /**
-     * La wallet contra su cuenta en el libro (111015), al corte.
+     * La wallet contra su cuenta en el libro (regla contable.cta_dropi_wallet, 11100501), al corte.
      *
      * La wallet es la suma de sus movimientos importados; la cuenta es lo que
      * asentaron esos movimientos y los recibos de caja pagados desde ella. La
-     * cuenta se lee sin filtro de línea: 111015 es sólo la wallet, y un recibo
+     * cuenta se lee sin filtro de línea: la billetera es sólo la wallet, y un recibo
      * de una factura vieja sin línea Dropi también la mueve.
      *
-     * @return array{saldo_wallet:float, saldo_contable:float, diferencia:float, pendientes:array{n:int, monto:float}}
+     * @return array{cuenta:string, saldo_wallet:float, saldo_contable:float, diferencia:float, pendientes:array{n:int, monto:float}}
      */
     protected function conciliacionWallet(CarbonImmutable $corte): array
     {
         $hasta = $corte->toDateString();
 
         $saldoWallet = (float) DropiWalletMovimiento::where('fecha', '<=', $hasta)->sum('monto');
-        $saldoContable = (float) MovimientoContable::where('cuenta_puc', RegistrarAsientoWalletDropi::CUENTA_WALLET)
+        $saldoContable = (float) MovimientoContable::where('cuenta_puc', RegistrarAsientoWalletDropi::cuentaWallet())
             ->where('fecha', '<=', $hasta)->selectRaw('COALESCE(SUM(debe - haber), 0) AS saldo')->value('saldo');
 
         $pendientes = DropiWalletMovimiento::where('fecha', '<=', $hasta)->estadoContable([
@@ -163,6 +163,7 @@ class ContabilidadDropi
         ]);
 
         return [
+            'cuenta' => RegistrarAsientoWalletDropi::cuentaWallet(),
             'saldo_wallet' => round($saldoWallet, 2),
             'saldo_contable' => round($saldoContable, 2),
             'diferencia' => round($saldoWallet - $saldoContable, 2),

@@ -60,7 +60,14 @@ class EmitirNotaCreditoDropi
             return ['status' => 'skip_sin_factura'];
         }
 
-        $valor = (float) $pedido->monto_esperado_proveedor;
+        // La NC anula la FACTURA, así que vale lo que vale la factura (19-nov).
+        // Antes tomaba el valor de proveedor del pedido: si Dropi había cambiado
+        // el precio, la NC no cerraba la factura y en SIIGO quedaba un saldo
+        // que no correspondía a nada. Sin factura local (referencias ARI viejas)
+        // se mantiene el valor del pedido.
+        $valor = $factura
+            ? round((float) $factura->total, 2)
+            : (float) $pedido->monto_esperado_proveedor;
         if ($valor <= 0) {
             $devolucion->update([
                 'genero_nota_credito' => false,
