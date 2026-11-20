@@ -14,6 +14,7 @@ import { useBogotaDate } from '@/composables/useBogotaDate';
 import { Head, router } from '@inertiajs/vue3';
 import { Banknote, Wallet, ClipboardCheck, Check } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
+import { useEscClose } from '@/composables/useEscClose';
 
 /*
  * La fecha de HOY en Colombia, no en UTC.
@@ -36,7 +37,8 @@ const errores = ref({});
 
 const money = (v) => '$' + Number(v || 0).toLocaleString('es-CO', { maximumFractionDigits: 0 });
 
-const modalPago = ref(null);   // { url, titulo, detalle }
+const modalPago = ref(null);
+useEscClose(modalPago);   // { url, titulo, detalle }
 const pago = reactive({ fecha_pago: hoyBogota() });
 
 const abrirPago = (url, titulo, detalle) => {

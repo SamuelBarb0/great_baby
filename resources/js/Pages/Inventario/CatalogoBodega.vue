@@ -17,6 +17,7 @@ import { ref, computed, watch } from 'vue';
 import { Head, router } from '@inertiajs/vue3';
 import { Building2, Package, Pencil, ArrowRightLeft, AlertTriangle, CheckCircle2, Link2 } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
+import { useEscClose } from '@/composables/useEscClose';
 
 const props = defineProps({
     oficinas: { type: Array, required: true },
@@ -33,7 +34,9 @@ const guardando = ref(false);
 const verSiigo = ref(false);
 
 const editandoOficina = ref(null);
+useEscClose(editandoOficina);
 const editandoAlmacen = ref(null);
+useEscClose(editandoAlmacen);
 
 const bodegasVisibles = computed(() =>
     props.bodegas.filter((b) => verSiigo.value || !b.de_siigo),

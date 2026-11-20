@@ -3,6 +3,7 @@ import { onMounted, onBeforeUnmount, ref, computed } from 'vue';
 import { Head, router, Link } from '@inertiajs/vue3';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import { Boxes, Clock, CheckCheck, PackageCheck, AlertTriangle } from 'lucide-vue-next';
+import { useEscClose } from '@/composables/useEscClose';
 
 const props = defineProps({
     en_cola: { type: Array, required: true },
@@ -71,6 +72,7 @@ const iniciar = (pedidoId) => {
 
 // Modal de finalizar · ahora obliga a declarar tipo de novedad.
 const finalizando = ref(null);
+useEscClose(finalizando);
 const notasFin = ref('');
 const tipoNovedad = ref('sin_novedad');
 const errFin = ref(null);
@@ -101,6 +103,7 @@ const confirmarFinalizar = () => {
 
 // Modal de resolver novedad.
 const resolviendo = ref(null);
+useEscClose(resolviendo);
 const resolucion = ref('');
 const errRes = ref(null);
 const abrirResolver = (p) => { resolviendo.value = p; resolucion.value = ''; errRes.value = null; };
@@ -129,9 +132,21 @@ const tipoNovedadLabel = (t) => ({
     otro: 'OTRO',
 }[t] || t?.toUpperCase() || '');
 
-// Cronómetro vivo para los pedidos en alistamiento.
+/*
+ * Cronómetro vivo para los pedidos en alistamiento.
+ *
+ * El intervalo se guarda y se apaga al salir. Antes quedaba suelto: cada vez
+ * que alguien entraba a la cola, abría un pedido y volvía —el movimiento
+ * normal del turno— quedaba otro temporizador corriendo contra un componente
+ * ya destruido. En un turno de ocho horas eso son decenas, todos despertando
+ * cada treinta segundos.
+ */
 const now = ref(Date.now());
-setInterval(() => now.value = Date.now(), 30000);
+let relojCrono;
+onMounted(() => {
+    relojCrono = setInterval(() => (now.value = Date.now()), 30000);
+});
+onBeforeUnmount(() => relojCrono && clearInterval(relojCrono));
 /*
  * Cuánto tardó el alistamiento, en palabras.
  *
@@ -146,11 +161,27 @@ const duracion = (seg) => {
     return `${Math.floor(min / 60)} h ${min % 60} min`;
 };
 
-const minutosDesde = (hhmm) => {
-    if (!hhmm) return 0;
-    const [h, m] = hhmm.split(':').map(Number);
-    const inicio = new Date(); inicio.setHours(h, m, 0, 0);
-    return Math.max(0, Math.round((now.value - inicio.getTime()) / 60000));
+/*
+ * Cuánto lleva un pedido en alistamiento.
+ *
+ * Recibe el INSTANTE completo (segundos Unix), no la hora del reloj. Antes
+ * llegaba «16:30» y la pantalla le pegaba la fecha de hoy: un pedido tomado
+ * ayer a esa hora y nunca cerrado amanecía diciendo «0 min», que es
+ * exactamente lo contrario de lo que la columna tiene que gritar.
+ */
+const minutosDesde = (ts) => {
+    if (!ts) return 0;
+
+    return Math.max(0, Math.round((now.value - ts * 1000) / 60000));
+};
+
+/** Lo mismo, pero en palabras, para los que ya llevan horas. */
+const llevaEnAlistamiento = (ts) => {
+    const min = minutosDesde(ts);
+
+    if (min < 60) return `${min} min`;
+
+    return `${Math.floor(min / 60)} h ${min % 60} min`;
 };
 </script>
 
@@ -342,8 +373,13 @@ const minutosDesde = (hhmm) => {
                                 <Link :href="`/app/pedidos-b2b/${p.id}`" class="font-bold text-brand-700 hover:underline">
                                     {{ p.numero }}
                                 </Link>
-                                <span class="text-xs font-mono bg-amber-200 text-amber-900 px-2 py-0.5 rounded">
-                                    ⏱ {{ minutosDesde(p.inicio_at) }} min
+                                <!-- Pasada una hora el chip se pone rojo: un pedido
+                                     que lleva así es un pedido olvidado, no uno lento. -->
+                                <span class="text-xs font-mono px-2 py-0.5 rounded"
+                                      :class="minutosDesde(p.inicio_ts) >= 60
+                                          ? 'bg-red-200 text-red-900 font-bold'
+                                          : 'bg-amber-200 text-amber-900'">
+                                    ⏱ {{ llevaEnAlistamiento(p.inicio_ts) }}
                                 </span>
                             </div>
                             <div class="text-sm">{{ p.cliente }}</div>

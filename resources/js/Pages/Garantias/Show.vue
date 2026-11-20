@@ -5,6 +5,7 @@ import { ArrowLeft, ShieldCheck, CheckCircle, XCircle, Truck, Lock } from 'lucid
 import AppLayout from '@/Layouts/AppLayout.vue';
 import AppConfirmModal from '@/Components/AppConfirmModal.vue';
 import { useMoney } from '@/composables/useMoney';
+import { useEscClose } from '@/composables/useEscClose';
 
 const props = defineProps({ ticket: { type: Object, required: true } });
 
@@ -52,10 +53,12 @@ const guardarCosto = () => {
 const modalConfirm = ref(null);
 
 const modalDecidir = ref(false);
+useEscClose(modalDecidir);
 const decision = ref('aprobar');
 const notas = ref('');
 const procesando = ref(false);
 const modalCerrar = ref(false);
+useEscClose(modalCerrar);
 const notasCierre = ref('');
 
 const decidir = () => {

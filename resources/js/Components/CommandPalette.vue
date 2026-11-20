@@ -3,8 +3,10 @@ import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
 import { router } from '@inertiajs/vue3';
 import { useEventListener } from '@vueuse/core';
 import { FileText, User, Truck, Package, Boxes, Zap, Search, Command } from 'lucide-vue-next';
+import { useEscClose } from '@/composables/useEscClose';
 
 const abierta = ref(false);
+useEscClose(abierta);
 const q = ref('');
 const resultados = ref([]);
 const cursor = ref(0);

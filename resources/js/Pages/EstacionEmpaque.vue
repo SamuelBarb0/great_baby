@@ -12,6 +12,7 @@ import RankingTable from '@/Components/RankingTable.vue';
 import { useSonido } from '@/composables/useSonido';
 import { useConfetti } from '@/composables/useConfetti';
 import { obtenerUbicacion } from '@/composables/useUbicacion';
+import { useEscClose } from '@/composables/useEscClose';
 
 const props = defineProps({
     pedidoActivo: { type: Object, default: null },
@@ -166,6 +167,7 @@ const confirmar = async () => {
 };
 // Modal Vue (no window.confirm — evita robar el foco a la pistola en tablets)
 const modalCancelar = ref(false);
+useEscClose(modalCancelar);
 const modalCancelarBtn = ref(null);
 const cancelar = () => {
     if (procesandoCancelar.value) return;

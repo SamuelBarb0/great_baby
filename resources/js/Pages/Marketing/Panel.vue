@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue';
 import { Head, Link, router } from '@inertiajs/vue3';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import { Camera, Warehouse, ArrowRightLeft, ArrowLeftRight } from 'lucide-vue-next';
+import { useEscClose } from '@/composables/useEscClose';
 
 /**
  * El servidor ya manda los préstamos separados en abiertos y cerrados.
@@ -49,7 +50,8 @@ const cerrados = computed(() => props.prestamos?.cerrados ?? []);
  * Cuando hay una sola bodega de venta y un solo almacén MKT —el caso de hoy—
  * no queda nada que elegir: se escribe qué se necesita y listo.
  */
-const modal = ref(null);          // 'pedir' | 'devolver' | null
+const modal = ref(null);
+useEscClose(modal);          // 'pedir' | 'devolver' | null
 const comercialId = ref(props.bodegas_comerciales[0]?.id ?? '');
 const mktId = ref(props.mis_bodegas[0]?.id ?? '');
 const observaciones = ref('');

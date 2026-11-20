@@ -11,6 +11,7 @@ import { ref, reactive } from 'vue';
 import { Head, router } from '@inertiajs/vue3';
 import { Users, Clock, AlertTriangle } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
+import { useEscClose } from '@/composables/useEscClose';
 
 const props = defineProps({
     equipo: { type: Array, default: () => [] },
@@ -25,6 +26,7 @@ const procesando = ref(false);
 const errores = ref({});
 
 const modal = ref(null);
+useEscClose(modal);
 /** El formulario arranca con las nueve notas en blanco, no en cero. */
 const enBlanco = () => ({
     resultado: 'continua',

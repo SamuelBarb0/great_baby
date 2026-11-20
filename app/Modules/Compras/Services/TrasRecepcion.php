@@ -90,7 +90,27 @@ class TrasRecepcion
          * dejaría la principal en negativo y el stock duplicado del otro lado:
          * el saldo diría que hay 40 donde hay 20.
          */
-        $aTrasladar = $deElla->filter(fn ($i) => $i->ubicacion_id === null);
+        /*
+         * Lo que se queda acá es lo que NO cambió de bodega — no lo que no
+         * tiene ubicación.
+         *
+         * Antes bastaba con `ubicacion_id === null`, porque la única razón
+         * para llenar ese campo era mandar la mercancía a otra bodega. Desde
+         * que quien descarga puede anotar el estante —que es justo lo que el
+         * área pidió— una línea que se queda en la principal también viene con
+         * ubicación: la del rack. Mirando sólo si es null, esas unidades
+         * dejaban de contarse como «hay que trasladarlas», el traslado no se
+         * creaba, y a Aracely se le decía que su mercancía ya estaba en su
+         * bodega cuando seguía en la de Great Baby, arriba de un estante.
+         *
+         * La pregunta correcta es a qué SEDE pertenece la ubicación elegida.
+         */
+        $sedeDeLaRecepcion = (int) $recepcion->bodega_id;
+
+        $aTrasladar = $deElla->filter(
+            fn ($i) => $this->sedeDe($i->ubicacion_id) === null
+                || $this->sedeDe($i->ubicacion_id) === $sedeDeLaRecepcion
+        );
 
         /*
          * De lo que SÍ se repartió, hay que distinguir dos cosas muy
@@ -107,15 +127,26 @@ class TrasRecepcion
          */
         $empresaDeLaBodega = $this->empresaPorBodega();
 
-        $repartidas = $deElla->filter(fn ($i) => $i->ubicacion_id !== null);
+        $repartidas = $deElla->diff($aTrasladar);
+
+        /*
+         * La empresa se pregunta por la SEDE, no por el estante.
+         *
+         * `empresaPorBodega()` mapea las ubicaciones que tienen oficina, y la
+         * oficina vive en la fila de la sede: un rack no la tiene. Preguntando
+         * por el id del estante, el mapa devolvía null siempre y toda línea
+         * bajada a una posición se reportaba como «quedó en una bodega que no
+         * es suya», aunque el estante fuera de su propia bodega.
+         */
+        $empresaDe = fn ($i) => $empresaDeLaBodega[$this->sedeDe($i->ubicacion_id)] ?? null;
 
         // Suya de verdad: la oficina de esa bodega es de la misma empresa a la
         // que la línea está destinada. Si la bodega no tiene oficina mapeada
         // todavía, no se sabe, y no se afirma que sea suya.
-        $enSuBodega = $repartidas->filter(fn ($i) => ($empresaDeLaBodega[(int) $i->ubicacion_id] ?? null)
+        $enSuBodega = $repartidas->filter(fn ($i) => $empresaDe($i)
             === (int) $i->ordenItem->empresa_destino_id);
 
-        $enBodegaAjena = $repartidas->reject(fn ($i) => ($empresaDeLaBodega[(int) $i->ubicacion_id] ?? null)
+        $enBodegaAjena = $repartidas->reject(fn ($i) => $empresaDe($i)
             === (int) $i->ordenItem->empresa_destino_id);
 
         $traslado = $aTrasladar->isNotEmpty()
@@ -190,6 +221,32 @@ class TrasRecepcion
      * destinadas. Devuelve [bodega_id => empresa_id], y las bodegas sin
      * oficina mapeada simplemente no están: de ésas no se sabe.
      */
+    /**
+     * A qué sede pertenece una ubicación: ella misma si es bodega, su madre
+     * si es un estante.
+     *
+     * Se memoiza porque se pregunta una vez por renglón de la recepción y un
+     * contenedor trae decenas.
+     */
+    private array $sedes = [];
+
+    private function sedeDe(?int $ubicacionId): ?int
+    {
+        if (! $ubicacionId) {
+            return null;
+        }
+
+        if (! array_key_exists($ubicacionId, $this->sedes)) {
+            $u = InventarioUbicacion::query()->find($ubicacionId, ['id', 'bodega_id']);
+
+            $this->sedes[$ubicacionId] = $u
+                ? (int) ($u->bodega_id ?: $u->id)
+                : null;
+        }
+
+        return $this->sedes[$ubicacionId];
+    }
+
     private function empresaPorBodega(): array
     {
         $empresaDeOficina = \App\Modules\Inventario\Models\Oficina::query()
@@ -207,38 +264,84 @@ class TrasRecepcion
         return $salida;
     }
 
+    /**
+     * El traslado sale DE DONDE ESTÁ la mercancía, no de la sede.
+     *
+     * ───────────────────────────────────────────────────────────────────────
+     * POR QUÉ HAY QUE AGRUPAR
+     *
+     * Antes, a esta lista sólo llegaban las líneas que se habían quedado en
+     * la bodega de la recepción sin ubicar, así que poner la sede como origen
+     * era correcto.
+     *
+     * Desde que quien descarga puede anotar el estante, una línea que se
+     * queda en esta misma bodega TAMBIÉN trae ubicación: la del rack. Esas
+     * hay que trasladarlas igual —son de Aracely y están en la bodega de
+     * Great Baby— pero su saldo vive en el rack, no en la fila de la sede.
+     *
+     * Sacándolas de la sede, el traslado nace y después revienta al enviarlo
+     * con «stock insuficiente en origen» sobre mercancía que está ahí, a tres
+     * metros. Y el que lo recibe no tiene cómo saber por qué.
+     *
+     * Así que se agrupa por la ubicación real y se crea UN traslado POR
+     * ORIGEN. Lo normal es que sea uno solo; con el contenedor repartido en
+     * dos racks, son dos, y cada uno cuadra.
+     * ───────────────────────────────────────────────────────────────────────
+     *
+     * @return Traslado|null  el primero, para el aviso; el resto quedan creados igual
+     */
     private function crearTraslado(RecepcionCompra $recepcion, Collection $items): ?Traslado
     {
         // Una línea sin producto creado no tiene qué trasladar en el kardex.
         $items = $items->filter(fn ($i) => $i->variante_id || $i->producto_id);
         $destino = (int) setting('compras.ubicacion_ecommerce', 0);
+
         if ($items->isEmpty()) {
             return null;
         }
-        if ($destino <= 0 || $destino === (int) $recepcion->bodega_id || ! InventarioUbicacion::whereKey($destino)->exists()) {
+
+        if ($destino <= 0 || ! InventarioUbicacion::whereKey($destino)->exists()) {
             return null;
         }
 
-        $traslado = Traslado::create([
-            'numero' => Traslado::siguienteNumero(),
-            'origen_id' => $recepcion->bodega_id,
-            'destino_id' => $destino,
-            'motivo' => 'Importación e-commerce',
-            'observaciones' => "Recepción {$recepcion->numero}, orden {$recepcion->orden?->numero}. Se traslada al costo de la liquidación, sin factura de venta.",
-            'solicitado_por' => auth()->id(),
-            'fecha_solicitud' => now('America/Bogota')->toDateString(),
-            'estado' => EstadoTraslado::Borrador,
-        ]);
+        // Cada grupo es un origen real: el estante donde quedó, o la sede si
+        // la línea no se ubicó en ninguno.
+        $porOrigen = $items->groupBy(fn ($i) => (int) ($i->ubicacion_id ?: $recepcion->bodega_id));
 
-        foreach ($items as $i) {
-            $traslado->items()->create([
-                'variante_id' => $i->variante_id,
-                'producto_id' => $i->producto_id,
-                'cantidad_solicitada' => $i->cantidad_recibida,
+        $primero = null;
+
+        foreach ($porOrigen as $origenId => $delOrigen) {
+            // Trasladar a donde ya está no mueve nada y deja un documento
+            // muerto en la lista de Aracely.
+            if ((int) $origenId === $destino) {
+                continue;
+            }
+
+            $traslado = Traslado::create([
+                'numero' => Traslado::siguienteNumero(),
+                'origen_id' => $origenId,
+                'destino_id' => $destino,
+                'motivo' => 'Importación e-commerce',
+                'observaciones' => "Recepción {$recepcion->numero}, orden {$recepcion->orden?->numero}. "
+                    .'Se traslada al costo de la liquidación, sin factura de venta.'
+                    .($porOrigen->count() > 1 ? ' Parte de la recepción: la mercancía quedó repartida en varias posiciones.' : ''),
+                'solicitado_por' => auth()->id(),
+                'fecha_solicitud' => now('America/Bogota')->toDateString(),
+                'estado' => EstadoTraslado::Borrador,
             ]);
+
+            foreach ($delOrigen as $i) {
+                $traslado->items()->create([
+                    'variante_id' => $i->variante_id,
+                    'producto_id' => $i->producto_id,
+                    'cantidad_solicitada' => $i->cantidad_recibida,
+                ]);
+            }
+
+            $primero ??= $traslado;
         }
 
-        return $traslado;
+        return $primero;
     }
 
     /** @return Collection<int, User> */

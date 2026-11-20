@@ -14,6 +14,7 @@ import { useBogotaDate } from '@/composables/useBogotaDate';
 import { Head, router } from '@inertiajs/vue3';
 import { Wrench, Plus, AlertTriangle, Download } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
+import { useEscClose } from '@/composables/useEscClose';
 
 /*
  * La fecha de HOY en Colombia, no en UTC.
@@ -56,6 +57,7 @@ const filtrar = () => router.get('/app/rrhh/asignaciones', { estado: estado.valu
 
 /* entregar */
 const modalEntrega = ref(false);
+useEscClose(modalEntrega);
 const entrega = reactive({
     empleado_id: null, tipo: 'herramienta', descripcion: '', identificador: '',
     cantidad: 1, valor: null, fecha_entrega: hoyBogota(),
@@ -70,6 +72,7 @@ const guardarEntrega = () => enviar('/app/rrhh/asignaciones', { ...entrega }, {
 
 /* devolver */
 const modalDevolucion = ref(null);
+useEscClose(modalDevolucion);
 const devolucion = reactive({
     estado: 'devuelta',
     fecha_devolucion: hoyBogota(),
@@ -82,6 +85,7 @@ const guardarDevolucion = () => enviar(
 
 /* responder un aviso */
 const modalReporte = ref(null);
+useEscClose(modalReporte);
 const respuesta = ref('');
 const responder = () => enviar(`/app/rrhh/reportes/${modalReporte.value.id}/atender`,
     { respuesta: respuesta.value },

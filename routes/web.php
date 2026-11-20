@@ -39,6 +39,29 @@ Route::middleware(['web', 'guest'])->prefix('app')->group(function () {
     Route::get('/activar-portal', [\App\Http\Controllers\App\PortalColaboradorController::class, 'mostrarActivacion'])->name('app.portal.activar');
     Route::post('/activar-portal', [\App\Http\Controllers\App\PortalColaboradorController::class, 'activar'])
         ->middleware('throttle:10,60');
+
+    /*
+     * Olvidé mi contraseña.
+     *
+     * Hasta hoy el ERP no tenía ninguna salida: quien la olvidaba le
+     * escribía a alguien para que se la cambiara a mano, y esa persona
+     * terminaba escogiéndole la clave y sabiéndola.
+     *
+     * El formulario de restablecer va FIRMADO (`signed`): el enlace no se
+     * puede fabricar a mano, y además lleva un token de un solo uso.
+     */
+    Route::get('/olvide-clave', [\App\Http\Controllers\App\ClaveController::class, 'olvide'])
+        ->name('app.clave.olvide');
+    Route::post('/olvide-clave', [\App\Http\Controllers\App\ClaveController::class, 'enviarEnlace'])
+        ->middleware('throttle:6,60')
+        ->name('app.clave.enviar');
+
+    Route::get('/restablecer-clave', [\App\Http\Controllers\App\ClaveController::class, 'restablecerForm'])
+        ->middleware('signed')
+        ->name('app.clave.restablecer.form');
+    Route::post('/restablecer-clave', [\App\Http\Controllers\App\ClaveController::class, 'restablecer'])
+        ->middleware('throttle:10,60')
+        ->name('app.clave.restablecer');
 });
 
 // App (auth)
@@ -52,6 +75,11 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     Route::post('/notificaciones/leidas', [\App\Http\Controllers\App\NotificacionesController::class, 'marcarLeidas'])->name('app.notificaciones.leidas');
     Route::get('/mapa-colombia', \App\Http\Controllers\App\MapaColombiaController::class)->name('app.mapa');
     Route::post('/logout', [\App\Http\Controllers\App\AuthController::class, 'logout'])->name('app.logout');
+
+    // Cambiar la propia contraseña estando adentro. Sin esto, nadie podía.
+    Route::get('/mi-clave', [\App\Http\Controllers\App\ClaveController::class, 'miClave'])->name('app.clave.mia');
+    Route::post('/mi-clave', [\App\Http\Controllers\App\ClaveController::class, 'cambiar'])
+        ->middleware('throttle:10,60')->name('app.clave.cambiar');
 
 
     // Reglas de Negocio (admin)

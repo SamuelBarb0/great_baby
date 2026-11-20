@@ -197,6 +197,7 @@ const aplicarAccountGroupACategoria = () => {
 // Fix de raíz · antes el user podía poner un código ya existente y solo se
 // enteraba al Guardar con un 500 de MySQL. Ahora se avisa al blur del campo.
 import axios from 'axios';
+import { useEscClose } from '@/composables/useEscClose';
 const refConflicto = ref(null);  // {id, nombre, eliminado} si existe otro
 const refOk = ref(false);         // true si pasó la verificación OK
 const refVerificando = ref(false);
@@ -403,6 +404,7 @@ const eliminar = () => {
 //   - Precios por lista (default OFF) · las listas suelen revisarse manualmente
 //     en el clon para no arrastrar un precio obsoleto.
 const modalClonar = ref(null);
+useEscClose(modalClonar);
 const abrirClonar = () => {
     modalClonar.value = {
         incluirVariantes: true,

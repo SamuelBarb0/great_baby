@@ -87,7 +87,19 @@ class DevolucionProveedorController extends Controller implements HasMiddleware
                 ->orderBy('nombre_completo')
                 ->limit(500)
                 ->get(['id', 'nombre_completo as nombre', 'numero_documento']),
+            /*
+             * Sólo BODEGAS, no estantes.
+             *
+             * Una devolución sale de una bodega: el estante es un detalle de
+             * dónde estaba guardada adentro, y el saldo se busca igual en
+             * todos. Ofrecer las 491 ubicaciones era pedirle a alguien que
+             * eligiera entre cuatrocientos treinta y seis estantes para algo
+             * que se decide por sede —y dejaba estampar un rack donde el
+             * resto del sistema espera una bodega.
+             */
             'ubicaciones' => InventarioUbicacion::where('activa', true)
+                ->whereNull('bodega_id')
+                ->where('codigo', 'not like', 'SIIGO-%')
                 ->orderBy('codigo')
                 ->get(['id', 'codigo', 'nombre']),
         ]);
@@ -146,7 +158,19 @@ class DevolucionProveedorController extends Controller implements HasMiddleware
                 ->orderBy('nombre_completo')
                 ->limit(500)
                 ->get(['id', 'nombre_completo as nombre', 'numero_documento']),
+            /*
+             * Sólo BODEGAS, no estantes.
+             *
+             * Una devolución sale de una bodega: el estante es un detalle de
+             * dónde estaba guardada adentro, y el saldo se busca igual en
+             * todos. Ofrecer las 491 ubicaciones era pedirle a alguien que
+             * eligiera entre cuatrocientos treinta y seis estantes para algo
+             * que se decide por sede —y dejaba estampar un rack donde el
+             * resto del sistema espera una bodega.
+             */
             'ubicaciones' => InventarioUbicacion::where('activa', true)
+                ->whereNull('bodega_id')
+                ->where('codigo', 'not like', 'SIIGO-%')
                 ->orderBy('codigo')
                 ->get(['id', 'codigo', 'nombre']),
         ]);
@@ -384,6 +408,19 @@ class DevolucionProveedorController extends Controller implements HasMiddleware
     {
         $q = trim((string) $r->input('q', ''));
         $ubicacionId = (int) $r->input('ubicacion_id', 0);
+
+        /*
+         * Se busca en la bodega Y en sus estantes.
+         *
+         * Preguntarle el saldo sólo a la fila de la sede dejaba el buscador
+         * ciego en cuanto alguien usara las posiciones: quien quiere devolver
+         * unas cajas que están en `R12-S1-N1` escribía la referencia y la
+         * pantalla le decía que no hay nada en esa bodega. Es el mismo punto
+         * ciego que tenían el despacho y el cálculo del costo.
+         */
+        $dondeBuscar = $ubicacionId
+            ? \App\Modules\Dropi\Models\InventarioUbicacion::laSedeYSusPosiciones($ubicacionId)
+            : [];
         if (mb_strlen($q) < 2 || ! $ubicacionId) {
             return response()->json([]);
         }
@@ -409,11 +446,11 @@ class DevolucionProveedorController extends Controller implements HasMiddleware
 
             $saldosAgg = InventarioMovimiento::whereIn('producto_id', $prods->pluck('id')->all())
                 ->whereNull('variante_id')
-                ->where('ubicacion_id', $ubicacionId)
+                ->whereIn('ubicacion_id', $dondeBuscar)
                 ->selectRaw('producto_id, SUM(cantidad) as saldo, '
-                          .'CASE WHEN SUM(cantidad) > 0 '
-                          .'THEN SUM(CASE WHEN cantidad > 0 THEN cantidad * COALESCE(costo_unit, 0) ELSE 0 END) '
-                          .'   / NULLIF(SUM(CASE WHEN cantidad > 0 THEN cantidad ELSE 0 END), 0) '
+                          .'CASE WHEN SUM(CASE WHEN cantidad > 0 AND costo_unit > 0 THEN cantidad ELSE 0 END) > 0 '
+                          .'THEN SUM(CASE WHEN cantidad > 0 AND costo_unit > 0 THEN cantidad * costo_unit ELSE 0 END) '
+                          .'   / SUM(CASE WHEN cantidad > 0 AND costo_unit > 0 THEN cantidad ELSE 0 END) '
                           .'ELSE 0 END as costo_prom')
                 ->groupBy('producto_id')
                 ->get()
@@ -453,11 +490,11 @@ class DevolucionProveedorController extends Controller implements HasMiddleware
         //    por la ubicación · evita N+1.
         $ids = $vars->pluck('id')->all();
         $saldos = InventarioMovimiento::whereIn('variante_id', $ids)
-            ->where('ubicacion_id', $ubicacionId)
+            ->whereIn('ubicacion_id', $dondeBuscar)
             ->selectRaw('variante_id, SUM(cantidad) as saldo, '
-                      .'CASE WHEN SUM(cantidad) > 0 '
-                      .'THEN SUM(CASE WHEN cantidad > 0 THEN cantidad * COALESCE(costo_unit, 0) ELSE 0 END) '
-                      .'   / NULLIF(SUM(CASE WHEN cantidad > 0 THEN cantidad ELSE 0 END), 0) '
+                      .'CASE WHEN SUM(CASE WHEN cantidad > 0 AND costo_unit > 0 THEN cantidad ELSE 0 END) > 0 '
+                      .'THEN SUM(CASE WHEN cantidad > 0 AND costo_unit > 0 THEN cantidad * costo_unit ELSE 0 END) '
+                      .'   / SUM(CASE WHEN cantidad > 0 AND costo_unit > 0 THEN cantidad ELSE 0 END) '
                       .'ELSE 0 END as costo_prom')
             ->groupBy('variante_id')
             ->get()

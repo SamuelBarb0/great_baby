@@ -7,6 +7,7 @@ import { FileText, Search, Filter, Phone, ExternalLink, Download } from 'lucide-
 import AppLayout from '@/Layouts/AppLayout.vue';
 import ModalFacturaManual from './ModalFacturaManual.vue';
 import ModalImportarExcel from './ModalImportarExcel.vue';
+import { useEscClose } from '@/composables/useEscClose';
 
 const props = defineProps({
     facturas: { type: Object, required: true },
@@ -68,7 +69,8 @@ watch(() => props.facturas.data, () => { seleccion.value = []; });
 const modalManual = ref(false);
 const modalExcel = ref(false);
 
-const modal = ref(null);  // { ids, destino, total } mientras se pide el motivo
+const modal = ref(null);
+useEscClose(modal);  // { ids, destino, total } mientras se pide el motivo
 const motivo = ref('');
 const montoFiscal = ref(null);
 const enviando = ref(false);

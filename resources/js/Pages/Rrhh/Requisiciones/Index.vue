@@ -11,6 +11,7 @@ import { ref, reactive, computed } from 'vue';
 import { Head, Link, router } from '@inertiajs/vue3';
 import { UserPlus, Plus, Clock, FileText, CheckCircle2, Download } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
+import { useEscClose } from '@/composables/useEscClose';
 
 const props = defineProps({
     requisiciones: { type: Object, required: true },
@@ -24,6 +25,7 @@ const props = defineProps({
 });
 
 const modal = ref(false);
+useEscClose(modal);
 const procesando = ref(false);
 const errores = ref({});
 

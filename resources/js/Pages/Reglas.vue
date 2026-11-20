@@ -11,6 +11,15 @@ const props = defineProps({
     gruposLabels: { type: Object, required: true },
     // clave de regla → familia de document-type de SIIGO (NC, ND, CC, …)
     familiasDocumento: { type: Object, default: () => ({}) },
+    /*
+     * Las cuentas que hoy no reciben movimiento, por clave de regla.
+     *
+     * El servidor las compara contra el plan de cuentas de verdad. Son 21 de
+     * 79: nacieron con cuentas de cuatro dígitos que en el plan de Great Baby
+     * son grupos, y los asientos se escribían ahí sin que nada se quejara.
+     * Cada una trae sus cuentas hijas, para elegir sin salir de acá.
+     */
+    cuentasQueNoSirven: { type: Object, default: () => ({}) },
 });
 
 /**
@@ -382,7 +391,11 @@ const totalReglas = computed(() =>
                 <div class="text-xs text-surface-500 mb-4 uppercase tracking-wider">{{ reglas.length }} parámetros</div>
 
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                    <div v-for="r in reglas" :key="r.clave" class="p-3 rounded-lg border border-surface-200 dark:border-surface-800 bg-surface-50 dark:bg-surface-900">
+                    <div v-for="r in reglas" :key="r.clave"
+                         :class="['p-3 rounded-lg border bg-surface-50 dark:bg-surface-900',
+                                  cuentasQueNoSirven[r.clave]
+                                      ? 'border-amber-400 dark:border-amber-600'
+                                      : 'border-surface-200 dark:border-surface-800']">
                         <!-- Bool: label envuelve el checkbox y su leyenda -->
                         <template v-if="r.tipo === 'bool'">
                             <div class="text-sm font-semibold text-surface-800 dark:text-surface-200">{{ r.etiqueta }}</div>
@@ -454,6 +467,48 @@ const totalReglas = computed(() =>
                                 class="input w-full"
                             />
                         </template>
+
+                        <!--
+                            La cuenta que hay escrita no recibe movimiento.
+
+                            No es un detalle contable fino: un asiento contra
+                            una cuenta agrupadora cuadra igual, el libro no se
+                            queja, y el error sale meses después cuando la
+                            declaración no coincide. El contador las fue
+                            encontrando de a una. Acá salen solas, con las
+                            cuentas hijas listas para elegir de un clic.
+                        -->
+                        <div v-if="cuentasQueNoSirven[r.clave]"
+                             class="mt-2 rounded-lg border-l-4 border-amber-500 bg-amber-50 dark:bg-amber-950/40 p-2.5 text-xs text-amber-900 dark:text-amber-200 space-y-1.5">
+                            <div class="font-semibold">
+                                <template v-if="cuentasQueNoSirven[r.clave].estado === 'no_existe'">
+                                    La cuenta {{ r.valor }} no existe en el plan de cuentas.
+                                </template>
+                                <template v-else>
+                                    {{ r.valor }} · {{ cuentasQueNoSirven[r.clave].nombre }} es una cuenta de grupo: no recibe movimiento.
+                                </template>
+                            </div>
+
+                            <div v-if="cuentasQueNoSirven[r.clave].hijas.length">
+                                <div class="mb-1">Cuentas de abajo que sí lo reciben:</div>
+                                <div class="flex flex-wrap gap-1">
+                                    <button v-for="h in cuentasQueNoSirven[r.clave].hijas" :key="h.codigo"
+                                            type="button"
+                                            @click="r.valor = h.codigo"
+                                            :title="h.nombre"
+                                            class="px-2 py-1 rounded border border-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900/50 font-mono">
+                                        {{ h.codigo }}
+                                    </button>
+                                </div>
+                                <div class="mt-1 text-amber-700 dark:text-amber-300">
+                                    Pulsando una se escribe en la casilla. Después hay que guardar.
+                                </div>
+                            </div>
+
+                            <div v-else class="text-amber-700 dark:text-amber-300">
+                                Esta cuenta no tiene hijas cargadas: hay que preguntarle al contador cuál va.
+                            </div>
+                        </div>
 
                         <div class="mt-1 text-xs text-surface-400 font-mono">{{ r.clave }}</div>
                     </div>

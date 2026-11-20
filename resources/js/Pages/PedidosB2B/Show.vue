@@ -4,6 +4,7 @@ import { Head, Link, router } from '@inertiajs/vue3';
 import { useEventListener } from '@vueuse/core';
 import { ArrowLeft, CheckCircle, XCircle, FileText, User } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
+import { useEscClose } from '@/composables/useEscClose';
 
 const props = defineProps({
     pedido: { type: Object, required: true },
@@ -48,12 +49,15 @@ const cambiarBodega = (e) => {
 
 const money = (n) => new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n || 0);
 const modalRechazar = ref(false);
-const modalConfirmar = ref(null); // { tipo: 'aprobar'|'facturar', msg }
+useEscClose(modalRechazar);
+const modalConfirmar = ref(null);
+useEscClose(modalConfirmar); // { tipo: 'aprobar'|'facturar', msg }
 const motivo = ref('');
 const motivoError = ref('');
 const procesando = ref(false);
 // LOG-J7
 const modalDespachar = ref(false);
+useEscClose(modalDespachar);
 const despachoForm = ref({ guia_transportadora: '', transportadora: '' });
 const despachoError = ref('');
 

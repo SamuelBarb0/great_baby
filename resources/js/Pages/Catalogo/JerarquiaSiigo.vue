@@ -4,6 +4,7 @@ import { Head, router } from '@inertiajs/vue3';
 import { Layers, Plus, Pencil, Trash2, X } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import AppConfirmModal from '@/Components/AppConfirmModal.vue';
+import { useEscClose } from '@/composables/useEscClose';
 
 const props = defineProps({
     lineas: { type: Array, required: true },
@@ -17,7 +18,8 @@ const props = defineProps({
 const modalConfirm = ref(null);
 
 const tab = ref('linea');
-const modal = ref(null); // 'linea' | 'grupo' | 'subgrupo' | 'clase'
+const modal = ref(null);
+useEscClose(modal); // 'linea' | 'grupo' | 'subgrupo' | 'clase'
 const form = reactive({});
 const procesando = ref(false);
 

@@ -125,6 +125,18 @@ class Reglas
         'ventas.dias_aviso_cotizacion' => ['grupo' => 'catalogo', 'tipo' => 'int', 'valor' => 3, 'etiqueta' => 'Días de aviso antes de que venza una cotización aceptada', 'descripcion' => 'Avisa al vendedor para que la convierta en pedido antes de que haya que recotizar.'],
 
         'inventario.meses_entre_conteos' => ['grupo' => 'logistica', 'tipo' => 'int', 'valor' => 6, 'etiqueta' => 'Meses entre tomas físicas', 'descripcion' => 'Pasados estos meses sin una toma cerrada, la bodega sale avisada por la campana.'],
+        /*
+         * La casilla que el código ya leía y que nadie podía encender.
+         *
+         * `CerrarTomaFisica` consulta `inventario.permitir_cerrar_propia_toma`
+         * y su comentario promete que «el bypass sólo es posible si Gerencia
+         * lo activó explícitamente». Sin registrar la clave acá, Gerencia no
+         * la veía en /app/reglas y `Reglas::set()` la rechazaba con «Regla
+         * desconocida»: la promesa no se podía cumplir por ningún camino.
+         *
+         * Queda apagada, que es el comportamiento de hoy.
+         */
+        'inventario.permitir_cerrar_propia_toma' => ['grupo' => 'logistica', 'tipo' => 'bool', 'valor' => '0', 'etiqueta' => 'Permitir que quien crea una toma física la cierre', 'descripcion' => 'Apagada, quien crea una toma física no puede cerrarla: la cierra Contabilidad o Gerencia. Es la segregación de funciones que pide una auditoría de inventario. Encenderla sólo tiene sentido en una bodega de una sola persona, y cada cierre así queda marcado en la bitácora.'],
         'logistica.dias_transito' => ['grupo' => 'logistica', 'tipo' => 'int', 'valor' => 5, 'etiqueta' => 'Días normales de entrega', 'descripcion' => 'Pasados estos días sin entregar, la guía se marca TARDÍA.'],
         'logistica.dias_sin_entregar' => ['grupo' => 'logistica', 'tipo' => 'int', 'valor' => 15, 'etiqueta' => 'Días para dar una guía por no entregada', 'descripcion' => 'Pasados estos días la guía se marca NO ENTREGADA: hay que reclamarle a la transportadora.'],
         // ---- Jerarquía de la cola de alistamiento (don Jorge, 17-nov-2026) ----
@@ -141,7 +153,21 @@ class Reglas
         // mueve racks de zona, suma una cuarta o renombra las letras, y cada
         // vez que eso pasa la hoja de picking manda a caminar por donde ya no
         // es. Acá se cambia en un minuto; clavado, toca un despliegue.
-        'logistica.zonas_bodega' => ['grupo' => 'logistica', 'tipo' => 'json', 'valor' => '{"A":["1","2","3","4","5","6"],"B":["6.5","7","8","9","10","10.5"],"C":["11","12","13","14","15","PARQUEADERO","ARSUTEX","LOCAL"]}', 'etiqueta' => 'Racks de cada zona de la bodega', 'descripcion' => 'JSON {"A":["1","2"],"B":[...]}. La letra es como la llama el área en la lista de picking, y el orden define el número del responsable: la primera zona es Responsable 1. Un rack que no quede en ninguna zona sale sin zona en la hoja, no da error. Se pueden agregar o quitar zonas.'],
+        /*
+         * OJO · este literal tiene que decir lo mismo que
+         * `ZonaDeLaBodega::POR_DEFECTO`.
+         *
+         * No es decoración. `Reglas::get()` cae a ESTE valor cuando no hay
+         * fila en `reglas_negocio`, y `seedDefaults()` siembra desde acá. El
+         * `POR_DEFECTO` de la clase sólo se alcanza si el JSON guardado es
+         * basura, así que mientras estos dos no coincidan manda éste.
+         *
+         * Ya pasó: el 19-nov se cambió el recorrido al que pidió el área
+         * —zonas «1/2/3», la 3 arrancando por el LOCAL— en la clase y no acá,
+         * y la hoja siguió imprimiendo «ZONA C» con las paradas al revés.
+         * `ZonasConfigurablesTest` vigila que no vuelva a separarse.
+         */
+        'logistica.zonas_bodega' => ['grupo' => 'logistica', 'tipo' => 'json', 'valor' => '{"1":["1","2","3","4","5","6"],"2":["7","6.5","8","9","10","10.5"],"3":["LOCAL","PARQUEADERO","15","14","13","ARSUTEX","12","11"]}', 'etiqueta' => 'Racks de cada zona de la bodega', 'descripcion' => 'JSON {"1":["1","2"],"2":[...]}. El nombre es como la llama el área en la lista de picking, y el ORDEN de los racks dentro de cada zona es el recorrido a pie: el primero de la lista es la primera parada. El orden de las zonas define el número del responsable. Un rack que no quede en ninguna zona sale sin zona en la hoja, no da error. Se pueden agregar o quitar zonas.'],
         'logistica.bodega_principal' => ['grupo' => 'logistica', 'tipo' => 'string', 'valor' => 'PPAL', 'etiqueta' => 'Código de la bodega donde están los racks', 'descripcion' => 'El código de la bodega física a la que cuelgan las posiciones del plano. Lo usa el sembrador de ubicaciones: si la bodega principal se llama de otro modo, se escribe acá y no hay que tocar código ni renombrar nada.'],
         'logistica.casillas_alistamiento' => ['grupo' => 'logistica', 'tipo' => 'json', 'valor' => '{"columnas":6,"filas":3}', 'etiqueta' => 'Cuadrícula de la zona de alistamiento', 'descripcion' => 'JSON {"columnas":6,"filas":3}. Es el plano del piso donde se arman los pedidos: cada casilla se llama C1FA, C1FB… Manda cuántos pedidos caben en una oleada, porque no se pueden armar más de los que caben. Si el área agranda la zona, se cambia acá.'],
         'logistica.dias_aviso_contenedor' => ['grupo' => 'logistica', 'tipo' => 'int', 'valor' => 7, 'etiqueta' => 'Días antes de la llegada para dar el contenedor por encima', 'descripcion' => 'A esta cantidad de días de la fecha estimada el contenedor sale en rojo y la pantalla dice que hay que pedir la gente para descargar. Subirlo da más margen para conseguir personal.'],
@@ -153,6 +179,41 @@ class Reglas
         'dropi.nit_tercero' => ['grupo' => 'dropi', 'tipo' => 'string', 'valor' => '', 'etiqueta' => 'NIT de Dropi (tercero de comisiones y sanciones)', 'descripcion' => 'Los gastos que cobra Dropi (fletes de garantía, tarjeta, sanciones) se asientan con este tercero'],
         'dropi.auto_nota_credito' => ['grupo' => 'dropi', 'tipo' => 'bool', 'valor' => '1', 'etiqueta' => 'Auto-generar Nota Crédito al devolver', 'descripcion' => 'Al marcar DropiPedido como Devuelto emite NC'],
         'dropi.auto_nc_envia_siigo' => ['grupo' => 'dropi', 'tipo' => 'bool', 'valor' => '1', 'etiqueta' => 'Auto-enviar NC a SIIGO', 'descripcion' => ''],
+
+        /*
+         * Las cuentas contables de Dropi (19-nov-2026). SÓLO DROPI.
+         *
+         * Dropi lleva sus propias cuentas y no toca las del ERP: las facturas,
+         * cobros y notas crédito de la línea Dropi pasan por el mismo código
+         * que las de Great Baby, pero cuando el documento es de Dropi la
+         * cuenta sale de acá. Las del ERP (contable.cta_*_default) quedan
+         * como están.
+         *
+         * Antes la wallet iba a la 111015, que NO EXISTE en el PUC de Great
+         * Baby (la billetera es la 11100501), y el resto a grupos que no
+         * admiten movimiento (1110, 4295, 5195, 5395, 4175, 240805, 2805) o a
+         * una cuenta equivocada (530525 es «Diferencia en cambio», no
+         * comisiones). Todas las de acá son HOJAS del PUC.
+         *
+         * Las claves empiezan por `contable.` a propósito: es lo único que la
+         * pantalla de Reglas le deja ver y editar a la Contadora, y lo que pasa
+         * por la validación de cuenta hoja (`cuentaAgrupadora()`). Se muestran
+         * bajo el título Dropi por el grupo.
+         */
+        'contable.cta_dropi_wallet' => ['grupo' => 'dropi', 'tipo' => 'string', 'valor' => '11100501', 'etiqueta' => 'Dropi · Billetera virtual', 'descripcion' => 'PUC 11100501 Billetera Virtual Dropi. Todo lo que entra o sale de la wallet pasa por acá; su saldo tiene que ser el de la wallet.'],
+        'contable.cta_dropi_banco_retiro' => ['grupo' => 'dropi', 'tipo' => 'string', 'valor' => '11200501', 'etiqueta' => 'Dropi · Banco al que llegan los retiros de la wallet', 'descripcion' => 'PUC 11200501 Bancolombia Great Baby **2664. ⚠ Confirmar con Silvia que los retiros de Dropi llegan a esta cuenta.'],
+        'contable.cta_dropi_flete' => ['grupo' => 'dropi', 'tipo' => 'string', 'valor' => '51355001', 'etiqueta' => 'Dropi · Fletes de garantía', 'descripcion' => 'PUC 51355001 Transporte, fletes y acarreos.'],
+        'contable.cta_dropi_comision_tarjeta' => ['grupo' => 'dropi', 'tipo' => 'string', 'valor' => '53051501', 'etiqueta' => 'Dropi · Comisión de tarjeta', 'descripcion' => 'PUC 53051501 Comisiones (gasto financiero). Antes iba a 530525, que es «Diferencia en cambio».'],
+        'contable.cta_dropi_sancion' => ['grupo' => 'dropi', 'tipo' => 'string', 'valor' => '53952001', 'etiqueta' => 'Dropi · Sanciones e indemnizaciones que cobra Dropi', 'descripcion' => 'PUC 53952001 Multas, sanciones y litigios. Lo que Dropi DESCUENTA de la wallet por incumplimiento o indemnización de una orden.'],
+        'contable.cta_dropi_indemnizacion' => ['grupo' => 'dropi', 'tipo' => 'string', 'valor' => '42950502', 'etiqueta' => 'Dropi · Indemnizaciones a favor', 'descripcion' => 'PUC 42950502 Otros ingresos. Lo que Dropi le PAGA a Great Baby por una indemnización.'],
+        'contable.cta_dropi_anticipo' => ['grupo' => 'dropi', 'tipo' => 'string', 'valor' => '28050501', 'etiqueta' => 'Dropi · Pagos sin factura y sobrepagos (anticipo)', 'descripcion' => 'PUC 28050501 Anticipos de clientes. Un pago de guía que llega antes de que el pedido se facture queda acá; al facturar se cruza con la factura y vuelve a cero. También lo que Dropi paga de más.'],
+        'contable.cta_dropi_otro_salida' => ['grupo' => 'dropi', 'tipo' => 'string', 'valor' => '53959501', 'etiqueta' => 'Dropi · Otros cobros sin clasificar', 'descripcion' => 'PUC 53959501 Otros gastos diversos. Para los códigos de wallet que el ERP todavía no conoce (tipo «Otro»). ⚠ Revisar con Silvia cada código nuevo.'],
+        'contable.cta_dropi_otro_entrada' => ['grupo' => 'dropi', 'tipo' => 'string', 'valor' => '42950502', 'etiqueta' => 'Dropi · Otros abonos sin clasificar', 'descripcion' => 'PUC 42950502 Otros ingresos. Para los abonos de wallet con un código que el ERP todavía no conoce (tipo «Otro»).'],
+        'contable.cta_dropi_iva_venta' => ['grupo' => 'dropi', 'tipo' => 'string', 'valor' => '24080501', 'etiqueta' => 'Dropi · IVA generado en las ventas', 'descripcion' => 'PUC 24080501 IVA generado en ventas 19%. Lo usan la factura y la nota crédito de Dropi; las de Great Baby siguen con la regla de Contabilidad.'],
+        'contable.cta_dropi_devolucion' => ['grupo' => 'dropi', 'tipo' => 'string', 'valor' => '41750501', 'etiqueta' => 'Dropi · Devolución en ventas', 'descripcion' => 'PUC 41750501 Devolución en ventas. La usa la nota crédito de una devolución de Dropi.'],
+        'contable.cta_dropi_proveedores' => ['grupo' => 'dropi', 'tipo' => 'string', 'valor' => '22050501', 'etiqueta' => 'Dropi · Proveedores nacionales', 'descripcion' => 'PUC 22050501 Proveedores nacionales. La deuda de una compra de Dropi; la recepción la abona y el pago al proveedor la cancela en la MISMA cuenta.'],
+        'contable.cta_dropi_proveedores_exterior' => ['grupo' => 'dropi', 'tipo' => 'string', 'valor' => '22100501', 'etiqueta' => 'Dropi · Proveedores del exterior', 'descripcion' => 'PUC 22100501 Proveedores del exterior. La deuda de una importación de Dropi.'],
+        'contable.cta_dropi_iva_compra' => ['grupo' => 'dropi', 'tipo' => 'string', 'valor' => '24081001', 'etiqueta' => 'Dropi · IVA descontable en compras', 'descripcion' => 'PUC 24081001 IVA descontable por compras 19%. ⚠ Si Dropi compra algo gravado al 5 %, su hoja es la 24081003: confirmar con Silvia.'],
 
         // ============ CATÁLOGO ============
         'catalogo.preservar_codigo_china' => ['grupo' => 'catalogo', 'tipo' => 'bool', 'valor' => '1', 'etiqueta' => 'Preservar consecutivo China en re-import', 'descripcion' => 'Si el SKU existe reusa el código de barras; no lo pisa'],
@@ -552,6 +613,7 @@ class Reglas
         'siigo.doc_type_nota_credito' => ['grupo' => 'siigo', 'tipo' => 'int', 'valor' => 0, 'etiqueta' => 'SIIGO · Tipo documento Nota crédito (venta)', 'descripcion' => 'ID del document-type NC. Sin esto SIIGO rechaza toda nota crédito'],
         'siigo.doc_type_nota_debito' => ['grupo' => 'siigo', 'tipo' => 'int', 'valor' => 0, 'etiqueta' => 'SIIGO · Tipo documento Nota débito (venta)', 'descripcion' => 'ID del document-type ND. Sin esto SIIGO rechaza toda nota débito'],
         'siigo.doc_type_asiento_manual' => ['grupo' => 'siigo', 'tipo' => 'int', 'valor' => 0, 'etiqueta' => 'SIIGO · Tipo documento Asiento manual', 'descripcion' => 'ID del comprobante contable (CC) para asientos manuales. Si queda en 0 se usa el de Gasto'],
+        'siigo.doc_type_wallet_dropi' => ['grupo' => 'siigo', 'tipo' => 'int', 'valor' => 0, 'etiqueta' => 'SIIGO · Tipo documento Wallet Dropi', 'descripcion' => 'ID del comprobante contable (CC) con el que viajan los movimientos de la wallet de Dropi (fletes, comisiones, sanciones, retiros, anticipos). Si queda en 0 se usa el de Asiento manual.'],
 
         // Centro de costo de las compras. SIIGO lo exige en algunas cuentas.
         'siigo.cost_center_compras' => ['grupo' => 'siigo', 'tipo' => 'int', 'valor' => 0, 'etiqueta' => 'SIIGO · Centro de costo de compras', 'descripcion' => 'ID del centro de costo para facturas de compra. 0 = no se manda'],

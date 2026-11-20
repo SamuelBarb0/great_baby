@@ -4,9 +4,11 @@ import { Head, Link, router } from '@inertiajs/vue3';
 import { Briefcase, Plus, Lock, Unlock } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import AppConfirmModal from '@/Components/AppConfirmModal.vue';
+import { useEscClose } from '@/composables/useEscClose';
 
 const props = defineProps({ vacantes: { type: Object, required: true } });
 const modal = ref(false);
+useEscClose(modal);
 const form = reactive({
     titulo: '', area: '', descripcion: '', requisitos: '',
     salario_min: null, salario_max: null, modalidad: 'presencial', tipo_contrato: 'indefinido',

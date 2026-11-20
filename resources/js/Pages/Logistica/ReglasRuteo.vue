@@ -16,6 +16,7 @@ import { ref, computed } from 'vue';
 import { Head, router } from '@inertiajs/vue3';
 import { Route, AlertTriangle, Plus, Pencil, Power, Trash2, MapPin } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
+import { useEscClose } from '@/composables/useEscClose';
 
 const props = defineProps({
     reglas: { type: Array, required: true },
@@ -29,6 +30,7 @@ const props = defineProps({
 const flash = ref(null);
 const guardando = ref(false);
 const editando = ref(null);
+useEscClose(editando);
 
 const avisar = (mensaje, tipo = 'ok') => {
     flash.value = { mensaje, tipo };
@@ -75,6 +77,7 @@ const alternar = (r) => router.post(`/app/logistica/reglas-ruteo/${r.id}/alterna
  * sin preguntar nada.
  */
 const porEliminar = ref(null);
+useEscClose(porEliminar);
 
 const pedirEliminar = (r) => (porEliminar.value = r);
 

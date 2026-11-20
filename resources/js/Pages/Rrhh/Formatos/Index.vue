@@ -15,6 +15,7 @@ import { ref, reactive, computed } from 'vue';
 import { Head, router } from '@inertiajs/vue3';
 import { FileCheck2, Pencil, AlertTriangle } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
+import { useEscClose } from '@/composables/useEscClose';
 
 const props = defineProps({
     formatos: { type: Array, default: () => [] },
@@ -25,6 +26,7 @@ const props = defineProps({
 const procesando = ref(false);
 const errores = ref({});
 const editando = ref(null);
+useEscClose(editando);
 
 const form = reactive({ codigo: '', nombre: '', proceso: '', version: '', fecha_version: '' });
 

@@ -15,7 +15,27 @@ class PlanCuentasSeeder extends Seeder
 {
     public function run(): void
     {
-        // [codigo, nombre, permite_movimiento]
+        /*
+         * [codigo, nombre, permite_movimiento]
+         *
+         * ───────────────────────────────────────────────────────────────────
+         * `permite_movimiento` TIENE QUE DECIR LA VERDAD
+         *
+         * Este PUC base es el que usa la suite. Seis cuentas de cuatro
+         * dígitos —1435, 2205, 2408, 4135— estaban sembradas como si
+         * recibieran movimiento, y en el plan real de Great Baby (1.081
+         * cuentas) son GRUPOS: no reciben nada.
+         *
+         * Esa mentira es la razón de que el problema no saliera nunca en
+         * pruebas. Las reglas de cuenta apuntaban a 1435 y a 4135, los
+         * asientos se escribían contra ellas, todo pasaba en verde — y en
+         * producción el contador encontraba las cuentas a mano, de a una,
+         * cuando un asiento no cuadraba. Eran 21 de 79.
+         *
+         * Si acá se vuelve a marcar `true` un grupo, el ERP deja de poder
+         * avisar que una regla apunta a donde no debe.
+         * ───────────────────────────────────────────────────────────────────
+         */
         $cuentas = [
             // 1 · ACTIVO
             ['1', 'ACTIVO', false],
@@ -34,16 +54,20 @@ class PlanCuentasSeeder extends Seeder
             ['135517', 'Impuesto a las ventas retenido', true],
             ['139535', 'Partida conciliatoria (ajustes por conciliar)', true],
             ['14', 'INVENTARIOS', false],
-            ['1435', 'Mercancías no fabricadas por la empresa', true],
+            ['1435', 'Mercancías no fabricadas por la empresa', false],
+            ['143505', 'Mercancías para la venta', true],
             // 2 · PASIVO
             ['2', 'PASIVO', false],
             ['23', 'CUENTAS POR PAGAR', false],
-            ['2205', 'Proveedores nacionales', true],
+            ['2205', 'PROVEEDORES', false],
+            ['220505', 'Proveedores nacionales', true],
             ['2365', 'Retención en la fuente', true],
             ['2367', 'Impuesto a las ventas retenido', true],
             ['2368', 'Impuesto de industria y comercio retenido', true],
             ['24', 'IMPUESTOS, GRAVÁMENES Y TASAS', false],
-            ['2408', 'Impuesto sobre las ventas por pagar', true],
+            ['2408', 'Impuesto sobre las ventas por pagar', false],
+            ['240805', 'IVA generado en ventas', true],
+            ['240810', 'IVA descontable en compras', true],
             // 3 · PATRIMONIO
             ['3', 'PATRIMONIO', false],
             ['31', 'CAPITAL SOCIAL', false],
@@ -53,7 +77,7 @@ class PlanCuentasSeeder extends Seeder
             // 4 · INGRESOS
             ['4', 'INGRESOS', false],
             ['41', 'OPERACIONALES', false],
-            ['4135', 'Comercio al por mayor y al por menor', true],
+            ['4135', 'Comercio al por mayor y al por menor', false],
             ['413505', 'Venta de mercancías', true],
             ['42', 'NO OPERACIONALES', false],
             ['4210', 'Financieros', true],

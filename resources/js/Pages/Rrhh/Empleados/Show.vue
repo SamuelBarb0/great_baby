@@ -14,6 +14,7 @@ import {
     IdCard, Package, Trash2, Wallet,
 } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
+import { useEscClose } from '@/composables/useEscClose';
 
 /*
  * La fecha de HOY en Colombia, no en UTC.
@@ -58,7 +59,9 @@ const url = (s = '') => `/app/rrhh/empleados/${props.empleado.id}${s}`;
  * demás sale de las fechas y del salario.
  */
 const modalLiquidacion = ref(false);
+useEscClose(modalLiquidacion);
 const modalPagoLiq = ref(false);
+useEscClose(modalPagoLiq);
 const pagoLiq = reactive({ fecha_pago: hoyBogota() });
 const liq = reactive({
     vacaciones_tomadas: 0, cesantias_ya_pagadas: 0,
@@ -174,6 +177,7 @@ const resumenFicha = computed(() => {
  * quitarla, sin un endpoint por renglón.
  */
 const modalEntrega = ref(false);
+useEscClose(modalEntrega);
 const entrega = reactive({ fecha: '', recibe_id: null, recibe_nombre: '', observaciones: '', items: [] });
 
 const cuantos = (bloque) =>
@@ -219,6 +223,7 @@ const confirmarEntrega = (area) => enviar(`/entrega-cargo/${area}/confirmar`);
  * normal volver a abrirla para completar lo que quedó suelto.
  */
 const modalEntrevista = ref(false);
+useEscClose(modalEntrevista);
 const entrevista = reactive({});
 
 const abrirEntrevista = () => {
@@ -259,6 +264,7 @@ const hasta = ref(props.empleado.prueba_hasta || props.empleado.prueba_sugerida)
 const guardarPrueba = () => enviar('/prueba', { hasta: hasta.value });
 
 const modalEvaluar = ref(false);
+useEscClose(modalEvaluar);
 const evaluacion = reactive({ resultado: 'continua', observacion: '' });
 const evaluar = () => enviar('/prueba/evaluar', { ...evaluacion },
     { onSuccess: () => (modalEvaluar.value = false) });
@@ -273,6 +279,7 @@ const evaluar = () => enviar('/prueba/evaluar', { ...evaluacion },
  * las que ya se dieron.
  */
 const modalInduccion = ref(false);
+useEscClose(modalInduccion);
 const ind = reactive({
     fecha: '', responsable_nombre: '', responsable_cargo: '',
     temas: [], observaciones: '', firmada_at: '',
@@ -301,6 +308,7 @@ const guardarTemario = () => enviar('/induccion-temario', { ...ind },
 
 /* documentos */
 const modalDoc = ref(false);
+useEscClose(modalDoc);
 const doc = reactive({ tipo: 'contrato', nombre: '', fecha_vencimiento: null });
 const archivo = ref(null);
 const subirDoc = () => {
@@ -331,12 +339,14 @@ const subirDoc = () => {
  * manda por el WhatsApp, que es como se comunican.
  */
 const modalAcceso = ref(false);
+useEscClose(modalAcceso);
 const emailAcceso = ref(props.empleado.email || '');
 const crearAcceso = () => enviar('/acceso', { email: emailAcceso.value },
     { onSuccess: () => (modalAcceso.value = false) });
 
 
 const modalRetiro = ref(false);
+useEscClose(modalRetiro);
 const retiro = reactive({
     fecha_retiro: hoyBogota(),
     tipo_retiro: 'renuncia',

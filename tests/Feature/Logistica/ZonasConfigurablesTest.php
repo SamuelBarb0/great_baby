@@ -246,3 +246,45 @@ it('no deja que hacer espacio se configure después de pedir la gente', function
     // «vaya haciendo espacio»—, así que el de espacio nunca queda por debajo.
     expect($f['dias_espacio'])->toBe(10);
 });
+
+/*
+ * ───────────────────────────────────────────────────────────────────────────
+ * EL CANDADO QUE FALTABA
+ *
+ * `ZonaDeLaBodega::POR_DEFECTO` y el valor registrado de la regla en
+ * `Reglas::DEFAULTS` tienen que decir lo mismo. No es simetría de adorno:
+ * `Reglas::get()` cae al literal de `DEFAULTS` cuando no hay fila sembrada, y
+ * `seedDefaults()` siembra desde ahí — así que en una instalación de verdad
+ * manda ESE, no la constante de la clase.
+ *
+ * El 19-nov se cambió el recorrido al que pidió el área en la clase y no en
+ * Reglas. Todo verde: los demás tests escriben la regla antes de mirarla, y el
+ * único que toca POR_DEFECTO primero deja basura guardada. Mientras tanto la
+ * hoja de picking seguía imprimiendo «ZONA C» con las paradas al revés.
+ * ───────────────────────────────────────────────────────────────────────────
+ */
+it('la regla de fábrica dice lo mismo que POR_DEFECTO', function () {
+    $registrado = json_decode(
+        \App\Support\Reglas::DEFAULTS['logistica.zonas_bodega']['valor'],
+        true,
+    );
+
+    expect($registrado)->toBe(Zona::POR_DEFECTO);
+});
+
+it('una instalación sin la fila sembrada usa el recorrido que pidió el área', function () {
+    // Sin fila en `reglas_negocio`: es el camino de una instalación nueva, y
+    // el que nadie estaba probando.
+    \App\Models\ReglaNegocio::where('clave', 'logistica.zonas_bodega')->delete();
+    \App\Support\Reglas::limpiarRequestCache();
+
+    // Por `letras()` y no por `array_keys()`: PHP convierte a entero toda
+    // clave que parezca número, así que el mapa viene con 1, 2 y 3 enteros.
+    // Ese mismo detalle ya había dejado la hoja diciendo «Responsable 0».
+    expect(Zona::letras())->toBe(['1', '2', '3'])
+        ->and(Zona::deRack('LOCAL'))->toBe('3')
+        // El LOCAL es la PRIMERA parada de la zona 3: lo pidió don Jorge con
+        // todas las letras el 19-nov.
+        ->and(Zona::ordenEnElRecorrido('LOCAL'))->toBe(0)
+        ->and(Zona::ordenEnElRecorrido('11'))->toBe(7);
+});

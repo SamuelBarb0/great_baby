@@ -4,6 +4,7 @@ import { Head, Link, router } from '@inertiajs/vue3';
 import { Calendar, Plus, ChevronLeft, ChevronRight, Clapperboard, Images } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import AppConfirmModal from '@/Components/AppConfirmModal.vue';
+import { useEscClose } from '@/composables/useEscClose';
 
 const props = defineProps({
     anio: Number, mes: Number,
@@ -30,6 +31,7 @@ const irMes = (delta) => {
 };
 
 const modal = ref(false);
+useEscClose(modal);
 const form = reactive({
     fecha_publicacion: '', hora_publicacion: '', titulo: '', copy: '',
     canal: 'instagram', tipo: 'post', estado: 'idea',
@@ -53,6 +55,7 @@ const crear = () => {
 const ETAPAS = { grabacion: 'Grabación', edicion: 'Edición', entregado: 'Entregado' };
 const ACCION = { grabacion: 'Empezar grabación', edicion: 'Pasar a edición', entregado: 'Entregar a mayorista y dropship' };
 const detalle = ref(null);
+useEscClose(detalle);
 const avanzando = ref(false);
 const avanzar = (p) => {
     if (avanzando.value) return;

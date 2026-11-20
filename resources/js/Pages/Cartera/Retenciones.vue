@@ -6,6 +6,7 @@ import AppLayout from '@/Layouts/AppLayout.vue';
 import PestanasSeccion from '@/Components/PestanasSeccion.vue';
 import { pestanasConfigContable } from '@/composables/usePestanasContables';
 import AppConfirmModal from '@/Components/AppConfirmModal.vue';
+import { useEscClose } from '@/composables/useEscClose';
 
 const props = defineProps({ reglas: { type: Array, required: true } });
 
@@ -15,6 +16,7 @@ const modalConfirm = ref(null);
 
 const tab = ref('retefuente');
 const modal = ref(false);
+useEscClose(modal);
 
 /*
  * Una autorretención se practica al EMITIR una factura de venta, no al pagar

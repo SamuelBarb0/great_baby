@@ -12,6 +12,7 @@ import { useMoney } from '@/composables/useMoney';
 import { fechaCorta } from '@/composables/useFecha';
 import AppConfirmModal from '@/Components/AppConfirmModal.vue';
 import AppPromptModal from '@/Components/AppPromptModal.vue';
+import { useEscClose } from '@/composables/useEscClose';
 
 const props = defineProps({
     tab: { type: String, default: 'ordenes' },
@@ -85,7 +86,8 @@ const estadosDeLaPestana = computed(() => props.estados[tabAct.value] ?? []);
 const tieneEjes = computed(() => tabAct.value !== 'importaciones');
 
 /* ── Cambiar si una compra se declara ────────────────────────────────────── */
-const modalDestino = ref(null);   // { orden, destino }
+const modalDestino = ref(null);
+useEscClose(modalDestino);   // { orden, destino }
 const motivoDestino = ref('');
 const guardandoDestino = ref(false);
 

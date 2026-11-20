@@ -111,11 +111,23 @@ class DescontarStockPorDespacho
             $pedido->forceFill(['ubicacion_origen_id' => reset($bodegas)])->save();
         }
 
-        // Costo con el que sale cada ítem: promedio ponderado de las entradas a
-        // SU bodega. Una consulta por bodega distinta, que normalmente es una.
+        /*
+         * Costo con el que sale cada ítem: promedio ponderado de las entradas
+         * a SU bodega Y A SUS ESTANTES.
+         *
+         * El egreso ya se reparte entre las posiciones (`repartirEgreso`),
+         * pero el costo se seguía preguntando sólo a la fila de la sede. Si la
+         * mercancía entró directo a `R12-S1-N1` —que es lo que el área pidió
+         * poder hacer— la sede no tiene entradas propias y el costo daba CERO:
+         * el movimiento de kardex y el asiento de costo de ventas se escribían
+         * en cero, el margen bruto daba 100% y nada se quejaba.
+         *
+         * Se pregunta por el mismo conjunto que usa el reparto: la sede y sus
+         * posiciones son el mismo sitio físico.
+         */
         $costos = [];
         foreach (array_unique(array_values($bodegas)) as $ubi) {
-            $costos[$ubi] = CostoPromedio::porUbicacion($sujetos, $ubi);
+            $costos[$ubi] = CostoPromedio::porUbicaciones($sujetos, $this->dondeBuscar($ubi));
         }
         $asiento = [];
 
@@ -189,23 +201,6 @@ class DescontarStockPorDespacho
     }
 
     /**
-     * Frena el despacho si la bodega de origen no tiene saldo para todo el pedido.
-     *
-     * Hasta ahora el egreso se escribía siempre: despachar 10 con 3 en bodega
-     * dejaba el kardex en −7 sin avisar a nadie. Se compara contra el saldo
-     * FÍSICO (lo que hay en el estante), no el disponible: el pedido que se
-     * está despachando puede tener su propia reserva y se contaría dos veces.
-     *
-     * Las cantidades se suman por producto porque un mismo SKU puede venir en
-     * dos líneas, y cada una sola cabría aunque juntas no.
-     *
-     * Cada ítem se mide en SU bodega de salida. El que no tiene ninguna no se
-     * mide: no se le escribe egreso, así que no puede dejar el kardex en
-     * negativo (el despacho lo reporta en `$motivo`).
-     *
-     * @param  array<string, int>  $bodegas  clave `v:{id}`/`p:{id}` => ubicacion_id
-     */
-    /**
      * Donde buscar el saldo de una sede: ella misma y sus posiciones.
      *
      * Una bodega y sus racks son el mismo sitio fisico. Si el alistador bajo
@@ -223,13 +218,9 @@ class DescontarStockPorDespacho
      */
     private function dondeBuscar(int $sedeId): array
     {
-        $hijas = InventarioUbicacion::query()
-            ->where('bodega_id', $sedeId)
-            ->where('activa', true)
-            ->pluck('id')
-            ->all();
-
-        return [...$hijas, $sedeId];
+        // La consulta vive en el modelo: el mismo descuido apareció en cuatro
+        // sitios distintos, cada uno con su propia versión.
+        return InventarioUbicacion::laSedeYSusPosiciones($sedeId);
     }
 
     /**
@@ -286,6 +277,23 @@ class DescontarStockPorDespacho
         return $reparto ?: [$sedeId => $cantidad];
     }
 
+    /**
+     * Frena el despacho si la bodega de origen no tiene saldo para todo el pedido.
+     *
+     * Hasta ahora el egreso se escribía siempre: despachar 10 con 3 en bodega
+     * dejaba el kardex en −7 sin avisar a nadie. Se compara contra el saldo
+     * FÍSICO (lo que hay en el estante), no el disponible: el pedido que se
+     * está despachando puede tener su propia reserva y se contaría dos veces.
+     *
+     * Las cantidades se suman por producto porque un mismo SKU puede venir en
+     * dos líneas, y cada una sola cabría aunque juntas no.
+     *
+     * Cada ítem se mide en SU bodega de salida. El que no tiene ninguna no se
+     * mide: no se le escribe egreso, así que no puede dejar el kardex en
+     * negativo (el despacho lo reporta en `$motivo`).
+     *
+     * @param  array<string, int>  $bodegas  clave `v:{id}`/`p:{id}` => ubicacion_id
+     */
     private function exigirSaldo(PedidoCliente $pedido, array $bodegas): void
     {
         $pedidas = [];

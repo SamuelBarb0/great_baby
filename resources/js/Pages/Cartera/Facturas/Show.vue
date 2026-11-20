@@ -7,6 +7,7 @@ import AppLayout from '@/Layouts/AppLayout.vue';
 import AppConfirmModal from '@/Components/AppConfirmModal.vue';
 import AppPromptModal from '@/Components/AppPromptModal.vue';
 import { mensajeDeError } from '@/composables/useMensajeError';
+import { useEscClose } from '@/composables/useEscClose';
 
 const props = defineProps({
     factura: { type: Object, required: true },
@@ -55,6 +56,7 @@ const esRoot = (usePage().props?.auth?.user?.roles ?? []).some(r =>
     ['Aracely', 'Gerencia'].includes(r?.name ?? r));
 
 const erroresDian = ref(null);
+useEscClose(erroresDian);
 const consultandoDian = ref(false);
 
 const reenviarMail = () => {

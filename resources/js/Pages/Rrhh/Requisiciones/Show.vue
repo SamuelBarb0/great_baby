@@ -11,6 +11,7 @@ import { Head, Link, router } from '@inertiajs/vue3';
 import { ArrowLeft, Send, Check, X, Briefcase, History, Users } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import AppConfirmModal from '@/Components/AppConfirmModal.vue';
+import { useEscClose } from '@/composables/useEscClose';
 
 const props = defineProps({
     requisicion: { type: Object, required: true },
@@ -21,6 +22,7 @@ const props = defineProps({
 
 const procesando = ref(false);
 const modalRechazo = ref(false);
+useEscClose(modalRechazo);
 const motivo = ref('');
 const errorMotivo = ref('');
 

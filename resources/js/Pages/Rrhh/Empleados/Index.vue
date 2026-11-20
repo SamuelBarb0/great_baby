@@ -4,6 +4,7 @@ import { useBogotaDate } from '@/composables/useBogotaDate';
 import { Head, Link, router } from '@inertiajs/vue3';
 import { Users, Plus, GraduationCap, Download } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
+import { useEscClose } from '@/composables/useEscClose';
 
 /*
  * La fecha de HOY en Colombia, no en UTC.
@@ -18,6 +19,7 @@ const { hoy: hoyBogota } = useBogotaDate();
 const props = defineProps({ empleados: { type: Object, required: true }, filtro: { type: String, default: 'activo' } });
 
 const modal = ref(false);
+useEscClose(modal);
 
 /*
  * Una sola fuente de verdad para el formulario en blanco.

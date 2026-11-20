@@ -14,6 +14,7 @@ import {
     User, FileText, Wrench, GraduationCap, Clock, AlertTriangle, CheckCircle2,
 } from 'lucide-vue-next';
 import AppLayout from '@/Layouts/AppLayout.vue';
+import { useEscClose } from '@/composables/useEscClose';
 
 const props = defineProps({
     yo: { type: Object, required: true },
@@ -26,6 +27,7 @@ const procesando = ref(false);
 const errores = ref({});
 
 const modal = ref(null);
+useEscClose(modal);
 const reporte = reactive({ novedad: 'falla', detalle: '' });
 
 const reportar = () => {

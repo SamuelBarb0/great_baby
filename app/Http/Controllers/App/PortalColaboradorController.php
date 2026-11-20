@@ -45,7 +45,36 @@ class PortalColaboradorController extends Controller implements HasMiddleware
 
     public function miEspacio(Request $r): Response
     {
-        $e = $this->miFicha($r);
+        /*
+         * Sin ficha, la pantalla EXPLICA. No responde 403.
+         *
+         * «Mi espacio» es lo primero que abre alguien que acaba de entrar, y
+         * un usuario con el rol pero sin ficha enlazada es un descuido
+         * normal de Gestión Humana —pasó con Ana Pérez en producción el
+         * 30-oct—. Lo que veía era una pantalla de error con un código: no
+         * decía qué hacer, y la persona iba a preguntar si el sistema estaba
+         * caído.
+         *
+         * El 403 sigue vivo en las ACCIONES (reportar una novedad, bajar un
+         * documento): ahí sí es un corte, porque no hay nada sobre qué
+         * actuar. Lo que cambia es la puerta de entrada.
+         */
+        $e = Empleado::with('contratacion')->where('user_id', $r->user()->id)->first();
+
+        if (! $e) {
+            return Inertia::render('Rrhh/Portal/MiEspacioSinFicha', [
+                'correo' => $r->user()->email,
+                'nombre' => $r->user()->name,
+                // A quién tocarle la puerta, con nombre y correo: «avisale a
+                // Gestión Humana» no sirve si no sabés quién es.
+                'a_quien_pedirle' => Permisos::usuariosQuePueden('rrhh')
+                    ->orderBy('name')
+                    ->limit(5)
+                    ->get(['id', 'name', 'email'])
+                    ->map(fn ($u) => ['nombre' => $u->name, 'correo' => $u->email])
+                    ->values(),
+            ]);
+        }
 
         return Inertia::render('Rrhh/Portal/MiEspacio', [
             'yo' => [

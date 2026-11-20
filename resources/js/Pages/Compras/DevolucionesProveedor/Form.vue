@@ -8,6 +8,7 @@ import { useMoney } from '@/composables/useMoney';
 import AppConfirmModal from '@/Components/AppConfirmModal.vue';
 import { mensajeDeError } from '@/composables/useMensajeError';
 import axios from 'axios';
+import { useEscClose } from '@/composables/useEscClose';
 
 /*
  * La fecha de HOY en Colombia, no en UTC.
@@ -160,6 +161,7 @@ const eliminarItem = async (itemId) => {
 
 // COMP-B2 · preview de asiento antes de ejecutar la confirmación.
 const preview = ref(null);
+useEscClose(preview);
 const cargandoPreview = ref(false);
 const abrirPreview = async () => {
     if (!items.value.length) { mostrarFlash('error', 'La devolución no tiene ítems.'); return; }

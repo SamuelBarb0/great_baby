@@ -237,7 +237,7 @@ class SeguimientoContenedor
             'dias_en_etapa' => $siguiente ? $dias : null,
             'esperados' => $esperados,
             'dias_atraso' => $esperados !== null ? max(0, $dias - $esperados) : 0,
-            'llegada_estimada' => $siguiente ? $this->llegadaEstimada($actual, $desde)?->toDateString() : null,
+            'llegada_estimada' => $siguiente ? $this->llegadaEstimada($actual, $desde, $imp)?->toDateString() : null,
             'terminado' => $siguiente === null,
         ];
     }
@@ -562,8 +562,24 @@ class SeguimientoContenedor
     }
 
     /** Suma lo que falta. Sin plazo conocido en algún tramo, no inventa una fecha. */
-    private function llegadaEstimada(EtapaContenedor $actual, Carbon $desde): ?Carbon
+    private function llegadaEstimada(EtapaContenedor $actual, Carbon $desde, ?Importacion $imp = null): ?Carbon
     {
+        /*
+         * La fecha que alguien escribió gana sobre la que se calcula.
+         *
+         * La ETA la pone quien tiene la información —el agente de aduana, la
+         * naviera—; esta cuenta de abajo sólo suma los días estándar de cada
+         * etapa, que es lo mejor que se puede hacer cuando nadie sabe.
+         *
+         * Sin esto la misma pantalla se contradecía: arriba decía «Llega en 5
+         * días» —que sale de la ETA— y la línea de tiempo decía una fecha de
+         * dos meses después. Dos fechas para lo mismo, y ninguna explicación
+         * de cuál creer.
+         */
+        if ($imp?->eta && ! $imp->fecha_llegada) {
+            return $imp->eta->copy();
+        }
+
         $fecha = $desde->copy();
         foreach (EtapaContenedor::cases() as $etapa) {
             if ($etapa->posicion() <= $actual->posicion()) {
