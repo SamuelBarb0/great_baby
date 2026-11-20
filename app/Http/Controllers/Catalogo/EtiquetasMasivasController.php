@@ -19,11 +19,15 @@ class EtiquetasMasivasController extends Controller
 {
     /**
      * Rollo de la térmica SAT TT460 para las etiquetas de Dropi, en mm: 3
-     * etiquetas de 30 × 25 por fila. El ancho del papel y la separación entre
-     * columnas son estimados (19-nov-2026); si la impresión se corre, se
-     * ajustan aquí con las medidas reales del rollo.
+     * etiquetas de 32,5 × 25 por fila, a 3 mm entre columnas. Son las medidas
+     * de la plantilla de BarTender con la que ya imprime la bodega
+     * (GREATBABY.btw, 20-nov-2026). El ancho del papel (104) es el de las tres
+     * columnas y sus separaciones; si la impresión se corre, se ajusta aquí.
      */
-    private const ROLLO_DROPI = ['ancho' => 100, 'alto' => 25, 'columnas' => 3, 'etiqueta' => 30, 'separacion' => 2];
+    private const ROLLO_DROPI = ['ancho' => 104, 'alto' => 25, 'columnas' => 3, 'etiqueta' => 32.5, 'separacion' => 3];
+
+    /** Alto máximo (mm) del código de barras: lo que dejan libre los 25 mm tras dos renglones de nombre. */
+    private const BARRAS_ALTO_MAX = 14;
 
     public function pdf(Request $request): Response
     {
@@ -111,8 +115,9 @@ class EtiquetasMasivasController extends Controller
 
     /**
      * @param  list<array{nombre:?string, detalle:string, precio:float, codigo:string}>  $etiquetas
-     * @param  bool  $soloBarras  las de «Mis productos en Dropi» llevan SOLO el código
-     *                            de barras (19-nov-2026); las del catálogo, completas.
+     * @param  bool  $soloBarras  las de «Mis productos en Dropi» llevan el nombre y el
+     *                            código de barras, como la plantilla de BarTender de la
+     *                            bodega (20-nov-2026); las del catálogo, completas.
      */
     private function lote(array $etiquetas, string $archivo, bool $soloBarras = false): Response
     {
@@ -126,7 +131,11 @@ class EtiquetasMasivasController extends Controller
             if ($qrOpts) {
                 $e['qr'] = (new QRCode($qrOpts))->render($e['codigo']);
             }
-            $e['barras'] = 'data:image/png;base64,' . base64_encode(Code128::png($e['codigo']));
+            $png = Code128::png($e['codigo']);
+            $e['barras'] = 'data:image/png;base64,' . base64_encode($png);
+            if ($soloBarras) {
+                [$e['barras_ancho'], $e['barras_alto']] = self::encajarBarras($png);
+            }
         }
         unset($e);
 
@@ -142,5 +151,27 @@ class EtiquetasMasivasController extends Controller
         return Pdf::loadView('catalogo.pdf.etiquetas-lote', ['etiquetas' => $etiquetas])
             ->setPaper('letter', 'portrait')
             ->stream($archivo . '-' . now()->format('Ymd-His') . '.pdf');
+    }
+
+    /**
+     * Medidas (mm) del código de barras dentro de la etiqueta de Dropi, sin
+     * deformarlo: tan ancho como la etiqueta, salvo que así quede más alto que
+     * el espacio que deja el nombre. Un código corto («899») estirado a lo ancho
+     * salía de 13 mm de alto y, con el nombre encima, la fila no cabía en los
+     * 25 mm y DomPDF la partía en páginas en blanco.
+     *
+     * @return array{0: float, 1: float}
+     */
+    private static function encajarBarras(string $png): array
+    {
+        [$px, $py] = getimagesizefromstring($png);
+        $ancho = self::ROLLO_DROPI['etiqueta'] - 2;
+        $alto = $ancho * $py / $px;
+        if ($alto > self::BARRAS_ALTO_MAX) {
+            $ancho *= self::BARRAS_ALTO_MAX / $alto;
+            $alto = self::BARRAS_ALTO_MAX;
+        }
+
+        return [round($ancho, 2), round($alto, 2)];
     }
 }

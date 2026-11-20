@@ -88,20 +88,32 @@ it('el PDF lleva el código del ERP: el de la variante o la referencia del agreg
     });
 
     $pdf = $this->get(route('catalogo.etiquetas.dropi', 1))->assertOk()->assertHeader('content-type', 'application/pdf');
-    // Cada página es una fila completa del rollo de la SAT TT460: 100 × 25 mm.
-    expect($pdf->getContent())->toContain('/MediaBox [0.000 0.000 283.465 70.866]');
+    // Cada página es una fila completa del rollo de la SAT TT460: 104 × 25 mm
+    // (3 etiquetas de 32,5 mm a 3 mm, como la plantilla de BarTender de la bodega).
+    expect($pdf->getContent())->toContain('/MediaBox [0.000 0.000 294.803 70.866]');
     $this->get(route('catalogo.etiquetas.dropi', 2))->assertOk();
 
     // La variación sin vincular (Rosa 6M) no sale; la vinculada lleva el código de la variante.
     expect($vistas[0])->toBe(['AND2512-79/154-02LEÓ-6M'])
         ->and($vistas[1])->toBe(['899'])
-        // Las de Dropi llevan SOLO el código de barras: ni QR se genera.
+        // Las de Dropi llevan el nombre y el código de barras: ni QR se genera.
         ->and($conQr)->toBe([false, false]);
 });
 
-it('las etiquetas de Dropi son solo el código de barras; las del catálogo siguen completas', function () {
-    $dropi = view('catalogo.pdf.etiquetas-dropi', ['rollo' => ['ancho' => 100, 'alto' => 25, 'columnas' => 3, 'etiqueta' => 30, 'separacion' => 2], 'etiquetas' => [['codigo' => '899', 'barras' => 'data:image/png;base64,AAA', 'nombre' => 'VOLANTE', 'detalle' => 'Azul', 'precio' => 12000]]])->render();
-    expect($dropi)->toContain('alt="899"')->not->toContain('QR')->not->toContain('VOLANTE')->not->toContain('12.000');
+it('las etiquetas de Dropi llevan el nombre y el código de barras; las del catálogo siguen completas', function () {
+    $rollo = ['ancho' => 104, 'alto' => 25, 'columnas' => 3, 'etiqueta' => 32.5, 'separacion' => 3];
+    $dropi = view('catalogo.pdf.etiquetas-dropi', ['rollo' => $rollo, 'etiquetas' => [['codigo' => '899', 'barras' => 'data:image/png;base64,AAA', 'nombre' => 'Carro lanzador', 'detalle' => 'Azul', 'precio' => 12000]]])->render();
+    // Como la plantilla de BarTender: nombre arriba (en mayúsculas por CSS) y barras; sin QR, variación ni precio.
+    expect($dropi)->toContain('alt="899"')->toContain('Carro lanzador')->toContain('width: 32.5mm')->toContain('width: 30.5mm; height: 12mm;')
+        ->not->toContain('QR')->not->toContain('Azul')->not->toContain('12.000');
+
+    // Un nombre muy largo se corta para no empujar las barras fuera de la etiqueta; sin nombre, solo barras.
+    $largo = view('catalogo.pdf.etiquetas-dropi', ['rollo' => $rollo, 'etiquetas' => [
+        ['codigo' => '900', 'barras' => 'data:image/png;base64,AAA', 'nombre' => str_repeat('Gimnasio musical ', 5)],
+        ['codigo' => '901', 'barras' => 'data:image/png;base64,AAA', 'nombre' => null],
+    ]])->render();
+    expect($largo)->toContain('Gimnasio musical Gimnasio musica...')->not->toContain(str_repeat('Gimnasio musical ', 2))
+        ->and(substr_count($largo, 'class="nombre"'))->toBe(1);
 
     $catalogo = view('catalogo.pdf.etiquetas-lote', ['etiquetas' => [['codigo' => '899', 'barras' => 'data:image/png;base64,AAA', 'qr' => 'data:image/png;base64,BBB', 'nombre' => 'VOLANTE', 'detalle' => 'Azul', 'precio' => 12000]]])->render();
     expect($catalogo)->toContain('alt="QR"')->toContain('VOLANTE')->toContain('12.000');

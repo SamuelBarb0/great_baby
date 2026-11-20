@@ -8,12 +8,13 @@
         $margen = ($rollo['ancho'] - $rollo['columnas'] * $rollo['etiqueta'] - ($rollo['columnas'] - 1) * $rollo['separacion']) / 2;
     @endphp
     <style>
-        {{-- Etiquetas de «Mis productos en Dropi»: SOLO el código de barras
-             (Code 128, con el código impreso debajo en la misma imagen), que es
-             lo que lee la pistola de empaque. Sin QR, nombre ni precio
-             (19-nov-2026). Las del catálogo siguen en etiquetas-lote.
-             El rollo de la térmica SAT TT460 trae 3 etiquetas de 30 × 25 mm por
-             fila: cada página es una fila completa del rollo.
+        {{-- Etiquetas de «Mis productos en Dropi»: el nombre del producto arriba
+             y el código de barras (Code 128, con el código impreso debajo en la
+             misma imagen), que es lo que lee la pistola de empaque. Sin QR ni
+             precio. Es el diseño de la plantilla de BarTender de la bodega
+             (20-nov-2026). Las del catálogo siguen en etiquetas-lote.
+             El rollo de la térmica SAT TT460 trae 3 etiquetas de 32,5 × 25 mm
+             por fila: cada página es una fila completa del rollo.
              DomPDF no entiende flex ni grid: el acomodo va en tabla. --}}
         * { box-sizing:border-box; margin:0; padding:0; }
         @page { margin: 0; }
@@ -23,7 +24,7 @@
         .etiqueta { width: {{ $rollo['etiqueta'] }}mm; text-align: center; vertical-align: middle; }
         .separacion { width: {{ $rollo['separacion'] }}mm; }
         .salto { page-break-after: always; }
-        .barras { width: {{ $rollo['etiqueta'] - 2 }}mm; }
+        .nombre { font-size: 7pt; font-weight: bold; line-height: 1.1; text-transform: uppercase; margin: 0 1mm 0.8mm; }
     </style>
 </head><body>
     @foreach(array_chunk($etiquetas, $rollo['columnas']) as $fila)
@@ -32,7 +33,11 @@
                 @for($i = 0; $i < $rollo['columnas']; $i++)
                     @if($i > 0)<td class="separacion"></td>@endif
                     <td class="etiqueta">
-                        @isset($fila[$i])<img src="{{ $fila[$i]['barras'] }}" class="barras" alt="{{ $fila[$i]['codigo'] }}">@endisset
+                        @isset($fila[$i])
+                            {{-- Dos renglones como máximo: un nombre largo no debe empujar las barras fuera de la etiqueta. --}}
+                            @if(filled($fila[$i]['nombre'] ?? null))<div class="nombre">{{ \Illuminate\Support\Str::limit($fila[$i]['nombre'], 32) }}</div>@endif
+                            <img src="{{ $fila[$i]['barras'] }}" style="width: {{ $fila[$i]['barras_ancho'] ?? $rollo['etiqueta'] - 2 }}mm; height: {{ $fila[$i]['barras_alto'] ?? 12 }}mm;" alt="{{ $fila[$i]['codigo'] }}">
+                        @endisset
                     </td>
                 @endfor
             </tr>
