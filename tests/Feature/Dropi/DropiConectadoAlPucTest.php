@@ -512,3 +512,66 @@ it('regla de la casa: una compra de Great Baby sigue con las cuentas del ERP', f
         ->toContain((string) setting('contable.cta_proveedores_default'))
         ->not->toContain('143504')->not->toContain('24081001')->not->toContain('22050501');
 });
+
+/** Carga de 10 coches a $15.000 por el canal indicado, cerrada con su asiento. */
+function pucCarga(string $canal, string $motivo, int $varianteId): App\Modules\Inventario\Models\CargaInventario
+{
+    $prov = Contacto::firstOrCreate(['numero_documento' => '901999777'], ['nombre_completo' => 'Proveedor carga', 'es_proveedor' => true]);
+    $c = App\Modules\Inventario\Actions\RegistrarCargaInventario::abrir([
+        'motivo' => App\Modules\Inventario\Enums\MotivoCargaInventario::from($motivo),
+        'observacion' => 'Carga de prueba', 'tercero_id' => $prov->id,
+        'ubicacion_id' => test()->bodega->id, 'canal' => $canal, 'user_id' => test()->user->id,
+    ]);
+    InventarioMovimiento::create([
+        'variante_id' => $varianteId, 'ubicacion_id' => test()->bodega->id, 'tipo' => 'carga_inicial_cliente',
+        'cantidad' => 10, 'costo_unit' => 15000,
+        'referencia_tipo' => App\Modules\Inventario\Models\CargaInventario::class, 'referencia_id' => $c->id,
+    ]);
+    $v = ProductoVariante::find($varianteId);
+    DB::table('inventario_movimientos')->where('referencia_id', $c->id)
+        ->where('referencia_tipo', App\Modules\Inventario\Models\CargaInventario::class)->update(['producto_id' => $v->producto_id]);
+
+    return App\Modules\Inventario\Actions\RegistrarCargaInventario::cerrar($c->fresh());
+}
+
+it('la carga de mercancía de Dropi entra al inventario de la familia, contra el proveedor de Dropi, y queda como Dropi', function () {
+    $c = pucCarga('dropi', 'compra', $this->variante->id);
+    $lineas = MovimientoContable::where('origen_type', $c::class)->where('origen_id', $c->id)->get();
+
+    expect($c->cuenta_contrapartida)->toBe('22050501')
+        ->and((float) $lineas->firstWhere('cuenta_puc', '143504')?->debe)->toBe(150000.0)
+        ->and((float) $lineas->firstWhere('cuenta_puc', '22050501')?->haber)->toBe(150000.0)
+        ->and($lineas->every(fn ($l) => $l->linea_negocio === App\Modules\Contabilidad\Enums\LineaNegocio::Dropi))->toBeTrue();
+
+    // Las otras contrapartidas de Dropi son hojas del PUC.
+    foreach (['saldo_inicial' => '37050501', 'aporte_socios' => '31050501', 'donacion' => '42950501', 'sobrante' => '42950501'] as $motivo => $cuenta) {
+        expect(App\Modules\Dropi\Support\CuentasDropi::contrapartidaCarga(App\Modules\Inventario\Enums\MotivoCargaInventario::from($motivo)))->toBe($cuenta);
+    }
+});
+
+it('regla de la casa: la carga de inventario del ERP sigue con sus cuentas y como Great Baby', function () {
+    $c = pucCarga('web', 'compra', $this->variante->id);
+    $lineas = MovimientoContable::where('origen_type', $c::class)->where('origen_id', $c->id)->get();
+
+    expect($c->cuenta_contrapartida)->toBe((string) setting('contable.cta_carga_compra'))
+        ->and($lineas->pluck('cuenta_puc')->all())->not->toContain('143504')->not->toContain('22050501')
+        ->and($lineas->every(fn ($l) => $l->linea_negocio === App\Modules\Contabilidad\Enums\LineaNegocio::GreatBaby))->toBeTrue();
+});
+
+it('la reparación rehace una carga de Dropi hecha con las cuentas del ERP', function () {
+    // Como la dejaba el código de main: 1435 contra 220505 y marcada Great Baby.
+    $c = pucCarga('web', 'compra', $this->variante->id);
+    $c->forceFill(['canal' => 'dropi'])->save();
+
+    $this->artisan('dropi:reparar-contabilidad --aplicar')->assertSuccessful();
+
+    $vivas = MovimientoContable::query()->vivas()->where('origen_type', $c::class)->where('origen_id', $c->id)->get();
+    expect($vivas->pluck('cuenta_puc')->sort()->values()->all())->toBe(['143504', '22050501'])
+        ->and($vivas->every(fn ($l) => $l->linea_negocio === App\Modules\Contabilidad\Enums\LineaNegocio::Dropi))->toBeTrue()
+        ->and($c->fresh()->cuenta_contrapartida)->toBe('22050501');
+
+    // Una segunda pasada no cambia nada.
+    $n = MovimientoContable::where('origen_type', $c::class)->where('origen_id', $c->id)->count();
+    $this->artisan('dropi:reparar-contabilidad --aplicar')->assertSuccessful();
+    expect(MovimientoContable::where('origen_type', $c::class)->where('origen_id', $c->id)->count())->toBe($n);
+});

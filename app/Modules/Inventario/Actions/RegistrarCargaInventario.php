@@ -44,7 +44,11 @@ class RegistrarCargaInventario
             'ubicacion_id' => $datos['ubicacion_id'],
             'archivo_nombre' => $datos['archivo_nombre'] ?? null,
             'canal' => $datos['canal'] ?? 'web',
-            'cuenta_contrapartida' => $motivo->cuentaContrapartida(),
+            // La carga que viene de Dropi lleva las cuentas de Dropi (hojas
+            // del PUC); la del ERP, la regla de su motivo como siempre.
+            'cuenta_contrapartida' => ($datos['canal'] ?? 'web') === 'dropi'
+                ? \App\Modules\Dropi\Support\CuentasDropi::contrapartidaCarga($motivo)
+                : $motivo->cuentaContrapartida(),
             'user_id' => $datos['user_id'] ?? auth()->id(),
         ]);
     }
@@ -114,6 +118,7 @@ class RegistrarCargaInventario
             ->get()
             ->keyBy('id');
 
+        $esDropi = $carga->canal === 'dropi';
         $porCuenta = [];
         $totalValor = 0.0;
         $sinCosto = 0;
@@ -123,8 +128,12 @@ class RegistrarCargaInventario
                 $sinCosto++;
                 continue;
             }
-            $cuenta = $productos->get($m->producto_id)?->cta('inventario')
-                ?? (string) setting('contable.cta_inventario_default');
+            // Dropi: la hoja de inventario de la familia del producto, la misma
+            // de la que su venta saca el costo. El resto, como siempre.
+            $cuenta = $esDropi
+                ? (string) (\App\Modules\Dropi\Support\CuentasDropi::inventario($productos->get($m->producto_id)) ?: setting('contable.cta_inventario_default'))
+                : ($productos->get($m->producto_id)?->cta('inventario')
+                    ?? (string) setting('contable.cta_inventario_default'));
             $porCuenta[$cuenta] = ($porCuenta[$cuenta] ?? 0) + $valor;
             $totalValor += $valor;
         }
@@ -155,6 +164,10 @@ class RegistrarCargaInventario
             'centro_costo' => ($cc !== null && $cc !== '') ? (string) $cc : null,
             'user_id' => $carga->user_id,
         ];
+        // La carga nace en Inventario y el estampado la dejaría en Great Baby.
+        if ($esDropi) {
+            $base['linea_negocio'] = \App\Modules\Contabilidad\Enums\LineaNegocio::Dropi;
+        }
 
         $lineas = [];
         foreach ($porCuenta as $cuenta => $valor) {
