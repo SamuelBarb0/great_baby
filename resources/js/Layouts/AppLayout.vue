@@ -362,7 +362,9 @@ const groups = [
             { name: 'Stock por producto', href: '/app/inventario', icon: Warehouse, permiso: 'bodega' },
             { name: 'Kardex (movimientos)', href: '/app/inventario/kardex', icon: Warehouse, permiso: 'bodega_operativa' },
             { name: 'Conteos físicos', href: '/app/inventario/conteos', icon: Warehouse, permiso: 'bodega_operativa' },
-            { name: 'Traslados entre bodegas', href: '/app/inventario/traslados', icon: Warehouse, permiso: 'bodega_operativa' },
+            // Llave propia: mover stock no es lo mismo que consultarlo. Ver
+            // `MenuApp::traslados_bodega`.
+            { name: 'Traslados entre bodegas', href: '/app/inventario/traslados', icon: Warehouse, permiso: 'traslados_bodega' },
             { name: 'Alertas de stock', href: '/app/inventario/alertas', icon: Warehouse, permiso: 'bodega_operativa' },
             { name: '🏢 Bodegas · ubicaciones (Rack·Sección·Nivel)', href: '/app/inventario/ubicaciones', icon: Warehouse, permiso: 'ubicaciones' },
             { name: '🗂 Catálogo de la bodega (oficinas y almacenes)', href: '/app/inventario/catalogo-bodega', icon: Warehouse, permiso: 'ubicaciones' },

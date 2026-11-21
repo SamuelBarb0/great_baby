@@ -1,0 +1,1 @@
+import{q as t}from"./app-7v49rDB-.js";function c(a="destacar"){const r=t(()=>{if(typeof window>"u")return null;const e=new URLSearchParams(window.location.search).get(a),n=Number(e);return Number.isInteger(n)&&n>0?n:null});return{idDestacado:r,clasesDe:e=>e===r.value?"ring-2 ring-brand-500 ring-inset bg-brand-50 dark:bg-brand-900/20":""}}export{c as u};

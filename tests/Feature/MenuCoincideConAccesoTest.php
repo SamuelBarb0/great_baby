@@ -95,7 +95,9 @@ const MENU_APP = [
     '/app/inventario' => 'bodega',
     '/app/inventario/kardex' => 'bodega_operativa',
     '/app/inventario/conteos' => 'bodega_operativa',
-    '/app/inventario/traslados' => 'bodega_operativa',
+    // Llave propia desde el 20-nov-2026: mover stock no es consultarlo, y el
+    // alistador ve el kardex y los conteos pero no opera traslados.
+    '/app/inventario/traslados' => 'traslados_bodega',
     '/app/inventario/alertas' => 'bodega_operativa',
     '/app/inventario/ubicaciones' => 'ubicaciones',
     // Las dos pantallas de logística del 17-nov. Reusan la casilla

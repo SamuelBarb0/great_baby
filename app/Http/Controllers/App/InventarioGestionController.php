@@ -44,6 +44,47 @@ class InventarioGestionController extends Controller implements HasMiddleware
         })];
     }
 
+    /**
+     * ¿Puede esta persona asomarse a los traslados?
+     *
+     * El middleware de arriba deja entrar a TODO el equipo de bodega —alistador
+     * incluido— porque la mayoría de las pantallas de este controlador son de
+     * consulta: kardex, conteos, alertas, reporte de stock.
+     *
+     * Traslados no es de consulta. Mover stock lo gobierna
+     * `User::bodegasAsignadasIds()`, que hereda la responsabilidad de
+     * ubicaciones SÓLO si el rol es AdminBodega: para un alistador devuelve
+     * `[]` y la guarda de escritura lo rechaza siempre.
+     *
+     * Hasta el 20-nov-2026 eso dejaba al alistador entrar a la pantalla, abrir
+     * el modal, elegir origen, destino y motivo… y recibir «No tenés permiso
+     * para hacer eso» al pulsar «Crear». El área decidió que mover mercancía
+     * entre bodegas lo autoriza el jefe de logística, así que la pantalla
+     * tampoco es suya: mejor no invitarlo a un callejón sin salida.
+     *
+     * El orden sigue al de `EjecutarTraslado::autorizarSobreBodegas()`, para
+     * que la puerta de entrada y la de ejecución digan lo mismo.
+     */
+    private function autorizarTraslados(Request $r): void
+    {
+        $u = $r->user();
+
+        if (\App\Auth\Permisos::esRoot($u)) {
+            return;
+        }
+
+        // El admin de bodega pasa: su alcance lo recorta `loOperaEnBodega()`.
+        if (method_exists($u, 'esAdminBodega') && $u->esAdminBodega()) {
+            return;
+        }
+
+        abort_unless(
+            \App\Auth\Permisos::puede($u, 'traslados'),
+            403,
+            'Los traslados entre bodegas los autoriza el jefe de logística.',
+        );
+    }
+
     // ---------- KARDEX POR VARIANTE ----------
     public function kardex(Request $request): Response
     {
@@ -551,6 +592,8 @@ class InventarioGestionController extends Controller implements HasMiddleware
     // ---------- TRASLADOS ----------
     public function trasladosIndex(Request $r): Response
     {
+        $this->autorizarTraslados($r);
+
         /*
          * PATRÓN α · pasar lista de ubicaciones para el selector por NOMBRE
          *   (antes: modal pedía "Origen (ID)" y "Destino (ID)" → operario
@@ -637,6 +680,10 @@ class InventarioGestionController extends Controller implements HasMiddleware
     // ---------- TRASLADO SHOW (repeater items + acciones state machine) ----------
     public function trasladoShow(int $id): Response
     {
+        // La misma puerta que el listado: si no puede ver la pantalla de
+        // traslados, tampoco entra a uno por su URL.
+        $this->autorizarTraslados(request());
+
         $t = Traslado::with(['items.variante.producto', 'items.producto', 'origen', 'destino', 'solicitante', 'ejecutor',
                 'aprobador', 'enviador', 'recogedor', 'prestamo'])
             ->findOrFail($id);
@@ -1108,6 +1155,13 @@ class InventarioGestionController extends Controller implements HasMiddleware
 
     public function trasladoCrear(Request $r): RedirectResponse
     {
+        /*
+         * Antes de validar: así el mensaje dice QUIÉN autoriza un traslado, en
+         * vez del «No tenés permiso para hacer eso» genérico que salía después
+         * de llenar el formulario entero.
+         */
+        $this->autorizarTraslados($r);
+
         $data = $r->validate([
             // Tienen que estar ACTIVAS: una ubicación apagada está fuera de
             // servicio, y mandarle mercancía la deja donde nadie la busca —no

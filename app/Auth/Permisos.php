@@ -145,7 +145,28 @@ final class Permisos
         'compras_pagos_exterior' => ['Gerente', 'Contador', 'Compras'],
 
         // INVENTARIO
-        'traslados'        => ['Gerente', 'Alistador'],
+        /*
+         * `traslados` SIN Alistador (20-nov-2026).
+         *
+         * Lo tenía, así que «Traslados entre bodegas» le salía en el menú. Pero
+         * mover stock lo gobierna `User::bodegasAsignadasIds()`, que hereda la
+         * responsabilidad de ubicaciones SÓLO si el rol es AdminBodega. Para un
+         * alistador devuelve `[]`, y la guarda del controlador —
+         * `abort_unless(in_array($origen, $bodegas) && …)` — con un array
+         * vacío es siempre falsa.
+         *
+         * O sea: el menú lo invitaba a una pantalla, lo dejaba abrir el modal,
+         * elegir origen, destino y motivo… y al pulsar «Crear» le contestaba
+         * «No tenés permiso para hacer eso». Comprobado contra el servidor: 403.
+         *
+         * Se resolvió preguntándole al área, no adivinando: mover mercancía
+         * entre bodegas lo autoriza el jefe de logística, no el alistador. Así
+         * que lo que estaba de más era la entrada del menú, no el permiso.
+         *
+         * El alistador conserva Kardex, Conteos físicos, Alertas de stock y
+         * Reporte de stock por bodega, que son de lectura y sí puede usar.
+         */
+        'traslados'        => ['Gerente'],
         'tomas_fisicas'    => ['Gerente', 'Contador', 'Alistador'],
         'alertas_stock'    => ['Gerente', 'Alistador'],
         'kardex'           => ['Gerente', 'Contador', 'Alistador'],

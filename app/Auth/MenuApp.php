@@ -188,9 +188,47 @@ final class MenuApp
 
             // InventarioController / InventarioUbicacionesController · esEquipoBodega()
             'bodega' => $puede('bodega'),
-            // InventarioGestionController (kardex, conteos, traslados, alertas,
-            //   reporte de stock) · equipo bodega + alistador
+            // InventarioGestionController (kardex, conteos, alertas, reporte
+            //   de stock) · equipo bodega + alistador. Son de CONSULTA: el
+            //   alistador las usa todos los días.
             'bodega_operativa' => $puede('bodega') || $puede('vista_alistador'),
+
+            /*
+             * Traslados entre bodegas · llave PROPIA (20-nov-2026).
+             *
+             * Vivía bajo `bodega_operativa`, junto al kardex y los conteos. Pero
+             * mover stock no es consultarlo: lo gobierna
+             * `User::bodegasAsignadasIds()`, que hereda la responsabilidad de
+             * ubicaciones SÓLO si el rol es AdminBodega. Para un alistador
+             * devuelve `[]` y la guarda del controlador rechaza siempre.
+             *
+             * O sea: el menú lo invitaba a la pantalla, lo dejaba abrir el
+             * modal, elegir origen, destino y motivo, y al pulsar «Crear» le
+             * contestaba «No tenés permiso para hacer eso». Comprobado contra
+             * el servidor: 403.
+             *
+             * El área lo resolvió: mover mercancía entre bodegas lo autoriza el
+             * jefe de logística. Así que lo que sobraba era la entrada del
+             * menú. El alistador conserva kardex, conteos, alertas y el reporte
+             * de stock, que sí puede usar.
+             */
+            /*
+             * Sólo `bodega`, o sea AdminBodega. Root pasa igual, por arriba.
+             *
+             * La primera versión decía `$puede('bodega') || $puede('traslados')`
+             * y destapó una contradicción que ya estaba: `Permisos::MATRIZ`
+             * autoriza `traslados` al Gerente, pero el middleware de
+             * `InventarioGestionController` sólo deja entrar a Aracely,
+             * Alistador y AdminBodega. Con esa llave el Gerente veía el ítem en
+             * el menú y recibía 403 al pulsarlo — la prueba
+             * `MenuCoincideConAccesoTest` lo cazó de inmediato.
+             *
+             * Acá el menú refleja QUIÉN PUEDE ENTRAR, que es lo que la persona
+             * necesita saber. Si algún día se decide que el Gerente opere
+             * traslados, hay que abrirle también el middleware; mientras tanto,
+             * el menú no promete lo que la puerta no cumple.
+             */
+            'traslados_bodega' => $puede('bodega'),
 
             // ProductosController / JerarquiaSiigoController · puede('productos')
             'catalogo' => $puede('productos'),
