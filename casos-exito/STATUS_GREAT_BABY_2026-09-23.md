@@ -138,8 +138,41 @@ El ERP está **en ejecución activa** y con módulos ya funcionando en producci�
 
 ## 10. Accesos
 
-- **Producción:** `https://maroon-goldfinch-224564.hostingersite.com/app` — usuarios `@greatbaby.com`, clave `greatbaby2026` (minúsculas).
-- **Local:** `http://127.0.0.1:8070/admin` — `admin@greatbaby.co`, clave `GreatBaby2026*`.
+> **Las contraseñas ya no se escriben en este documento.** Este repositorio es
+> público: lo que se anote acá lo puede leer cualquiera que lo clone, y queda
+> además en el historial de Git para siempre.
+
+### ⚠ Las claves que estaban acá están comprometidas
+
+Hasta el 20-nov-2026 estas dos líneas traían la URL de producción y su
+contraseña. **Borrarlas del archivo no cierra la fuga**: siguen en el
+historial de Git, en `origin/main` y en once ramas más, y una de ellas está
+además en el *mensaje* de un commit — o sea que se lee en la lista de commits
+de GitHub sin abrir un solo diff.
+
+Reescribir el historial exigiría un `push --force` sobre doce referencias, y
+el servidor es compartido. **Lo que de verdad cierra la fuga es cambiar las
+contraseñas.** Pasos, en este orden:
+
+1. **Cambiar la contraseña de cada cuenta `@greatbaby.com` en producción.**
+   Desde el ERP, en *Mi clave*, o pidiéndole a cada persona que la cambie al
+   entrar. Prioridad a las cuentas con permisos de Gerencia y Contabilidad.
+2. **Revisar si alguien entró sin ser de la casa:** auditoría de `audits` y
+   los accesos del servidor en el período en que la clave estuvo publicada.
+3. **Poner `CLAVE_INICIAL_USUARIOS` en el `.env` de producción** antes de
+   volver a correr cualquier seeder de usuarios. Si no está, el seeder inventa
+   una aleatoria y la imprime una sola vez.
+4. **No volver a escribir una contraseña en un archivo del repositorio**, ni
+   en el mensaje de un commit.
+
+Mientras los pasos 1 y 2 no se hagan, esto sigue abierto por más que el
+archivo se vea limpio.
+
+- **Producción:** panel en `/app` del dominio de Hostinger. Las credenciales se
+  piden a Gerencia; no se guardan en el repositorio.
+- **Local:** `http://127.0.0.1:8090/app` — las cuentas las crea
+  `DropiCoreSeeder`, que toma la contraseña de `CLAVE_INICIAL_USUARIOS` del
+  `.env` o inventa una y la imprime al correr.
 
 ---
 

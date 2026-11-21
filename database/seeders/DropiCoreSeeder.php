@@ -35,10 +35,32 @@ class DropiCoreSeeder extends Seeder
         }
 
         // --- Admin user ---
-        $admin = User::updateOrCreate(
-            ['email' => 'admin@greatbaby.co'],
-            ['name' => 'Aracely (demo)', 'password' => Hash::make('greatbaby2026')]
-        );
+        /*
+         * La contraseña NO se escribe acá: este repositorio es público y el
+         * correo del admin está dos líneas arriba. Sale de
+         * `CLAVE_INICIAL_USUARIOS` o es aleatoria y se imprime una vez.
+         *
+         * `updateOrCreate` pisaría la contraseña de un admin que ya existe —y
+         * en producción ese admin es de alguien—, así que la contraseña sólo
+         * se escribe cuando la cuenta nace.
+         */
+        $admin = User::firstOrNew(['email' => 'admin@greatbaby.co']);
+        $nace = ! $admin->exists;
+
+        $admin->name = 'Aracely (demo)';
+
+        if ($nace) {
+            $admin->password = Hash::make(EquipoComprasMarketingSeeder::claveInicial());
+        }
+
+        $admin->save();
+
+        if ($nace && EquipoComprasMarketingSeeder::claveFueGenerada()) {
+            $this->command?->warn(
+                '  admin@greatbaby.co creado con esta contraseña: '
+                .EquipoComprasMarketingSeeder::claveInicial().' — anótela ahora.'
+            );
+        }
         $admin->syncRoles(['Aracely']);
 
         // --- Ubicaciones §7 (5 categorías) ---
