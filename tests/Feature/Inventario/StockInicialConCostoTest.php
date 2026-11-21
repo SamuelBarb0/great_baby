@@ -23,6 +23,7 @@ use App\Modules\Dropi\Enums\CategoriaUbicacion;
 use App\Modules\Dropi\Models\InventarioMovimiento;
 use App\Modules\Dropi\Models\InventarioUbicacion;
 use App\Modules\Dropi\Models\Producto;
+use App\Modules\Inventario\Enums\MotivoCargaInventario;
 use App\Modules\Inventario\Support\CostoPromedio;
 use Spatie\Permission\Models\Role;
 
@@ -83,11 +84,16 @@ it('un producto sin costo cargado no inventa uno', function () {
 
 it('el producto creado desde la pantalla llega con su costo al kardex', function () {
     // La ruta completa, como la usa la persona: formulario → producto → kardex.
+    // `stock_motivo` y `stock_observacion` son obligatorios desde que el stock
+    // inicial dejó de poder entrar sin decir de dónde viene: un saldo que
+    // aparece sin explicación es un descuadre que nadie puede auditar después.
     $this->actingAs($this->admin)->post('/app/catalogo/productos', [
         'referencia' => 'GB-WEB01', 'nombre' => 'Pijama algodón',
         'desglose_stock' => false, 'stock_directo' => 40,
         'precio_proveedor' => 12000,
         'stock_ubicacion_id' => $this->bodega->id,
+        'stock_motivo' => MotivoCargaInventario::SaldoInicial->value,
+        'stock_observacion' => 'Carga de arranque del catálogo, conteo del 20-nov.',
     ])->assertRedirect();
 
     $mov = movimientoInicial(Producto::where('referencia', 'GB-WEB01')->firstOrFail());
