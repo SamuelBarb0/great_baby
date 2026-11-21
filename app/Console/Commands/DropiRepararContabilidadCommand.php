@@ -42,6 +42,10 @@ use Illuminate\Support\Facades\DB;
  *      proveedores de Dropi. Las devoluciones a proveedor se listan para
  *      revisarlas a mano.
  *
+ *   7. Cargas de mercancía de Dropi · las que quedaron en la 1435, contra la
+ *      cuenta del motivo en el ERP y marcadas como Great Baby se rehacen:
+ *      inventario por familia, contrapartida de Dropi y línea Dropi.
+ *
  * SÓLO DROPI: no toca ningún documento de Great Baby ni ninguna regla del ERP.
  *
  * Nunca borra: todo se corrige con contra-asiento. Nunca toca una línea que ya
@@ -67,6 +71,7 @@ class DropiRepararContabilidadCommand extends Command
         $this->facturas();
         $this->devoluciones();
         $this->compras();
+        $this->cargas();
 
         $this->newLine();
         $this->aplicar
@@ -331,6 +336,88 @@ class DropiRepararContabilidadCommand extends Command
                 }
             });
         }
+    }
+
+    private function cargas(): void
+    {
+        $this->line('<options=bold>7 · Cargas de mercancía de Dropi</>');
+        $carga = \App\Modules\Inventario\Models\CargaInventario::class;
+        $filas = [];
+
+        foreach ($carga::where('canal', 'dropi')->orderBy('id')->get() as $c) {
+            $vivas = MovimientoContable::query()->vivas()->where('origen_type', $carga)->where('origen_id', $c->id)->get();
+            if ($vivas->isEmpty()) {
+                continue;
+            }
+            $esperadas = $this->lineasDeCarga($c);
+            $iguales = $this->firma($vivas) === $this->firma($esperadas)
+                && $vivas->every(fn ($l) => CuentasDropi::esDropi($l));
+            if ($iguales) {
+                continue;
+            }
+            if ($vivas->contains(fn ($l) => filled($l->siigo_journal_id))) {
+                $this->warn("  Carga {$c->numero} tiene líneas en SIIGO: revisarla a mano.");
+                continue;
+            }
+            $filas[] = [$c->numero, $c->motivo?->label(), $c->total_valor, $vivas->pluck('cuenta_puc')->unique()->implode(' / ')];
+
+            if ($this->aplicar) {
+                DB::transaction(function () use ($vivas, $c, $esperadas) {
+                    foreach ($vivas as $l) {
+                        $this->reversar($l);
+                    }
+                    $c->forceFill(['cuenta_contrapartida' => CuentasDropi::contrapartidaCarga($c->motivo)])->save();
+                    MovimientoContable::registrarAsientoAtomico($esperadas);
+                });
+            }
+        }
+
+        $this->tabla(['carga', 'motivo', 'valor', 'cuentas de hoy'], $filas);
+    }
+
+    /**
+     * El asiento que le corresponde a una carga de Dropi: el mismo que escribe
+     * RegistrarCargaInventario::cerrar, con las cuentas de Dropi.
+     *
+     * @return array<int,array<string,mixed>>
+     */
+    private function lineasDeCarga(\App\Modules\Inventario\Models\CargaInventario $c): array
+    {
+        $movs = \App\Modules\Dropi\Models\InventarioMovimiento::query()
+            ->where('referencia_tipo', $c::class)->where('referencia_id', $c->id)
+            ->get(['producto_id', 'variante_id', 'cantidad', 'costo_unit']);
+
+        $porCuenta = [];
+        foreach ($movs as $m) {
+            $valor = round(abs((float) $m->cantidad) * (float) ($m->costo_unit ?? 0), 2);
+            if ($valor <= 0) {
+                continue;
+            }
+            $cuenta = (string) (CuentasDropi::inventario(CuentasDropi::productoDe($m->producto_id, $m->variante_id))
+                ?: setting('contable.cta_inventario_default'));
+            $porCuenta[$cuenta] = round(($porCuenta[$cuenta] ?? 0) + $valor, 2);
+        }
+        if (! $porCuenta) {
+            return [];
+        }
+
+        $base = [
+            'fecha' => now()->toDateString(), 'origen_type' => $c::class, 'origen_id' => $c->id,
+            'linea_negocio' => LineaNegocio::Dropi, 'user_id' => $c->user_id,
+        ];
+        $lineas = [];
+        foreach ($porCuenta as $cuenta => $valor) {
+            $lineas[] = $base + ['cuenta_puc' => $cuenta, 'debe' => $valor, 'haber' => 0,
+                'descripcion' => mb_substr("{$c->numero} · Ingreso de inventario · {$c->motivo->label()}", 0, 255)];
+        }
+        $lineas[] = $base + [
+            'cuenta_puc' => CuentasDropi::contrapartidaCarga($c->motivo),
+            'tercero_type' => $c->tercero_id ? \App\Models\Contacto::class : null, 'tercero_id' => $c->tercero_id,
+            'debe' => 0, 'haber' => round(array_sum($porCuenta), 2),
+            'descripcion' => mb_substr("{$c->numero} · {$c->motivo->label()} · {$c->observacion}", 0, 255),
+        ];
+
+        return $lineas;
     }
 
     /** @param  iterable<MovimientoContable|array>  $lineas */

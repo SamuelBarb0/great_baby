@@ -62,6 +62,18 @@ class CuentasDropi
             : setting('contable.cta_iva_compra_default'));
     }
 
+    /**
+     * Contrapartida de una carga de mercancía de Dropi, según el motivo.
+     * La compra se le debe al proveedor en la misma cuenta que una compra por
+     * orden; el resto, a su regla `contable.cta_dropi_carga_*`.
+     */
+    public static function contrapartidaCarga(\App\Modules\Inventario\Enums\MotivoCargaInventario $motivo): string
+    {
+        return $motivo === \App\Modules\Inventario\Enums\MotivoCargaInventario::Compra
+            ? (string) setting('contable.cta_dropi_proveedores')
+            : (string) setting('contable.cta_dropi_carga_'.$motivo->value);
+    }
+
     /** El producto de una línea que trae producto y/o variante. */
     public static function productoDe(?int $productoId, ?int $varianteId): ?Producto
     {

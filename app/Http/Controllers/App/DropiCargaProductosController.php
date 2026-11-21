@@ -285,7 +285,11 @@ class DropiCargaProductosController extends Controller implements HasMiddleware
             ])->values(),
             'resumen' => $ops->countBy(fn (Op $o) => $o->estado)->all() + ['crear_listos' => $ops->where('tipo', Op::CREAR)->where('estado', Op::LISTO)->count()],
             'categorias' => $carga->editable() ? $this->categorias($carga) : [],
-            'motivos' => $carga->editable() ? \App\Modules\Inventario\Enums\MotivoCargaInventario::opciones() : [],
+            // La cuenta que se muestra es la que de verdad usa la carga de
+            // Dropi (sus hojas del PUC), no la del motivo en el ERP.
+            'motivos' => $carga->editable() ? array_map(fn (array $m) => ['cuenta' => \App\Modules\Dropi\Support\CuentasDropi::contrapartidaCarga(
+                \App\Modules\Inventario\Enums\MotivoCargaInventario::from($m['value'])
+            )] + $m, \App\Modules\Inventario\Enums\MotivoCargaInventario::opciones()) : [],
             'bodegas_erp' => $carga->editable() ? self::bodegasErp() : [],
         ]);
     }
