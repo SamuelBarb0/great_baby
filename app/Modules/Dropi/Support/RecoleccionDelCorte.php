@@ -70,10 +70,7 @@ class RecoleccionDelCorte
                 'sku' => $key,
                 'producto' => $producto?->nombre ?? 'SKU sin match',
                 'referencia' => $producto?->referencia ?? '—',
-                'variante' => trim(
-                    ($it->variante?->color_nombre ?? '') . ' ' . ($it->variante?->diseno_nombre ?? '')
-                    . ' ' . ($it->variante?->talla ?? '')
-                ),
+                'variante' => $it->nombreVariante(),
                 'total_unidades' => 0,
                 'ubicacion_sugerida' => $u['codigo'] ?? '—',
                 'zona' => $u['zona'] ?? null,

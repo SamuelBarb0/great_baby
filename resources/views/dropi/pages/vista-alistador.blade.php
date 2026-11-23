@@ -209,7 +209,7 @@
                                             @php
                                                 // El nombre es lo que reconoce quien empaca; el SKU de Dropi queda de apoyo.
                                                 $prodItem = $it->variante?->producto ?? $it->producto;
-                                                $varItem = trim(($it->variante?->color_nombre ?? '') . ' ' . ($it->variante?->talla ?? ''));
+                                                $varItem = $it->nombreVariante();
                                             @endphp
                                             <span title="{{ $it->sku_dropi }}" style="display:inline-block;font-size:.75rem;padding:.25rem .5rem;background:rgba(156,163,175,.15);border-radius:.25rem;margin-right:.25rem;margin-bottom:.25rem;">
                                                 <strong>{{ $it->cantidad }}×</strong> {{ $prodItem?->nombre ?? $it->sku_dropi }}@if($varItem !== '') <span style="color:#9ca3af;">· {{ $varItem }}</span>@endif

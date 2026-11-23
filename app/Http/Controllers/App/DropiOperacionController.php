@@ -79,17 +79,19 @@ class DropiOperacionController extends Controller implements HasMiddleware
                     EstadoPedidoDropi::CanceladoDropi, EstadoPedidoDropi::CanceladoGb,
                     EstadoPedidoDropi::Devuelto,
                 ])
-                ->with(['items.variante.producto'])
+                ->with(['items.variante.producto', 'items.producto'])
                 ->get();
             $grupos = [];
             foreach ($pedidos as $ped) {
                 foreach ($ped->items as $it) {
                     $key = $it->sku_dropi ?: 'sin-sku';
+                    // Variante del ERP o producto agregado (sin variantes), como en RecoleccionDelCorte.
+                    $prod = $it->variante?->producto ?? $it->producto;
                     $grupos[$key] ??= [
                         'sku' => $key,
-                        'producto' => $it->variante?->producto?->nombre ?? 'SKU sin match',
-                        'referencia' => $it->variante?->producto?->referencia ?? '—',
-                        'variante' => trim(($it->variante?->color_nombre ?? '') . ' ' . ($it->variante?->diseno_nombre ?? '') . ' ' . ($it->variante?->talla ?? '')),
+                        'producto' => $prod?->nombre ?? 'SKU sin match',
+                        'referencia' => $prod?->referencia ?? '—',
+                        'variante' => $it->nombreVariante(),
                         'total' => 0,
                     ];
                     $grupos[$key]['total'] += (int) $it->cantidad;
@@ -241,7 +243,7 @@ class DropiOperacionController extends Controller implements HasMiddleware
                 'estado' => is_object($pedido->estado) ? $pedido->estado->value : $pedido->estado,
                 'items' => $pedido->items->map(fn ($i) => [
                     'sku' => $i->sku_dropi,
-                    'descripcion' => trim(($i->variante?->producto?->nombre ?? '') . ' · ' . ($i->variante?->color_nombre ?? '') . ' ' . ($i->variante?->talla ?? '')),
+                    'descripcion' => collect([($i->variante?->producto ?? $i->producto)?->nombre, $i->nombreVariante()])->filter()->implode(' · '),
                     'cantidad' => (int) $i->cantidad,
                 ])->all(),
                 'devolucion_existente' => DropiDevolucion::where('pedido_id', $pedido->id)->exists(),
@@ -348,7 +350,7 @@ class DropiOperacionController extends Controller implements HasMiddleware
         $codigo = strtoupper(trim($data['codigo']));
         $pedido = DropiPedido::where('guia', $codigo)
             ->orWhere('dropi_orden_id', $codigo)
-            ->with(['items.variante.producto'])
+            ->with(['items.variante.producto', 'items.producto'])
             ->first();
 
         // N3/UX#2 · el monto SOLO se devuelve a Aracely (para Wallet-autocomplete).
@@ -366,7 +368,7 @@ class DropiOperacionController extends Controller implements HasMiddleware
                 'estado' => is_object($pedido->estado) ? $pedido->estado->value : $pedido->estado,
                 'items' => $pedido->items->map(fn ($i) => [
                     'sku' => $i->sku_dropi,
-                    'descripcion' => trim(($i->variante?->producto?->nombre ?? '') . ' · ' . ($i->variante?->color_nombre ?? '') . ' ' . ($i->variante?->talla ?? '')),
+                    'descripcion' => collect([($i->variante?->producto ?? $i->producto)?->nombre, $i->nombreVariante()])->filter()->implode(' · '),
                     'cantidad' => (int) $i->cantidad,
                 ])->all(),
             ], fn ($v) => $v !== null) : null,

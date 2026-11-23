@@ -1087,6 +1087,11 @@ Route::middleware(['web', 'auth'])->group(function () {
     Route::get('/dropi/recoleccion/{corte}/pdf', [\App\Http\Controllers\Dropi\RecoleccionPdfController::class, 'descargar'])
         ->name('dropi.recoleccion.pdf');
 
+    // Pedidos del corte en PDF (todos o `?pedido=ID`), abierto o cerrado. El
+    //   controlador pide Cortes Dropi + Pedidos Dropi: trae nombres de clientes.
+    Route::get('/dropi/corte/{corte}/pedidos/pdf', [\App\Http\Controllers\Dropi\PedidosCortePdfController::class, 'descargar'])
+        ->name('dropi.corte.pedidos.pdf');
+
     // P9 · escáner con throttle para evitar despacho masivo o enumeración de guías.
     Route::post('/dropi/escaner/analizar', [EscanerController::class, 'analizar'])
         ->middleware('throttle:60,1')->name('dropi.escaner.analizar');

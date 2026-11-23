@@ -27,9 +27,10 @@ use Illuminate\Support\Sleep;
  *      la misma acción que la pantalla «Productos sin vincular», que además
  *      reasigna los ítems de pedidos que esperaban y libera los que ya tienen stock.
  *
- * Lo que NO hace: crear productos (enviaría cada uno a SIIGO; espera el visto
- * bueno de contabilidad), traer stock (la verdad es el kardex del ERP) ni
- * precios (manda el ERP). Esos datos de Dropi sólo se muestran.
+ * Lo que NO hace: traer stock (la verdad es el kardex del ERP) ni precios
+ * (manda el ERP). Esos datos de Dropi sólo se muestran. Crear productos lo hace
+ * aparte CrearProductosNuevosDropi, y sólo para las llaves «nuevo» que ya
+ * frenan pedidos.
  */
 class CatalogoDropi
 {
@@ -132,7 +133,7 @@ class CatalogoDropi
      *   · vinculado — ya tiene vínculo; no se toca.
      *   · enlazar   — hay destino seguro en el ERP; `vincular()` lo hace.
      *   · revisar   — hay algo parecido pero no es seguro; se hace a mano.
-     *   · nuevo     — no existe en el ERP (crearlo queda para después).
+     *   · nuevo     — no existe en el ERP (si frena pedidos, lo crea CrearProductosNuevosDropi).
      *   · sin_catalogo — llave que traen pedidos sin producto pero que no está
      *                    en el catálogo activo de Dropi (archivados, borrados).
      *

@@ -54,6 +54,24 @@ class DropiPedidoItem extends Model implements AuditableContract
         return $this->variante_id === null && $this->producto_id !== null;
     }
 
+    /**
+     * Qué variante sacar del estante: la del ERP si el ítem apunta a una; si
+     * no, la variación que mandó Dropi («ROJO», «SALMÓN / 20-21»).
+     *
+     * Casi todo lo de Dropi se vincula a un producto SIN variantes, así que la
+     * lista de recolección y el empaque, que sólo miraban la variante del ERP,
+     * salían con «—» en todas las filas: dos cuatrimotos sin saber cuál era la
+     * verde y cuál la roja (bodega, 23-nov-2026). Cadena vacía si no hay nada.
+     */
+    public function nombreVariante(): string
+    {
+        $erp = $this->variante
+            ? collect([$this->variante->color_nombre, $this->variante->diseno_nombre, $this->variante->talla])->filter()->implode(' ')
+            : '';
+
+        return $erp !== '' ? $erp : trim((string) $this->variacion);
+    }
+
     public function ubicacionAsignada(): BelongsTo
     {
         return $this->belongsTo(InventarioUbicacion::class, 'ubicacion_asignada_id');
