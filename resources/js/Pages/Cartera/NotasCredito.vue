@@ -41,7 +41,7 @@ const filtrar = () => {
         router.get('/app/cartera/notas-credito', {
             q: q.value || null,
             sin_siigo: sinSiigo.value ? 1 : null,
-            linea: linea.value !== 'todas' ? linea.value : null,
+            linea: linea.value, // «todas» viaja: sin línea el servidor muestra sólo Great Baby
             destino: destino.value !== 'todas' ? destino.value : null,
         }, { preserveScroll: true, preserveState: true, replace: true });
     }, 300);

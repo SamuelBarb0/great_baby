@@ -175,7 +175,9 @@ it('panel contable, cartera, reportes de cartera y notas crédito separan Dropi 
     // Dashboard de cartera.
     expect((float) $props('/app/cartera?linea=dropi')['kpis']['facturado_mes'])->toBe(119000.0)
         ->and((float) $props('/app/cartera?linea=great_baby')['kpis']['facturado_mes'])->toBe(595000.0)
-        ->and((float) $props('/app/cartera')['kpis']['facturado_mes'])->toBe(714000.0);
+        // 23-nov-2026: sin línea el ERP ve sólo Great Baby; «todas» es el consolidado.
+        ->and((float) $props('/app/cartera')['kpis']['facturado_mes'])->toBe(595000.0)
+        ->and((float) $props('/app/cartera?linea=todas')['kpis']['facturado_mes'])->toBe(714000.0);
 
     // Reportes de cartera: lo que se debe, por libro.
     expect((float) $props('/app/cartera/reportes?linea=dropi')['kpis']['total_cartera'])->toBe(119000.0)

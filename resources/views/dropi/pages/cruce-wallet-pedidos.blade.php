@@ -204,7 +204,7 @@
                         $facturaId = $m->pedido?->factura_venta_id;
                         $destino = match (true) {
                             $m->estado_contable === 'asentado' && $verLibro => $libro($m),
-                            $facturaId !== null => '/app/facturas/'.$facturaId,
+                            $facturaId !== null => \App\Modules\Dropi\Filament\Pages\VerFacturaDropi::urlDe($facturaId),
                             default => null,
                         };
                     @endphp
@@ -215,7 +215,7 @@
                         </td>
                         <td style="{{ $td }}{{ $mono }}">
                             @if($facturaId)
-                                <a href="/app/facturas/{{ $facturaId }}" target="_blank" style="color:#3b82f6;">{{ $numeros[$facturaId] ?? '#'.$facturaId }}</a>
+                                <a href="{{ \App\Modules\Dropi\Filament\Pages\VerFacturaDropi::urlDe($facturaId) }}" style="color:#3b82f6;">{{ $numeros[$facturaId] ?? '#'.$facturaId }}</a>
                             @else
                                 <span style="color:#9ca3af;font-weight:400;">sin factura</span>
                             @endif

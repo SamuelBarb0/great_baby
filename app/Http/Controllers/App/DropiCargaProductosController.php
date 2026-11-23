@@ -145,6 +145,30 @@ class DropiCargaProductosController extends Controller implements HasMiddleware
         return redirect()->route('app.dropi.carga-productos.show', $carga);
     }
 
+    /**
+     * «Crear en Dropi» un producto que ya existe en el ERP (23-nov-2026, la
+     * clienta: «cuando se crea el producto, sea en el ERP o en Dropi, que
+     * queden conectados»). Abre la misma carga individual, con el nombre y la
+     * referencia del ERP como SKU: al crearse en Dropi, EjecutarOperacionDropi
+     * le guarda el id de Dropi a la ficha del ERP y quedan vinculados.
+     */
+    public function desdeErp(\App\Modules\Dropi\Models\Producto $producto): RedirectResponse
+    {
+        if ($producto->dropi_sku) {
+            throw ValidationException::withMessages(['producto' => "«{$producto->nombre}» ya está conectado con Dropi (id {$producto->dropi_sku})."]);
+        }
+        $op = [
+            'fila' => 1, 'ref_excel' => $producto->referencia, 'nombre_excel' => $producto->nombre, 'variaciones_excel' => null, 'cantidad_excel' => null,
+            'tipo' => Op::CREAR, 'estado' => Op::REVISAR, 'motivo' => 'Falta el precio y el precio sugerido.',
+            'detalle' => ['nombre' => $producto->nombre, 'sku' => $producto->referencia, 'descripcion' => (string) ($producto->descripcion ?? ''),
+                'precio' => null, 'sugerido' => null, 'cantidad' => 0, 'variaciones' => []],
+        ];
+
+        $carga = $this->nuevaCarga('individual', "Producto del ERP {$producto->referencia}", 'reemplazar', null, [$op]);
+
+        return redirect()->route('app.dropi.carga-productos.show', $carga);
+    }
+
     /** Buscador de productos de Dropi (catálogo con caché corta) para el modo individual. */
     public function buscar(Request $request): JsonResponse
     {
@@ -289,7 +313,7 @@ class DropiCargaProductosController extends Controller implements HasMiddleware
             // Dropi (sus hojas del PUC), no la del motivo en el ERP.
             'motivos' => $carga->editable() ? array_map(fn (array $m) => ['cuenta' => \App\Modules\Dropi\Support\CuentasDropi::contrapartidaCarga(
                 \App\Modules\Inventario\Enums\MotivoCargaInventario::from($m['value'])
-            )] + $m, \App\Modules\Inventario\Enums\MotivoCargaInventario::opciones()) : [],
+            )] + $m, \App\Modules\Inventario\Enums\MotivoCargaInventario::opciones(dropi: true)) : [],
             'bodegas_erp' => $carga->editable() ? self::bodegasErp() : [],
         ]);
     }
@@ -426,6 +450,7 @@ class DropiCargaProductosController extends Controller implements HasMiddleware
             'ingreso_erp.soporte' => ['nullable', 'string', 'max:60'],
             'ingreso_erp.tercero_id' => ['nullable', 'integer', 'exists:contactos,id'],
             'ingreso_erp.ubicacion_id' => ['nullable', 'integer', 'exists:inventario_ubicaciones,id'],
+            'ingreso_erp.origen_ubicacion_id' => ['nullable', 'integer', 'exists:inventario_ubicaciones,id'],
         ]);
         $def = $data['defaults'] ?? [];
         $categoria = collect($this->categorias($carga))->firstWhere('id', (int) ($def['categoria_id'] ?? 0));
@@ -439,6 +464,8 @@ class DropiCargaProductosController extends Controller implements HasMiddleware
                 'soporte' => isset($ing['soporte']) ? (trim($ing['soporte']) ?: null) : null,
                 'tercero_id' => isset($ing['tercero_id']) ? (int) $ing['tercero_id'] : null,
                 'ubicacion_id' => isset($ing['ubicacion_id']) ? (int) $ing['ubicacion_id'] : null,
+                // Traslado desde Great Baby: la bodega de donde sale.
+                'origen_ubicacion_id' => isset($ing['origen_ubicacion_id']) ? (int) $ing['origen_ubicacion_id'] : null,
             ],
             'concepto' => $data['concepto'],
             'modo' => $data['modo'],
@@ -508,6 +535,13 @@ class DropiCargaProductosController extends Controller implements HasMiddleware
         }
         if (empty($i['ubicacion_id'])) {
             $falta[] = 'la bodega del ERP';
+        }
+        if ($motivo === \App\Modules\Inventario\Enums\MotivoCargaInventario::TrasladoGreatBaby) {
+            if (empty($i['origen_ubicacion_id'])) {
+                $falta[] = 'la bodega de Great Baby de donde sale';
+            } elseif ((int) $i['origen_ubicacion_id'] === (int) ($i['ubicacion_id'] ?? 0)) {
+                $falta[] = 'una bodega de origen distinta a la de Dropi';
+            }
         }
 
         return $falta ? implode(', ', $falta) : null;

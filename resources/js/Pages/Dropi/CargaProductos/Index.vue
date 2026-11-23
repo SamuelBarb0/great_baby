@@ -3,7 +3,7 @@ import { ref, watch } from 'vue';
 import { Head, Link, router, useForm } from '@inertiajs/vue3';
 import axios from 'axios';
 import { PackageOpen, Upload, Search, PackagePlus, Loader2, ChevronRight } from 'lucide-vue-next';
-import AppLayout from '@/Layouts/AppLayout.vue';
+import DropiLayout from '@/Layouts/DropiLayout.vue';
 
 defineProps({
     cargas: { type: Array, default: () => [] },
@@ -47,7 +47,7 @@ const estadoClase = (e) => ({
 
 <template>
     <Head title="Productos y stock en Dropi"/>
-    <AppLayout>
+    <DropiLayout>
         <div class="max-w-5xl mx-auto space-y-4 p-4">
             <div>
                 <h1 class="text-2xl font-bold flex items-center gap-2">
@@ -156,5 +156,5 @@ const estadoClase = (e) => ({
                 </ul>
             </div>
         </div>
-    </AppLayout>
+    </DropiLayout>
 </template>

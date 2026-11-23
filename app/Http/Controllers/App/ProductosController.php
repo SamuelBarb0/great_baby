@@ -366,7 +366,7 @@ class ProductosController extends Controller implements HasMiddleware
         $porqueStock = null;
         if (! ($producto && $producto->exists) && empty($data['desglose_stock']) && (float) ($data['stock_directo'] ?? 0) > 0) {
             $p = $r->validate([
-                'stock_motivo' => ['required', \Illuminate\Validation\Rule::enum(MotivoCargaInventario::class)],
+                'stock_motivo' => ['required', \Illuminate\Validation\Rule::enum(MotivoCargaInventario::class)->only(MotivoCargaInventario::delErp())],
                 'stock_observacion' => ['required', 'string', 'min:5', 'max:1000'],
                 'stock_soporte' => ['nullable', 'string', 'max:60'],
                 'stock_tercero_id' => ['nullable', 'integer', 'exists:contactos,id'],

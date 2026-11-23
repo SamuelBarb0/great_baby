@@ -3,6 +3,7 @@
 namespace App\Modules\Dropi\Filament\Pages;
 
 use App\Auth\Permisos;
+use App\Modules\Dropi\Actions\CrearProductosNuevosDropi;
 use App\Modules\Dropi\Jobs\LeerCatalogoDropiJob;
 use App\Modules\Dropi\Services\CatalogoDropi;
 use App\Modules\Dropi\Support\DestinosVinculo;
@@ -145,7 +146,66 @@ class ProductosDeDropi extends Page
                         ->body("{$r['items']} líneas de pedido ya tienen producto · {$r['pedidos_liberados']} pedidos salieron de «pendiente por inventario».");
                     ($r['errores'] ? $n->warning()->body('No se pudieron: ' . implode(' | ', array_slice($r['errores'], 0, 5))) : $n->success())->send();
                 }),
+            // Masivo (23-nov-2026): todos los «No están en el ERP» de una vez.
+            Action::make('crearNuevos')
+                ->label(fn () => 'Crear en el ERP ' . count(app(CrearProductosNuevosDropi::class)->porCrear(true)))
+                ->icon('heroicon-o-plus-circle')
+                ->color('gray')
+                ->disabled(fn () => app(CrearProductosNuevosDropi::class)->porCrear(true) === [])
+                ->visible(fn () => $this->puedeEditar)
+                ->requiresConfirmation()
+                ->modalHeading('Crear en el ERP los productos nuevos de Dropi')
+                ->modalDescription('Se crea una ficha por producto de Dropi que no se parece a ninguno del ERP, ya vinculada, sin stock ni costo: el inventario entra con la compra. Los parecidos («Revisar a mano») no se tocan.')
+                ->action(function () {
+                    $this->exigirEdicion();
+                    $r = app(CrearProductosNuevosDropi::class)->handle(todos: true);
+                    $n = Notification::make()->title(count($r['creados']) . ' producto(s) creado(s) en el ERP')
+                        ->body(collect($r['creados'])->pluck('referencia')->take(10)->implode(', ') ?: 'Ninguno.');
+                    ($r['errores'] ? $n->warning()->body('No se pudieron: ' . implode(' | ', array_slice($r['errores'], 0, 5))) : $n->success())->send();
+                }),
+            // La regla, aquí mismo: que lo hagan solos o no.
+            Action::make('automatico')
+                ->label(fn () => CrearProductosNuevosDropi::todos() ? 'Crear solos: Sí' : 'Crear solos: No')
+                ->icon(fn () => CrearProductosNuevosDropi::todos() ? 'heroicon-o-check-circle' : 'heroicon-o-pause-circle')
+                ->color(fn () => CrearProductosNuevosDropi::todos() ? 'success' : 'gray')
+                ->visible(fn () => $this->puedeEditar)
+                ->requiresConfirmation()
+                ->modalHeading(fn () => CrearProductosNuevosDropi::todos() ? '¿Dejar de crearlos solos?' : '¿Crearlos solos?')
+                ->modalDescription(fn () => CrearProductosNuevosDropi::todos()
+                    ? 'Sólo se crearán solos los que frenan pedidos. Los demás quedan aquí para crearlos a mano, uno por uno o todos.'
+                    : 'Cada producto nuevo de Dropi que no se parezca a ninguno del ERP se creará y vinculará solo, cada pocos minutos.')
+                ->action(function () {
+                    $this->exigirEdicion();
+                    \App\Support\Reglas::set('dropi.crear_productos_nuevos', CrearProductosNuevosDropi::todos() ? '0' : '1');
+                    Notification::make()->title(CrearProductosNuevosDropi::todos() ? 'Se crearán solos' : 'Ya no se crearán solos')->success()->send();
+                }),
         ];
+    }
+
+    /** «Crear en el ERP» de una fila «No están en el ERP»: ese producto de Dropi, con todas sus variaciones. */
+    public function crearEnErpAction(): Action
+    {
+        return Action::make('crearEnErp')
+            ->label('Crear en el ERP')
+            ->size('sm')
+            ->outlined()
+            ->color('gray')
+            ->visible(fn () => $this->puedeEditar)
+            ->requiresConfirmation()
+            ->modalHeading(fn (array $arguments) => 'Crear «' . ($arguments['nombre'] ?? '') . '» en el ERP')
+            ->modalDescription('Queda una ficha nueva, vinculada a este producto de Dropi y a todas sus variaciones, sin stock ni costo: el inventario entra con la compra.')
+            ->action(function (array $arguments) {
+                $this->exigirEdicion();
+                try {
+                    $r = app(CrearProductosNuevosDropi::class)->crearUno((int) $arguments['dropi_id']);
+                } catch (\DomainException $e) {
+                    Notification::make()->title('No se creó')->body($e->getMessage())->danger()->send();
+
+                    return;
+                }
+                Notification::make()->title("«{$r['nombre']}» creado en el ERP")
+                    ->body("Referencia {$r['referencia']} · " . count($r['llaves']) . ' llave(s) vinculada(s).')->success()->send();
+            });
     }
 
     /** «Vincular…» de una fila: producto agregado (`p:`) o variante (`v:`). */

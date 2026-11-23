@@ -88,7 +88,7 @@ class ImportarInventarioClienteController extends Controller
             'nivel' => ['nullable', 'string', 'max:30'],
             // Por qué entra la mercancía. Sin esto el ingreso no tiene
             // contrapartida contable y no pasa una auditoría.
-            'motivo' => ['required', Rule::enum(MotivoCargaInventario::class)],
+            'motivo' => ['required', Rule::enum(MotivoCargaInventario::class)->only(MotivoCargaInventario::delErp())],
             'observacion' => ['required', 'string', 'min:5', 'max:1000'],
             'soporte' => ['nullable', 'string', 'max:60'],
             'tercero_id' => ['nullable', 'integer', 'exists:contactos,id'],

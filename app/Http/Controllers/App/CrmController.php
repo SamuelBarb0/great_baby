@@ -92,7 +92,7 @@ class CrmController extends Controller implements HasMiddleware
      */
     private function leadsPorFuente(): array
     {
-        $contactos = \App\Models\Contacto::query()
+        $contactos = \App\Models\Contacto::query()->delErp()
             ->where('es_cliente', true)
             ->selectRaw("COALESCE(fuente, '') as f, COUNT(*) as total")
             ->groupBy('f')

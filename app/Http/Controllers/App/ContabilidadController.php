@@ -48,7 +48,7 @@ class ContabilidadController extends Controller implements HasMiddleware
         $incluirAnulados = (bool) ($data['incluir_anulados'] ?? false);
         // `?linea=dropi` · el panel de Dropi abre el libro ya filtrado. Sólo la
         // línea: el destino fiscal no se pide desde aquí.
-        $ejes = FiltroEjes::de($request->input('linea'), null);
+        $ejes = FiltroEjes::de($request->input('linea', FiltroEjes::LINEA_ERP_POR_DEFECTO), null);
         $acumulado = (bool) ($data['acumulado'] ?? false);
         $terceroId = isset($data['tercero_id']) ? (int) $data['tercero_id'] : null;
         $agruparTercero = (bool) ($data['agrupar_tercero'] ?? false);

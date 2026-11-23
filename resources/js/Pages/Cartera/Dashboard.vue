@@ -36,7 +36,7 @@ const props = defineProps({
 const linea = ref(props.filtros.linea || 'todas');
 const destino = ref(props.filtros.destino || 'todas');
 watch([linea, destino], () => router.get('/app/cartera', {
-    linea: linea.value !== 'todas' ? linea.value : null,
+    linea: linea.value, // «todas» viaja: sin línea el servidor muestra sólo Great Baby
     destino: destino.value !== 'todas' ? destino.value : null,
 }, { preserveScroll: true, preserveState: true, replace: true }));
 

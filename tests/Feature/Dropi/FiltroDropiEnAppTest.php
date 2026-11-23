@@ -3,7 +3,8 @@
 /**
  * Las pantallas de compras y contabilidad de /app aceptan `?linea=dropi` (el
  * botón «Abrir en el ERP» del panel de Dropi llega así) y muestran sólo lo de
- * Dropi. Sin el parámetro siguen mostrando todo, como antes.
+ * Dropi. Sin el parámetro muestran sólo Great Baby (23-nov-2026: Dropi va
+ * aparte) y con `?linea=todas` el consolidado.
  */
 
 use App\Auth\Permisos;
@@ -47,7 +48,8 @@ it('el libro con ?linea=dropi sólo trae los asientos de Dropi', function () {
     MovimientoContable::create($base + ['debe' => 100, 'descripcion' => 'de Great Baby', 'linea_negocio' => LineaNegocio::GreatBaby]);
     MovimientoContable::create($base + ['debe' => 40, 'descripcion' => 'de Dropi', 'linea_negocio' => LineaNegocio::Dropi]);
 
-    $todo = propsDe('/app/contabilidad');
+    $todo = propsDe('/app/contabilidad?linea=todas');
+    expect(propsDe('/app/contabilidad')['kpis']['movimientos'])->toBe(1);
     $dropi = propsDe('/app/contabilidad?linea=dropi');
 
     expect($todo['kpis']['movimientos'])->toBe(2)
@@ -69,7 +71,8 @@ it('los gastos con ?linea=dropi sólo traen los de Dropi', function () {
     $gasto(LineaNegocio::GreatBaby, 'gasto GB');
     $gasto(LineaNegocio::Dropi, 'gasto Dropi');
 
-    $todo = propsDe('/app/gastos');
+    $todo = propsDe('/app/gastos?linea=todas');
+    expect(propsDe('/app/gastos')['gastos']['data'])->toHaveCount(1);
     $dropi = propsDe('/app/gastos?linea=dropi');
 
     expect($todo['gastos']['data'])->toHaveCount(2)
@@ -98,7 +101,8 @@ it('cuentas por pagar con ?linea=dropi sólo trae las compras de Dropi', functio
     $recepcion(LineaNegocio::GreatBaby, 2_000_000);
     $recepcion(LineaNegocio::Dropi, 300_000);
 
-    $todo = propsDe('/app/compras/cuentas-por-pagar');
+    $todo = propsDe('/app/compras/cuentas-por-pagar?linea=todas');
+    expect(propsDe('/app/compras/cuentas-por-pagar')['filas'])->toHaveCount(1);
     $dropi = propsDe('/app/compras/cuentas-por-pagar?linea=dropi');
 
     expect($todo['filas'])->toHaveCount(2)

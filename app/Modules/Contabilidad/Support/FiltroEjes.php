@@ -29,10 +29,19 @@ final class FiltroEjes
         public readonly string $destino,
     ) {}
 
+    /**
+     * Lo que ve el ERP cuando nadie elige línea (23-nov-2026): sólo Great Baby.
+     *
+     * Dropi es la misma empresa ante la DIAN pero internamente va aparte —
+     * «juntos pero no revueltos»— y tiene sus propios reportes en /admin. El
+     * consolidado (las dos) sigue a un clic: `linea=todas`.
+     */
+    public const LINEA_ERP_POR_DEFECTO = 'great_baby';
+
     public static function deRequest(Request $r): self
     {
         return new self(
-            linea: self::normalizarLinea((string) $r->input('linea', 'todas')),
+            linea: self::normalizarLinea((string) $r->input('linea', self::LINEA_ERP_POR_DEFECTO)),
             destino: self::normalizarDestino((string) $r->input('destino', 'todas')),
         );
     }

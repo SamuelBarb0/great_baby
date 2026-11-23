@@ -82,7 +82,7 @@ class DevolucionProveedorController extends Controller implements HasMiddleware
     {
         return Inertia::render('Compras/DevolucionesProveedor/Form', [
             'devolucion' => null,
-            'proveedores' => Contacto::query()
+            'proveedores' => Contacto::query()->delErp()
                 ->where('es_proveedor', true)
                 ->orderBy('nombre_completo')
                 ->limit(500)
@@ -153,7 +153,7 @@ class DevolucionProveedorController extends Controller implements HasMiddleware
                     'motivo_item' => $it->motivo_item,
                 ])->values(),
             ],
-            'proveedores' => Contacto::query()
+            'proveedores' => Contacto::query()->delErp()
                 ->where('es_proveedor', true)
                 ->orderBy('nombre_completo')
                 ->limit(500)

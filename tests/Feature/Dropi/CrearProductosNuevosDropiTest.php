@@ -80,6 +80,9 @@ beforeEach(function () {
     Sleep::fake();
     Storage::fake('local');
     Cache::flush();
+    // Estas pruebas son del modo «sólo lo que frena pedidos» (regla apagada);
+    // el modo «todos» y lo manual van al final.
+    App\Support\Reglas::set('dropi.crear_productos_nuevos', '0');
     config()->set('dropi.api.bodega_id', 10548);
     config()->set('dropi.api.proveedor_id', CPN_DUENO);
     app()->instance(DropiWebClient::class, new DropiApiClient(app(DropiWebAuth::class), [
@@ -210,7 +213,7 @@ it('avisa en la campana a quien vincula productos de Dropi', function () {
 
     expect($aviso)->not->toBeNull()
         ->and($aviso->tipo)->toBe('dropi_producto_creado')
-        ->and($aviso->mensaje)->toContain('Falta cargar su stock y su costo')
+        ->and($aviso->mensaje)->toContain('El inventario y el costo entran con la compra')
         ->and(NotificacionErp::where('user_id', $this->otro->id)->exists())->toBeFalse();
 });
 
@@ -250,4 +253,38 @@ it('si un pedido trae un producto que la foto no tiene, relee Dropi una vez por 
     app(SincronizarPedidosDropi::class)->importarPedidos([cpnPedido('NV-8', 'ARCHIVADO-9')]);
     expect(app(CrearProductosNuevosDropi::class)->handle()['releido'])->toBeFalse()
         ->and($this->lecturas)->toBe(1);
+});
+
+// ── 23-nov-2026 · la clienta decide: solos (regla) o a mano, uno o todos ──
+
+it('con la regla prendida crea solos también los que no tienen pedidos, y nunca los parecidos', function () {
+    App\Support\Reglas::set('dropi.crear_productos_nuevos', '1');
+
+    app(CrearProductosNuevosDropi::class)->handle();
+
+    expect(Producto::where('referencia', 'QUIETO-1')->exists())->toBeTrue()
+        ->and(DropiVinculoProducto::where('sku_dropi', 'QUIETO-1')->exists())->toBeTrue()
+        ->and(Producto::where('referencia', 'MIX-50')->exists())->toBeFalse();
+});
+
+it('con la regla apagada se crea a mano: uno por uno o todos de una vez', function () {
+    $accion = app(CrearProductosNuevosDropi::class);
+
+    $uno = $accion->crearUno(30);
+    expect($uno['referencia'])->toBe('QUIETO-1')
+        ->and(Producto::where('referencia', 'QUIETO-1')->value('dropi_sku'))->toBe('30');
+
+    // El mitad vinculado no es «nuevo»: a mano tampoco se crea, se vincula.
+    expect(fn () => $accion->crearUno(50))->toThrow(DomainException::class, 'Vincúlalo a mano');
+
+    $todos = $accion->handle(todos: true);
+    expect(collect($todos['creados'])->pluck('referencia')->sort()->values()->all())->toBe(['DIDA-004', 'DROPI-2352474', 'VAR-40'])
+        ->and(collect($accion->porCrear(true))->pluck('referencia')->all())->toBe(['PAPEL-1']) // choca con la papelera: lo decide una persona
+        ->and($todos['errores'][0])->toContain('PAPEL-1');
+});
+
+it('«Vincular con el ERP» trae el interruptor, el masivo y el botón por fila', function () {
+    $html = $this->actingAs($this->jefa)->get('/admin/productos-de-dropi?filtro=nuevo')->assertOk()->getContent();
+
+    expect($html)->toContain('Crear solos: No')->toContain('Crear en el ERP');
 });
