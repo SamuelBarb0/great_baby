@@ -25,6 +25,8 @@
         .separacion { width: {{ $rollo['separacion'] }}mm; }
         .salto { page-break-after: always; }
         .nombre { font-size: 7pt; font-weight: bold; line-height: 1.1; text-transform: uppercase; margin: 0 1mm 0.8mm; }
+        {{-- Producto agrupado: todos los colores comparten el código, el color escrito es lo que los distingue. --}}
+        .color { font-size: 8pt; font-weight: bold; line-height: 1.1; text-transform: uppercase; margin: 0 1mm 0.6mm; border: 0.3mm solid #000; padding: 0.2mm 0; }
     </style>
 </head><body>
     @foreach(array_chunk($etiquetas, $rollo['columnas']) as $fila)
@@ -36,6 +38,7 @@
                         @isset($fila[$i])
                             {{-- Dos renglones como máximo: un nombre largo no debe empujar las barras fuera de la etiqueta. --}}
                             @if(filled($fila[$i]['nombre'] ?? null))<div class="nombre">{{ \Illuminate\Support\Str::limit($fila[$i]['nombre'], 32) }}</div>@endif
+                            @if(filled($fila[$i]['color'] ?? null))<div class="color">{{ \Illuminate\Support\Str::limit($fila[$i]['color'], 20) }}</div>@endif
                             <img src="{{ $fila[$i]['barras'] }}" style="width: {{ $fila[$i]['barras_ancho'] ?? $rollo['etiqueta'] - 2 }}mm; height: {{ $fila[$i]['barras_alto'] ?? 12 }}mm;" alt="{{ $fila[$i]['codigo'] }}">
                         @endisset
                     </td>

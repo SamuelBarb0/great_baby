@@ -5,7 +5,9 @@ namespace App\Modules\Dropi\Actions;
 use App\Auth\Permisos;
 use App\Models\NotificacionErp;
 use App\Models\User;
+use App\Modules\Compras\Services\ColoresDeImportacion;
 use App\Modules\Dropi\Models\Producto;
+use App\Modules\Dropi\Models\ProductoVariante;
 use App\Modules\Dropi\Services\CatalogoDropi;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -27,10 +29,16 @@ use Lorisleiva\Actions\Concerns\AsAction;
  * referencia) ni las llaves que ya no están en el catálogo de Dropi.
  *
  * Cómo queda el producto: referencia = SKU de Dropi si es válido, si no
- * `DROPI-<id>`; sin variantes (todas las variaciones de Dropi descuentan del
- * mismo total); stock 0 y sin costo. El stock y el costo los pone bodega: el
+ * `DROPI-<id>`; stock 0 y sin costo. El stock y el costo los pone bodega: el
  * kardex del ERP es la verdad, y copiar el de Dropi lo entraría a $0. Por eso
  * cada producto creado deja un aviso en la campana.
+ *
+ * Con variaciones en Dropi (colores, tallas) nace con una variante por cada
+ * una, cada una con su código de barras y vinculada a su variación (bodega,
+ * 23-nov-2026: «que no me salga generalizado, no voy a saber cuáles eran»).
+ * Es el único momento en que se puede: con stock 0 aún no tiene movimientos, y
+ * después el kardex ya no deja pasar un agrupado a colores. Un producto SIMPLE
+ * de Dropi sigue naciendo agrupado (sin variantes).
  */
 class CrearProductosNuevosDropi
 {
@@ -94,7 +102,9 @@ class CrearProductosNuevosDropi
      * Las llaves «nuevo» con pedidos esperando, agrupadas por producto de Dropi:
      * un producto con variaciones da UNA ficha con todas sus llaves.
      *
-     * @return list<array{dropi_id: int, referencia: string, nombre: string, descripcion: ?string, llaves: list<string>}>
+     * `variaciones` trae, por llave, la variación de Dropi: vacía en un SIMPLE.
+     *
+     * @return list<array{dropi_id: int, referencia: string, nombre: string, descripcion: ?string, llaves: list<string>, variaciones: array<string, array{id: int, nombre: ?string}>}>
      */
     public function porCrear(): array
     {
@@ -111,20 +121,26 @@ class CrearProductosNuevosDropi
                 && $filas->contains(fn ($f) => $f['pedidos_esperando'] > 0))
             ->map(function ($filas, $id) use ($foto) {
                 $p = $foto->get((int) $id) ?? [];
+                $llaves = $filas->pluck('llave')->values()->all();
 
                 return [
                     'dropi_id' => (int) $id,
                     'referencia' => ($p['sku_valido'] ?? false) ? $p['sku'] : "DROPI-{$id}",
                     'nombre' => $filas->first()['nombre'],
                     'descripcion' => $p['descripcion'] ?? null,
-                    'llaves' => $filas->pluck('llave')->values()->all(),
+                    'llaves' => $llaves,
+                    // Solo las llaves que son una variación de Dropi (DV-): un SIMPLE no trae ninguna.
+                    'variaciones' => collect($p['llaves'] ?? [])
+                        ->filter(fn ($ll) => in_array($ll['llave'], $llaves, true) && ! empty($ll['variacion_id']))
+                        ->mapWithKeys(fn ($ll) => [$ll['llave'] => ['id' => (int) $ll['variacion_id'], 'nombre' => $ll['variacion'] ?? null]])
+                        ->all(),
                 ];
             })
             ->values()
             ->all();
     }
 
-    /** @param array{dropi_id: int, referencia: string, nombre: string, descripcion: ?string, llaves: list<string>} $g */
+    /** @param array{dropi_id: int, referencia: string, nombre: string, descripcion: ?string, llaves: list<string>, variaciones: array<string, array{id: int, nombre: ?string}>} $g */
     private function crear(array $g): array
     {
         // Referencia única contando la papelera (como la ficha), y el id de Dropi
@@ -136,19 +152,27 @@ class CrearProductosNuevosDropi
             throw new \DomainException("ya hay un producto con el id de Dropi {$g['dropi_id']}: vincúlalo a mano");
         }
 
-        [$producto, $liberados] = DB::transaction(function () use ($g) {
+        $conVariantes = $g['variaciones'] !== [];
+
+        [$producto, $liberados] = DB::transaction(function () use ($g, $conVariantes) {
             $producto = Producto::sinKardexAutomatico(fn () => Producto::create([
                 'referencia' => $g['referencia'],
                 'nombre' => mb_substr($g['nombre'], 0, 200),
                 'descripcion' => $g['descripcion'],
-                'desglose_stock' => false,
+                'desglose_stock' => $conVariantes,
                 'activo' => true,
             ]));
             $producto->forceFill(['dropi_sku' => (string) $g['dropi_id']])->save();
 
+            $nombres = ['producto_nombre' => mb_substr($g['nombre'], 0, 150)];
             $liberados = 0;
             foreach ($g['llaves'] as $llave) {
-                $liberados += VincularProductoDropi::make()->aProducto($llave, $producto->id, null, ['producto_nombre' => mb_substr($g['nombre'], 0, 150)])['pedidos_liberados'];
+                $variacion = $g['variaciones'][$llave] ?? null;
+                $variante = $conVariantes ? $this->varianteDe($producto, $llave, $variacion) : null;
+
+                $liberados += ($variante
+                    ? VincularProductoDropi::make()->handle($llave, $variante->id, null, $nombres + ['variacion' => $variante->color_nombre])
+                    : VincularProductoDropi::make()->aProducto($llave, $producto->id, null, $nombres))['pedidos_liberados'];
             }
 
             return [$producto, $liberados];
@@ -163,6 +187,30 @@ class CrearProductosNuevosDropi
             'llaves' => $g['llaves'],
             'pedidos_liberados' => $liberados,
         ];
+    }
+
+    /**
+     * La variante de una variación de Dropi: con su nombre (color, o «color /
+     * talla» como lo escribe Dropi) y su id, que es como CatalogoDropi la vuelve a
+     * reconocer en la siguiente lectura. El código del color y el de barras salen
+     * como en compras (ColoresDeImportacion): «REF-ROJO», «REF-ROJO2» si se repite.
+     * Dos variaciones con el mismo nombre comparten la variante; el id de Dropi
+     * queda en la primera (es único).
+     *
+     * @param  array{id: int, nombre: ?string}|null  $variacion
+     */
+    private function varianteDe(Producto $producto, string $llave, ?array $variacion): ProductoVariante
+    {
+        $nombre = trim((string) ($variacion['nombre'] ?? '')) ?: "Variación {$llave}";
+        $variante = app(ColoresDeImportacion::class)->varianteDe($producto, $nombre)
+            ?? throw new \DomainException("no se pudo crear la variante «{$nombre}»");
+
+        if ($variacion && ! $variante->dropi_variacion_id
+            && ! ProductoVariante::where('dropi_variacion_id', (string) $variacion['id'])->exists()) {
+            $variante->forceFill(['dropi_variacion_id' => (string) $variacion['id']])->save();
+        }
+
+        return $variante;
     }
 
     /** A quien vincula productos de Dropi: falta el stock y el costo. */

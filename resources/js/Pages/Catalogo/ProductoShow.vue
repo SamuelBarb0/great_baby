@@ -1097,10 +1097,13 @@ const matrizDisenos = ref([]);
                     {{ form.variantes.length }} variante(s) · se guardan al pulsar
                     <strong>Guardar</strong> arriba, en la misma transacción que el producto.
                 </p>
-                <a v-if="producto?.id && form.variantes.some(v => v.id)"
+                <!-- Un producto agrupado (sin variantes) también imprime: una etiqueta
+                     por color de Dropi, todas con la referencia (bodega, 23-nov-2026). -->
+                <a v-if="producto?.id"
                    :href="`/catalogo/etiquetas-lote?productos[]=${producto.id}`" target="_blank"
                    class="btn btn-secondary text-xs inline-flex items-center gap-1">
-                    <Printer class="w-4 h-4"/> Imprimir etiquetas de todas las variantes
+                    <Printer class="w-4 h-4"/>
+                    {{ form.variantes.some(v => v.id) ? 'Imprimir etiquetas de todas las variantes' : 'Imprimir etiquetas (una por color de Dropi)' }}
                 </a>
             </div>
 
