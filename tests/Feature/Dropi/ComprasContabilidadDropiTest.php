@@ -126,12 +126,12 @@ it('pagos recibidos: sólo los de facturas de Dropi', function () {
         ->assertCanSeeTableRecords([$pDr])->assertCanNotSeeTableRecords([$pGb]);
 });
 
-it('el menú tiene Compras y Contabilidad, «Abrir en el ERP» va relativo y el Alistador no entra', function () {
+it('el menú tiene Compras y Contabilidad, sin botón que lleve al ERP, y el Alistador no entra', function () {
     $html = $this->actingAs($this->aracely)->get('/admin/compras-ordenes-dropi')->assertOk()
         ->assertSee('Cuentas por pagar')->assertSee('Libro contable')->assertSee('Pagos recibidos')
         ->assertSee('Contabilidad Dropi')
-        // Relativo: con url() tomaba el APP_URL de otro puerto.
-        ->assertSee('href="/app/compras?linea=dropi"', false)
+        // 23-nov-2026: Dropi va aparte, ya no hay «Abrir en el ERP».
+        ->assertDontSee('Abrir en el ERP')->assertDontSee('href="/app/compras?linea=dropi"', false)
         ->getContent();
     expect($html)->not->toContain('8076/app');
 

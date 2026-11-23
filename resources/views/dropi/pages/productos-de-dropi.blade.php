@@ -96,6 +96,9 @@
                                         @if($f['motivo'])<div style="font-size:.75rem;color:#9ca3af;">{{ $f['motivo'] }}</div>@endif
                                     </td>
                                     <td style="padding:.5rem;text-align:right;white-space:nowrap;">
+                                        @if($f['estado'] === 'nuevo' && $f['dropi_id'])
+                                            {{ ($this->crearEnErpAction)(['dropi_id' => $f['dropi_id'], 'nombre' => $f['nombre']]) }}
+                                        @endif
                                         {{ ($this->vincularLlaveAction)(['llave' => $f['llave'], 'nombre' => trim($f['nombre'] . ' ' . ($f['variacion'] ?? '')), 'vinculado' => $f['estado'] === 'vinculado']) }}
                                     </td>
                                 </tr>

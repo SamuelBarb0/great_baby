@@ -119,7 +119,14 @@ class RegistrarCargaInventario
             ->keyBy('id');
 
         $esDropi = $carga->canal === 'dropi';
+        $esTraslado = $carga->motivo === MotivoCargaInventario::TrasladoGreatBaby;
+        if ($esTraslado) {
+            // El traslado escribe la salida de Great Baby y la entrada a Dropi:
+            // lo que suma es lo que entra; la salida es la otra cara.
+            $movs = $movs->filter(fn ($m) => (float) $m->cantidad > 0)->values();
+        }
         $porCuenta = [];
+        $porCuentaErp = [];
         $totalValor = 0.0;
         $sinCosto = 0;
         foreach ($movs as $m) {
@@ -135,6 +142,11 @@ class RegistrarCargaInventario
                 : ($productos->get($m->producto_id)?->cta('inventario')
                     ?? (string) setting('contable.cta_inventario_default'));
             $porCuenta[$cuenta] = ($porCuenta[$cuenta] ?? 0) + $valor;
+            if ($esTraslado) {
+                // De dónde sale en Great Baby: la cuenta de inventario del ERP.
+                $deErp = $productos->get($m->producto_id)?->cta('inventario') ?? (string) setting('contable.cta_inventario_default');
+                $porCuentaErp[$deErp] = ($porCuentaErp[$deErp] ?? 0) + $valor;
+            }
             $totalValor += $valor;
         }
         $totalValor = round($totalValor, 2);
@@ -195,6 +207,34 @@ class RegistrarCargaInventario
                 0, 255
             ),
         ];
+
+        if ($esTraslado) {
+            // Great Baby entrega la mercancía. Cada lado cuadra solo contra la
+            // cuenta interna (Dropi la acreditó arriba; Great Baby la debita), y
+            // en el consolidado de la misma empresa esa cuenta queda en cero.
+            // Lo interno no va a SIIGO.
+            $gb = ['linea_negocio' => \App\Modules\Contabilidad\Enums\LineaNegocio::GreatBaby] + $base;
+            $lineas[array_key_last($lineas)]['destino_fiscal'] = \App\Modules\Contabilidad\Enums\DestinoFiscal::Interno;
+            $lineas[] = $gb + [
+                'cuenta_puc' => $carga->cuenta_contrapartida,
+                'debe' => $totalDebitos,
+                'haber' => 0,
+                'destino_fiscal' => \App\Modules\Contabilidad\Enums\DestinoFiscal::Interno,
+                'descripcion' => mb_substr("{$carga->numero} · Traslado a Dropi · {$carga->observacion}", 0, 255),
+            ];
+            $restante = $totalDebitos;
+            $cuentasErp = array_keys($porCuentaErp);
+            foreach ($cuentasErp as $i => $cuenta) {
+                $valor = $i === count($cuentasErp) - 1 ? round($restante, 2) : round($porCuentaErp[$cuenta], 2);
+                $restante -= $valor;
+                $lineas[] = $gb + [
+                    'cuenta_puc' => (string) $cuenta,
+                    'debe' => 0,
+                    'haber' => $valor,
+                    'descripcion' => mb_substr("{$carga->numero} · Salida de inventario · Traslado a Dropi", 0, 255),
+                ];
+            }
+        }
 
         MovimientoContable::registrarAsientoAtomico($lineas);
 

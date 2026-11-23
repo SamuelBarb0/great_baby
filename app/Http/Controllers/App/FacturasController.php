@@ -49,7 +49,7 @@ class FacturasController extends Controller implements HasMiddleware
          * donde estorba menos.
          */
         $destino = (string) $request->input('destino', 'todas');
-        $linea = (string) $request->input('linea', 'todas');
+        $linea = (string) $request->input('linea', FiltroEjes::LINEA_ERP_POR_DEFECTO);
 
         $query = FacturaVenta::query()->with('contacto:id,nombre_completo,telefono');
 

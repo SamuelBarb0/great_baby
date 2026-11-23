@@ -21,6 +21,8 @@ enum MotivoCargaInventario: string
     case SaldoInicial = 'saldo_inicial';
     case Donacion = 'donacion';
     case Sobrante = 'sobrante';
+    /** Sólo Dropi (23-nov-2026): mercancía de Great Baby que pasa a Dropi. */
+    case TrasladoGreatBaby = 'traslado_great_baby';
 
     public function label(): string
     {
@@ -30,6 +32,7 @@ enum MotivoCargaInventario: string
             self::SaldoInicial => 'Inventario inicial (apertura de cuentas)',
             self::Donacion => 'Donación / mercancía recibida sin pago',
             self::Sobrante => 'Sobrante encontrado (ajuste)',
+            self::TrasladoGreatBaby => 'Traslado desde Great Baby',
         };
     }
 
@@ -42,6 +45,7 @@ enum MotivoCargaInventario: string
             self::SaldoInicial => 'Para arrancar el sistema con el inventario que ya existía.',
             self::Donacion => 'Entra como ingreso no operacional.',
             self::Sobrante => 'Mercancía que apareció en bodega sin documento.',
+            self::TrasladoGreatBaby => 'Sale de la bodega de Great Baby que elijas y entra a Dropi al mismo costo. No es una compra: no hay proveedor ni IVA.',
         };
     }
 
@@ -53,6 +57,10 @@ enum MotivoCargaInventario: string
 
     public function cuentaContrapartida(): string
     {
+        // El traslado es sólo de Dropi: su contrapartida es la cuenta interna.
+        if ($this === self::TrasladoGreatBaby) {
+            return (string) setting('contable.cta_dropi_cuenta_interna');
+        }
         $cuenta = setting($this->reglaCuenta());
 
         return ($cuenta !== null && $cuenta !== '')
@@ -69,8 +77,23 @@ enum MotivoCargaInventario: string
         return in_array($this, [self::Compra, self::AporteSocios], true);
     }
 
-    /** @return list<array{value:string,label:string,ayuda:string,cuenta:string,requiere_tercero:bool}> */
-    public static function opciones(): array
+    /** Los motivos que sólo existen en la carga de Dropi. */
+    public function soloDropi(): bool
+    {
+        return $this === self::TrasladoGreatBaby;
+    }
+
+    /** Los motivos que ofrece el ERP (sin los de Dropi). */
+    public static function delErp(): array
+    {
+        return array_values(array_filter(self::cases(), fn (self $m) => ! $m->soloDropi()));
+    }
+
+    /**
+     * @param  bool  $dropi  true = la carga de Dropi (incluye el traslado)
+     * @return list<array{value:string,label:string,ayuda:string,cuenta:string,requiere_tercero:bool}>
+     */
+    public static function opciones(bool $dropi = false): array
     {
         return array_map(fn (self $m) => [
             'value' => $m->value,
@@ -78,6 +101,6 @@ enum MotivoCargaInventario: string
             'ayuda' => $m->ayuda(),
             'cuenta' => $m->cuentaContrapartida(),
             'requiere_tercero' => $m->requiereTercero(),
-        ], self::cases());
+        ], $dropi ? self::cases() : self::delErp());
     }
 }

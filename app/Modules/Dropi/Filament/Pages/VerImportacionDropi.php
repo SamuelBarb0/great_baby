@@ -243,8 +243,6 @@ class VerImportacionDropi extends Page
                     'Importación liquidada: costos prorrateados.',
                 )),
 
-            Action::make('abrirEnErp')->label('Abrir en el ERP')->icon('heroicon-o-arrow-top-right-on-square')->color('gray')
-                ->url(fn () => '/app/compras/importacion/' . $this->importacion, shouldOpenInNewTab: true),
         ];
     }
 

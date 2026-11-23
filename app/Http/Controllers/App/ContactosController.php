@@ -30,7 +30,7 @@ class ContactosController extends Controller implements HasMiddleware
         $q = trim((string) $request->input('q', ''));
         $rol = (string) $request->input('rol', 'todos'); // todos|cliente|b2b|proveedor|empleado|vendedor
 
-        $query = Contacto::query();
+        $query = Contacto::query()->delErp(); // los terceros sólo de Dropi van en /admin (23-nov)
 
         if ($q !== '') {
             $query->where(function ($qq) use ($q) {
@@ -72,11 +72,11 @@ class ContactosController extends Controller implements HasMiddleware
             'filtros' => ['q' => $q, 'rol' => $rol],
             'totales' => [
                 'todos' => Contacto::count(),
-                'cliente' => Contacto::where('es_cliente', true)->count(),
-                'b2b' => Contacto::where('es_cliente_b2b', true)->count(),
-                'proveedor' => Contacto::where('es_proveedor', true)->count(),
-                'empleado' => Contacto::where('es_empleado', true)->count(),
-                'vendedor' => Contacto::where('es_vendedor_dropi', true)->count(),
+                'cliente' => Contacto::delErp()->where('es_cliente', true)->count(),
+                'b2b' => Contacto::delErp()->where('es_cliente_b2b', true)->count(),
+                'proveedor' => Contacto::delErp()->where('es_proveedor', true)->count(),
+                'empleado' => Contacto::delErp()->where('es_empleado', true)->count(),
+                'vendedor' => Contacto::delErp()->where('es_vendedor_dropi', true)->count(),
             ],
         ]);
     }
@@ -132,6 +132,8 @@ class ContactosController extends Controller implements HasMiddleware
         $rol = (string) $request->input('rol', '');
 
         $contactos = Contacto::query()
+            // La carga de Dropi busca entre los terceros de Dropi; el resto, entre los del ERP.
+            ->when($request->input('lado') === 'dropi', fn ($c) => $c->deDropi(), fn ($c) => $c->delErp())
             ->where(function ($qq) use ($q) {
                 $qq->where('nombre_completo', 'like', "%{$q}%")
                     ->orWhere('numero_documento', 'like', "%{$q}%");

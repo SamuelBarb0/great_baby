@@ -21,7 +21,7 @@
                 <div style="font-size:.7rem;text-transform:uppercase;color:#9ca3af;">Cuenta de SIIGO</div>
                 <div style="font-weight:600;">{{ $cfg->username ?: 'Sin configurar' }}</div>
                 <div style="color:#9ca3af;">{{ $cfg->ambiente === 'sandbox' ? 'Sandbox (pruebas)' : 'Producción' }}</div>
-                <a href="/app/siigo" style="font-size:.8rem;color:#f59e0b;">Credenciales en SIIGO ↗</a>
+                <div style="font-size:.8rem;color:#9ca3af;">Es la misma cuenta de SIIGO de la empresa (mismo NIT); Dropi factura con su prefijo.</div>
             </div>
             <div>
                 <div style="font-size:.7rem;text-transform:uppercase;color:#9ca3af;">Integración</div>

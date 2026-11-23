@@ -31,7 +31,8 @@ const hrefExport = computed(() => {
     for (const [k, v] of Object.entries(props.paramsExport)) {
         if (v !== null && v !== undefined && v !== '' && v !== 'todas' && v !== 'todos') p.set(k, v);
     }
-    if (props.linea !== 'todas') p.set('linea', props.linea);
+    // Siempre: sin `linea` el servidor entiende «sólo Great Baby».
+    p.set('linea', props.linea);
     if (props.destino !== 'todas') p.set('destino', props.destino);
     const qs = p.toString();
     return qs ? `${props.urlExport}?${qs}` : props.urlExport;
@@ -43,7 +44,7 @@ const hrefExport = computed(() => {
         <div>
             <label class="text-xs font-semibold text-surface-500">Línea de negocio</label>
             <select :value="linea" @change="emit('update:linea', $event.target.value)" class="input mt-1">
-                <option value="todas">Todas</option>
+                <option value="todas">Consolidado (Great Baby + Dropi)</option>
                 <option v-for="l in opciones.lineas" :key="l.valor" :value="l.valor">{{ l.label }}</option>
             </select>
         </div>

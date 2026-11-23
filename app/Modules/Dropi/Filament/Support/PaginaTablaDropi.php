@@ -14,8 +14,7 @@ use Filament\Tables\Contracts\HasTable;
  *
  * Muestran sólo lo de la línea Dropi, separado de las otras empresas, con el
  * mismo filtro (`FiltroEjes`) que usa /app para que los números no difieran.
- * Son de consulta: crear o editar se hace en el ERP, y el botón «Abrir en el
- * ERP» lleva allá.
+ * Todo se hace dentro de este panel: no hay botón que lleve al ERP.
  *
  * Los enlaces a /app van RELATIVOS: armados con `url()` toman el APP_URL del
  * .env y en un servidor con otro puerto apuntaban al equivocado (7-nov).
@@ -50,14 +49,13 @@ abstract class PaginaTablaDropi extends Page implements HasTable
         return [];
     }
 
+    /**
+     * Sin «Abrir en el ERP» (23-nov-2026): Dropi va aparte y la clienta
+     * terminaba en el ERP principal. `rutaEnErp()` queda como referencia de
+     * cuál es su pantalla gemela en /app.
+     */
     protected function getHeaderActions(): array
     {
-        return [
-            Action::make('abrirEnErp')
-                ->label('Abrir en el ERP')
-                ->icon('heroicon-o-arrow-top-right-on-square')
-                ->color('gray')
-                ->url(static::rutaEnErp() . '?linea=' . LineaNegocio::Dropi->value, shouldOpenInNewTab: true),
-        ];
+        return [];
     }
 }

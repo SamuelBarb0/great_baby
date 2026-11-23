@@ -92,8 +92,7 @@ class DropiWalletMovimientoResource extends Resource
                     ->tooltip(fn (DropiWalletMovimiento $r) => $estados[$r->estado_contable][2] ?? null)
                     ->url(fn (DropiWalletMovimiento $r) => match ($r->estado_contable) {
                         DropiWalletMovimiento::CONTABLE_ASENTADO => LibroContableDropi::urlDeWallet($r->id),
-                        DropiWalletMovimiento::CONTABLE_POR_RECIBO, DropiWalletMovimiento::CONTABLE_RECIBO_PENDIENTE => $r->pedido?->factura_venta_id
-                            ? '/app/facturas/'.$r->pedido->factura_venta_id : null,
+                        DropiWalletMovimiento::CONTABLE_POR_RECIBO, DropiWalletMovimiento::CONTABLE_RECIBO_PENDIENTE => \App\Modules\Dropi\Filament\Pages\VerFacturaDropi::urlDe($r->pedido?->factura_venta_id),
                         default => null,
                     }, shouldOpenInNewTab: true),
             ])

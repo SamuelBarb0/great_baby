@@ -30,7 +30,7 @@ const cargando = ref(false);
 const filtrar = () => router.get('/app/contabilidad/panel', {
     desde: desde.value, hasta: hasta.value,
     incluir_anulados: incluirAnulados.value ? 1 : null,
-    linea: linea.value !== 'todas' ? linea.value : null,
+    linea: linea.value, // «todas» viaja: sin línea el servidor muestra sólo Great Baby
     destino: destino.value !== 'todas' ? destino.value : null,
 }, {
     preserveScroll: true, preserveState: true, replace: true,

@@ -3,7 +3,7 @@ import { computed, onMounted, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { Head, Link, router, usePage } from '@inertiajs/vue3';
 import axios from 'axios';
 import { ArrowLeft, PackageOpen, AlertTriangle, CheckCircle2, XCircle, Loader2, Plus, Trash2, RotateCcw, Send, Download } from 'lucide-vue-next';
-import AppLayout from '@/Layouts/AppLayout.vue';
+import DropiLayout from '@/Layouts/DropiLayout.vue';
 
 const props = defineProps({
     carga: { type: Object, required: true },
@@ -36,7 +36,7 @@ const rehacer = () => {
 };
 watch(() => props.operaciones, rehacer, { immediate: true });
 
-const ingresoDe = (c) => ({ activo: false, motivo: null, observacion: '', soporte: '', tercero_id: null, ubicacion_id: props.bodegas_erp.find((b) => b.sede)?.id ?? null, ...(c.ingreso_erp || {}) });
+const ingresoDe = (c) => ({ activo: false, motivo: null, observacion: '', soporte: '', tercero_id: null, origen_ubicacion_id: null, ubicacion_id: props.bodegas_erp.find((b) => b.sede)?.id ?? null, ...(c.ingreso_erp || {}) });
 const cargaForm = reactive({ concepto: props.carga.concepto, modo: props.carga.modo, defaults: { ...props.carga.defaults, categoria_id: props.carga.defaults?.categoria?.id ?? null }, ingreso_erp: ingresoDe(props.carga) });
 watch(() => props.carga, (c) => {
     cargaForm.concepto = c.concepto;
@@ -112,7 +112,7 @@ watch(terceroTexto, (q) => {
     if (cargaForm.ingreso_erp.tercero_id || !q || q.trim().length < 2) { terceroResultados.value = []; return; }
     terceroDeb = setTimeout(async () => {
         try {
-            terceroResultados.value = (await axios.get('/app/api/contactos/buscar', { params: { q: q.trim() } })).data;
+            terceroResultados.value = (await axios.get('/app/api/contactos/buscar', { params: { q: q.trim(), ...(cargaForm.ingreso_erp.motivo === 'compra' ? { lado: 'dropi', rol: 'proveedor' } : {}) } })).data;
         } catch { terceroResultados.value = []; }
     }, 300);
 });
@@ -210,7 +210,7 @@ const errores = computed(() => page.props.errors || {});
 
 <template>
     <Head :title="`Carga Dropi ${carga.numero}`"/>
-    <AppLayout>
+    <DropiLayout>
         <div class="max-w-6xl mx-auto space-y-4 p-4">
             <Link href="/app/dropi/carga-productos" class="text-sm text-brand-600 hover:underline inline-flex items-center gap-1">
                 <ArrowLeft class="h-4 w-4"/> Productos y stock en Dropi
@@ -289,7 +289,14 @@ const errores = computed(() => page.props.errors || {});
                                 </label>
                             </div>
                             <div class="grid md:grid-cols-2 gap-3">
-                                <label class="text-xs">Bodega del ERP donde entra
+                                <label v-if="cargaForm.ingreso_erp.motivo === 'traslado_great_baby'" class="text-xs">Bodega de Great Baby de donde sale
+                                    <select v-model="cargaForm.ingreso_erp.origen_ubicacion_id" class="input w-full">
+                                        <option :value="null">Elige la bodega…</option>
+                                        <option v-for="b in bodegas_erp" :key="b.id" :value="b.id">{{ b.label }}</option>
+                                    </select>
+                                    <span class="text-surface-500">Sale de aquí al costo que tiene. Si no alcanza el stock de alguna referencia, no se mueve nada.</span>
+                                </label>
+                                <label class="text-xs">{{ cargaForm.ingreso_erp.motivo === 'traslado_great_baby' ? 'Bodega de Dropi donde entra' : 'Bodega del ERP donde entra' }}
                                     <select v-model="cargaForm.ingreso_erp.ubicacion_id" class="input w-full">
                                         <option :value="null">Elige la bodega…</option>
                                         <option v-for="b in bodegas_erp" :key="b.id" :value="b.id">{{ b.label }}</option>
@@ -323,7 +330,7 @@ const errores = computed(() => page.props.errors || {});
                 </form>
                 <p v-else class="text-sm"><strong>Concepto:</strong> {{ carga.concepto }} · <strong>Modo:</strong> {{ carga.modo === 'sumar' ? 'sumar lo que entra' : 'el Excel dice cuánto debe quedar' }}</p>
                 <p v-if="carga.carga_inventario" class="text-sm rounded bg-emerald-50 dark:bg-emerald-900/20 px-3 py-2">
-                    Inventario del ERP: <Link :href="carga.carga_inventario.url" class="font-mono text-brand-600 hover:underline">{{ carga.carga_inventario.numero }}</Link>
+                    Inventario del ERP: <span class="font-mono">{{ carga.carga_inventario.numero }}</span>
                     · {{ carga.carga_inventario.total_unidades }} unidades · asiento por {{ new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(carga.carga_inventario.total_valor) }}
                     <span v-if="carga.ingreso_erp?.resultado" class="text-surface-500">
                         · {{ carga.ingreso_erp.resultado.creados }} productos creados en el ERP<span v-if="carga.ingreso_erp.resultado.omitidos">, {{ carga.ingreso_erp.resultado.omitidos }} omitidos (granulares)</span><span v-if="carga.ingreso_erp.resultado.sin_costo">, {{ carga.ingreso_erp.resultado.sin_costo }} sin costo</span>
@@ -509,5 +516,5 @@ const errores = computed(() => page.props.errors || {});
                 </div>
             </div>
         </div>
-    </AppLayout>
+    </DropiLayout>
 </template>

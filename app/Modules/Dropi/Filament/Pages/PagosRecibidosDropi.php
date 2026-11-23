@@ -59,7 +59,7 @@ class PagosRecibidosDropi extends PaginaTablaDropi
                     ->summarize(Sum::make()->money('COP')->label('Total')),
             ])
             ->defaultSort('fecha', 'desc')
-            ->recordUrl(fn (PagoVenta $p) => $p->factura_id ? '/app/facturas/' . $p->factura_id : null, shouldOpenInNewTab: true)
+            ->recordUrl(fn (PagoVenta $p) => VerFacturaDropi::urlDe($p->factura_id))
             ->emptyStateHeading('No hay pagos sobre facturas de Dropi');
     }
 }

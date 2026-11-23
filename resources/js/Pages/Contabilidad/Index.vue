@@ -38,7 +38,7 @@ const filtrar = () => {
         acumulado: acumulado.value ? 1 : null,
         agrupar_tercero: agruparTercero.value ? 1 : null,
         tercero_id: tercero.value?.id || null,
-        linea: props.filtros.linea !== 'todas' ? props.filtros.linea : null,
+        linea: props.filtros.linea,
     }, {
         preserveScroll: true, preserveState: true, replace: true,
         onStart: () => { cargando.value = true; },

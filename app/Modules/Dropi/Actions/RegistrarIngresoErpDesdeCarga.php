@@ -62,6 +62,22 @@ class RegistrarIngresoErpDesdeCarga
                         $r['filas'][$ref] = 'omitido: en el ERP se maneja por variantes (granular)';
                         continue;
                     }
+                    if ($motivo === MotivoCargaInventario::TrasladoGreatBaby) {
+                        // Mercancía que YA es de Great Baby: no se crea nada, sale
+                        // de su bodega y entra a la de Dropi al costo que tenía.
+                        if (! $producto) {
+                            throw new \RuntimeException("La referencia {$ref} no existe en Great Baby: un traslado sólo mueve mercancía que ya está en el ERP.");
+                        }
+                        $this->trasladar($carga, $ingreso, $motivo, $ubicacionId, $producto, $ref, $cantidad, $ci, $r);
+
+                        continue;
+                    }
+                    if (! $producto && $motivo === MotivoCargaInventario::Compra) {
+                        // 23-nov-2026, la clienta: primero se crea el producto (en
+                        // Dropi o en el ERP, y quedan conectados); la compra sólo
+                        // le pone inventario. Si no existe, no se inventa una ficha.
+                        throw new \RuntimeException("La referencia {$ref} no existe en el ERP: créela primero (en Dropi o en el ERP) y después registre la compra.");
+                    }
                     if (! $producto) {
                         $producto = Producto::create([
                             'referencia' => $ref,
@@ -136,5 +152,69 @@ class RegistrarIngresoErpDesdeCarga
 
             return ['carga_inventario' => $ci?->refresh(), 'resultado' => $r];
         });
+    }
+
+    /**
+     * Traslado desde Great Baby (23-nov-2026): salida de la bodega del ERP y
+     * entrada a la de Dropi, las dos al costo promedio que tenía en el origen.
+     * Sin stock suficiente en el origen no se mueve NADA (la excepción deshace
+     * la transacción entera y no se manda nada a Dropi).
+     */
+    private function trasladar(Carga $carga, array $ingreso, MotivoCargaInventario $motivo, int $destinoId, Producto $producto, string $ref, int $cantidad, ?CargaInventario &$ci, array &$r): void
+    {
+        $origenId = (int) ($ingreso['origen_ubicacion_id'] ?? 0);
+        $marker = "{$carga->numero} · Traslado desde Great Baby · ref {$ref}";
+        $yaEsta = InventarioMovimiento::query()
+            ->where('producto_id', $producto->id)->whereNull('variante_id')
+            ->where('notas', $marker)->exists();
+        if ($yaEsta) {
+            $r['ya_estaban']++;
+            $r['filas'][$ref] = 'ya estaba trasladado';
+
+            return;
+        }
+
+        $disponible = app(\App\Modules\Inventario\Services\StockService::class)->saldoDisponibleProducto($producto->id, $origenId);
+        if ($disponible < $cantidad) {
+            $bodega = \App\Modules\Dropi\Models\InventarioUbicacion::whereKey($origenId)->value('nombre') ?? "#{$origenId}";
+            throw new \RuntimeException("No alcanza el stock de {$ref} en {$bodega}: hay {$disponible} y el traslado pide {$cantidad}.");
+        }
+
+        $costo = \App\Modules\Inventario\Support\CostoPromedio::porUbicacion(
+            [['variante_id' => null, 'producto_id' => $producto->id]], $origenId,
+        )[\App\Modules\Inventario\Support\CostoPromedio::clave(null, $producto->id)] ?? null;
+        $costo = $costo && $costo > 0 ? (float) $costo : (float) ($producto->precio_proveedor ?: 0);
+
+        $ci ??= RegistrarCargaInventario::abrir([
+            'motivo' => $motivo,
+            'observacion' => $ingreso['observacion'],
+            'soporte' => $ingreso['soporte'] ?? null,
+            'tercero_id' => null,
+            'ubicacion_id' => $destinoId,
+            'archivo_nombre' => $carga->archivo_nombre,
+            'canal' => 'dropi',
+            'user_id' => $carga->user_id,
+        ]);
+
+        foreach ([[$origenId, 'traslado_salida', -$cantidad], [$destinoId, 'traslado_entrada', $cantidad]] as [$ubic, $tipo, $cant]) {
+            InventarioMovimiento::create([
+                'producto_id' => $producto->id,
+                'variante_id' => null,
+                'ubicacion_id' => $ubic,
+                'tipo' => $tipo,
+                'cantidad' => $cant,
+                'costo_unit' => $costo,
+                'notas' => $marker,
+                'referencia_tipo' => CargaInventario::class,
+                'referencia_id' => $ci->id,
+                'user_id' => $carga->user_id,
+            ]);
+        }
+        $r['movimientos']++;
+        $r['actualizados']++;
+        if ($costo <= 0) {
+            $r['sin_costo']++;
+        }
+        $r['filas'][$ref] = 'trasladado de Great Baby'.($costo <= 0 ? ' (sin costo: no suma al asiento)' : '');
     }
 }

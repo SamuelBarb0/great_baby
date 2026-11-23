@@ -87,15 +87,9 @@ class AdminPanelProvider extends PanelProvider
                     ->group('Productos')
                     ->sort(5)
                     ->visible(fn (): bool => \App\Auth\Permisos::puede(auth()->user(), 'dropi_productos')),
-                // El catálogo del ERP, para quien no tiene cuenta en Dropi
-                //   (reunión del 19-nov-2026). Es el de la app, no el
-                //   ProductoResource de Filament, que sigue oculto.
-                NavigationItem::make('Catálogo de productos')
-                    ->url('/app/catalogo/productos')
-                    ->icon('heroicon-o-book-open')
-                    ->group('Productos')
-                    ->sort(6)
-                    ->visible(fn (): bool => \App\Auth\Permisos::puede(auth()->user(), 'productos')),
+                // El «Catálogo de productos» ya no va al ERP (/app/catalogo):
+                //   es la página CatalogoProductosDropi, dentro de este panel
+                //   (23-nov-2026, «que no se me vaya al ERP»).
                 // La entrega a la transportadora: todas las guías se escanean
                 //   en Dropi (reunión del 19-nov-2026). Solo abre Dropi, en
                 //   pestaña aparte con la sesión de Dropi de la persona.

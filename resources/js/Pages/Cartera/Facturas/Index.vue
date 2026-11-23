@@ -178,7 +178,7 @@ const abrirWhatsApp = (tel, nombre, numero, saldo) => {
                 <div>
                     <label class="text-xs font-semibold text-surface-500">Línea de negocio</label>
                     <select v-model="linea" class="input mt-1">
-                        <option value="todas">Todas</option>
+                        <option value="todas">Consolidado (Great Baby + Dropi)</option>
                         <option v-for="l in opciones.lineas" :key="l.valor" :value="l.valor">{{ l.label }}</option>
                     </select>
                 </div>

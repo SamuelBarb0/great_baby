@@ -52,6 +52,8 @@ class Contacto extends Model implements AuditableContract, AuthenticatableContra
         // campo no existe en el form para un Vendedor) o el "claim" del primer
         // pedido. Ningún endpoint hace `update($request->all())` sobre Contacto.
         'vendedor_id',
+        // Dropi va aparte (23-nov-2026): en qué lado se usa el tercero.
+        'en_erp', 'en_dropi',
         // password, portal_habilitado, reset_token, reset_token_at INTENCIONALMENTE OMITIDOS.
     ];
 
@@ -75,6 +77,8 @@ class Contacto extends Model implements AuditableContract, AuthenticatableContra
         'es_proveedor' => 'boolean',
         'es_empleado' => 'boolean',
         'es_vendedor_dropi' => 'boolean',
+        'en_erp' => 'boolean',
+        'en_dropi' => 'boolean',
         'activo' => 'boolean',
         'retenciones_default' => 'array',
         'portal_habilitado' => 'boolean',
@@ -82,6 +86,18 @@ class Contacto extends Model implements AuditableContract, AuthenticatableContra
         'reset_token_at' => 'datetime',
         'password' => 'hashed',
     ];
+
+    /** Los terceros de Dropi (/admin). */
+    public function scopeDeDropi($q)
+    {
+        return $q->where('en_dropi', true);
+    }
+
+    /** Los terceros del ERP (/app): todo lo que no es sólo de Dropi. */
+    public function scopeDelErp($q)
+    {
+        return $q->where('en_erp', true);
+    }
 
     public function listaPrecios(): BelongsTo
     {

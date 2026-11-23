@@ -210,7 +210,7 @@ class ComprasGestionController extends Controller implements HasMiddleware
 
         return Inertia::render('Compras/OC/Nueva', [
             // COMP-B10 · incluir numero_documento para búsqueda por NIT en el autocomplete.
-            'proveedores' => \App\Models\Contacto::where('es_proveedor', true)->where('activo', true)
+            'proveedores' => \App\Models\Contacto::delErp()->where('es_proveedor', true)->where('activo', true)
                 ->orderBy('nombre_completo')->limit(500)->get(['id', 'nombre_completo', 'razon_social', 'numero_documento'])
                 ->map(fn ($c) => [
                     'id' => $c->id,

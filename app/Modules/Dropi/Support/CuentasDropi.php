@@ -69,9 +69,12 @@ class CuentasDropi
      */
     public static function contrapartidaCarga(\App\Modules\Inventario\Enums\MotivoCargaInventario $motivo): string
     {
-        return $motivo === \App\Modules\Inventario\Enums\MotivoCargaInventario::Compra
-            ? (string) setting('contable.cta_dropi_proveedores')
-            : (string) setting('contable.cta_dropi_carga_'.$motivo->value);
+        return match ($motivo) {
+            \App\Modules\Inventario\Enums\MotivoCargaInventario::Compra => (string) setting('contable.cta_dropi_proveedores'),
+            // De Great Baby a Dropi: la misma empresa, libros aparte.
+            \App\Modules\Inventario\Enums\MotivoCargaInventario::TrasladoGreatBaby => (string) setting('contable.cta_dropi_cuenta_interna'),
+            default => (string) setting('contable.cta_dropi_carga_'.$motivo->value),
+        };
     }
 
     /** El producto de una línea que trae producto y/o variante. */

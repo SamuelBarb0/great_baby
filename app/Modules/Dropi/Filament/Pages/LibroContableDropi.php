@@ -122,7 +122,7 @@ class LibroContableDropi extends PaginaTablaDropi
         return match ($m->origen_type) {
             DropiWalletMovimiento::class => DropiWalletMovimientoResource::urlDelMovimiento((int) $m->origen_id),
             PagoVenta::class => ($f = PagoVenta::withTrashed()->whereKey($m->origen_id)->value('factura_id'))
-                ? '/app/facturas/'.$f : null,
+                ? VerFacturaDropi::urlDe((int) $f) : null,
             default => null,
         };
     }

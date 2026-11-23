@@ -31,6 +31,15 @@ use Lorisleiva\Actions\Concerns\AsAction;
  * mismo total); stock 0 y sin costo. El stock y el costo los pone bodega: el
  * kardex del ERP es la verdad, y copiar el de Dropi lo entraría a $0. Por eso
  * cada producto creado deja un aviso en la campana.
+ *
+ * ── 23-nov-2026 · la clienta decide (regla `dropi.crear_productos_nuevos`) ──
+ *
+ * «Cuando se crea el producto, sea en el ERP o en Dropi, que queden
+ * conectados». Con la regla prendida, el automático crea TODOS los «nuevo»
+ * (tengan o no pedidos); apagada, sólo los que frenan pedidos, como antes. Y
+ * en «Vincular con el ERP» se puede hacer a mano: uno por uno (`crearUno`) o
+ * todos los «nuevo» de una vez (`handle(todos: true)`). Lo que se parece a algo
+ * del ERP («revisar») nunca se crea solo.
  */
 class CrearProductosNuevosDropi
 {
@@ -46,13 +55,16 @@ class CrearProductosNuevosDropi
     /**
      * @return array{creados: list<array{producto_id: ?int, referencia: string, nombre: string, llaves: list<string>, pedidos_liberados: int}>, releido: bool, errores: list<string>}
      */
-    public function handle(bool $simular = false): array
+    public function handle(bool $simular = false, ?bool $todos = null): array
     {
+        $todos ??= self::todos();
         $out = ['creados' => [], 'releido' => false, 'errores' => []];
 
         // Un producto recién creado en Dropi no está en la foto hasta que se
         // relee: su llave aparece «fuera del catálogo». Se relee (con tope).
-        if (! $simular && $this->faltanEnFoto() && Cache::add(self::CACHE_RELECTURA, true, now()->addMinutes(self::RELEER_CADA_MIN))) {
+        // Con «todos» también sin pedidos: el producto que bodega crea hoy en
+        // Dropi tiene que llegar al ERP aunque nadie lo haya pedido.
+        if (! $simular && ($todos || $this->faltanEnFoto()) && Cache::add(self::CACHE_RELECTURA, true, now()->addMinutes(self::RELEER_CADA_MIN))) {
             try {
                 $this->catalogo->actualizar();
                 $out['releido'] = true;
@@ -61,7 +73,7 @@ class CrearProductosNuevosDropi
             }
         }
 
-        foreach ($this->porCrear() as $grupo) {
+        foreach ($this->porCrear($todos) as $grupo) {
             if ($simular) {
                 $out['creados'][] = ['producto_id' => null] + $grupo + ['pedidos_liberados' => 0];
 
@@ -83,6 +95,31 @@ class CrearProductosNuevosDropi
         return $out;
     }
 
+    /** ¿El automático crea todos los «nuevo», o sólo los que frenan pedidos? */
+    public static function todos(): bool
+    {
+        return (bool) setting('dropi.crear_productos_nuevos');
+    }
+
+    /**
+     * «Crear en el ERP» de una fila de Vincular: el producto de Dropi entero
+     * (todas sus variaciones), tenga o no pedidos. Sólo si todo él es «nuevo».
+     *
+     * @return array{producto_id: ?int, referencia: string, nombre: string, llaves: list<string>, pedidos_liberados: int}
+     */
+    public function crearUno(int $dropiId): array
+    {
+        $grupo = collect($this->porCrear(true))->firstWhere('dropi_id', $dropiId);
+        if (! $grupo) {
+            throw new \DomainException('Este producto ya no está «nuevo»: ya se vinculó o se parece a uno del ERP. Vincúlalo a mano.');
+        }
+
+        $r = $this->crear($grupo);
+        Cache::forget(CatalogoDropi::CACHE_BADGE);
+
+        return $r;
+    }
+
     /** ¿Hay pedidos esperando una llave que la foto no tiene? */
     private function faltanEnFoto(): bool
     {
@@ -96,7 +133,7 @@ class CrearProductosNuevosDropi
      *
      * @return list<array{dropi_id: int, referencia: string, nombre: string, descripcion: ?string, llaves: list<string>}>
      */
-    public function porCrear(): array
+    public function porCrear(bool $todos = false): array
     {
         $foto = collect($this->catalogo->foto()['productos'] ?? [])->keyBy('id');
 
@@ -108,7 +145,7 @@ class CrearProductosNuevosDropi
             // alguna variación ya está vinculada o en «revisar», el producto ya
             // tiene algo en el ERP: no se crea otra ficha, lo decide una persona.
             ->filter(fn ($filas) => $filas->every(fn ($f) => $f['estado'] === 'nuevo')
-                && $filas->contains(fn ($f) => $f['pedidos_esperando'] > 0))
+                && ($todos || $filas->contains(fn ($f) => $f['pedidos_esperando'] > 0)))
             ->map(function ($filas, $id) use ($foto) {
                 $p = $foto->get((int) $id) ?? [];
 
@@ -177,7 +214,7 @@ class CrearProductosNuevosDropi
                 'user_id' => $userId,
                 'tipo' => 'dropi_producto_creado',
                 'titulo' => "Se creó «{$p->nombre}» desde Dropi",
-                'mensaje' => "Llegó en pedidos y no estaba en el ERP: quedó con la referencia {$p->referencia} y vinculado. Falta cargar su stock y su costo.",
+                'mensaje' => "Estaba en Dropi y no en el ERP: quedó con la referencia {$p->referencia} y vinculado. El inventario y el costo entran con la compra.",
                 'url' => "/app/catalogo/productos/{$p->id}",
                 'color' => 'warning',
                 'icono' => 'heroicon-o-plus-circle',

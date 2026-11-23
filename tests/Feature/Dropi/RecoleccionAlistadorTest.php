@@ -139,16 +139,17 @@ it('la lista de pedidos se separa en pestañas por etapa, con «Todos» por defe
     expect($tabs['nuevos']->getBadge())->toEqual(1)->and($tabs['por_empacar']->getBadge())->toEqual(1)->and($tabs['empacados']->getBadge())->toEqual(0);
 });
 
-it('el panel Dropi enlaza al catálogo del ERP sólo para quien tiene el permiso de productos', function () {
-    $item = fn () => collect(Filament::getPanel('admin')->getNavigationItems())->first(fn ($i) => $i->getLabel() === 'Catálogo de productos');
+it('el catálogo se ve dentro del panel Dropi, sólo para quien tiene el permiso de productos', function () {
+    // 23-nov-2026: ya no es un enlace al catálogo del ERP («que no se me vaya al ERP»).
+    expect(collect(Filament::getPanel('admin')->getNavigationItems())->map(fn ($i) => $i->getUrl())->all())
+        ->not->toContain('/app/catalogo/productos');
 
     $this->actingAs($this->aracely);
-    expect($item())->not->toBeNull()
-        ->and($item()->getUrl())->toBe('/app/catalogo/productos')
-        ->and($item()->isVisible())->toBeTrue();
+    expect(App\Modules\Dropi\Filament\Pages\CatalogoProductosDropi::canAccess())->toBeTrue();
+    $this->get('/admin/catalogo-productos')->assertOk();
 
     $this->actingAs(User::factory()->create());
-    expect($item()->isVisible())->toBeFalse();
+    expect(App\Modules\Dropi\Filament\Pages\CatalogoProductosDropi::canAccess())->toBeFalse();
 });
 
 /** Una posición de venta en un rack del plano, con saldo de lo que se le pase. */

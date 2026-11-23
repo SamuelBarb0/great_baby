@@ -32,7 +32,7 @@ class GastosController extends Controller implements HasMiddleware
         $tipo = (string) $request->input('tipo', '');
         $estado = (string) $request->input('estado', '');
         // `?linea=dropi` · el panel de Dropi abre los gastos ya filtrados.
-        $ejes = FiltroEjes::de($request->input('linea'), null);
+        $ejes = FiltroEjes::de($request->input('linea', FiltroEjes::LINEA_ERP_POR_DEFECTO), null);
         $u = $request->user();
         // Re-audit M5 R2 SEG-B2 · esContable() unificado.
         /*

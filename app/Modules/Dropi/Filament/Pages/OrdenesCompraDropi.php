@@ -43,6 +43,50 @@ class OrdenesCompraDropi extends PaginaTablaDropi
             \Filament\Actions\Action::make('nueva')->label('Nueva OC')->icon('heroicon-o-plus')
                 ->visible(fn () => \App\Modules\Dropi\Filament\Support\ComprasDropi::puedeArmar(auth()->user()))
                 ->url(fn () => NuevaOrdenCompraDropi::getUrl()),
+            // Carga masiva (23-nov-2026): muchas compras de muchos proveedores.
+            \Filament\Actions\Action::make('importar')->label('Importar desde Excel')->icon('heroicon-o-arrow-up-tray')
+                ->color('gray')
+                ->visible(fn () => \App\Modules\Dropi\Filament\Support\ComprasDropi::puedeArmar(auth()->user()))
+                ->modalHeading('Importar órdenes de compra de Dropi')
+                ->modalDescription('Cada fila es un producto; las filas con la misma «referencia_oc» forman una orden. Quedan en borrador, como las de «Nueva OC». Una orden con una fila mala no se crea y se dice cuál fila falló.')
+                ->modalSubmitActionLabel('Importar')
+                ->schema([
+                    \Filament\Forms\Components\FileUpload::make('archivo')->label('Archivo (.xlsx)')
+                        ->acceptedFileTypes(['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/octet-stream'])
+                        ->disk('local')->directory('imports')->required(),
+                ])
+                ->action(function (array $data) {
+                    $rel = (string) ($data['archivo'] ?? '');
+                    $ruta = collect([storage_path('app/private/'.$rel), storage_path('app/'.$rel)])
+                        ->first(fn ($p) => $rel !== '' && is_file($p));
+                    if (! $ruta) {
+                        \Filament\Notifications\Notification::make()->title('No se encontró el archivo cargado.')->danger()->send();
+
+                        return;
+                    }
+                    try {
+                        $r = app(\App\Modules\Dropi\Services\ImportadorOrdenesCompraDropi::class)->importar($ruta);
+                    } finally {
+                        @unlink($ruta);
+                    }
+                    $cuerpo = $r['ok'] ? 'Creadas en borrador: '.implode(', ', $r['ordenes']).'.' : 'No se creó ninguna orden.';
+                    if ($r['errores']) {
+                        $cuerpo .= "\n\nNo se importaron:\n· ".implode("\n· ", array_slice($r['errores'], 0, 15))
+                            .(count($r['errores']) > 15 ? "\n· … y ".(count($r['errores']) - 15).' más.' : '');
+                    }
+                    \Filament\Notifications\Notification::make()
+                        ->title("{$r['ok']} orden(es) importada(s)".($r['errores'] ? ' · '.count($r['errores']).' con error' : ''))
+                        ->body($cuerpo)->color($r['errores'] ? ($r['ok'] ? 'warning' : 'danger') : 'success')
+                        ->persistent()->send();
+                }),
+            \Filament\Actions\Action::make('plantilla')->label('Plantilla')->icon('heroicon-o-arrow-down-tray')
+                ->color('gray')->link()
+                ->visible(fn () => \App\Modules\Dropi\Filament\Support\ComprasDropi::puedeArmar(auth()->user()))
+                ->action(fn () => response()->streamDownload(
+                    fn () => \App\Modules\Dropi\Services\ImportadorOrdenesCompraDropi::escribirPlantilla('php://output'),
+                    'plantilla-compras-dropi.xlsx',
+                    ['Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
+                )),
             ...parent::getHeaderActions(),
         ];
     }

@@ -38,7 +38,7 @@ class CuentasPorPagarController extends Controller implements HasMiddleware
     {
         // `?linea=dropi` · el panel de Dropi abre la hoja ya filtrada. Aquí el
         //   resumen sí cambia: es la deuda de esa línea.
-        $ejes = FiltroEjes::de($r->query('linea'), null);
+        $ejes = FiltroEjes::de($r->query('linea', FiltroEjes::LINEA_ERP_POR_DEFECTO), null);
         $filas = $servicio->pendientes($ejes);
 
         // Los filtros son los tres con los que se mira la hoja: todo, lo que

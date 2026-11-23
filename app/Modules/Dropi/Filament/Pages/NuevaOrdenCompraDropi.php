@@ -75,7 +75,7 @@ class NuevaOrdenCompraDropi extends Page implements HasForms
             Section::make('Datos de la orden')->schema([
                 Select::make('proveedor_id')->label('Proveedor')->required()
                     ->searchable()
-                    ->getSearchResultsUsing(fn (string $search) => Contacto::query()
+                    ->getSearchResultsUsing(fn (string $search) => Contacto::query()->deDropi()
                         ->where('es_proveedor', true)->where('activo', true)
                         ->where(fn ($q) => $q->where('nombre_completo', 'like', "%{$search}%")
                             ->orWhere('razon_social', 'like', "%{$search}%")
@@ -91,7 +91,7 @@ class NuevaOrdenCompraDropi extends Page implements HasForms
                         TextInput::make('email')->email()->maxLength(120),
                         TextInput::make('telefono')->maxLength(30),
                     ])
-                    ->createOptionUsing(fn (array $data) => RegistrarProveedor::run($data)['contacto']->id),
+                    ->createOptionUsing(fn (array $data) => \App\Modules\Dropi\Actions\RegistrarTerceroDropi::run($data + ['es_proveedor' => true])['contacto']->id),
                 Select::make('bodega_id')->label('Bodega a donde llega')->required()
                     ->options(fn () => ComprasDropi::bodegas())->searchable(),
                 DatePicker::make('fecha_esperada')->label('Fecha esperada'),

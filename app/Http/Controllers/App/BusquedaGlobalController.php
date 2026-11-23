@@ -72,7 +72,7 @@ class BusquedaGlobalController extends Controller implements HasMiddleware
 
         // Contactos
         if ($puedeContactos) {
-        foreach (Contacto::where('activo', true)->where(function ($w) use ($like) {
+        foreach (Contacto::delErp()->where('activo', true)->where(function ($w) use ($like) {
             $w->where('nombre_completo', 'like', $like)
                 ->orWhere('razon_social', 'like', $like)
                 ->orWhere('numero_documento', 'like', $like)
