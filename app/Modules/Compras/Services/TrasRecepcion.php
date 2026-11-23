@@ -34,6 +34,94 @@ class TrasRecepcion
      * para devolvérselo al proveedor. La mercancía quedaba contable y
      * físicamente trabada.
      */
+    /**
+     * Dónde cae lo averiado, SIN mezclar la mercancía de una marca con la de
+     * otra.
+     *
+     * ───────────────────────────────────────────────────────────────────────
+     * EL PROBLEMA
+     *
+     * Quien descarga clasifica línea por línea —«de estas 50, 30 a Great Baby
+     * y 20 a Dropi»— y esa decisión se respeta… mientras la línea llegue bien.
+     * En cuanto una llega averiada, `ubicacionNoVendible()` devuelve la PRIMERA
+     * ubicación de avería por id y el destino elegido se descarta.
+     *
+     * Resultado: la avería de Dropi y la de Great Baby terminan en el mismo
+     * estante, revueltas, y después nadie sabe a quién reclamarle qué. El área
+     * lo pidió por escrito el 20-nov-2026: «la mercancía averiada se gestiona
+     * de manera independiente para cada marca, manteniendo una separación
+     * física».
+     *
+     * ───────────────────────────────────────────────────────────────────────
+     * LA SOLUCIÓN
+     *
+     * El dato para separarlas YA estaba en la línea y se estaba tirando. La
+     * bodega razona con dos ejes: la OFICINA dice de quién es (10 Great Baby,
+     * 11 Dropi, 14 Exhibición) y el ALMACÉN dice en qué estado está (01
+     * principal, 02 averías leves). Así que la avería de una línea es el par
+     * (la oficina de su destino elegido, almacén de averías).
+     *
+     * Se pasa `esIngreso: false` a propósito. Esa bandera existe para impedir
+     * que alguien DECIDA descargar un contenedor entero directo a «averías
+     * leves», y por eso el almacén 02 no admite ingreso directo. Pero acá no
+     * lo está decidiendo una persona: lo está decidiendo el sistema porque la
+     * mercancía llegó rota, que es exactamente para lo que ese almacén existe.
+     *
+     * Si no se puede resolver el par —falta el catálogo, la línea no eligió
+     * destino, la bodega no tiene oficina— se cae al comportamiento de antes.
+     * Entre perder la separación por marca y no poder recibir un contenedor
+     * que ya está en el piso, se pierde la separación.
+     */
+    public function ubicacionDeAveria(
+        ?InventarioUbicacion $destinoElegido,
+        ?InventarioUbicacion $bodegaDeLaRecepcion = null,
+    ): InventarioUbicacion {
+        $oficina = $this->oficinaDe($destinoElegido) ?? $this->oficinaDe($bodegaDeLaRecepcion);
+
+        $almacenAverias = \App\Modules\Inventario\Models\Almacen::query()
+            ->where('codigo', self::ALMACEN_AVERIAS)
+            ->first();
+
+        if ($oficina && $almacenAverias) {
+            try {
+                return app(\App\Modules\Inventario\Support\UbicacionDelPar::class)
+                    ->resolver($oficina, $almacenAverias, esIngreso: false);
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning(
+                    'No se pudo resolver la avería por oficina; cae a la ubicación de avería general.',
+                    ['oficina' => $oficina->codigo, 'error' => $e->getMessage()],
+                );
+            }
+        }
+
+        return $this->ubicacionNoVendible($bodegaDeLaRecepcion);
+    }
+
+    /** El almacén donde vive lo averiado, por código del catálogo del área. */
+    private const ALMACEN_AVERIAS = '02';
+
+    /**
+     * La oficina de una ubicación.
+     *
+     * Un rack no lleva el par: lo hereda de la bodega de la que cuelga
+     * (`UbicacionDelPar::consultaDelPar` lo dice explícito). Así que si viene
+     * una posición, se sube a su sede antes de preguntar.
+     */
+    private function oficinaDe(?InventarioUbicacion $u): ?\App\Modules\Inventario\Models\Oficina
+    {
+        if (! $u) {
+            return null;
+        }
+
+        $conPar = $u->oficina_id
+            ? $u
+            : ($u->bodega_id ? InventarioUbicacion::find($u->bodega_id) : null);
+
+        return $conPar?->oficina_id
+            ? \App\Modules\Inventario\Models\Oficina::find($conPar->oficina_id)
+            : null;
+    }
+
     public function ubicacionNoVendible(?InventarioUbicacion $bodega = null): InventarioUbicacion
     {
         $existente = InventarioUbicacion::query()

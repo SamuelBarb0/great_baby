@@ -126,6 +126,28 @@ class Reglas
 
         'inventario.meses_entre_conteos' => ['grupo' => 'logistica', 'tipo' => 'int', 'valor' => 6, 'etiqueta' => 'Meses entre tomas físicas', 'descripcion' => 'Pasados estos meses sin una toma cerrada, la bodega sale avisada por la campana.'],
         /*
+         * El conteo cíclico: un pedacito cada día en vez de parar la bodega.
+         *
+         * Una toma física de la bodega entera son 436 posiciones y nadie la
+         * termina nunca, así que en la práctica no se contaba. Contando unas
+         * pocas posiciones al día la bodega se recorre completa sola, sin
+         * cerrar, y las diferencias se ven cuando todavía se pueden explicar.
+         *
+         * Cuántas al día lo decide el área, no el código: depende de cuánta
+         * gente hay esa semana.
+         */
+        'inventario.posiciones_por_conteo' => ['grupo' => 'logistica', 'tipo' => 'int', 'valor' => 10, 'etiqueta' => 'Posiciones a contar por día', 'descripcion' => 'Cuántas posiciones manda a contar el conteo cíclico cada vez que corre. Con 10 al día, las 436 posiciones de la bodega se recorren enteras en unos dos meses. Sólo se mandan posiciones con saldo: contar un estante vacío no dice nada.'],
+        /*
+         * Nace APAGADA, como la de cerrar la propia toma.
+         *
+         * El comando está agendado todos los días, pero crear conteos solos es
+         * algo que el área tiene que querer: aparecen tomas en la pantalla que
+         * alguien tiene que contar y cerrar, y si nadie las trabaja se acumulan
+         * y bloquean esos estantes para cualquier otro conteo. Se enciende el
+         * día que el área decida arrancar, desde Reglas y sin tocar código.
+         */
+        'inventario.conteo_ciclico_activo' => ['grupo' => 'logistica', 'tipo' => 'bool', 'valor' => '0', 'etiqueta' => 'Conteo cíclico automático', 'descripcion' => 'Encendida, cada día se arma sola una tanda de conteo con unas pocas posiciones de la zona que lleve más tiempo sin contarse, sin cerrar la bodega. Apagada, el conteo cíclico sólo corre cuando alguien lo pide a mano. Las tomas quedan en borrador en Inventario · Conteos: si nadie las trabaja, se acumulan.'],
+        /*
          * La casilla que el código ya leía y que nadie podía encender.
          *
          * `CerrarTomaFisica` consulta `inventario.permitir_cerrar_propia_toma`
@@ -146,7 +168,43 @@ class Reglas
         // pedido los dice todavía.
         'logistica.contacto_sra_tania' => ['grupo' => 'logistica', 'tipo' => 'int', 'valor' => 0, 'etiqueta' => 'Contacto de la señora Tania', 'descripcion' => 'Sus pedidos se alistan PRIMEROS, antes que cualquier otro. Se pone el id del contacto. 0 = sin configurar, y entonces ese escalón no aparta a nadie.'],
         'logistica.area_metropolitana' => ['grupo' => 'logistica', 'tipo' => 'json', 'valor' => '["bucaramanga","giron","girón","floridablanca","piedecuesta"]', 'etiqueta' => 'Ciudades del área metropolitana', 'descripcion' => 'Los pedidos de contado de estas ciudades se alistan antes que los de contado nacionales. Se comparan sin mayúsculas; conviene poner la ciudad con y sin tilde.'],
-        'logistica.rastreo_urls' => ['grupo' => 'logistica', 'tipo' => 'json', 'valor' => '{"SERVIENTREGA":"https://www.servientrega.com/wps/portal/rastreo-envio?guia={guia}","INTERRAPIDISIMO":"https://www.interrapidisimo.com/sigue-tu-envio/?guia={guia}","COORDINADORA":"https://www.coordinadora.com/portafolio-de-servicios/rastreo-de-guia/?guia={guia}","ENVIA":"https://envia.co/rastreo?guia={guia}"}', 'etiqueta' => 'Enlaces de rastreo por transportadora', 'descripcion' => 'JSON {"TRANSPORTADORA":"url con {guia}"}. El nombre se compara sin tildes ni mayúsculas.'],
+        /*
+         * Las transportadoras con las que se trabaja, dichas por el área el
+         * 20-nov-2026: Estelar, Exprecar, Veloenvíos, Servientrega e
+         * Interrapidísimo.
+         *
+         * Existe para que el nombre se ELIJA y no se teclee. Era texto libre,
+         * así que la misma empresa entraba como «Servientrega», «SERVIENTREGA»
+         * y «servientrega s.a.», y con eso no se puede responder la pregunta
+         * que el área sí quiere responder: cuál se demora más. `logistica.
+         * dias_sin_entregar_alerta` mide los días, pero agrupar por un texto
+         * que cada quien escribe distinto no agrupa nada.
+         *
+         * Se deja como regla y no como tabla porque cambia al ritmo al que el
+         * área cambia de transportadora, y así lo cambian ellos en /app/reglas
+         * sin esperar un despliegue.
+         */
+        'logistica.transportadoras' => ['grupo' => 'logistica', 'tipo' => 'json', 'valor' => '["ESTELAR","EXPRECAR","VELOENVIOS","SERVIENTREGA","INTERRAPIDISIMO"]', 'etiqueta' => 'Transportadoras con las que se despacha', 'descripcion' => 'La lista que se ofrece al despachar. Se escriben en MAYÚSCULAS y sin tildes, igual que las llaves de los enlaces de rastreo. Si hace falta una que no está, se agrega acá.'],
+        /*
+         * Enlaces de rastreo. Las tres que el área nombró y no tienen enlace
+         * —Estelar, Exprecar y Veloenvíos— quedan con la cadena VACÍA a
+         * propósito, no afuera.
+         *
+         * Se buscaron sus páginas de rastreo y no tienen una pública. Inventar
+         * una URL sería peor que no tenerla: el enlace saldría en pantalla y
+         * llevaría a una página muerta, y quien lo pulse va a creer que el
+         * sistema está roto en vez de entender que esa transportadora no
+         * ofrece rastreo en línea.
+         *
+         * Vacías, aparecen en /app/reglas listas para llenar el día que el
+         * área consiga el enlace, y `urlDeRastreo()` las trata como «sin
+         * enlace», que es la verdad.
+         *
+         * Coordinadora y Envía se quedan aunque el área no las nombró: pueden
+         * tener guías viejas en el sistema y quitarles el enlace no le hace
+         * bien a nadie.
+         */
+        'logistica.rastreo_urls' => ['grupo' => 'logistica', 'tipo' => 'json', 'valor' => '{"SERVIENTREGA":"https://www.servientrega.com/wps/portal/rastreo-envio?guia={guia}","INTERRAPIDISIMO":"https://www.interrapidisimo.com/sigue-tu-envio/?guia={guia}","ESTELAR":"","EXPRECAR":"","VELOENVIOS":"","COORDINADORA":"https://www.coordinadora.com/portafolio-de-servicios/rastreo-de-guia/?guia={guia}","ENVIA":"https://envia.co/rastreo?guia={guia}"}', 'etiqueta' => 'Enlaces de rastreo por transportadora', 'descripcion' => 'JSON {"TRANSPORTADORA":"url con {guia}"}. El nombre se compara sin tildes ni mayúsculas. Dejar la url VACÍA si esa transportadora no tiene rastreo en línea: entonces no se pinta el enlace.'],
         // ---- La bodega por dentro (levantamiento del area, 17-nov-2026) ----
         //
         // El reparto de racks por zona NO va clavado en el código: el área

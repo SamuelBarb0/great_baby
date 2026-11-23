@@ -59,8 +59,18 @@ class SeguimientoGuiasController extends Controller implements HasMiddleware
              * la ventana. En una pantalla cuyo filtro por defecto es «pide
              * atención», lo que más atención pide no puede ser lo que no entra.
              */
-            ->orderByRaw('despachado_at IS NOT NULL')
-            ->orderBy('despachado_at')
+            /*
+             * Se ordena por la salida REAL, no por `despachado_at`.
+             *
+             * Con el despacho parcial esas dos dejaron de ser lo mismo: un
+             * pedido cuya primera caja ya va en camino tiene `despachado_at` en
+             * NULL hasta que salga el resto. Ordenando por esa columna, una
+             * guía que lleva ocho días en la calle se mezclaba con las que no
+             * han salido, y la pantalla ordenaba por una fecha mientras la
+             * columna «Días» mostraba otra.
+             */
+            ->orderByRaw('COALESCE(primer_despacho_at, despachado_at) IS NOT NULL')
+            ->orderByRaw('COALESCE(primer_despacho_at, despachado_at)')
             ->limit(400)
             ->get();
 
@@ -72,7 +82,17 @@ class SeguimientoGuiasController extends Controller implements HasMiddleware
             'total' => (float) $p->total,
             'transportadora' => $p->transportadora,
             'guia' => $p->guia_transportadora,
-            'despachado' => $p->despachado_at?->toDateString(),
+            // La fecha que se muestra es la de la salida real: en un parcial,
+            // la de la primera caja. `despachado_at` sigue vacío hasta que salga
+            // todo, y esa columna decía «—» sobre una guía que ya iba en camino.
+            'despachado' => $p->salidaDeBodega()?->toDateString(),
+            // Y si todavía falta mercancía, se dice APARTE del estado de la guía.
+            // Son dos cosas distintas: la guía puede ir a tiempo, tardía o no
+            // entregada, y además faltar el resto. Meterlo como un estado más
+            // apagaría la alarma: un parcial despachado hace treinta días
+            // dejaría de ser «no entregada» y se caería de «Piden atención»,
+            // justo la caja que hay que reclamar.
+            'resto_pendiente' => (bool) $p->resto_pendiente,
             'entregado' => $p->entregado_at?->toDateString(),
             'entregado_por' => $p->entregadoPor?->name,
             'entrega_nota' => $p->entrega_nota,
@@ -100,7 +120,21 @@ class SeguimientoGuiasController extends Controller implements HasMiddleware
 
         PedidoCliente::query()
             ->whereIn('estado', ['facturado', 'despachado'])
-            ->select(['id', 'estado', 'despachado_at', 'entregado_at'])
+            /*
+             * `primer_despacho_at` VA ACÁ, y olvidarla es el error más
+             * traicionero de esta pantalla.
+             *
+             * Las FILAS de arriba no tienen `select()`: traen la fila entera,
+             * así que leen cualquier columna nueva sin que nadie la agregue.
+             * Este conteo sí recorta. Y como el proyecto no activa
+             * `Model::shouldBeStrict()`, un atributo que no se trajo no explota:
+             * vale null. Así que `estadoGuia()` daría una cosa en las filas y
+             * otra en los contadores, y la pantalla mostraría nueve guías bajo
+             * una pestaña que dice siete, en silencio y para siempre.
+             *
+             * `id` es obligatorio aparte: `chunkById` ordena por él.
+             */
+            ->select(['id', 'estado', 'despachado_at', 'primer_despacho_at', 'entregado_at'])
             ->chunkById(1000, function ($tanda) use (&$conteo) {
                 foreach ($tanda as $p) {
                     $conteo[$p->estadoGuia()->value]++;
@@ -137,7 +171,17 @@ class SeguimientoGuiasController extends Controller implements HasMiddleware
             'fecha' => ['nullable', 'date', 'before_or_equal:today'],
         ]);
 
-        abort_if($pedido->despachado_at === null, 422,
+        /*
+         * Basta con que haya salido ALGO.
+         *
+         * Miraba `despachado_at`, que en un despacho parcial se deja en NULL
+         * hasta que salga todo. Resultado: la caja que SÍ salió y SÍ llegó no
+         * se podía marcar entregada, y quedaba acumulando días como si la
+         * transportadora la hubiera perdido.
+         */
+        $salida = $pedido->salidaDeBodega();
+
+        abort_if($salida === null, 422,
             'Ese pedido todavía no ha salido de bodega.');
         abort_if($pedido->entregado_at !== null, 422,
             'Ese pedido ya estaba marcado como entregado.');
@@ -151,11 +195,20 @@ class SeguimientoGuiasController extends Controller implements HasMiddleware
          * días en tránsito salen negativos y se le restan al promedio de la
          * transportadora, que es el número con el que se la reclama.
          */
-        $entregadoEn = $data['fecha'] ? \Carbon\Carbon::parse($data['fecha']) : now();
+        /*
+         * El `??` importa: `validate()` NO devuelve las claves `nullable` que
+         * no vinieron en la petición, sólo las que llegaron. La pantalla manda
+         * siempre `fecha: null` explícito, así que acá nunca se notó — pero
+         * cualquier otro llamador que omita el campo se lleva un 500 con
+         * «Undefined array key "fecha"» en vez de la fecha de hoy.
+         */
+        $entregadoEn = ! empty($data['fecha']) ? \Carbon\Carbon::parse($data['fecha']) : now();
 
-        abort_if($entregadoEn->lt($pedido->despachado_at->copy()->startOfDay()), 422, sprintf(
+        // Contra la salida real, igual que el candado de arriba. Si se aflojara
+        // uno y no el otro, esta línea reventaría con «copy() on null».
+        abort_if($entregadoEn->lt($salida->copy()->startOfDay()), 422, sprintf(
             'La entrega no puede ser anterior al despacho. El pedido salió de bodega el %s.',
-            $pedido->despachado_at->format('Y-m-d')
+            $salida->format('Y-m-d')
         ));
 
         $pedido->update([

@@ -32,6 +32,18 @@ class Traslado extends Model implements AuditableContract
     ];
 
     /** MKT-5 · cómo puede venir la mercancía al entregarla o devolverla. */
+    /**
+     * El motivo de un surtido desde el respaldo de Exhibición.
+     *
+     * Es el único traslado que un alistador puede hacer sin el permiso
+     * `traslados`, y `EjecutarTraslado::esSurtidoDelRespaldo()` comprueba los
+     * dos extremos antes de dejarlo pasar: que el origen sea del almacén
+     * marcado como respaldo y que el destino sea una bodega que esa persona ya
+     * ve. El motivo por sí solo no autoriza nada —lo escribe quien crea el
+     * traslado—, pero deja la operación identificada en la bitácora.
+     */
+    public const MOTIVO_SURTIDO = 'surtido_respaldo';
+
     public const ESTADOS_MERCANCIA = [
         'completo' => 'Completa y en buen estado',
         'incompleto' => 'Incompleta',

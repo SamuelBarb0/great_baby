@@ -40,18 +40,41 @@ class DescontarStockPorDespacho
      *
      * @return int cuántas líneas se descontaron
      */
-    public function ejecutar(PedidoCliente $pedido, ?int $userId = null): int
+    /**
+     * Baja del kardex lo que sale.
+     *
+     * @param  array<int, float>|null  $envio  Cuánto sale de cada línea EN ESTE
+     *        despacho, por id de ítem. Null = sale lo que diga la línea, que es
+     *        como funcionó siempre.
+     *
+     *        Se usa en el despacho parcial con resto pendiente: ahí el mismo
+     *        pedido sale en dos viajes, y cada viaje descuenta LO SUYO. Sin
+     *        esto, el segundo viaje no descontaba nada —la guarda de abajo veía
+     *        que el pedido ya tenía egreso y se iba— y la mercancía del segundo
+     *        envío salía de la bodega sin bajar del sistema.
+     */
+    public function ejecutar(PedidoCliente $pedido, ?int $userId = null, ?array $envio = null): int
     {
-        // Idempotencia: si el pedido ya tiene su egreso, no duplicar. El despacho
-        // ya se protege con `despachado_at`, pero esto cubre un reintento manual
-        // o un despacho corregido a mano.
-        $yaDescontado = InventarioMovimiento::query()
-            ->where('referencia_tipo', self::REFERENCIA_TIPO)
-            ->where('referencia_id', $pedido->id)
-            ->exists();
+        $this->envio = $envio;
 
-        if ($yaDescontado) {
-            return 0;
+        /*
+         * Idempotencia: si el pedido ya tiene su egreso, no duplicar. El
+         * despacho ya se protege con `despachado_at`, pero esto cubre un
+         * reintento manual o un despacho corregido a mano.
+         *
+         * NO aplica cuando se dice explícitamente qué sale en este envío: ahí
+         * quien llama ya decidió que esto es un viaje nuevo del mismo pedido, y
+         * la guarda lo confundiría con un reintento.
+         */
+        if ($envio === null) {
+            $yaDescontado = InventarioMovimiento::query()
+                ->where('referencia_tipo', self::REFERENCIA_TIPO)
+                ->where('referencia_id', $pedido->id)
+                ->exists();
+
+            if ($yaDescontado) {
+                return 0;
+            }
         }
 
         // Se cargan los productos por adelantado: el asiento los necesita para
@@ -136,7 +159,7 @@ class DescontarStockPorDespacho
             if (! $item->variante_id && ! $item->producto_id) {
                 continue;
             }
-            $cantidad = (int) ($item->cantidad ?? 0);
+            $cantidad = $this->aDespachar($item);
             if ($cantidad <= 0) {
                 continue;
             }
@@ -294,12 +317,51 @@ class DescontarStockPorDespacho
      *
      * @param  array<string, int>  $bodegas  clave `v:{id}`/`p:{id}` => ubicacion_id
      */
+    /**
+     * Cuánto sale de esta línea: lo despachado si alguien lo dijo, y si no, lo
+     * pedido.
+     *
+     * Hasta el 21-nov-2026 el despacho no manejaba cantidades: salía el pedido
+     * entero o no salía nada, y si la bodega no tenía todo, `exigirSaldo()`
+     * abortaba con el camión esperando. El área pidió poder despachar lo que
+     * hay («se autoriza el despacho de la mercancía disponible, sin esperar a
+     * completar la totalidad»), así que ahora cada línea puede salir con menos.
+     *
+     * El `??` es lo que hace que nada viejo cambie de significado: una línea
+     * que nunca se tocó sigue saliendo completa, y las que ya salieron tienen
+     * su `cantidad_despachada` igual a `cantidad` desde la migración.
+     *
+     * Nunca más de lo pedido: despachar de más no es un despacho parcial, es
+     * un error, y dejarlo pasar descontaría stock que nadie compró.
+     */
+    private function aDespachar(object $item): int
+    {
+        $pedida = (int) ($item->cantidad ?? 0);
+
+        // Un envío explícito manda sobre todo: es lo que sale AHORA, en este
+        // viaje, y puede ser menos de lo que la línea lleva acumulado.
+        if ($this->envio !== null) {
+            return max(0, min($pedida, (int) ($this->envio[$item->id] ?? 0)));
+        }
+
+        $despachada = $item->cantidad_despachada ?? null;
+
+        if ($despachada === null) {
+            return $pedida;
+        }
+
+        return max(0, min($pedida, (int) $despachada));
+    }
+
+    /** Lo que sale en ESTE viaje, por id de ítem. Null = lo que diga la línea. */
+    private ?array $envio = null;
+
     private function exigirSaldo(PedidoCliente $pedido, array $bodegas): void
     {
         $pedidas = [];
         foreach ($pedido->items as $item) {
             if (! $item->variante_id && ! $item->producto_id) continue;
-            $cantidad = (int) ($item->cantidad ?? 0);
+            $cantidad = $this->aDespachar($item);
             if ($cantidad <= 0) continue;
 
             $clave = CostoPromedio::clave($item->variante_id, $item->producto_id);

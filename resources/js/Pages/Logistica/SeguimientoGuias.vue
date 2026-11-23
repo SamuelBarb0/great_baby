@@ -137,6 +137,23 @@ const confirmarEntrega = () => {
                                 <span :class="['px-2 py-0.5 rounded text-xs font-bold', TONOS[g.color]]">
                                     {{ g.estado_label }}
                                 </span>
+                                <!--
+                                    «Falta resto» va APARTE del estado, no como
+                                    un estado más.
+
+                                    Son dos ejes: la guía que ya salió va a
+                                    tiempo, tardía o no entregada, y ADEMÁS puede
+                                    faltar mercancía. Si fuera un estado, un
+                                    parcial despachado hace treinta días dejaría
+                                    de ser «no entregada» y se caería de «Piden
+                                    atención» — se apagaría la alarma justo sobre
+                                    la caja que hay que reclamar.
+                                -->
+                                <span v-if="g.resto_pendiente"
+                                      class="ml-1 px-2 py-0.5 rounded text-xs font-bold bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200"
+                                      title="De este pedido falta mercancía por despachar">
+                                    falta resto
+                                </span>
                                 <div v-if="g.entregado" class="text-xs text-surface-500 mt-0.5">
                                     {{ g.entregado }} · {{ g.entrega_nota }}
                                 </div>

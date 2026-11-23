@@ -14,12 +14,30 @@ class PedidoClienteItem extends Model
     protected $fillable = [
         'pedido_id', 'variante_id', 'producto_id',
         'sku_snapshot', 'descripcion_snapshot',
-        'cantidad', 'precio_unitario', 'iva_porcentaje',
+        'cantidad', 'cantidad_despachada', 'precio_unitario', 'iva_porcentaje',
         'subtotal', 'iva_valor', 'total',
     ];
 
     protected $casts = [
         'cantidad' => 'integer',
+        /*
+         * CUÁNTO DE ESTA LÍNEA YA SALIÓ. Y EL NULL SE RESPETA.
+         *
+         * La columna nació con el despacho parcial y nadie la declaró acá.
+         * Funcionaba de casualidad: el único que escribe usa `forceFill`, que
+         * se salta el `$fillable`. Por cualquier otro camino —un seeder, un
+         * comando de corrección, un `update()`— el valor se descartaba EN
+         * SILENCIO y el parcial dejaba de cuadrar sin un solo error.
+         *
+         * El cast `integer` es a propósito y no un `default 0`: Laravel no
+         * castea los nulos, así que NULL sigue llegando como NULL. Eso importa
+         * porque NULL acá tiene dos significados opuestos según quién lea —
+         * «sale completo» para `DescontarStockPorDespacho`, cero para
+         * cualquier pantalla—, y es lo único que mantiene andando todo lo
+         * viejo que nunca se tocó. Un accessor que devolviera 0 dejaría de
+         * descontar stock a esos pedidos.
+         */
+        'cantidad_despachada' => 'integer',
         'precio_unitario' => 'decimal:2',
         'iva_porcentaje' => 'decimal:2',
         'subtotal' => 'decimal:2',

@@ -50,6 +50,25 @@ Schedule::command('cartera:cobrar')->dailyAt('09:00')->withoutOverlapping();
 Schedule::command('inventario:recordar-conteo')->weeklyOn(1, '07:00')->withoutOverlapping();
 
 /*
+ * El conteo del día: unas pocas posiciones, sin cerrar la bodega.
+ *
+ * El aviso de arriba dice qué bodega lleva mucho sin contarse; esto es lo que
+ * hace que no vuelva a pasar. Una toma física de la bodega entera son 436
+ * posiciones y nadie la termina, así que en la práctica no se contaba nunca.
+ * De a diez al día, la bodega se recorre completa en unos dos meses.
+ *
+ * A las 6:30, antes de que empiece el movimiento: una posición contada con
+ * despachos encima no dice nada.
+ *
+ * NACE APAGADO. El comando sale sin hacer nada mientras la regla
+ * `inventario.conteo_ciclico_activo` esté en cero, que es como viene. Se
+ * enciende desde Reglas el día que el área decida arrancar: antes de eso
+ * aparecerían tomas que nadie va a contar, y cada una bloquea su estante.
+ */
+Schedule::command('inventario:conteo-del-dia')
+    ->dailyAt('06:30')->timezone('America/Bogota')->withoutOverlapping();
+
+/*
  * Gestión Humana · recordatorio de períodos de prueba. Lunes temprano.
  *
  * Semanal y no diario: el plazo se mide en MESES, y con los días de

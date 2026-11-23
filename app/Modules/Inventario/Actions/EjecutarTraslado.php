@@ -3,6 +3,7 @@
 namespace App\Modules\Inventario\Actions;
 
 use App\Modules\Dropi\Models\InventarioMovimiento;
+use App\Modules\Dropi\Models\InventarioUbicacion;
 use App\Modules\Inventario\Enums\EstadoTraslado;
 use App\Modules\Inventario\Models\Traslado;
 use App\Modules\Inventario\Models\TrasladoItem;
@@ -437,6 +438,34 @@ class EjecutarTraslado
             return;
         }
 
+        /*
+         * SURTIDO DESDE EL RESPALDO · la excepción del alistador.
+         *
+         * La hoja de picking le dice, impreso: «si los racks no completan la
+         * cantidad, tome de EXHIBICIÓN y reporte el traslado. El pedido sale
+         * completo o no sale». Y el área lo confirmó por escrito el
+         * 20-nov-2026: «el alistador tiene autonomía para retirar mercancía de
+         * la Oficina 14 cuando sea necesario completar un pedido, sin requerir
+         * autorización previa».
+         *
+         * Pero `traslados` es de quien manda la bodega, no del alistador —eso
+         * también lo decidió el área—. Las dos cosas son ciertas porque son
+         * operaciones distintas: mover mercancía entre bodegas es una decisión
+         * de logística; sacar de Exhibición para completar un pedido que ya
+         * está en la mano es parte de alistar.
+         *
+         * Así que acá pasa SÓLO ese caso, y acotado a los dos extremos:
+         *   · el origen tiene que ser del almacén marcado como respaldo de
+         *     surtido en el catálogo (no un 14 escrito en el código);
+         *   · el destino tiene que ser una bodega que esta persona YA ve.
+         *
+         * Sin lo segundo, cualquiera con un pedido en la mano podría sacar
+         * mercancía de Exhibición hacia una bodega ajena.
+         */
+        if ($traslado->motivo === Traslado::MOTIVO_SURTIDO && $this->esSurtidoDelRespaldo($traslado, $u)) {
+            return;
+        }
+
         if (! \App\Auth\Permisos::puede($u, 'traslados')) {
             abort(403, 'No autorizado para operar traslados de inventario.');
         }
@@ -453,6 +482,41 @@ class EjecutarTraslado
         }
 
         // Gerente y demás roles no scoped por bodega ya pasaron el filtro Permisos::puede.
+    }
+
+    /**
+     * ¿Es de verdad un surtido desde el respaldo, hecho por alguien que opera
+     * la bodega de destino?
+     *
+     * No alcanza con que el motivo lo diga: el motivo lo escribe quien crea el
+     * traslado. Se comprueban los dos extremos contra la base.
+     */
+    private function esSurtidoDelRespaldo(Traslado $traslado, \App\Models\User $u): bool
+    {
+        $respaldo = \App\Modules\Inventario\Models\Oficina::respaldoDeSurtido();
+
+        if (! $respaldo) {
+            return false;
+        }
+
+        $origen = $traslado->origen ?: InventarioUbicacion::find($traslado->origen_id);
+
+        if (! $origen) {
+            return false;
+        }
+
+        // El origen puede ser una posición: la oficina vive en su sede.
+        $oficinaDelOrigen = $origen->oficina_id
+            ?: InventarioUbicacion::find($origen->bodega_id)?->oficina_id;
+
+        if ((int) $oficinaDelOrigen !== (int) $respaldo->id) {
+            return false;
+        }
+
+        // Y el destino tiene que ser una bodega que esta persona ya ve.
+        $suyas = array_map('intval', $u->bodegasQueVeIds());
+
+        return in_array((int) $traslado->destino_id, $suyas, true);
     }
 
     // C-F2 R2 · guardTemporalContraAgregados() REMOVIDO — Actions ahora soportan

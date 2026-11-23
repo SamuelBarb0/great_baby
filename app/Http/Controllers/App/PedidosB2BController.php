@@ -109,9 +109,18 @@ class PedidosB2BController extends Controller implements HasMiddleware
         // la de todos.
         $mios = $this->soloLosSuyos($request->user()) ? $request->user()->id : null;
 
+        // ¿Sólo los que salieron a medias y todavía deben mercancía? Va como
+        // filtro PROPIO y no como un estado más: el estado del pedido sigue
+        // siendo «facturado», y meterlo en el mismo selector rompería el
+        // conteo por estado y el orden de abajo.
+        $soloPendientes = $request->boolean('resto_pendiente');
+
         $pedidos = PedidoCliente::with(['contacto:id,nombre_completo,razon_social,email', 'lista:id,nombre'])
+            ->withSum('items as unidades_pedidas', 'cantidad')
+            ->withSum('items as unidades_despachadas', 'cantidad_despachada')
             ->when($mios, fn ($q) => $q->where('vendedor_id', $mios))
             ->when($estado, fn ($q) => $q->where('estado', $estado))
+            ->when($soloPendientes, fn ($q) => $q->where('resto_pendiente', true))
             // LOG-J3 · retenidos y nuevos (enviado) arriba porque son los que
             //   requieren una acción humana; luego por recencia. Si hay filtro
             //   específico, el orderByRaw no estorba (no cambia el resultado
@@ -130,6 +139,14 @@ class PedidosB2BController extends Controller implements HasMiddleware
             ->when($mios, fn ($q) => $q->where('vendedor_id', $mios))
             ->groupBy('estado')->pluck('total', 'estado')->all();
 
+        // Cuántos deben mercancía. Se cuenta por `resto_pendiente` y NO por
+        // `despacho_parcial`, que es pegajoso: un pedido que salió en dos
+        // viajes y ya se completó lo lleva en true para siempre, y aparecería
+        // acá como si le faltara algo.
+        $parcialesPendientes = PedidoCliente::where('resto_pendiente', true)
+            ->when($mios, fn ($q) => $q->where('vendedor_id', $mios))
+            ->count();
+
         return Inertia::render('PedidosB2B/Index', [
             'pedidos' => $pedidos->through(fn ($p) => [
                 'id' => $p->id,
@@ -141,9 +158,30 @@ class PedidosB2BController extends Controller implements HasMiddleware
                 'total' => (float) $p->total,
                 'fecha' => $p->created_at?->format('Y-m-d H:i'),
                 'facturado' => (bool) $p->factura_id,
+                /*
+                 * Un pedido que salió a medias se veía EXACTAMENTE igual que uno
+                 * que no ha salido: el mismo badge «FACTURADO». El estado no
+                 * alcanza para distinguirlos porque es el mismo a propósito —el
+                 * pedido vuelve a la cola— así que la diferencia tiene que ir
+                 * aparte.
+                 *
+                 * Las unidades se castean a (int) y el NULL se lee como 0: en
+                 * `cantidad_despachada` el NULL significa «sale completo» para
+                 * el descuento de stock, pero en una pantalla significa
+                 * «todavía no salió nada». Copiar aquel `??` diría «6 de 6 ya
+                 * salieron» sobre un pedido que no ha salido: la mentira
+                 * exactamente inversa a la que esto viene a arreglar.
+                 */
+                'resto_pendiente' => (bool) $p->resto_pendiente,
+                'unidades_pedidas' => (int) ($p->unidades_pedidas ?? 0),
+                'unidades_despachadas' => (int) ($p->unidades_despachadas ?? 0),
             ]),
             'conteos' => $conteos,
+            // Aparte de `conteos`, que es el GROUP BY por estado. Si entrara ahí
+            // se sumaría dos veces: un parcial ya se cuenta como «facturado».
+            'parciales_pendientes' => $parcialesPendientes,
             'estado_filtro' => $estado ?: null,
+            'solo_pendientes' => $soloPendientes,
         ]);
     }
 
@@ -160,6 +198,10 @@ class PedidosB2BController extends Controller implements HasMiddleware
             // Quién firmó la liberación de cartera y de qué bodega sale.
             'retencionLiberadaPor:id,name', 'entregadoPor:id,name',
             'ubicacionOrigen:id,codigo,nombre',
+            // Las cajas con sus guías. Hasta hoy esta tabla se escribía y no la
+            // leía NADIE: un pedido de tres cajas guardaba las tres guías y la
+            // pantalla sólo mostraba la primera.
+            'cajas:id,pedido_id,numero,viaje,guia,created_at',
         ])->findOrFail($pedido);
 
         /*
@@ -215,6 +257,37 @@ class PedidosB2BController extends Controller implements HasMiddleware
                 'despachado_at' => $p->despachado_at?->format('Y-m-d H:i'),
                 'guia_transportadora' => $p->guia_transportadora,
                 'transportadora' => $p->transportadora,
+                /*
+                 * DESPACHO PARCIAL · lo que la pantalla necesita para no mentir.
+                 *
+                 * Sin esto, un pedido que salió a medias se veía EXACTAMENTE
+                 * igual que uno que no ha salido: mismo estado, mismo botón, ni
+                 * la guía ni cuánto se llevó el transportador. Todo eso existía
+                 * sólo dentro del modal de despachar, así que quien abría el
+                 * pedido al día siguiente no tenía cómo saberlo.
+                 *
+                 * `despacho_parcial` es ACUMULATIVO: una vez que un pedido sale
+                 * a medias queda marcado para siempre, aunque después se
+                 * complete. Por eso la pantalla tiene que mirar las dos: la
+                 * marca dice «salió en partes» y `resto_pendiente` dice si
+                 * todavía falta algo.
+                 */
+                'despacho_parcial' => (bool) $p->despacho_parcial,
+                'resto_pendiente' => (bool) $p->resto_pendiente,
+                'despachado_por' => $p->despachadoPor?->name,
+                'cajas' => $p->cajas->map(fn ($c) => [
+                    'numero' => (int) $c->numero,
+                    // De qué envío salió. Con un solo viaje no se muestra —sería
+                    // ruido—; con dos es lo primero que se pregunta cuando el
+                    // cliente dice que le llegaron dos de tres.
+                    'viaje' => (int) $c->viaje,
+                    'guia' => $c->guia,
+                    'salio' => $c->created_at?->format('Y-m-d H:i'),
+                ])->values(),
+                // Cuántos envíos lleva el pedido. Si es 1, la pantalla no
+                // menciona viajes.
+                'viajes' => (int) ($p->cajas->max('viaje') ?: 0),
+                'primer_despacho_at' => $p->primer_despacho_at?->format('Y-m-d H:i'),
                 // LOG-J10 · línea de tiempo unificada del pedido · evita que
                 // Don Jorge tenga que ir a 4 módulos distintos. Cada hito trae
                 // actor, hora y observación. Mostramos SOLO los que ocurrieron.
@@ -341,14 +414,18 @@ class PedidosB2BController extends Controller implements HasMiddleware
                         'color' => 'emerald',
                         'detalle' => $p->novedad_resolucion ?: 'Liberado al empaque.',
                     ] : null,
-                    $p->despachado_at ? [
-                        'hito' => 'Pedido despachado',
-                        'actor' => $p->despachadoPor?->name ?? 'Logística',
-                        'at' => $p->despachado_at->format('Y-m-d H:i'),
-                        'icon' => '🚚',
-                        'color' => 'indigo',
-                        'detalle' => ($p->transportadora ? $p->transportadora.' · ' : '').'Guía '.$p->guia_transportadora,
-                    ] : null,
+                    /*
+                     * Un hito POR VIAJE, no uno solo.
+                     *
+                     * Colgaba de `despachado_at`, que en un despacho parcial se
+                     * deja en NULL hasta que salga todo: la historia del pedido
+                     * no registraba ninguna salida mientras faltara mercancía, y
+                     * al completarse mostraba un único «Pedido despachado» con
+                     * la guía del último viaje. La primera caja —la que el
+                     * cliente ya recibió y por la que llama— no existía en
+                     * ninguna parte del historial.
+                     */
+                    ...$this->hitosDeSalida($p),
                     /*
                      * Y la entrega cierra el ciclo.
                      *
@@ -376,6 +453,9 @@ class PedidosB2BController extends Controller implements HasMiddleware
                 'lista' => $p->lista?->nombre,
             ],
             'items' => $p->items->map(fn ($i) => [
+                // El id va porque el despacho parcial manda cuánto sale de
+                // CADA línea, y hay que poder decir de cuál.
+                'id' => $i->id,
                 'sku' => $i->sku_snapshot,
                 'desc' => $i->descripcion_snapshot,
                 'variante_id' => $i->variante_id,
@@ -383,6 +463,10 @@ class PedidosB2BController extends Controller implements HasMiddleware
                 'producto_id' => $i->producto_id,
                 'es_agregado' => $i->variante_id === null && $i->producto_id !== null,
                 'cantidad' => (int) $i->cantidad,
+                // Lo que ya salió, para que un segundo despacho ofrezca el
+                // resto y no vuelva a ofrecer todo.
+                'despachada' => (int) ($i->cantidad_despachada ?? 0),
+                'pendiente' => max(0, (int) $i->cantidad - (int) ($i->cantidad_despachada ?? 0)),
                 'precio' => (float) $i->precio_unitario,
                 'total' => (float) $i->total,
             ])->values(),
@@ -433,6 +517,29 @@ class PedidosB2BController extends Controller implements HasMiddleware
             'puede_cambiar_bodega' => $this->puedeAprobar($r->user())
                 && $p->despachado_at === null
                 && $p->estado !== 'rechazado',
+            /*
+             * Las transportadoras con las que se despacha, de la regla
+             * `logistica.transportadoras`.
+             *
+             * El campo era texto libre, así que la misma empresa entraba como
+             * «Servientrega», «SERVIENTREGA» y «servientrega s.a.». Con eso
+             * `urlDeRastreo()` no encontraba el enlace y, peor, no se podía
+             * responder cuál transportadora se demora más — que es justo para
+             * lo que existe `logistica.dias_sin_entregar_alerta`.
+             *
+             * Va la que el pedido YA tiene aunque no esté en la lista: si se
+             * despachó con una que el área dejó de usar, el `<select>` caería
+             * en vacío y al guardar le borraría la transportadora a un pedido
+             * que sí salió por ella.
+             */
+            'transportadoras' => collect((array) setting('logistica.transportadoras'))
+                ->map(fn ($t) => trim((string) $t))
+                ->filter()
+                ->push(trim((string) $p->transportadora))
+                ->filter()
+                ->unique()
+                ->sort()
+                ->values(),
         ]);
     }
 
@@ -742,6 +849,73 @@ class PedidosB2BController extends Controller implements HasMiddleware
      */
     private ?string $motivoStock = null;
 
+    /**
+     * LAS SALIDAS DEL PEDIDO, UNA POR VIAJE.
+     *
+     * Un pedido puede salir en varias tandas, y cada una lleva sus propias
+     * guías. Como historia, lo que importa es poder responder «¿cuándo salió
+     * la caja que el cliente dice que no llegó?», y para eso hace falta un
+     * hito por viaje con sus números.
+     *
+     * Los pedidos anteriores a las guías por caja no tienen filas en
+     * `pedido_cajas`: ésos conservan el hito de siempre, armado con
+     * `despachado_at` y la guía de la cabecera.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function hitosDeSalida(PedidoCliente $p): array
+    {
+        if ($p->cajas->isEmpty()) {
+            return $p->despachado_at ? [[
+                'hito' => 'Pedido despachado',
+                'actor' => $p->despachadoPor?->name ?? 'Logística',
+                'at' => $p->despachado_at->format('Y-m-d H:i'),
+                'icon' => '🚚',
+                'color' => 'indigo',
+                'detalle' => ($p->transportadora ? $p->transportadora.' · ' : '').'Guía '.$p->guia_transportadora,
+            ]] : [];
+        }
+
+        $porViaje = $p->cajas->groupBy('viaje')->sortKeys();
+        $ultimo = (int) $porViaje->keys()->last();
+        $varios = $porViaje->count() > 1;
+        $hitos = [];
+
+        foreach ($porViaje as $viaje => $cajas) {
+            $esUltimo = (int) $viaje === $ultimo;
+            $guias = $cajas->pluck('guia')->filter()->unique()->values();
+
+            /*
+             * Quién despachó se guarda una sola vez, en la cabecera, y es el
+             * del ÚLTIMO viaje. Ponerle ese nombre a los anteriores sería
+             * inventar: de esos sólo consta que los despachó logística.
+             */
+            $actor = $esUltimo ? ($p->despachadoPor?->name ?? 'Logística') : 'Logística';
+
+            $detalle = $cajas->count().' caja'.($cajas->count() > 1 ? 's' : '')
+                .($p->transportadora ? ' · '.$p->transportadora : '')
+                .($guias->isNotEmpty() ? ' · Guía'.($guias->count() > 1 ? 's' : '').' '.$guias->implode(', ') : '');
+
+            // Sólo el último viaje sabe si todavía se debe algo: `resto_pendiente`
+            // es el estado de HOY, no el de cuando salió aquella caja.
+            if ($esUltimo && $p->resto_pendiente) {
+                $faltan = max(0, (int) $p->items->sum('cantidad') - (int) $p->items->sum('cantidad_despachada'));
+                $detalle .= " · quedan {$faltan} unidades por despachar";
+            }
+
+            $hitos[] = [
+                'hito' => $varios ? "Salió el viaje {$viaje}" : 'Pedido despachado',
+                'actor' => $actor,
+                'at' => ($cajas->min('created_at') ?? $p->salidaDeBodega())?->format('Y-m-d H:i'),
+                'icon' => '🚚',
+                'color' => $esUltimo && $p->resto_pendiente ? 'amber' : 'indigo',
+                'detalle' => $detalle,
+            ];
+        }
+
+        return $hitos;
+    }
+
     /** Cuánto duró algo, en palabras: «19 s», «4 min», «1 h 12 min». */
     private function duracionLegible(?\Carbon\Carbon $desde, ?\Carbon\Carbon $hasta): string
     {
@@ -768,7 +942,76 @@ class PedidosB2BController extends Controller implements HasMiddleware
         $data = $r->validate([
             'guia_transportadora' => ['required', 'string', 'max:60'],
             'transportadora' => ['nullable', 'string', 'max:80'],
+            /*
+             * Las guías de las demás cajas.
+             *
+             * Un pedido puede salir en varias cajas, y con Interrapidísimo cada
+             * una lleva su propia guía (lo dijo el área el 20-nov-2026). Antes
+             * sólo cabía una: de un pedido de tres cajas se guardaba una y las
+             * otras dos quedaban anotadas en un papel. La guía es con lo que se
+             * reclama cuando una caja no llega.
+             *
+             * La primera sigue yendo en `guia_transportadora`, que es lo que
+             * leen el seguimiento y el enlace de rastreo. Éstas son de la caja
+             * 2 en adelante.
+             */
+            'guias_extra' => ['nullable', 'array', 'max:49'],
+            'guias_extra.*' => ['nullable', 'string', 'max:60'],
+            /*
+             * DESPACHO PARCIAL · cuánto sale de cada línea.
+             *
+             * «Se autoriza el despacho de la mercancía disponible, sin esperar
+             * a completar la totalidad» (área, 20-nov-2026). Hasta hoy el
+             * despacho no manejaba cantidades: salía todo o abortaba con un
+             * 422 y el camión esperando.
+             *
+             * Viene como {id_de_linea: cantidad}. Si no viene, sale completo,
+             * que es como se despachó siempre.
+             */
+            'cantidades' => ['nullable', 'array'],
+            /*
+             * ENTEROS. Great Baby vende unidades, no fracciones.
+             *
+             * Con `numeric` entraba un 2,5: la línea guardaba 2.5000 y el
+             * kardex bajaba `(int) 2.5 = 2`. Media unidad salía de la bodega
+             * sin bajar del sistema, y como `exigirSaldo()` hace el mismo
+             * truncado, ni siquiera había cómo notarlo. Después, portal, lista
+             * y detalle mostraban tres números distintos del mismo pedido,
+             * porque cada uno castea a su manera.
+             */
+            'cantidades.*' => ['nullable', 'integer', 'min:0'],
+            /*
+             * Y qué pasa con lo que NO salió. Lo elige quien despacha, caso
+             * por caso, porque depende de si el cliente va a esperar el resto
+             * — y eso no lo sabe el código.
+             *
+             *   true  → sigue debiéndose: el pedido vuelve a la cola.
+             *   false → ya no sale: el pedido se cierra con lo entregado.
+             */
+            'resto_pendiente' => ['nullable', 'boolean'],
+        ], [], [
+            'guia_transportadora' => 'guía',
+            'guias_extra' => 'guías de las demás cajas',
+            'cantidades' => 'cantidades a despachar',
         ]);
+
+        /*
+         * Dos cajas no pueden llevar la misma guía: o alguien la pegó dos
+         * veces, o se la copió de otra caja. Las dos son errores que después
+         * aparecen como «el cliente reclama una caja que el sistema dice que
+         * sí llegó».
+         */
+        $todas = collect([$data['guia_transportadora']])
+            ->merge($data['guias_extra'] ?? [])
+            ->map(fn ($g) => trim((string) $g))
+            ->filter()
+            ->values();
+
+        if ($todas->count() !== $todas->unique()->count()) {
+            return back()->withErrors([
+                'guia_transportadora' => 'Hay guías repetidas entre las cajas. Cada caja lleva la suya.',
+            ]);
+        }
         /*
          * Los cinco motivos por los que NO se despacha salían con `abort(422)`
          * y nunca llegaban a la pantalla.
@@ -789,73 +1032,429 @@ class PedidosB2BController extends Controller implements HasMiddleware
          */
         $noSePuede = null;
 
-        DB::transaction(function () use ($pedido, $data, $r, &$noSePuede) {
-            $p = PedidoCliente::whereKey($pedido)->with('factura:id,numero,siigo_id,cufe,estado')
-                ->lockForUpdate()->firstOrFail();
+        /*
+         * Estas dos se declaran acá y entran a la transacción por referencia
+         * porque el MENSAJE de después las necesita.
+         *
+         * Decía «Pedido despachado · guía registrada» siempre, también cuando
+         * habían salido 12 de 20. Quien despacha lee eso y entiende que el
+         * pedido se fue completo; el que lo mandó a medias ya lo sabe, pero el
+         * que lee la pantalla mañana, no.
+         */
+        $faltaAlgo = false;
+        $quedaPendiente = false;
 
-            $estadoFactura = $p->factura?->estado;
-            $estadoFactura = is_object($estadoFactura) ? $estadoFactura->value : $estadoFactura;
+        /*
+         * EL SEXTO MOTIVO, EL QUE SE HABÍA QUEDADO AFUERA.
+         *
+         * Los cinco de abajo se convirtieron a `withErrors` por lo que explica
+         * el comentario largo que sigue. Pero quedaba uno más, y es el más
+         * frecuente en bodega: `DescontarStockPorDespacho::exigirSaldo()` corta
+         * con `abort(422)` cuando no alcanza la mercancía, y ese abort nace
+         * DENTRO de la transacción, en otro archivo, así que no pasaba por el
+         * `$noSePuede` de acá.
+         *
+         * Resultado probado el 21-nov-2026: se intentó despachar 4 unidades de
+         * un producto con saldo 0 y en pantalla salió «El servidor rechazó la
+         * operación». El mensaje bueno —que dice el SKU, cuánto pide y cuánto
+         * hay— viajaba en el cuerpo de una página HTML que Inertia no lee.
+         *
+         * EL `catch` VA FUERA DE LA TRANSACCIÓN, Y NO ES UN DETALLE DE ESTILO.
+         * Adentro, atrapar la excepción la daría por manejada y la transacción
+         * COMMITEARÍA: el pedido quedaría marcado como despachado, con guías y
+         * con `cantidad_despachada` sumada, y sin un solo movimiento de kardex
+         * —el estante y el sistema distintos, que es justo lo que este módulo
+         * existe para evitar—. Y el candado de idempotencia cerraría la puerta
+         * del segundo viaje. Afuera, el abort revierte todo y después se
+         * traduce a un error de campo que el modal sí sabe pintar.
+         *
+         * Es el mismo patrón que ya usa `ComprasGestionController::guardar()`
+         * para los abort de `UbicacionDelPar`.
+         */
+        try {
+            DB::transaction(function () use ($pedido, $data, $r, $todas, &$noSePuede, &$faltaAlgo, &$quedaPendiente) {
+                $p = PedidoCliente::whereKey($pedido)->with('factura:id,numero,siigo_id,cufe,estado')
+                    ->lockForUpdate()->firstOrFail();
 
-            $noSePuede = match (true) {
-                // Gate duro #1 · estado válido.
-                ! in_array($p->estado, ['aprobado', 'facturado'], true)
-                    => 'Sólo se despacha un pedido aprobado o facturado.',
+                $estadoFactura = $p->factura?->estado;
+                $estadoFactura = is_object($estadoFactura) ? $estadoFactura->value : $estadoFactura;
 
-                // Gate duro #2 · raíz del problema: factura emitida en el ERP.
-                // No exigimos siigo_id ni CUFE acá porque la factura ya está
-                // impresa y acompaña físicamente la mercancía — la sync con
-                // SIIGO se completa en segundo plano. Trabar al logístico
-                // esperando SIIGO lo hace circular entre pantallas sin razón.
-                ! $p->factura_id
-                    => 'No se puede despachar sin factura. Generá la factura antes de entregar al transportador.',
+                /*
+                 * CUÁNTO SALE EN TOTAL · pasada de SÓLO LECTURA.
+                 *
+                 * Se cuenta acá arriba, sin guardar nada, porque el motivo
+                 * «no hay nada que despachar» tiene que poder cortar ANTES de
+                 * la primera escritura. Más abajo se vuelve a recorrer para
+                 * guardar; eso cuesta un recorrido de más sobre una lista de
+                 * pocas líneas y vale lo que evita.
+                 *
+                 * Lo que evita: el 21-nov-2026 se despachó un pedido con 0
+                 * unidades en la única línea. Quedó la guía escrita, una caja
+                 * creada y el pedido marcado como parcial, sin que saliera
+                 * nada. Esa guía fantasma ya aparecía en Seguimiento de guías
+                 * sobre un pedido que decía «Pendiente de despacho» — y si
+                 * alguien se la pasa al cliente, el cliente rastrea un envío
+                 * que no existe.
+                 *
+                 * Si el corte se pusiera después del recorrido que guarda, el
+                 * `return` del closure COMMITEA lo ya escrito y las líneas
+                 * quedarían con `cantidad_despachada = 0`. Y eso no es
+                 * cosmético: para `DescontarStockPorDespacho` el NULL significa
+                 * «sale completo» y el 0 significa «no sale nada», así que un
+                 * pedido tocado por un despacho-cero abortado dejaría de
+                 * descontar para siempre.
+                 */
+                $pedidasLectura = $data['cantidades'] ?? [];
+                $totalSale = 0.0;
 
-                // …y que esa factura siga viva. Sólo se validaba que existiera,
-                // así que una factura anulada dejaba salir la mercancía igual.
-                $estadoFactura === 'anulada'
-                    => 'La factura de este pedido está anulada. Generá una factura nueva antes de despachar.',
+                foreach ($p->items as $item) {
+                    $pendiente = max(0, (float) $item->cantidad - (float) ($item->cantidad_despachada ?? 0));
+                    $totalSale += array_key_exists($item->id, $pedidasLectura)
+                        ? max(0, min($pendiente, (float) $pedidasLectura[$item->id]))
+                        : $pendiente;
+                }
 
-                // Gate duro #3 · idempotencia.
-                (bool) $p->despachado_at
-                    => 'Este pedido ya fue despachado.',
+                /*
+                 * ¿Es el PRIMER viaje de este pedido, o viene de uno parcial?
+                 *
+                 * Se mira acá y no más abajo porque el recorrido que guarda
+                 * ACUMULA sobre `cantidad_despachada`: después de él ya no se
+                 * puede distinguir «nunca salió» de «salió y volvió».
+                 *
+                 * De esto depende qué hacer con las cajas ya guardadas.
+                 */
+                $yaHabiaSalido = (float) $p->items->sum('cantidad_despachada') > 0;
 
-                // Gate duro #4 (LOG-J5-fix) · novedad del alistamiento abierta.
-                //   Si el alistador cerró con faltante/avería/revisión, no sale
-                //   la mercancía hasta que Gerencia/admin de bodega resuelva.
-                //   Esto es la raíz del «inventario negativo + mercancía mala
-                //   al cliente» que Don Jorge reportó: nunca más se despacha
-                //   algo que ya se marcó como incompleto o defectuoso.
-                $p->alistado_con_novedad && ! $p->novedad_resuelta_at
-                    => 'Este pedido tiene una novedad abierta ('
-                        .($p->alistado_tipo_novedad ?: 'sin tipo')
-                        .'). Resolvela en la Cola de alistamiento antes de despachar.',
+                /*
+                 * Las guías que este pedido YA lleva de viajes anteriores.
+                 *
+                 * La comprobación de guías repetidas de arriba sólo compara
+                 * las de ESTA petición: en el segundo viaje se podía volver a
+                 * teclear la del primero y quedaba guardada dos veces, que es
+                 * exactamente el daño que esa comprobación quería evitar —«el
+                 * cliente reclama una caja que el sistema dice que sí llegó».
+                 */
+                $guiasPrevias = $yaHabiaSalido
+                    ? $p->cajas()->pluck('guia')->map(fn ($g) => trim((string) $g))->filter()->all()
+                    : [];
 
-                default => null,
-            };
+                $repetidaDeOtroViaje = $todas->first(fn ($g) => in_array($g, $guiasPrevias, true));
 
-            if ($noSePuede) {
-                return;
+                $noSePuede = match (true) {
+                    // Gate duro #1 · estado válido.
+                    ! in_array($p->estado, ['aprobado', 'facturado'], true)
+                        => 'Sólo se despacha un pedido aprobado o facturado.',
+
+                    // Gate duro #2 · raíz del problema: factura emitida en el ERP.
+                    // No exigimos siigo_id ni CUFE acá porque la factura ya está
+                    // impresa y acompaña físicamente la mercancía — la sync con
+                    // SIIGO se completa en segundo plano. Trabar al logístico
+                    // esperando SIIGO lo hace circular entre pantallas sin razón.
+                    ! $p->factura_id
+                        => 'No se puede despachar sin factura. Generá la factura antes de entregar al transportador.',
+
+                    // …y que esa factura siga viva. Sólo se validaba que existiera,
+                    // así que una factura anulada dejaba salir la mercancía igual.
+                    $estadoFactura === 'anulada'
+                        => 'La factura de este pedido está anulada. Generá una factura nueva antes de despachar.',
+
+                    // Gate duro #3 · idempotencia.
+                    (bool) $p->despachado_at
+                        => 'Este pedido ya fue despachado.',
+
+                    // Gate duro #4 (LOG-J5-fix) · novedad del alistamiento abierta.
+                    //   Si el alistador cerró con faltante/avería/revisión, no sale
+                    //   la mercancía hasta que Gerencia/admin de bodega resuelva.
+                    //   Esto es la raíz del «inventario negativo + mercancía mala
+                    //   al cliente» que Don Jorge reportó: nunca más se despacha
+                    //   algo que ya se marcó como incompleto o defectuoso.
+                    $p->alistado_con_novedad && ! $p->novedad_resuelta_at
+                        => 'Este pedido tiene una novedad abierta ('
+                            .($p->alistado_tipo_novedad ?: 'sin tipo')
+                            .'). Resolvela en la Cola de alistamiento antes de despachar.',
+
+                    /*
+                     * Gate duro #5 · que salga ALGO.
+                     *
+                     * Un despacho de cero unidades no es un despacho: es una
+                     * guía en el aire. El `items->isNotEmpty()` está porque un
+                     * pedido sin líneas —que a mano o por seeder se puede
+                     * armar— daría total 0 por otra razón, y el mensaje lo
+                     * mandaría a corregir una casilla que no existe.
+                     */
+                    $p->items->isNotEmpty() && $totalSale <= 0
+                        => $p->items->sum('cantidad_despachada') > 0
+                            ? 'Este pedido ya salió completo: no queda nada por despachar.'
+                            : 'No hay nada que despachar: poné al menos una unidad en alguna línea.',
+
+                    // Gate duro #6 · una guía no se repite entre viajes.
+                    $repetidaDeOtroViaje !== null
+                        => "La guía {$repetidaDeOtroViaje} ya se usó en un envío anterior de este pedido. "
+                            .'Cada caja lleva la suya.',
+
+                    default => null,
+                };
+
+                if ($noSePuede) {
+                    return;
+                }
+
+                /*
+                 * CUÁNTO SALE DE CADA LÍNEA.
+                 *
+                 * Se escribe ANTES de descontar, porque `DescontarStockPorDespacho`
+                 * lee `cantidad_despachada` para saber qué bajar del kardex y qué
+                 * saldo exigir. Si se escribiera después, el descuento saldría por
+                 * la cantidad pedida y el parcial no serviría de nada.
+                 *
+                 * Nunca más de lo pedido: despachar de más no es un parcial, es un
+                 * error, y descontaría stock que nadie compró.
+                 */
+                $pedidas = $data['cantidades'] ?? [];
+                $envio = [];
+                $faltaAlgo = false;
+
+                foreach ($p->items as $item) {
+                    $yaSalio = (float) ($item->cantidad_despachada ?? 0);
+                    $pendiente = max(0, (float) $item->cantidad - $yaSalio);
+
+                    /*
+                     * Lo que sale EN ESTE VIAJE. Topado por lo que todavía se debe:
+                     * en el segundo despacho de un pedido parcial, la pantalla
+                     * muestra lo pendiente, y si alguien teclea de más no puede
+                     * salir más de lo que el cliente compró.
+                     */
+                    $sale = array_key_exists($item->id, $pedidas)
+                        ? max(0, min($pendiente, (float) $pedidas[$item->id]))
+                        : $pendiente;
+
+                    $envio[$item->id] = $sale;
+
+                    if ($sale < $pendiente) {
+                        $faltaAlgo = true;
+                    }
+
+                    // ACUMULA, no pisa: un pedido que sale en dos viajes lleva la
+                    // suma de los dos, no sólo lo del último.
+                    $item->forceFill(['cantidad_despachada' => $yaSalio + $sale])->save();
+                }
+
+                $p->setRelation('items', $p->items->fresh());
+
+                /*
+                 * ¿Vuelve a la cola, o se cierra con lo entregado?
+                 *
+                 * Lo elige quien despacha. Depende de si el cliente va a esperar el
+                 * resto, y eso no lo sabe el código. Sin nada que falte, la
+                 * pregunta no existe: el pedido se cierra igual.
+                 */
+                $quedaPendiente = $faltaAlgo && (bool) ($data['resto_pendiente'] ?? false);
+
+                /*
+                 * SI VUELVE A LA COLA, VUELVE LISTO PARA ALISTAR DE NUEVO.
+                 *
+                 * Volver a «facturado» no alcanzaba. La cola reparte sus
+                 * columnas por las marcas del alistamiento, y las del primer
+                 * viaje seguían puestas: el pedido reaparecía en «Listos para
+                 * empaque» —con el cronómetro del día anterior— en vez de en la
+                 * cola de alistar. Y ahí se quedaba atascado, porque `asignar`,
+                 * `iniciar` y `finalizar` cortan con 422 cuando esas marcas
+                 * existen. La única forma de moverlo era despacharlo otra vez
+                 * desde la pantalla del pedido, sin que nadie recogiera lo que
+                 * faltaba.
+                 *
+                 * La casilla también se suelta: el pedido no está armándose en
+                 * el piso mientras espera el segundo viaje, y `repartirCasillas`
+                 * la cuenta como ocupada mientras no haya `despachado_at` —que
+                 * en un parcial es justamente NULL—. Cuando vuelva a entrar en
+                 * una oleada se le da una nueva.
+                 *
+                 * No se pierde el rastro del primer alistamiento: el modelo es
+                 * auditable y estas columnas están en el `$fillable`, así que
+                 * quién lo alistó y cuándo queda en la bitácora.
+                 */
+                if ($quedaPendiente) {
+                    $p->forceFill([
+                        'alistador_id' => null,
+                        'alistado_asignado_at' => null,
+                        'alistado_inicio_at' => null,
+                        'alistado_fin_at' => null,
+                        'alistado_notas' => null,
+                        'alistado_con_novedad' => false,
+                        'alistado_tipo_novedad' => null,
+                        'novedad_resuelta_at' => null,
+                        'novedad_resuelta_por_id' => null,
+                        'novedad_resolucion' => null,
+                        'casilla_consolidacion' => null,
+                    ])->save();
+                }
+
+                $p->update([
+                    /*
+                     * El estado depende de qué se decidió con lo que no salió.
+                     *
+                     *   resto pendiente → vuelve a «facturado», que es el estado
+                     *     que la cola de alistamiento mira. Así el pedido reaparece
+                     *     para el segundo despacho en vez de desaparecer con una
+                     *     deuda abierta.
+                     *   resto cerrado   → «despachado», con lo entregado.
+                     *
+                     * Sin parcial, nada de esto aplica: despachado y listo.
+                     */
+                    'estado' => $quedaPendiente ? 'facturado' : 'despachado',
+                    /*
+                     * `despachado_at` se deja VACÍO mientras quede algo por
+                     * entregar, y no por prolijidad: el gate de idempotencia de
+                     * arriba («este pedido ya fue despachado») lo mira, así que
+                     * ponerlo cerraría la puerta del segundo viaje.
+                     *
+                     * La fecha del primer envío no se pierde: queda en el
+                     * movimiento de kardex y en la línea de tiempo.
+                     */
+                    'despachado_at' => $quedaPendiente ? null : now(),
+                    /*
+                     * La fecha de la PRIMERA caja, que se pone una vez y no se
+                     * vuelve a tocar.
+                     *
+                     * Es la que sirve para contar días de tránsito y para
+                     * reclamarle a la transportadora. `despachado_at` no puede
+                     * hacer ese trabajo: en un parcial se deja NULL a propósito,
+                     * así que un pedido cuya primera caja salió hace ocho días
+                     * figuraba como si nunca hubiera salido y el seguimiento no
+                     * tenía desde cuándo contar.
+                     */
+                    'primer_despacho_at' => $p->primer_despacho_at ?? now(),
+                    'despachado_por_id' => $r->user()->id,
+                    'guia_transportadora' => $data['guia_transportadora'],
+                    /*
+                     * La transportadora del segundo viaje no BORRA la del
+                     * primero.
+                     *
+                     * El campo es opcional, así que un segundo despacho con el
+                     * selector en «— sin transportadora —» dejaba el pedido sin
+                     * empresa: `urlDeRastreo()` necesita las dos —nombre y
+                     * guía— así que el cliente se quedaba sin el enlace de
+                     * rastreo que ya tenía, y la pantalla de guías perdía con
+                     * quién reclamar la caja que iba en camino.
+                     *
+                     * Si el segundo viaje va por otra empresa, se escribe esa:
+                     * lo que no puede es que un campo vacío borre un dato que
+                     * ya existía.
+                     */
+                    'transportadora' => ($data['transportadora'] ?? null) ?: $p->transportadora,
+                    'despacho_parcial' => $faltaAlgo || $p->despacho_parcial,
+                    'resto_pendiente' => $quedaPendiente,
+                ]);
+
+                /*
+                 * Y EL DETALLE DE LAS CAJAS, QUE SE ACUMULA ENTRE VIAJES.
+                 *
+                 * Antes acá se borraban todas y se recreaban. El comentario que
+                 * lo justificaba decía «un re-despacho no puede dejar las guías
+                 * del intento anterior mezcladas con las nuevas», y describía un
+                 * reintento fallido — que no existe: si la transacción revienta
+                 * hay rollback y las cajas nunca llegaron a crearse.
+                 *
+                 * Lo que sí existe es el segundo viaje, que lo habilitó este
+                 * mismo cambio: con `resto_pendiente` el pedido vuelve a
+                 * «facturado» con `despachado_at` en NULL justamente para poder
+                 * volver a entrar acá. Así que el borrado no disparaba en un
+                 * caso imaginario: disparaba en el único caso nuevo.
+                 *
+                 * Probado el 21-nov-2026: salieron 4 de 6 con guía PARCIAL-A y
+                 * después las 2 restantes con PARCIAL-B. Quedó UNA caja. La
+                 * primera remesa sólo sobrevivía en la nota de un movimiento de
+                 * kardex, así que al cliente que reclamaba esa caja no se le
+                 * podía dar el número ni mirando la base.
+                 *
+                 * El borrado se conserva SÓLO para el primer viaje, y no por
+                 * simetría: el backfill de la migración le creó caja 1 a todo
+                 * pedido que tuviera guía escrita, incluidos los que nunca
+                 * salieron (el sembrador de QA arma uno así a propósito). Si no
+                 * se limpiara, el primer despacho real de ese pedido empezaría a
+                 * numerar en 2 y arrastraría una guía que nunca viajó.
+                 */
+                if (! $yaHabiaSalido) {
+                    $p->cajas()->delete();
+                }
+
+                // Numerar desde la última: el `unique(pedido_id, numero)` de la
+                // tabla no admite repetir, y además la caja 3 de un pedido tiene
+                // que llamarse 3 aunque haya salido en el segundo viaje.
+                $desde = (int) $p->cajas()->max('numero');
+
+                /*
+                 * Y de qué viaje son. El número de caja no alcanza para saber
+                 * cuáles salieron juntas, que es lo primero que se pregunta
+                 * cuando el cliente dice que le llegaron dos de tres.
+                 */
+                $viaje = (int) $p->cajas()->max('viaje') + 1;
+
+                foreach ($todas as $i => $guia) {
+                    $p->cajas()->create([
+                        'numero' => $desde + $i + 1,
+                        'viaje' => $viaje,
+                        'guia' => $guia,
+                    ]);
+                }
+
+                // La mercancía sale de la bodega: baja del kardex. Sin esto el ERP
+                // seguía mostrando en stock lo que ya iba camino al cliente.
+                $accion = new \App\Modules\Inventario\Actions\DescontarStockPorDespacho();
+                // Se le dice QUÉ sale en este viaje: en un segundo despacho, la
+                // línea lleva acumulado lo de los dos, y del kardex sólo debe
+                // bajar lo de ahora.
+                $this->lineasDescontadas = $accion->ejecutar($p, $r->user()->id, $envio);
+                $this->motivoStock = $accion->motivo;
+            });
+        } catch (\Symfony\Component\HttpKernel\Exception\HttpException $e) {
+            /*
+             * Un 5xx no es «no se pudo despachar», es «el sistema se rompió»:
+             * mostrarlo como error del campo de la guía mandaría a la persona
+             * a corregir un número que está bien. Ese sube tal cual.
+             */
+            if ($e->getStatusCode() >= 500) {
+                throw $e;
             }
 
-            $p->update([
-                'estado' => 'despachado',
-                'despachado_at' => now(),
-                'despachado_por_id' => $r->user()->id,
-                'guia_transportadora' => $data['guia_transportadora'],
-                'transportadora' => $data['transportadora'] ?? null,
+            return back()->withErrors([
+                'guia_transportadora' => $e->getMessage() ?: 'No se pudo despachar.',
             ]);
-
-            // La mercancía sale de la bodega: baja del kardex. Sin esto el ERP
-            // seguía mostrando en stock lo que ya iba camino al cliente.
-            $accion = new \App\Modules\Inventario\Actions\DescontarStockPorDespacho();
-            $this->lineasDescontadas = $accion->ejecutar($p, $r->user()->id);
-            $this->motivoStock = $accion->motivo;
-        });
+        }
 
         if ($noSePuede) {
             return back()->withErrors(['guia_transportadora' => $noSePuede]);
         }
 
-        $msg = 'Pedido despachado · guía registrada.';
+        /*
+         * El tablero del cliente cambia con esto, así que su caché se suelta.
+         *
+         * Despachar mueve el contador de «pedidos que salieron en partes» y la
+         * fecha de salida que la lista del portal muestra. Sin este olvido, el
+         * cliente que entra a ver si su pedido salió sigue viendo el tablero de
+         * hace un minuto — justo cuando acaba de recibir el aviso.
+         */
+        $contactoId = (int) PedidoCliente::whereKey($pedido)->value('contacto_id');
+
+        \Illuminate\Support\Facades\Cache::forget(
+            \App\Http\Controllers\Portal\PortalHomeController::llaveKpis($contactoId)
+        );
+
+        /*
+         * El mensaje dice lo que PASÓ, no siempre lo mismo.
+         *
+         * Las tres frases son tres hechos distintos y quien despacha necesita
+         * saber en cuál quedó: si el pedido vuelve a la cola, si se cerró
+         * sabiendo que falta mercancía, o si salió completo.
+         */
+        $msg = match (true) {
+            $quedaPendiente => 'Salió parte del pedido · guía registrada. '
+                .'Lo que falta queda pendiente y el pedido vuelve a la cola.',
+            $faltaAlgo => 'Salió parte del pedido · guía registrada. '
+                .'El resto se dio por cerrado: ya no sale.',
+            default => 'Pedido despachado · guía registrada.',
+        };
+
         if (($this->lineasDescontadas ?? 0) > 0) {
             $msg .= " Se descontaron {$this->lineasDescontadas} ítem(s) del inventario.";
         }
@@ -1072,7 +1671,7 @@ class PedidosB2BController extends Controller implements HasMiddleware
         });
 
         // QA-D Bloque3: invalidar cache portal del cliente (saldo, pendientes, vencidas cambian).
-        \Illuminate\Support\Facades\Cache::forget("portal.kpis.{$factura->contacto_id}");
+        \Illuminate\Support\Facades\Cache::forget(\App\Http\Controllers\Portal\PortalHomeController::llaveKpis((int) $factura->contacto_id));
 
         // LOG-Jorge · Observación: "creaste la factura pero no está en SIIGO".
         //   Si la integración está activa, encolamos la emisión AFUERA de la tx

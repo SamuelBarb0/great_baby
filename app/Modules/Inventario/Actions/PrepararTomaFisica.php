@@ -100,13 +100,19 @@ class PrepararTomaFisica
         $variantes = $variantesQ->get(['id', 'producto_id']);
         if ($variantes->isEmpty()) return 0;
 
-        $saldos = $this->stock->saldosMasivos($variantes->pluck('id')->all());
+        $lugares = $this->lugaresDeLaToma($toma);
+        $saldos = $this->sumarPorSujeto(
+            $this->stock->saldosMasivos($variantes->pluck('id')->all()),
+            'variante_id',
+            $lugares
+        );
+
         $n = 0;
         foreach ($variantes as $v) {
-            $saldo = (int) ($saldos["{$v->id}-{$toma->ubicacion_id}"]->saldo ?? 0);
+            $saldo = (int) ($saldos[$v->id] ?? 0);
             if ($saldo <= 0 && $toma->tipo === 'ciclico') continue;
 
-            $costo = $this->calcularCostoPromedio($v->id, $toma->ubicacion_id)
+            $costo = $this->calcularCostoPromedio($v->id, $lugares)
                 ?? (float) ($v->producto?->precio_proveedor ?? 0);
 
             // Re-audit M3 α · asignación por propiedades (no fill()) para
@@ -148,10 +154,12 @@ class PrepararTomaFisica
          * ubicación, lo diga la bandera o no, más los declarados agregados
          * (que en una toma total hay que listar aunque estén en cero).
          */
+        $lugares = $this->lugaresDeLaToma($toma);
+
         $conSaldoAgregado = InventarioMovimiento::query()
             ->whereNull('variante_id')
             ->whereNotNull('producto_id')
-            ->where('ubicacion_id', $toma->ubicacion_id)
+            ->whereIn('ubicacion_id', $lugares)
             ->distinct()
             ->pluck('producto_id');
 
@@ -169,13 +177,18 @@ class PrepararTomaFisica
         $productos = $productosQ->get(['id', 'precio_proveedor']);
         if ($productos->isEmpty()) return 0;
 
-        $saldos = $this->stock->saldosMasivosProducto($productos->pluck('id')->all());
+        $saldos = $this->sumarPorSujeto(
+            $this->stock->saldosMasivosProducto($productos->pluck('id')->all()),
+            'producto_id',
+            $lugares
+        );
+
         $n = 0;
         foreach ($productos as $p) {
-            $saldo = (int) ($saldos["{$p->id}-{$toma->ubicacion_id}"]->saldo ?? 0);
+            $saldo = (int) ($saldos[$p->id] ?? 0);
             if ($saldo <= 0 && $toma->tipo === 'ciclico') continue;
 
-            $costo = $this->calcularCostoPromedioProducto($p->id, $toma->ubicacion_id)
+            $costo = $this->calcularCostoPromedioProducto($p->id, $lugares)
                 ?? (float) ($p->precio_proveedor ?? 0);
 
             $item = TomaFisicaItem::firstOrNew([
@@ -205,11 +218,96 @@ class PrepararTomaFisica
      *   quedan fuera del PMP y se cae al fallback del llamador). Se retorna
      *   null si no hay base de cálculo → el llamador decide (fallback o abort).
      */
-    protected function calcularCostoPromedio(int $varianteId, int $ubicacionId): ?float
+    /**
+     * QUÉ LUGARES ABARCA ESTA TOMA.
+     *
+     * Contar «la bodega principal» tiene que incluir sus racks. Esto no era un
+     * matiz: el snapshot buscaba el saldo de la ubicación EXACTA, así que una
+     * toma sobre la sede veía CERO de todo lo que ya estaba bajado a
+     * estantería. Medido el 22-nov-2026 en la bodega principal: congelaba 14
+     * unidades de una referencia que tenía 19 —las otras 5 estaban en dos
+     * racks— y el operario que cuenta la bodega encuentra las 19.
+     *
+     * Lo que pasaba después es lo caro: la diferencia salía +5, el cierre
+     * escribía una entrada de 5 en la fila de la sede, el rack se quedaba con
+     * las suyas, y el sistema terminaba con 24 unidades donde hay 19. Más un
+     * asiento de aprovechamiento (4295) por mercancía que siempre estuvo ahí.
+     * Un conteo que inventa sobrantes es peor que no contar.
+     *
+     * Para una posición suelta —un rack, un nivel— esto devuelve ese único id,
+     * así que la toma por posición no cambia en nada.
+     *
+     * @return array<int, int>
+     */
+    protected function lugaresDeLaToma(TomaFisica $toma): array
+    {
+        $sede = (int) $toma->ubicacion_id;
+
+        /*
+         * Consulta propia en vez de `laSedeYSusPosiciones()`, por dos razones
+         * que en una toma física cambian el resultado:
+         *
+         *   • SIN filtrar por vendibles. Una toma cuenta lo que HAY, no lo que
+         *     se puede vender: dejar fuera averías o cuarentena haría aparecer
+         *     como sobrante justo la mercancía apartada, que es la que más
+         *     vigila el área.
+         *
+         *   • SIN filtrar por activa. Una posición se desactiva cuando se
+         *     retira del plano, y eso NO la vacía: si tenía 6 unidades en el
+         *     kardex y queda fuera del conteo, el operario las cuenta en el
+         *     piso, sale un sobrante de 6 y el cierre lo escribe en la sede.
+         *     Es el mismo sobrante inventado que esta clase viene a matar,
+         *     entrando por otra puerta.
+         */
+        $hijas = \App\Modules\Dropi\Models\InventarioUbicacion::query()
+            ->where('bodega_id', $sede)
+            ->pluck('id')
+            ->map(fn ($x) => (int) $x)
+            ->all();
+
+        return [...$hijas, $sede];
+    }
+
+    /**
+     * Suma los saldos de un sujeto (variante o producto) en TODOS los lugares
+     * de la toma, en una sola pasada.
+     *
+     * `saldosMasivos` devuelve una fila por par sujeto+ubicación; lo que hace
+     * falta acá es el total del sitio contado, que con una sede son 437 filas
+     * por referencia.
+     *
+     * @param  \Illuminate\Support\Collection<string, object>  $filas
+     * @param  array<int, int>  $lugares
+     * @return array<int, float>
+     */
+    protected function sumarPorSujeto($filas, string $campo, array $lugares): array
+    {
+        $permitidas = array_flip(array_map('intval', $lugares));
+        $total = [];
+
+        foreach ($filas as $fila) {
+            if (! isset($permitidas[(int) $fila->ubicacion_id])) {
+                continue;
+            }
+
+            $total[$fila->{$campo}] = ($total[$fila->{$campo}] ?? 0) + (float) $fila->saldo;
+        }
+
+        return $total;
+    }
+
+    /**
+     * @param  array<int, int>  $lugares
+     */
+    protected function calcularCostoPromedio(int $varianteId, array $lugares): ?float
     {
         $agg = InventarioMovimiento::query()
             ->where('variante_id', $varianteId)
-            ->where('ubicacion_id', $ubicacionId)
+            // El costo se promedia sobre los mismos lugares que se cuentan: si
+            // mirara sólo la sede, una referencia que vive en racks saldría sin
+            // costo y el ajuste se valoraría con el precio del maestro — que es
+            // justo lo que esta clase evita desde la auditoría M3.
+            ->whereIn('ubicacion_id', $lugares)
             ->where('cantidad', '>', 0)
             ->whereNotNull('costo_unit')
             ->selectRaw('SUM(cantidad * costo_unit) as valor, SUM(cantidad) as qty')
@@ -224,12 +322,15 @@ class PrepararTomaFisica
     /**
      * C-F2 R2 · PMP para productos agregados (variante_id IS NULL en movs).
      */
-    protected function calcularCostoPromedioProducto(int $productoId, int $ubicacionId): ?float
+    /**
+     * @param  array<int, int>  $lugares
+     */
+    protected function calcularCostoPromedioProducto(int $productoId, array $lugares): ?float
     {
         $agg = InventarioMovimiento::query()
             ->where('producto_id', $productoId)
             ->whereNull('variante_id')
-            ->where('ubicacion_id', $ubicacionId)
+            ->whereIn('ubicacion_id', $lugares)
             ->where('cantidad', '>', 0)
             ->whereNotNull('costo_unit')
             ->selectRaw('SUM(cantidad * costo_unit) as valor, SUM(cantidad) as qty')

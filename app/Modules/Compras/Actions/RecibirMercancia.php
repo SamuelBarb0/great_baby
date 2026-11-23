@@ -11,6 +11,7 @@ use App\Modules\Compras\Services\CostoImportacion;
 use App\Modules\Compras\Services\SeguimientoContenedor;
 use App\Modules\Compras\Services\TrasRecepcion;
 use App\Modules\Dropi\Models\InventarioMovimiento;
+use App\Modules\Dropi\Models\InventarioUbicacion;
 use App\Modules\Siigo\Jobs\PushRecepcionASiigo;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
@@ -92,10 +93,24 @@ class RecibirMercancia
 
                 // Re-audit FUNC-C1 · guard sobre-recepción atómico.
                 $pendiente = (float) $ordenItem->cantidad - (float) $ordenItem->cantidad_recibida;
-                // De China llega agrupado y en otras cantidades por color: en una
-                // importación el tope es el total de la referencia, y lo revisa
-                // `recepcionCrear`. Una compra nacional sigue topada por línea.
-                if (! $esImportacion && $cantidadRecibida > $pendiente + 0.0001) {
+                /*
+                 * De China llega agrupado y en otras cantidades por color: en una
+                 * importación el tope es el total de la referencia, y lo revisa
+                 * `recepcionCrear`.
+                 *
+                 * En una compra nacional el tope por línea sigue en pie, con una
+                 * excepción: que alguien haya escrito POR QUÉ llegó de más.
+                 * `RegistrarRecepcion` exige ese motivo antes de dejar pasar un
+                 * exceso, así que si está lleno es porque la bodega contó de más
+                 * a conciencia y eso es un hecho, no un error de digitación.
+                 *
+                 * Sin el motivo se rechaza igual que siempre: un conteo que
+                 * supera lo pedido sin explicación descuadra la deuda con el
+                 * proveedor y nadie se entera hasta que llega la factura.
+                 */
+                $excesoAutorizado = filled($recepcion->motivo_exceso);
+
+                if (! $esImportacion && ! $excesoAutorizado && $cantidadRecibida > $pendiente + 0.0001) {
                     throw new InvalidArgumentException(sprintf(
                         'Sobre-recepción bloqueada · item "%s": pedido %.3f, ya recibido %.3f, esta recepción %.3f (pendiente %.3f).',
                         $ordenItem->descripcion ?? '?', $ordenItem->cantidad, $ordenItem->cantidad_recibida,
@@ -142,11 +157,18 @@ class RecibirMercancia
                          * entró todo hasta hoy.
                          *
                          * Lo que llegó mal entra al inventario pero no a la
-                         * venta, y eso pesa más que cualquier destino elegido.
+                         * venta. Eso pesa más que el destino elegido… pero no
+                         * borra DE QUIÉN es: la avería de Dropi va a la avería
+                         * de Dropi y la de Great Baby a la suya. Antes todo
+                         * caía en la primera ubicación de avería por id y las
+                         * dos marcas quedaban revueltas en el mismo estante.
                          */
                         'ubicacion_id' => $clasificacion === 'apto'
                             ? ($it->ubicacion_id ?: $recepcion->bodega_id)
-                            : $tras->ubicacionNoVendible($bodegaDeLaRecepcion)->id,
+                            : $tras->ubicacionDeAveria(
+                                $it->ubicacion_id ? InventarioUbicacion::find($it->ubicacion_id) : null,
+                                $bodegaDeLaRecepcion,
+                            )->id,
                         'tipo' => $esImportacion ? 'entrada_importacion' : 'entrada_compra',
                         'cantidad' => round($cantidadRecibida, 4),
                         'costo_unit' => $costoUnit,
