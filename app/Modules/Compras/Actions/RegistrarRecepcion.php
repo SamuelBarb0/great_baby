@@ -44,18 +44,39 @@ class RegistrarRecepcion
 
         $itemsFusionados = $this->fusionar($this->normalizarDestino($data['items'], $orden));
 
-        $this->exigirQueElRepartoCuadre($orden, $itemsFusionados);
+        /*
+         * RECIBIR DE MÁS · lo que el proveedor mandó de sobra ENTRA.
+         *
+         * El área lo dijo sin matices el 20-nov-2026: «cuando el proveedor
+         * entrega cantidades superiores a las solicitadas, la mercancía se
+         * recibe y se registra, dejando constancia de las cantidades
+         * efectivamente recibidas».
+         *
+         * Hasta hoy eso sólo valía para las importaciones. En una compra
+         * nacional el exceso estaba bloqueado en tres capas, así que lo que de
+         * verdad llegó no se podía ni teclear: la casilla lo recortaba, el
+         * reparto lo rechazaba y la confirmación abortaba. La bodega quedaba
+         * con mercancía en el piso que el sistema decía que no existía.
+         *
+         * La distinción buena no es importación contra nacional: es CON motivo
+         * contra SIN motivo. Un exceso explicado es un hecho de la bodega; uno
+         * sin explicar es casi siempre un error de digitación, y ése se sigue
+         * rechazando igual que antes.
+         */
+        $excesos = $orden->esImportacion()
+            ? app(ColoresDeImportacion::class)->excesos($orden, array_values($itemsFusionados))
+            : $this->excesosPorLinea($orden, $itemsFusionados);
 
-        // El conteo de Don Jorge es la verdad, así que contar de más no se bloquea:
-        // sólo se le pide el motivo, para que quede dicho contra la orden.
-        if ($orden->esImportacion()) {
-            $excesos = app(ColoresDeImportacion::class)->excesos($orden, array_values($itemsFusionados));
-            if ($excesos && blank($data['motivo_exceso'] ?? null)) {
-                throw new InvalidArgumentException('Se contó más de lo esperado en '.implode(', ', array_keys($excesos)).': escriba el motivo.');
-            }
-            if ($excesos) {
-                $data['observaciones'] = trim(($data['observaciones'] ?? '')."\nLlegó de más (".implode(', ', array_keys($excesos))."): {$data['motivo_exceso']}");
-            }
+        if ($excesos && blank($data['motivo_exceso'] ?? null)) {
+            throw new InvalidArgumentException(
+                'Se contó más de lo pedido en '.implode(', ', array_keys($excesos))
+                .'. Escriba por qué, y entra con esa constancia.'
+            );
+        }
+
+        // Sin exceso, el reparto tiene que cuadrar contra el pendiente.
+        if (! $excesos) {
+            $this->exigirQueElRepartoCuadre($orden, $itemsFusionados);
         }
 
         // Re-audit M2 R3 PATRÓN Q (FUNC-C3) · TX UNIFICADA: la recepción y su
@@ -72,6 +93,19 @@ class RegistrarRecepcion
                 'factura_proveedor' => $data['factura_proveedor'] ?? null,
                 'transportista' => $data['transportista'] ?? null,
                 'observaciones' => $data['observaciones'] ?? null,
+                /*
+                 * Por qué se aceptó recibir de más, en su columna.
+                 *
+                 * Antes se pegaba al final de `observaciones`, así que no se
+                 * podía listar «las recepciones que llegaron con exceso» sin
+                 * buscar una frase dentro de un texto libre, y editar las
+                 * observaciones se llevaba la constancia por delante.
+                 *
+                 * Además es lo que `RecibirMercancia` mira para saber que el
+                 * exceso de esta recepción fue autorizado y no un error de
+                 * digitación.
+                 */
+                'motivo_exceso' => blank($data['motivo_exceso'] ?? null) ? null : $data['motivo_exceso'],
                 // Clave real del $fillable (antes 'creado_por' se descartaba).
                 'recibido_por' => auth()->id(),
             ]);
@@ -154,6 +188,55 @@ class RegistrarRecepcion
      *
      * @param  array<string, array>  $itemsFusionados
      */
+    /**
+     * Qué líneas de una compra NACIONAL traen más de lo que quedaba pendiente.
+     *
+     * El equivalente de `ColoresDeImportacion::excesos()`, que no sirve acá:
+     * de China la mercancía llega agrupada y en otras cantidades por color, así
+     * que allá el tope es el total de la referencia. En una compra nacional
+     * cada línea es una línea.
+     *
+     * Lo marcado «faltante» no cuenta, por lo mismo que no cuenta en
+     * `exigirQueElRepartoCuadre`: no entra al inventario ni le suma nada al
+     * pendiente de la orden.
+     *
+     * @return array<string, array{pedido: float, recibido: float}> por descripción de la línea
+     */
+    private function excesosPorLinea(OrdenCompra $orden, array $itemsFusionados): array
+    {
+        $porLinea = [];
+
+        foreach ($itemsFusionados as $it) {
+            if (($it['clasificacion'] ?? 'apto') === 'faltante') {
+                continue;
+            }
+
+            $id = (int) $it['orden_item_id'];
+            $porLinea[$id] = ($porLinea[$id] ?? 0) + (float) $it['cantidad_recibida'];
+        }
+
+        $excesos = [];
+
+        foreach ($porLinea as $ordenItemId => $total) {
+            $ocItem = $orden->items->firstWhere('id', $ordenItemId);
+
+            if (! $ocItem) {
+                continue;
+            }
+
+            $pendiente = (float) $ocItem->cantidad - (float) $ocItem->cantidad_recibida;
+
+            if ($total > $pendiente + 0.0001) {
+                $excesos[$ocItem->descripcion ?: "línea {$ordenItemId}"] = [
+                    'pedido' => $pendiente,
+                    'recibido' => $total,
+                ];
+            }
+        }
+
+        return $excesos;
+    }
+
     private function exigirQueElRepartoCuadre(OrdenCompra $orden, array $itemsFusionados): void
     {
         if ($orden->esImportacion()) {

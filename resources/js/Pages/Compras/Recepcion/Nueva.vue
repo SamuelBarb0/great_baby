@@ -202,11 +202,16 @@ if (claveConteo) {
                      * por el pendiente de la orden. Los otros cuatro sitios que
                      * topan sí preguntan si es importación; éste no preguntaba.
                      */
-                    const tope = Number(base[g.orden_item_id].cantidad_pendiente || 0);
-                    if (! props.oc?.es_importacion && Number(fila.cantidad_recibida) > tope) {
-                        fila.cantidad_recibida = tope;
-                        conteoRecortado.value = true;
-                    }
+                    /*
+                     * Y desde el 21-nov tampoco se recorta en compra nacional.
+                     *
+                     * El exceso ya no es un error: el área recibe lo que el
+                     * proveedor mandó de más, y el sistema lo acepta pidiendo
+                     * el motivo. Recortar acá volvería a borrar en silencio el
+                     * número que alguien contó con las cajas en la mano —que
+                     * es justo lo que este comentario venía señalando para la
+                     * importación—.
+                     */
                     if (fila.destino_ingreso && !destinosValidos.has(fila.destino_ingreso)) {
                         fila.destino_ingreso = '';
                         conteoRecortado.value = true;
@@ -422,12 +427,30 @@ const sinReferencia = computed(() => props.oc?.items.filter(i => i.no_sube) ?? [
 
 // Re-audit M2 UX-A7 · clamp reactivo — antes `:max` era solo hint HTML, el
 // usuario podía escribir 30 sobre pendiente 20 y romper el saldo.
+/*
+ * Ya NO recorta al pendiente.
+ *
+ * Lo hacía, y con eso lo que de verdad llegó no se podía ni teclear: el
+ * proveedor manda 55 contra una orden de 50, la persona escribe 55 y la
+ * casilla le ponía 50. El área lo dijo claro el 20-nov-2026 — «se recibe y se
+ * registra, dejando constancia de las cantidades efectivamente recibidas»— y
+ * un conteo que la pantalla corrige a espaldas de quien cuenta no es una
+ * constancia de nada.
+ *
+ * El exceso ahora entra, pero pidiendo el motivo: lo exige
+ * `RegistrarRecepcion` y queda guardado en la recepción. Acá sólo se impide
+ * lo que no es un número.
+ */
 const clampCantidad = (it) => {
     const n = Number(it.cantidad_recibida);
     if (isNaN(n) || n < 0) it.cantidad_recibida = 0;
-    // En una importación el tope es el total de la referencia, no cada línea.
-    else if (!props.oc?.es_importacion && n > it.cantidad_pendiente) it.cantidad_recibida = it.cantidad_pendiente;
 };
+
+// Las líneas donde se contó más de lo que quedaba pendiente. Lo marcado
+// «faltante» no cuenta: no llegó, así que no puede sobrar.
+const lineasConExceso = computed(() => form.items.filter(
+    (i) => i.clasificacion !== 'faltante' && Number(i.cantidad_recibida || 0) > Number(i.cantidad_pendiente || 0),
+));
 
 // Re-audit M2 UX-M12 · deshabilitar submit si ningún ítem tiene cantidad > 0.
 const itemsAConfirmar = computed(() => form.items.filter(i => Number(i.cantidad_recibida) > 0));
@@ -437,7 +460,9 @@ const totalRecepcion = computed(() => itemsAConfirmar.value.reduce((s, i) => s +
 
 const guardar = () => {
     if (procesando.value || itemsAConfirmar.value.length === 0) return;
-    if (excesos.value.length && !form.motivo_exceso.trim()) return;
+    // Sin motivo no se manda un exceso, venga de una importación o de una
+    // compra nacional: el servidor lo rechazaría igual y con peor mensaje.
+    if ((excesos.value.length || lineasConExceso.value.length) && !form.motivo_exceso.trim()) return;
     procesando.value = true;
     router.post('/app/compras/recepcion', {
         orden_id: form.orden_id,
@@ -571,8 +596,16 @@ const guardar = () => {
                     </div>
                 </div>
 
-                <div v-if="excesos.length" class="p-3 rounded-lg bg-amber-50 dark:bg-amber-950/40 border-l-4 border-amber-500 text-sm space-y-2">
-                    <div><b>Se contó de más:</b> <span v-for="(c, n) in excesos" :key="c.referencia"><template v-if="n">, </template>{{ c.referencia }} ({{ c.contado }} de {{ c.esperado }})</span>. Se puede guardar, pero diga por qué.</div>
+                <!--
+                    El aviso de exceso ahora sale en los DOS casos.
+                    En importación se cuenta por referencia (de China llega
+                    agrupado y en otras cantidades por color); en compra
+                    nacional, línea por línea. En las dos, el exceso entra
+                    pidiendo el motivo — ya no se bloquea.
+                -->
+                <div v-if="excesos.length || lineasConExceso.length" class="p-3 rounded-lg bg-amber-50 dark:bg-amber-950/40 border-l-4 border-amber-500 text-sm space-y-2">
+                    <div v-if="excesos.length"><b>Se contó de más:</b> <span v-for="(c, n) in excesos" :key="c.referencia"><template v-if="n">, </template>{{ c.referencia }} ({{ c.contado }} de {{ c.esperado }})</span>. Se puede guardar, pero diga por qué.</div>
+                    <div v-else><b>Llegó más de lo pedido:</b> <span v-for="(i, n) in lineasConExceso" :key="i.orden_item_id"><template v-if="n">, </template>{{ i.descripcion }} ({{ i.cantidad_recibida }} contra {{ i.cantidad_pendiente }} pendientes)</span>. Entra igual, pero diga por qué.</div>
                     <input v-model="form.motivo_exceso" maxlength="300" required class="input w-full text-sm" placeholder="Motivo de lo que llegó de más" aria-label="Motivo de lo que llegó de más"/>
                 </div>
 
