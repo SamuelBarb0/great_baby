@@ -249,3 +249,45 @@ it('«Crear en Dropi» abre la carga con el producto del ERP, y uno ya conectado
     expect(fn () => app(App\Http\Controllers\App\DropiCargaProductosController::class)->desdeErp($p->fresh()))
         ->toThrow(Illuminate\Validation\ValidationException::class);
 });
+
+// ───────────────────────── terceros desde Excel ─────────────────────────
+
+it('importa clientes y proveedores de Dropi desde Excel: nuevos sólo en Dropi, los del ERP compartidos, la fila mala se informa', function () {
+    Contacto::create(['tipo_documento' => 'NIT', 'numero_documento' => '900555002', 'nombre_completo' => 'Ya del ERP', 'es_cliente' => true, 'activo' => true]);
+    $ruta = tempnam(sys_get_temp_dir(), 'ter').'.xlsx';
+    $w = new Writer();
+    $w->openToFile($ruta);
+    $w->addRow(Row::fromValues(App\Modules\Dropi\Services\ImportadorTercerosDropi::COLUMNAS));
+    $w->addRow(Row::fromValues(['NIT', '900.555.001-1', 'Textiles Excel SAS', 'si', '', 'a@b.co', '300', '', 'Cali']));
+    $w->addRow(Row::fromValues(['NIT', '900555002', 'Otro nombre', 'si', 'no', '', '', '', '']));
+    $w->addRow(Row::fromValues(['CC', '', 'Sin documento', 'no', 'si', '', '', '', '']));
+    $w->addRow(Row::fromValues(['cédula', '1020304050', 'Cliente Excel', 'no', 'si', 'correo-malo', '', '', '']));
+    $w->close();
+
+    $r = app(App\Modules\Dropi\Services\ImportadorTercerosDropi::class)->importar($ruta);
+
+    expect($r['creados'])->toBe(2)->and($r['compartidos'])->toBe(1)
+        ->and(collect($r['errores'])->implode('|'))->toContain('Fila 4')->toContain('correo-malo');
+
+    $nuevo = Contacto::where('numero_documento', '9005550011')->sole();
+    expect($nuevo->only(['en_dropi', 'en_erp', 'es_proveedor', 'ciudad']))->toBe(['en_dropi' => true, 'en_erp' => false, 'es_proveedor' => true, 'ciudad' => 'Cali'])
+        ->and(Contacto::where('numero_documento', '900555002')->sole()->only(['en_erp', 'en_dropi', 'nombre_completo']))
+        ->toBe(['en_erp' => true, 'en_dropi' => true, 'nombre_completo' => 'Ya del ERP'])
+        ->and(Contacto::where('numero_documento', '1020304050')->sole()->only(['tipo_documento', 'es_cliente', 'email']))
+        ->toBe(['tipo_documento' => 'CC', 'es_cliente' => true, 'email' => null]);
+});
+
+it('Clientes y proveedores trae Importar y Plantilla', function () {
+    $this->actingAs(App\Models\User::factory()->create()->assignRole(Spatie\Permission\Models\Role::findOrCreate('Aracely')));
+    $this->get('/admin/terceros-dropi')->assertOk()->assertSee('Importar desde Excel')->assertSee('Plantilla');
+});
+
+it('las plantillas de terceros y de compras se descargan', function () {
+    \Filament\Facades\Filament::setCurrentPanel('admin');
+    $this->actingAs(App\Models\User::factory()->create()->assignRole(Spatie\Permission\Models\Role::findOrCreate('Aracely')));
+
+    Livewire\Livewire::test(App\Modules\Dropi\Filament\Resources\TerceroDropiResource\Pages\ListTercerosDropi::class)
+        ->callAction('plantilla')->assertFileDownloaded('plantilla-clientes-proveedores-dropi.xlsx');
+    Livewire\Livewire::test(App\Modules\Dropi\Filament\Pages\OrdenesCompraDropi::class)
+        ->callAction('plantilla')->assertFileDownloaded('plantilla-compras-dropi.xlsx');
+});
