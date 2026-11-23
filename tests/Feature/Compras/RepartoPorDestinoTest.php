@@ -210,22 +210,48 @@ it('lo que no llegó apto ignora el destino y no lo guarda', function () {
         ->and(kardexDe($rc))->toBe([$noVendible->id => 50.0]);
 });
 
-it('repartir más de lo pendiente se rechaza diciendo la suma', function () {
+it('repartir más de lo pendiente exige el motivo, y con él entra', function () {
+    /*
+     * La regla cambió el 20-nov-2026 y este caso la sigue.
+     *
+     * Antes, repartir 60 sobre 50 pendientes se rechazaba y punto. El área lo
+     * corrigió: «cuando el proveedor entrega cantidades superiores a las
+     * solicitadas, la mercancía se recibe y se registra, dejando constancia de
+     * las cantidades efectivamente recibidas». Lo que de verdad llegó tiene que
+     * poder entrar, porque si no la bodega queda con mercancía en el piso que
+     * el sistema dice que no existe.
+     *
+     * Lo que NO cambió es que un exceso sin explicar sigue sin pasar: casi
+     * siempre es un error de digitación, y ése hay que atajarlo.
+     */
     $orden = ordenDe50($this->bodegaOrden);
     $linea = $orden->items->first();
 
-    expect(fn () => \App\Modules\Compras\Actions\RegistrarRecepcion::run([
+    $reparto = fn (array $extra = []) => \App\Modules\Compras\Actions\RegistrarRecepcion::run([
         'orden_id' => $orden->id,
         'items' => [
             ['orden_item_id' => $linea->id, 'cantidad_recibida' => 30, 'ubicacion_id' => $this->gbPrincipal->id],
             ['orden_item_id' => $linea->id, 'cantidad_recibida' => 30, 'ubicacion_id' => $this->dropiPrincipal->id],
         ],
-    ]))->toThrow(InvalidArgumentException::class, 'repartiendo 60');
+    ] + $extra);
 
-    // Y no deja nada a medias: ni recepción ni una sola unidad de stock.
+    expect(fn () => $reparto())
+        ->toThrow(InvalidArgumentException::class, 'Se contó más de lo pedido');
+
+    // Sin motivo no deja nada a medias: ni recepción ni una unidad de stock.
     expect(RecepcionCompra::count())->toBe(0)
         ->and(InventarioMovimiento::count())->toBe(0)
         ->and((float) $linea->fresh()->cantidad_recibida)->toBe(0.0);
+
+    // Con el motivo escrito, las 60 entran y el reparto a los dos destinos se
+    // respeta: el exceso no se amontona en el primero.
+    $reparto(['motivo_exceso' => 'El proveedor mandó 10 de cortesía']);
+
+    expect((float) $linea->fresh()->cantidad_recibida)->toBe(60.0)
+        ->and((float) InventarioMovimiento::where('ubicacion_id', $this->gbPrincipal->id)->sum('cantidad'))->toBe(30.0)
+        ->and((float) InventarioMovimiento::where('ubicacion_id', $this->dropiPrincipal->id)->sum('cantidad'))->toBe(30.0)
+        // Y la constancia queda en su columna, no sepultada en observaciones.
+        ->and(RecepcionCompra::first()->motivo_exceso)->toContain('cortesía');
 });
 
 it('no se puede recibir contra un par que el área marcó de sólo traslado', function () {
