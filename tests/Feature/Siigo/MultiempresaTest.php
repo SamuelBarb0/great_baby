@@ -229,9 +229,21 @@ it('la empresa se cambia antes de facturar, no después', function () {
     $this->actingAs($this->aracely)->post("/app/pedidos-b2b/{$p->id}/empresa",
         ['empresa_id' => EmpresaConfig::porCodigo('ecommerce')->id])->assertSessionHasErrors('empresa_id');
 
+    /*
+     * Con factura emitida ya no se cambia, y el motivo viaja como error de
+     * campo y no como `abort(422)`.
+     *
+     * El test esperaba el 422 original. El controlador lo cambió a propósito
+     * —en una petición de Inertia el cuerpo de un abort no se puede leer, así
+     * que la pantalla mostraba «El servidor rechazó la operación» en vez del
+     * motivo—, y lo que hay que seguir cuidando es que la razón social NO se
+     * mueva: `assertSessionHasErrors` por sí solo no mira el dato.
+     */
     $p->update(['factura_id' => facturaDeEmpresa($this->gb, $this->cliente)->id]);
     $this->actingAs($this->aracely)->post("/app/pedidos-b2b/{$p->id}/empresa", ['empresa_id' => $this->gb->id])
-        ->assertStatus(422);
+        ->assertSessionHasErrors('empresa_id');
+
+    expect($p->fresh()->empresa_id)->toBe($this->arsutex->id);
 });
 
 it('el PDF y el QR DIAN llevan el NIT de la empresa que facturó', function () {

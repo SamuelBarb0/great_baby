@@ -346,3 +346,40 @@ it('la hoja de un pedido ya despachado no manda a recoger nada', function () {
     expect($props['items'])->toBeEmpty()
         ->and($props['secciones'])->toBeEmpty();
 });
+
+it('un alistador de otra bodega no imprime la hoja', function () {
+    /*
+     * La hoja de picking no es una lista de referencias: lleva el nombre del
+     * cliente, su dirección, su teléfono y el del asesor que vendió. Bastaba
+     * la casilla `logistica` —que tienen AdminBodega, Alistador y
+     * Despachador— para imprimir CUALQUIER pedido cambiando el número en la
+     * dirección, de cualquier sede.
+     *
+     * Es el mismo criterio que ya aplicaba `oleada()`: quien ve el pedido en
+     * su cola es quien puede imprimirlo.
+     */
+    $zonaA = posicionDeZona('R1-SA-N1', '1');
+
+    $otraSede = InventarioUbicacion::create([
+        'codigo' => 'SEDE-AJENA', 'nombre' => 'Bodega de otra ciudad',
+        'categoria' => CategoriaUbicacion::Venta, 'activa' => true,
+        'disponible_para_venta' => true,
+    ]);
+
+    $pedido = pedidoParaPartir($this, [[productoEnVariasZonas([$zonaA->id => 50]), 5]]);
+    $pedido->forceFill(['ubicacion_origen_id' => $otraSede->id])->save();
+
+    $ajeno = \App\Models\User::factory()->create();
+    $ajeno->assignRole(Role::firstOrCreate(['name' => 'Alistador', 'guard_name' => 'web']));
+
+    $this->actingAs($ajeno)
+        ->get("/app/logistica/cola-jorge/{$pedido->id}/picking")
+        ->assertForbidden();
+
+    // Y quien sí responde por esa bodega la imprime sin problema.
+    $otraSede->forceFill(['responsable_user_id' => $ajeno->id])->save();
+
+    $this->actingAs($ajeno)
+        ->get("/app/logistica/cola-jorge/{$pedido->id}/picking")
+        ->assertOk();
+});

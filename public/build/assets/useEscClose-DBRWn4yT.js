@@ -1,0 +1,1 @@
+import{y as i,O as s}from"./app-Dm80-7I8.js";function l(e,t=null){const n=o=>{if(!(o.key!=="Escape"||!e.value)){if(t){t();return}e.value=typeof e.value=="boolean"?!1:null}};i(e,o=>{o?window.addEventListener("keydown",n):window.removeEventListener("keydown",n)},{immediate:!0}),s(()=>window.removeEventListener("keydown",n))}export{l as u};

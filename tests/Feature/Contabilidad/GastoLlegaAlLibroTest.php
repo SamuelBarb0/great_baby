@@ -177,8 +177,28 @@ it('aprobar desde la pantalla deja el gasto en el libro', function () {
     // Ésta es la prueba que importa: el camino que de verdad usa la gente.
     $g = gastoDe(750_000);
 
+    /*
+     * Aprobar gastos dejó de colgar del ROL y pasó a su propia casilla.
+     *
+     * El test le daba el rol Gerente y con eso bastaba. El 12-nov eso cambió a
+     * propósito: `contabilidad_aprobar_gastos` nace SIN ningún rol —firma
+     * propia, que la reparte un admin en /app/roles— así que el rol por sí
+     * solo ya no abre nada. Se le da la casilla como se la daría el admin.
+     *
+     * OJO en producción: una casilla que nace vacía no la tiene nadie hasta
+     * que se corre `PermisosSeeder` Y alguien la marca. Mientras no pase, los
+     * únicos que aprueban gastos son Aracely y Gerencia por su bypass de root.
+     */
     $gerente = User::factory()->create();
-    $gerente->assignRole(Role::firstOrCreate(['name' => 'Gerente', 'guard_name' => 'web']));
+    $rol = Role::firstOrCreate(['name' => 'Gerente', 'guard_name' => 'web']);
+
+    // La casilla tiene que EXISTIR antes de repartirla. En una base recién
+    // migrada no está —nace del `PermisosSeeder`—, y eso es exactamente lo que
+    // pasa hoy en producción: el permiso no existe, así que nadie lo tiene.
+    $rol->givePermissionTo(
+        \Spatie\Permission\Models\Permission::findOrCreate('ver.contabilidad_aprobar_gastos', 'web')
+    );
+    $gerente->assignRole($rol);
 
     $this->actingAs($gerente)->post("/app/gastos/{$g->id}/aprobar")->assertRedirect();
 

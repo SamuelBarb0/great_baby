@@ -209,11 +209,20 @@ it('el colaborador no entra a Gestión Humana ni a lo de su jefe', function () {
 });
 
 it('quien tiene el rol pero no ficha ve un error claro, no una pantalla vacía', function () {
-    // Es un error de configuración, y decirlo ahorra media hora de buscar.
+    /*
+     * Es un error de configuración, y decirlo ahorra media hora de buscar.
+     *
+     * Antes se respondía 403, y el 20-nov se cambió a propósito: un 403 sobre
+     * «Mi espacio» no le dice a nadie qué hacer. Ahora abre una pantalla que
+     * EXPLICA que falta la ficha y a quién pedirla. El 403 se conservó donde
+     * sí corresponde, que es en las acciones.
+     */
     $suelto = User::factory()->create();
     $suelto->assignRole('Colaborador');
 
-    $this->actingAs($suelto)->get('/app/mi-espacio')->assertStatus(403);
+    $this->actingAs($suelto)->get('/app/mi-espacio')
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page->component('Rrhh/Portal/MiEspacioSinFicha'));
 });
 
 it('sólo ve sus propios documentos', function () {

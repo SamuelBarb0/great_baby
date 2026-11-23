@@ -303,12 +303,23 @@ class UbicacionesDeLaBodegaSeeder extends Seeder
     }
 
     /**
-     * Las tres cuentas que identifican cada zona.
+     * Las tres cuentas que responden por cada zona.
      *
-     * Nacen sin contraseña utilizable a propósito: el área dijo que son una
-     * etiqueta operativa y que no deciden nada. Llevan el papel de Alistador
-     * porque el sistema exige papel de bodega para ser responsable de una
-     * ubicación, y porque es el más acotado de los tres.
+     * Nacen como etiqueta —nombre genérico y contraseña aleatoria— porque al
+     * sembrar todavía no se sabe quién responde por qué. Pero dejaron de serlo
+     * en cuanto el área puso los nombres: el 23-nov-2026 se les asignó persona
+     * y clave propia, una por zona, y entraron a trabajar con ellas.
+     *
+     * Por eso el `if (! $u->exists)` de abajo NO es un detalle: volver a
+     * sembrar no puede pisar el nombre ni la contraseña de una persona que ya
+     * usa su cuenta.
+     *
+     * Llevan el papel de Alistador porque el sistema exige papel de bodega
+     * para ser responsable de una ubicación, y porque es el más acotado de los
+     * tres. Lo que NO les da ese papel es poder contar: eso va por
+     * `User::ubicacionesQuePuedeContar()`, que hereda la responsabilidad sin
+     * pedir rol — si colgara de la casilla `bodega`, estrenarían también los
+     * traslados entre bodegas, que el área reservó al jefe de logística.
      *
      * @return array<int, ?User>
      */
