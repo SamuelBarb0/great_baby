@@ -30,23 +30,39 @@ class EtiquetasMasivasController extends Controller
     /** Alto máximo (mm) del código de barras: lo que dejan libre los 25 mm tras dos renglones de nombre. */
     private const BARRAS_ALTO_MAX = 14;
 
-    public function pdf(Request $request): Response
+    /** Lo mismo, cuando la etiqueta lleva además el renglón del color (producto agrupado). */
+    private const BARRAS_ALTO_CON_COLOR = 11;
+
+    public function pdf(Request $request, CatalogoDropi $catalogo): Response
     {
         abort_unless(auth()->check(), 401);
 
         $productoIds = (array) $request->input('productos', []);
-        $variantes = ProductoVariante::query()
-            ->whereIn('producto_id', $productoIds)
-            ->with('producto')
-            ->orderBy('producto_id')
-            ->orderBy('codigo_barras')
+        $productos = Producto::query()
+            ->whereIn('id', $productoIds)
+            ->with(['variantes' => fn ($q) => $q->orderBy('codigo_barras')])
+            ->orderBy('id')
             ->get();
 
-        if ($variantes->isEmpty()) {
-            abort(404, 'Sin variantes para imprimir.');
+        // Con variantes, una etiqueta por variante. Un producto agrupado no tiene
+        //   variantes en el ERP (bodega, 23-nov-2026: «no puedo imprimir las
+        //   variaciones»): sale una por cada color de Dropi, todas con su referencia.
+        //   El nombre del color sale de la última lectura del catálogo de Dropi (la
+        //   misma de «Mis productos en Dropi», sin llamar a Dropi), solo si hay agrupados.
+        $nombrePorLlave = $productos->contains(fn (Producto $p) => $p->variantes->isEmpty())
+            ? collect($catalogo->misProductos()['productos'])->flatMap(fn ($x) => $x['variaciones'])
+                ->pluck('variacion', 'llave')->filter()->all()
+            : [];
+
+        $etiquetas = $productos->flatMap(fn (Producto $p) => $p->variantes->isNotEmpty()
+            ? $p->variantes->map(fn (ProductoVariante $v) => self::deVariante($v->setRelation('producto', $p)))->all()
+            : self::deAgrupado($p, $nombrePorLlave))->all();
+
+        if ($etiquetas === []) {
+            abort(404, 'Sin productos para imprimir.');
         }
 
-        return $this->lote($variantes->map(fn (ProductoVariante $v) => self::deVariante($v))->all(), 'etiquetas-lote');
+        return $this->lote($etiquetas, 'etiquetas-lote');
     }
 
     /**
@@ -77,9 +93,12 @@ class EtiquetasMasivasController extends Controller
                 $vinculo->producto !== null => self::deAgregado($vinculo->producto, $variacion),
                 default => null,
             };
-            // Dos variaciones de Dropi pueden apuntar al mismo código del ERP: una etiqueta basta.
-            if ($etiqueta && ! isset($etiquetas[$etiqueta['codigo']])) {
-                $etiquetas[$etiqueta['codigo']] = $etiqueta;
+            // Dos variaciones de Dropi pueden apuntar a la misma variante del ERP: una
+            //   etiqueta basta. En un agrupado todas comparten la referencia, así que
+            //   va una por color, con el color escrito: es lo único que las distingue.
+            $llave = $etiqueta ? $etiqueta['codigo'] . '|' . ($etiqueta['color'] ?? '') : null;
+            if ($llave && ! isset($etiquetas[$llave])) {
+                $etiquetas[$llave] = $etiqueta;
             }
         }
 
@@ -103,15 +122,49 @@ class EtiquetasMasivasController extends Controller
         ];
     }
 
-    /** Un producto agregado no tiene variantes: su código es la referencia. */
+    /**
+     * Un producto agregado no tiene variantes: su código es la referencia. La
+     * variación de Dropi (el color) va escrita en `color`: el código es el mismo
+     * para todos los colores y solo así se sabe cuál es cuál.
+     */
     private static function deAgregado(Producto $p, ?string $variacion): array
     {
+        $variacion = filled($variacion) ? trim($variacion) : null;
+
         return [
             'nombre' => $p->nombre,
             'detalle' => (string) $variacion,
+            'color' => $variacion,
             'precio' => (float) ($p->precio_proveedor ?? 0),
             'codigo' => $p->referencia,
         ];
+    }
+
+    /**
+     * Las etiquetas de un producto agrupado en el catálogo: una por cada color
+     * con que está vinculado en Dropi, o una sola si no tiene colores. El nombre
+     * del color viene del catálogo de Dropi; si no está, el que guardó el vínculo.
+     *
+     * @param  array<string, string>  $nombrePorLlave  llave de Dropi => variación
+     * @return list<array{nombre:?string, detalle:string, color:?string, precio:float, codigo:string}>
+     */
+    private static function deAgrupado(Producto $p, array $nombrePorLlave): array
+    {
+        $colores = DropiVinculoProducto::query()
+            ->where('producto_id', $p->id)
+            ->whereNull('variante_id')
+            ->get(['sku_dropi', 'variacion'])
+            ->map(fn (DropiVinculoProducto $v) => trim((string) ($nombrePorLlave[$v->sku_dropi] ?? $v->variacion)))
+            ->sort()
+            ->filter()
+            ->unique(fn ($v) => mb_strtoupper($v))
+            ->values();
+
+        if ($colores->isEmpty()) {
+            return [self::deAgregado($p, null)];
+        }
+
+        return $colores->map(fn (string $color) => self::deAgregado($p, $color))->all();
     }
 
     /**
@@ -135,7 +188,9 @@ class EtiquetasMasivasController extends Controller
             $png = Code128::png($e['codigo']);
             $e['barras'] = 'data:image/png;base64,' . base64_encode($png);
             if ($soloBarras) {
-                [$e['barras_ancho'], $e['barras_alto']] = self::encajarBarras($png);
+                // Con el renglón del color, las barras bajan de alto para caber en los 25 mm.
+                $altoMax = filled($e['color'] ?? null) ? self::BARRAS_ALTO_CON_COLOR : self::BARRAS_ALTO_MAX;
+                [$e['barras_ancho'], $e['barras_alto']] = self::encajarBarras($png, $altoMax);
             }
         }
         unset($e);
@@ -163,14 +218,14 @@ class EtiquetasMasivasController extends Controller
      *
      * @return array{0: float, 1: float}
      */
-    private static function encajarBarras(string $png): array
+    private static function encajarBarras(string $png, float $altoMax = self::BARRAS_ALTO_MAX): array
     {
         [$px, $py] = getimagesizefromstring($png);
         $ancho = self::ROLLO_DROPI['etiqueta'] - 2;
         $alto = $ancho * $py / $px;
-        if ($alto > self::BARRAS_ALTO_MAX) {
-            $ancho *= self::BARRAS_ALTO_MAX / $alto;
-            $alto = self::BARRAS_ALTO_MAX;
+        if ($alto > $altoMax) {
+            $ancho *= $altoMax / $alto;
+            $alto = $altoMax;
         }
 
         return [round($ancho, 2), round($alto, 2)];
