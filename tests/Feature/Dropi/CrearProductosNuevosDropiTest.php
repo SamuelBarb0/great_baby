@@ -138,12 +138,54 @@ it('crea y vincula solo los productos nuevos que frenan pedidos', function () {
         ->and(DropiVinculoProducto::where('sku_dropi', 'DP-2352474')->value('producto_id'))->toBe($robot->id)
         ->and(DropiPedidoItem::where('sku_dropi', 'DP-2352474')->pluck('producto_id')->unique()->all())->toBe([$robot->id]);
 
-    // Las dos variaciones quedan en la misma ficha, aunque solo una tenga pedidos.
+    // Las dos variaciones quedan en la misma ficha, aunque solo una tenga pedidos:
+    //   cada una en su variante (ver «con variaciones nace con una variante por color»).
     $pelota = Producto::where('referencia', 'VAR-40')->firstOrFail();
-    expect(DropiVinculoProducto::whereIn('sku_dropi', ['DV-401', 'DV-402'])->pluck('producto_id')->unique()->all())->toBe([$pelota->id]);
+    expect(DropiVinculoProducto::whereIn('sku_dropi', ['DV-401', 'DV-402'])->with('variante')->get()
+        ->pluck('variante.producto_id')->unique()->all())->toBe([$pelota->id]);
 
     // Sin stock los pedidos siguen esperando: el stock lo carga bodega.
     expect(DropiPedido::where('guia', 'NV-1')->value('estado'))->toBe(EstadoPedidoDropi::PendienteInventario);
+});
+
+it('con variaciones nace con una variante por color, cada una con su código de barras', function () {
+    app(CrearProductosNuevosDropi::class)->handle();
+
+    // Bodega, 23-nov-2026: «que no me salga generalizado, no voy a saber cuáles eran».
+    $pelota = Producto::where('referencia', 'VAR-40')->firstOrFail();
+    $variantes = $pelota->variantes()->orderBy('dropi_variacion_id')->get();
+
+    expect((bool) $pelota->desglose_stock)->toBeTrue()
+        ->and($variantes->pluck('color_nombre')->all())->toBe(['ROJO', 'AZUL'])
+        ->and($variantes->pluck('codigo_barras')->all())->toBe(['VAR-40-ROJO', 'VAR-40-AZUL'])
+        ->and($variantes->pluck('dropi_variacion_id')->all())->toBe(['401', '402'])
+        // Cada llave de Dropi en su variante, y el pedido que esperaba ya apunta al color.
+        ->and(DropiVinculoProducto::where('sku_dropi', 'DV-401')->value('variante_id'))->toBe($variantes[0]->id)
+        ->and(DropiVinculoProducto::where('sku_dropi', 'DV-402')->value('variante_id'))->toBe($variantes[1]->id)
+        ->and(DropiPedidoItem::where('sku_dropi', 'DV-401')->value('variante_id'))->toBe($variantes[0]->id);
+
+    // La siguiente lectura las reconoce: ya no son «nuevo» ni se vuelven a crear.
+    $filas = collect(app(CatalogoDropi::class)->previsualizar()['filas'])->whereIn('llave', ['DV-401', 'DV-402']);
+    expect($filas->pluck('estado')->unique()->all())->not->toContain('nuevo');
+
+    // Los SIMPLE siguen agrupados, sin variantes.
+    $robot = Producto::where('referencia', 'DROPI-2352474')->firstOrFail();
+    expect((bool) $robot->desglose_stock)->toBeFalse()->and($robot->variantes()->count())->toBe(0);
+});
+
+it('las etiquetas del producto nuevo con colores salen con un código por color', function () {
+    app(CrearProductosNuevosDropi::class)->handle();
+    $codigos = null;
+    \Illuminate\Support\Facades\View::composer('catalogo.pdf.etiquetas-dropi', function ($v) use (&$codigos) {
+        $codigos = array_column($v->getData()['etiquetas'], 'codigo');
+    });
+
+    $this->seed(\Database\Seeders\PermisosSeeder::class);
+    $aracely = User::factory()->create();
+    $aracely->assignRole(Role::findOrCreate('Aracely', 'web'));
+    $this->actingAs($aracely)->get(route('catalogo.etiquetas.dropi', 40))->assertOk();
+
+    expect($codigos)->toBe(['VAR-40-ROJO', 'VAR-40-AZUL']);
 });
 
 it('deja quietos los que no tienen pedidos, los que ya tienen algo en el ERP y los de la papelera', function () {
