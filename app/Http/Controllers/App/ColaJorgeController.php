@@ -10,6 +10,7 @@ use Illuminate\Http\Request;
 use Illuminate\Routing\Controllers\HasMiddleware;
 use Illuminate\Routing\Controllers\Middleware;
 use Illuminate\Support\Facades\DB;
+use App\Modules\Logistica\Support\RepartoPorUbicacion;
 use App\Modules\Logistica\Support\ZonaDeLaBodega as Zona;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -279,6 +280,111 @@ class ColaJorgeController extends Controller implements HasMiddleware
         return back()->with('success', 'Pedido asignado al alistador.');
     }
 
+    /**
+     * Traer mercancía de Exhibición para completar un pedido.
+     *
+     * ───────────────────────────────────────────────────────────────────────
+     * POR QUÉ EXISTE
+     *
+     * La hoja de picking le dice al alistador, impreso: «si los racks no
+     * completan la cantidad, tome de EXHIBICIÓN y reporte el traslado. El
+     * pedido sale completo o no sale». Y el área confirmó el 20-nov-2026 que
+     * eso lo hace «sin requerir autorización previa».
+     *
+     * Pero no tenía con qué reportarlo: la pantalla de traslados es de quien
+     * manda la bodega. Así que o se llevaba la mercancía sin registrarla —y
+     * Exhibición quedaba descuadrada— o el pedido esperaba al jefe. Las dos
+     * salidas son malas y la bodega venía eligiendo la primera.
+     *
+     * Esto es la tercera: un traslado acotado, que sólo puede ir DESDE el
+     * almacén marcado como respaldo de surtido HACIA una bodega que esa
+     * persona ya opera. Nada más.
+     *
+     * Se envía y se recibe en el mismo acto, a propósito: la mercancía no está
+     * «en tránsito», la tiene en la mano. Dejarla en tránsito obligaría a un
+     * segundo paso que nadie va a dar con el pedido a medio alistar.
+     */
+    public function surtirDesdeRespaldo(Request $r, int $pedido): RedirectResponse
+    {
+        $datos = $r->validate([
+            'origen_id' => ['required', 'integer', 'exists:inventario_ubicaciones,id'],
+            'producto_id' => ['nullable', 'integer', 'exists:productos,id'],
+            'variante_id' => ['nullable', 'integer', 'exists:producto_variantes,id'],
+            'cantidad' => ['required', 'numeric', 'min:0.0001'],
+        ], [], [
+            'origen_id' => 'ubicación de origen',
+            'cantidad' => 'cantidad',
+        ]);
+
+        abort_if(
+            ! $datos['producto_id'] && ! $datos['variante_id'],
+            422,
+            'Hay que decir qué producto se trae de Exhibición.',
+        );
+
+        $u = $r->user();
+        $p = PedidoCliente::findOrFail($pedido);
+
+        abort_unless($p->ubicacion_origen_id, 422,
+            'Este pedido no tiene bodega de origen: no hay a dónde traer la mercancía.');
+
+        /*
+         * Quién puede: el alistador del pedido, o quien opere esa bodega. NO
+         * se pide el permiso `traslados` — ese es del jefe de bodega, y la
+         * razón entera de esta pantalla es que el alistador no lo tiene.
+         */
+        abort_unless(
+            $u->esAracely()
+            || $p->alistador_id === $u->id
+            || in_array((int) $p->ubicacion_origen_id, array_map('intval', $u->bodegasQueVeIds()), true),
+            403,
+            'Este pedido no es de una bodega suya.',
+        );
+
+        $respaldo = \App\Modules\Inventario\Models\Oficina::respaldoDeSurtido();
+
+        abort_unless($respaldo, 422,
+            'Ninguna oficina está marcada como respaldo de surtido en el catálogo de la bodega.');
+
+        $origen = \App\Modules\Dropi\Models\InventarioUbicacion::findOrFail($datos['origen_id']);
+        $oficinaDelOrigen = $origen->oficina_id
+            ?: \App\Modules\Dropi\Models\InventarioUbicacion::find($origen->bodega_id)?->oficina_id;
+
+        abort_unless((int) $oficinaDelOrigen === (int) $respaldo->id, 422,
+            "De ahí no se surte: {$origen->codigo} no es del respaldo ({$respaldo->etiqueta()}).");
+
+        $traslado = DB::transaction(function () use ($datos, $p, $u, $origen, $respaldo) {
+            $t = \App\Modules\Inventario\Models\Traslado::create([
+                'numero' => \App\Modules\Inventario\Models\Traslado::siguienteNumero(),
+                'origen_id' => $origen->id,
+                'destino_id' => $p->ubicacion_origen_id,
+                'estado' => \App\Modules\Inventario\Enums\EstadoTraslado::Borrador,
+                'motivo' => \App\Modules\Inventario\Models\Traslado::MOTIVO_SURTIDO,
+                'observaciones' => "Surtido desde {$respaldo->etiqueta()} para completar el pedido {$p->numero}.",
+                'solicitado_por' => $u->id,
+                'fecha_solicitud' => now()->toDateString(),
+            ]);
+
+            \App\Modules\Inventario\Models\TrasladoItem::create([
+                'traslado_id' => $t->id,
+                'producto_id' => $datos['producto_id'],
+                'variante_id' => $datos['variante_id'],
+                'cantidad_solicitada' => $datos['cantidad'],
+            ]);
+
+            return $t->fresh('items');
+        });
+
+        $accion = app(\App\Modules\Inventario\Actions\EjecutarTraslado::class);
+
+        // La mercancía la tiene en la mano: sale y entra en el mismo acto.
+        $traslado = $accion->enviar($traslado);
+        $accion->recibir($traslado->fresh('items'));
+
+        return back()->with('success',
+            "Traído de {$origen->codigo} · {$traslado->numero}. Exhibición quedó descontada.");
+    }
+
     public function iniciar(Request $r, int $pedido): RedirectResponse
     {
         $u = $r->user();
@@ -438,6 +544,9 @@ class ColaJorgeController extends Controller implements HasMiddleware
 
             foreach ($saldos($campo, $ids) as $row) {
                 $saldosPorSujeto["{$pre}:{$row->sujeto}"][] = [
+                    // El id va porque desde la hoja se dispara el surtido
+                    // («traer de Exhibición») y hay que decir de DÓNDE sale.
+                    'id' => (int) $row->ubicacion_id,
                     'codigo' => $row->codigo,
                     'nombre' => $row->nombre,
                     'categoria' => $row->categoria,
@@ -519,10 +628,29 @@ class ColaJorgeController extends Controller implements HasMiddleware
              * `usort` es estable desde PHP 8, así que dentro de cada grupo se
              * conserva el orden por stock que trajo la consulta.
              */
+            /*
+             * LO QUE HAY QUE RECOGER ES LO QUE FALTA, NO LO QUE PIDIÓ EL CLIENTE.
+             *
+             * Decía `$it->cantidad` a secas. Con el despacho parcial eso manda
+             * al alistador a recoger el pedido COMPLETO otra vez: salieron 4 de
+             * 6 en el primer viaje y la hoja del segundo seguía pidiendo 6.
+             *
+             * En bodega eso termina de una de dos formas, las dos malas: o
+             * recoge 6 y salen 10 de un pedido de 6, o se para frente al
+             * estante contando y descubre que la hoja no cuadra con la caja que
+             * ya se fue.
+             */
+            $yaSalio = (int) (float) ($it->cantidad_despachada ?? 0);
+            $porRecoger = max(0, (int) $it->cantidad - $yaSalio);
+
             return [
                 'sku' => $it->sku_snapshot,
                 'descripcion' => $it->descripcion_snapshot,
-                'cantidad' => (int) $it->cantidad,
+                'cantidad' => $porRecoger,
+                // Para que la hoja del segundo viaje pueda decir de dónde sale
+                // ese número, en vez de mostrar uno más chico sin explicación.
+                'cantidad_pedida' => (int) $it->cantidad,
+                'ya_salio' => $yaSalio,
                 'variante' => $it->variante ? [
                     'codigo_barras' => $it->variante->codigo_barras,
                     'color' => $it->variante->color_nombre,
@@ -532,8 +660,21 @@ class ColaJorgeController extends Controller implements HasMiddleware
                 //   el alistador tenga alternativas si una está vacía.
                 'ubicaciones' => array_slice($saldos, 0, 3),
                 'es_agregado' => !$it->variante_id && $it->producto_id,
+                // Para disparar el surtido desde la hoja hay que decir QUÉ se
+                // trae, y eso es el par producto/variante del renglón.
+                'producto_id' => $it->producto_id ? (int) $it->producto_id : null,
+                'variante_id' => $it->variante_id ? (int) $it->variante_id : null,
             ];
-        })->values();
+        })
+            /*
+             * Y las líneas que ya salieron enteras NO se imprimen.
+             *
+             * Dejarlas con un cero invita a recogerlas igual: quien camina con
+             * la hoja lee el renglón, no la columna. Si el pedido vuelve por un
+             * segundo viaje, la hoja es la de lo que falta.
+             */
+            ->filter(fn ($i) => $i['cantidad'] > 0)
+            ->values();
 
         // LOG-J6 fix · si Don Jorge quiere horas automáticas, usamos las que
         //   el ERP ya registró en la Cola de alistamiento (asignación, inicio,
@@ -564,29 +705,13 @@ class ColaJorgeController extends Controller implements HasMiddleware
          * a menor stock, asi que se acumulan en ese orden hasta cubrir la
          * cantidad del item.
          */
-        $visitadas = $items->flatMap(function ($it) {
-            $faltan = (int) $it['cantidad'];
-            $usadas = [];
-
-            foreach ($it['ubicaciones'] as $u) {
-                // Exhibicion no es una zona del recorrido: ir alla es una
-                // excepcion con traslado, no un estante mas que caminar. Si
-                // entrara, la hoja diria «compartido con zona» por algo que no
-                // es una zona.
-                if ($u['es_respaldo']) {
-                    continue;
-                }
-
-                $usadas[] = $u;
-                $faltan -= (int) $u['stock'];
-
-                if ($faltan <= 0) {
-                    break;
-                }
-            }
-
-            return $usadas;
-        });
+        /*
+         * El reparto vive en `RepartoPorUbicacion` y no acá: la hoja del pedido
+         * y la de la oleada tienen que caminar igual, y dos copias de este
+         * bucle se desincronizan sin que nadie lo note hasta que el papel y el
+         * estante dejan de coincidir.
+         */
+        $visitadas = $items->flatMap(fn ($it) => RepartoPorUbicacion::paradas($it));
 
         /*
          * Cuál es LA zona del pedido, cuando toca más de una.
@@ -597,20 +722,41 @@ class ColaJorgeController extends Controller implements HasMiddleware
          * responsable equivocado y mandaría a la persona que casi no trabaja
          * en él.
          */
+        /*
+         * OJO CON EL TIPO DE LA CLAVE.
+         *
+         * Las zonas de fábrica se llaman «1», «2» y «3» —así las entregó el
+         * área— y PHP convierte toda clave de array que parezca un entero en
+         * un entero. Así que `$porZona['1']` guarda bajo `1`, y el `===` de más
+         * abajo comparaba el string «1» que devuelve `Zona::deRack()` contra el
+         * int 1 de `array_keys()`: SIEMPRE false.
+         *
+         * Consecuencia, comprobada el 22-nov-2026: la hoja de picking nunca
+         * imprimía el nombre real del responsable. Siempre caía al genérico
+         * «Responsable 1», que es justo lo que el comentario de abajo explica
+         * que NO debe pasar. Y sólo ocurre con zonas de nombre numérico, que es
+         * exactamente la configuración de fábrica.
+         *
+         * Por eso todo lo que toque estas claves se normaliza a texto.
+         */
         $porZona = [];
 
         foreach ($visitadas as $u) {
-            if ($u['zona'] ?? null) {
-                $porZona[$u['zona']] = ($porZona[$u['zona']] ?? 0) + (int) $u['stock'];
+            $zona = isset($u['zona']) ? (string) $u['zona'] : '';
+
+            if ($zona !== '') {
+                // Se pesa con lo que SALE de esa ubicación, no con lo que hay.
+                $porZona[$zona] = ($porZona[$zona] ?? 0) + (int) ($u['toma'] ?? 0);
             }
         }
 
         // A igualdad de unidades manda el orden del plano, para que la misma
         // hoja impresa dos veces diga siempre lo mismo.
-        $orden = array_flip(Zona::letras());
-        uksort($porZona, fn ($a, $b) => [-$porZona[$a], $orden[$a] ?? 99] <=> [-$porZona[$b], $orden[$b] ?? 99]);
+        $orden = array_flip(array_map('strval', Zona::letras()));
+        uksort($porZona, fn ($a, $b) => [-$porZona[(string) $a], $orden[(string) $a] ?? 99]
+            <=> [-$porZona[(string) $b], $orden[(string) $b] ?? 99]);
 
-        $zonas = array_keys($porZona);
+        $zonas = array_map('strval', array_keys($porZona));
         $principal = $zonas[0] ?? null;
         $compartidas = array_slice($zonas, 1);
 
@@ -626,17 +772,27 @@ class ColaJorgeController extends Controller implements HasMiddleware
          * buscar. Asi que se lee el responsable real de la ubicacion, y solo
          * si nadie responde por ella se cae al numero de la zona.
          */
-        $responsable = null;
+        /*
+         * Se resuelve para CUALQUIER zona, no sólo la principal: cuando la hoja
+         * se parte, cada sección lleva impreso el nombre de quien responde por
+         * ella. Imprimir el de la zona principal en todas las bandas sería peor
+         * que no imprimir ninguno.
+         */
+        $responsableDe = function (?string $zona) use ($visitadas): ?string {
+            if ($zona === null || $zona === '') {
+                return null;
+            }
 
-        if ($principal !== null) {
-            $id = $visitadas->firstWhere(fn ($u) => ($u['zona'] ?? null) === $principal)['responsable_id'] ?? null;
+            // Las dos partes a texto: ver la nota sobre las claves de arriba.
+            $id = $visitadas->first(
+                fn ($u) => (string) ($u['zona'] ?? '') === $zona && ! empty($u['responsable_id'])
+            )['responsable_id'] ?? null;
 
-            $responsable = $id
-                ? \App\Models\User::whereKey($id)->value('name')
-                : null;
+            return ($id ? \App\Models\User::whereKey($id)->value('name') : null)
+                ?? 'Responsable '.Zona::numero($zona);
+        };
 
-            $responsable ??= 'Responsable '.Zona::numero($principal);
-        }
+        $responsable = $responsableDe($principal);
 
         /*
          * El telefono del asesor sale de su ficha de Gestion Humana.
@@ -651,6 +807,165 @@ class ColaJorgeController extends Controller implements HasMiddleware
         $telefonoAsesor = $p->vendedor_id
             ? \App\Modules\Rrhh\Models\Empleado::where('user_id', $p->vendedor_id)->value('telefono')
             : null;
+
+        /*
+         * LA HOJA PARTIDA POR ZONA.
+         *
+         * El procedimiento del área dice «picking por zonas», y hasta acá la
+         * hoja sólo lo decía en una casilla: se imprimía UNA lista con los
+         * renglones de las tres zonas mezclados y la banda rotulada con la
+         * principal. Con eso, un pedido compartido se alista de dos maneras, y
+         * las dos malas: una persona lo camina entero —justo lo que el reparto
+         * por zonas existe para evitar— o se fotocopia la hoja y cada quien
+         * tacha a ojo los renglones que cree suyos.
+         *
+         * Lo que se parte es el RENGLÓN POR ZONA, no el renglón entero: una
+         * línea de 50 que saca 48 de la zona 1 y 2 de la zona 3 sale en las dos
+         * secciones, con 48 en una y 2 en la otra. Partir por «dónde hay stock»
+         * pondría 50 en cada una y entre las dos personas recogerían 100.
+         *
+         * Las unidades que ningún estante cubre —exhibición, racks sin zona o
+         * mercancía que no está— NO se caen de la hoja: van a una sección final
+         * con su motivo. Si se perdieran, la suma de las secciones dejaría de
+         * dar el total y nadie lo notaría hasta que falte mercancía en la caja.
+         */
+        $porSeccion = [];
+        $sinUbicacion = [];
+
+        foreach ($items as $it) {
+            foreach (RepartoPorUbicacion::paradas($it) as $u) {
+                $toma = (int) ($u['toma'] ?? 0);
+
+                if ($toma <= 0) {
+                    continue;
+                }
+
+                // Un rack que no está en el reparto de zonas va al final, no a
+                // una zona inventada: mandar a caminar a donde no es cuesta más
+                // que decir «este no tiene zona».
+                $zona = isset($u['zona']) && (string) $u['zona'] !== '' ? (string) $u['zona'] : null;
+
+                if ($zona === null) {
+                    /*
+                     * Sin zona NO quiere decir sin sitio. El caso mayoritario
+                     * mientras la bodega migra a posiciones es la mercancía
+                     * parada en la FILA DE LA BODEGA, que no tiene rack: esa
+                     * ubicación hay que imprimirla igual, o el alistador lee
+                     * «no está asignado a ninguna zona» y no sabe a dónde ir.
+                     */
+                    $sinUbicacion[] = ['item' => $it, 'cantidad' => $toma, 'motivo' => 'sin_zona', 'ubicacion' => $u];
+
+                    continue;
+                }
+
+                $porSeccion[$zona] ??= [];
+                $clave = $it['sku'].'|'.($it['variante_id'] ?? '').'|'.($it['producto_id'] ?? '');
+
+                if (isset($porSeccion[$zona][$clave])) {
+                    // Dos estantes de la MISMA zona para el mismo renglón: una
+                    // sola línea con las dos ubicaciones, no dos renglones.
+                    $porSeccion[$zona][$clave]['cantidad'] += $toma;
+                    $porSeccion[$zona][$clave]['ubicaciones'][] = $u;
+                } else {
+                    $porSeccion[$zona][$clave] = array_merge($it, [
+                        'cantidad' => $toma,
+                        'ubicaciones' => [$u],
+                    ]);
+                }
+            }
+
+            if ($resto = RepartoPorUbicacion::sinCubrir($it)) {
+                $enVitrina = collect($it['ubicaciones'])->first(fn ($u) => ! empty($u['es_respaldo']));
+
+                /*
+                 * «Sin stock» sólo cuando de verdad no hay dónde buscar.
+                 *
+                 * La lista de ubicaciones viene recortada a las tres primeras
+                 * (`array_slice($saldos, 0, 3)`), así que una referencia
+                 * repartida en cinco racks puede quedar sin cubrir aunque haya
+                 * mercancía de sobra en el cuarto. Decirle «sin stock» al
+                 * alistador le hace reportar un faltante que no existe, y un
+                 * faltante abre novedad y retiene el pedido.
+                 */
+                $hayMas = count($it['ubicaciones']) >= 3;
+
+                $sinUbicacion[] = [
+                    'item' => $it,
+                    'cantidad' => $resto,
+                    'motivo' => match (true) {
+                        $enVitrina !== null => 'exhibicion',
+                        $hayMas => 'buscar_mas',
+                        default => 'sin_stock',
+                    },
+                    'ubicacion' => $enVitrina,
+                ];
+            }
+        }
+
+        // Las secciones salen en el mismo orden que ya manda la banda: primero
+        // la que más aporta, y a igualdad, el orden del plano.
+        $secciones = [];
+
+        foreach ($zonas as $z) {
+            $filas = array_values($porSeccion[$z] ?? []);
+
+            if ($filas === []) {
+                continue;
+            }
+
+            $secciones[] = [
+                'zona' => $z,
+                'responsable' => $responsableDe($z),
+                'items' => $filas,
+                'unidades' => array_sum(array_column($filas, 'cantidad')),
+            ];
+        }
+
+        if ($sinUbicacion !== []) {
+            $secciones[] = [
+                'zona' => null,
+                'responsable' => null,
+                'items' => array_map(fn (array $f) => array_merge($f['item'], [
+                    'cantidad' => $f['cantidad'],
+                    'motivo' => $f['motivo'],
+                    'ubicaciones' => $f['ubicacion'] ? [$f['ubicacion']] : [],
+                ]), $sinUbicacion),
+                'unidades' => array_sum(array_column($sinUbicacion, 'cantidad')),
+            ];
+        }
+
+        /*
+         * Reimprimir UNA sección.
+         *
+         * Pasa todo el tiempo: la hoja de la zona 2 se moja, se traspapela o la
+         * persona entra al turno después. Reimprimir el pedido entero para eso
+         * desperdicia papel y, peor, pone a circular dos copias de las otras
+         * secciones — y nadie sabe cuál se caminó.
+         *
+         * Se valida contra las zonas de ESTE pedido y se corta con 422. Filtrar
+         * en silencio dejaría salir una hoja con el membrete completo y cero
+         * renglones: quien la recibe cree que no hay nada que recoger.
+         */
+        /*
+         * El parámetro se normaliza antes de tocarlo: `?zona[]=1` llega como
+         * ARRAY y `(string)` sobre un array es un error fatal —la hoja salía
+         * con 500 en vez del 422 que este bloque cree devolver—. Y `?zona=%20`
+         * queda en cadena vacía: eso NO es pedir una zona, es no pedir
+         * ninguna, así que la hoja sale completa como siempre.
+         */
+        $pedida = $r->query('zona');
+        $soloZona = is_array($pedida) ? '' : trim((string) ($pedida ?? ''));
+
+        if ($soloZona !== '') {
+            $elegida = collect($secciones)->first(fn ($s) => (string) ($s['zona'] ?? '') === $soloZona);
+
+            abort_if($elegida === null, 422, sprintf(
+                'El pedido %s no tiene nada que recoger en la zona %s. Sus zonas son: %s.',
+                $p->numero, $soloZona, $zonas ? implode(', ', $zonas) : '(ninguna)'
+            ));
+
+            $secciones = [$elegida];
+        }
 
         return Inertia::render('Logistica/HojaPicking', [
             'pedido' => [
@@ -676,8 +991,39 @@ class ColaJorgeController extends Controller implements HasMiddleware
                 'compartido_con' => $compartidas,
                 'asesor' => $p->vendedor?->name,
                 'asesor_telefono' => $telefonoAsesor,
+                /*
+                 * ¿Esta hoja es de un segundo viaje?
+                 *
+                 * Va impreso y en grande. Una hoja que pide 2 de un pedido de 6
+                 * sin explicar por qué parece una hoja mal generada, y lo
+                 * primero que hace quien la recibe es ir a buscar las otras 4.
+                 */
+                'viaje_anterior' => (bool) $p->despacho_parcial,
+                'ya_despachado' => (int) $p->items->sum('cantidad_despachada'),
+                'total_pedido' => (int) $p->items->sum('cantidad'),
+                /*
+                 * La casilla donde se consolida, impresa en cada sección.
+                 *
+                 * El ERP la asignaba desde la primera oleada y no se imprimía
+                 * en ninguna parte: quien terminaba su zona se quedaba con la
+                 * mercancía en la mano preguntando dónde dejarla. Con la hoja
+                 * partida es peor —son dos o tres personas llegando por
+                 * separado— así que va en la banda de cada una.
+                 */
+                'casilla' => $p->casilla_consolidacion,
             ],
+            /*
+             * `items` sigue siendo la lista PLANA de todo el pedido, y se
+             * queda. Es lo que mira quien quiere el pedido completo de un
+             * vistazo, es el respaldo si el reparto por zonas no está
+             * configurado, y es sobre lo que cuentan los tests. `secciones` se
+             * agrega al lado: no la reemplaza.
+             */
             'items' => $items,
+            'secciones' => $secciones,
+            // Para el botón de reimprimir una sola: la hoja ya sabe cuál está
+            // mostrando sin tener que mirar la URL.
+            'zona_filtrada' => $soloZona ?: null,
         ]);
     }
 

@@ -310,6 +310,13 @@ const sparklinePath = computed(() => {
                             <div class="flex-1 min-w-0">
                                 <div class="font-mono text-xs text-surface-600">{{ p.numero }}</div>
                                 <div class="truncate">{{ p.cliente }}</div>
+                                <!-- El chip de estado dice «facturado» tanto para el
+                                     que salió completo como para el que salió a medias.
+                                     Es el pedido por el que el cliente no paga. -->
+                                <div v-if="p.resto_pendiente"
+                                     class="text-[10px] font-bold text-amber-700 dark:text-amber-300">
+                                    ⏳ le falta mercancía
+                                </div>
                             </div>
                             <span class="px-2 py-0.5 rounded text-xs font-semibold" :class="estadoChip(p.estado)">{{ p.estado }}</span>
                             <span class="font-bold text-xs whitespace-nowrap">{{ money(p.total) }}</span>

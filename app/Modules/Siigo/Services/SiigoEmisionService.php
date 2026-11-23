@@ -1860,14 +1860,32 @@ class SiigoEmisionService
          * crédito en /app/cartera/notas-credito. Reversa el ingreso dejando
          * rastro, que es justo lo que anular no hace.
          */
+        /*
+         * BASTA CON QUE HAYA SALIDO UNA CAJA.
+         *
+         * Este candado miraba `despachado_at`, que significa «salió TODO» y en
+         * un despacho parcial se deja en NULL a propósito hasta que salga el
+         * resto. Con media carga ya en la calle el candado no saltaba: la
+         * factura se anulaba, se borraban sus movimientos contables y el
+         * pedido volvía a «aprobado» sin factura —pero conservando
+         * `cantidad_despachada`—, así que reaparecía en la cola de facturación
+         * como si nunca se hubiera despachado nada. Mercancía afuera, venta
+         * borrada y stock ya descontado.
+         *
+         * `primer_despacho_at` VA EN EL SELECT. Es lo que hace que el arreglo
+         * sirva: el proyecto no activa `Model::shouldBeStrict()`, así que una
+         * columna que no se trajo vale null en silencio, y el candado seguiría
+         * sin saltar con pinta de estar corregido.
+         */
         $pedido = \App\Modules\Portal\Models\PedidoCliente::query()
             ->where('factura_id', $factura->id)
-            ->first(['id', 'numero', 'despachado_at']);
+            ->first(['id', 'numero', 'despachado_at', 'primer_despacho_at', 'resto_pendiente']);
 
-        if ($pedido && $pedido->despachado_at) {
+        if ($salida = $pedido?->salidaDeBodega()) {
             throw new RuntimeException(
                 "El pedido {$pedido->numero} de esta factura ya se despachó el "
-                .$pedido->despachado_at->format('Y-m-d')
+                .$salida->format('Y-m-d')
+                .($pedido->resto_pendiente ? ' (salió a medias, pero ya hay mercancía afuera)' : '')
                 .'. Una factura con mercancía entregada no se anula: hacele una nota crédito '
                 .'(Cartera → Notas crédito), que reversa la venta y deja el rastro.'
             );
@@ -1902,9 +1920,18 @@ class SiigoEmisionService
                 ->where('origen_id', $factura->id)
                 ->forceDelete();
 
-            // Libera el pedido para que se pueda volver a facturar.
+            /*
+             * Libera el pedido para que se pueda volver a facturar.
+             *
+             * La misma puerta que el candado de arriba, y por la misma razón:
+             * un parcial tiene `despachado_at` en NULL con mercancía ya
+             * entregada. Con el candado arreglado este bloque ya no se alcanza
+             * con un parcial, pero las dos condiciones tienen que decir lo
+             * mismo: si alguna vez se afloja una y no la otra, se vuelve a
+             * soltar un pedido cuya carga ya salió.
+             */
             $pedido = \App\Modules\Portal\Models\PedidoCliente::where('factura_id', $factura->id)->first();
-            if ($pedido && ! $pedido->despachado_at) {
+            if ($pedido && ! $pedido->salidaDeBodega()) {
                 $pedido->forceFill([
                     'factura_id' => null,
                     'estado' => 'aprobado',

@@ -239,3 +239,45 @@ it('la factura de un pedido que no salió de bodega sí se anula', function () {
         ->and($pedido->fresh()->factura_id)->toBeNull()
         ->and($pedido->fresh()->estado)->toBe('aprobado');
 });
+
+it('tampoco se anula la del pedido que salió A MEDIAS', function () {
+    /*
+     * El hueco que abrió el despacho parcial, y el más caro de los que dejó.
+     *
+     * El candado miraba `despachado_at`, que significa «salió TODO» y en un
+     * parcial se deja en NULL a propósito hasta que salga el resto. Con media
+     * carga ya en la calle el candado no saltaba: se anulaba la factura, se
+     * borraban sus movimientos contables y el pedido volvía a «aprobado» sin
+     * factura —pero con `cantidad_despachada` ya acumulada—, así que
+     * reaparecía en la cola de facturación como si no hubiera salido nada.
+     * Mercancía afuera, venta borrada y stock descontado.
+     *
+     * El test de arriba pasaba en verde con el hueco abierto porque sólo
+     * probaba el pedido despachado del todo.
+     */
+    $factura = FacturaVenta::create([
+        'numero' => 'FV-000125', 'contacto_id' => $this->proveedor->id,
+        'estado' => 'pendiente', 'fecha_emision' => now()->toDateString(),
+        'fecha_vencimiento' => now()->addDays(30)->toDateString(),
+        'subtotal' => 500_000, 'impuestos' => 0, 'total' => 500_000, 'saldo' => 500_000,
+    ]);
+
+    $pedido = PedidoCliente::create([
+        'numero' => 'PB-001001', 'contacto_id' => $this->proveedor->id,
+        // Las tres marcas del parcial: vuelve a «facturado», sin `despachado_at`,
+        // y con la fecha de la primera caja en `primer_despacho_at`.
+        'estado' => 'facturado', 'factura_id' => $factura->id,
+        'despachado_at' => null,
+        'primer_despacho_at' => now()->subDays(2),
+        'despacho_parcial' => true, 'resto_pendiente' => true,
+        'subtotal' => 500_000, 'total' => 500_000,
+    ]);
+
+    expect(fn () => app(SiigoEmisionService::class)->anularFacturaEnSiigo($factura))
+        ->toThrow(RuntimeException::class, 'nota crédito');
+
+    // Y nada se movió: ni la factura, ni el pedido, ni su vínculo.
+    expect($factura->fresh()->estado->value)->not->toBe('anulada')
+        ->and($pedido->fresh()->factura_id)->toBe($factura->id)
+        ->and($pedido->fresh()->estado)->toBe('facturado');
+});

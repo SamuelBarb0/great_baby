@@ -62,7 +62,19 @@ class OleadaDeAlistamiento
             ];
 
             foreach ($p->items as $it) {
-                $cantidad = (int) $it->cantidad;
+                /*
+                 * LO QUE FALTA, NO LO QUE PIDIÓ EL CLIENTE.
+                 *
+                 * Con el despacho parcial un pedido puede volver a la oleada
+                 * debiendo sólo una parte. Leyendo `cantidad` a secas, la hoja
+                 * mandaba a recoger el pedido entero otra vez — y en una oleada
+                 * eso además infla el total consolidado de la referencia, así
+                 * que el error se reparte entre todos los pedidos de la pasada.
+                 *
+                 * El `continue` de abajo hace el resto: una línea que ya salió
+                 * completa da cero y no se imprime.
+                 */
+                $cantidad = (int) $it->cantidad - (int) (float) ($it->cantidad_despachada ?? 0);
 
                 if ($cantidad <= 0) {
                     continue;

@@ -45,6 +45,24 @@ class PedidoCliente extends Model implements AuditableContract
         'retenido_at', 'retencion_liberada_at', 'retencion_liberada_por_id',
         // LOG-J7 · columnas de despacho con huella.
         'despachado_at', 'despachado_por_id', 'guia_transportadora', 'transportadora',
+        /*
+         * Despacho parcial · el pedido salió incompleto, y qué se decidió con
+         * el resto.
+         *
+         * Van en el `$fillable` porque sin eso `update()` las DESCARTA en
+         * silencio: el pedido salía con 12 de 20 y la pantalla seguía diciendo
+         * que había salido completo. Un `update()` que ignora la mitad de lo
+         * que se le pasa y no se queja es de los errores más caros de ver.
+         */
+        'despacho_parcial', 'resto_pendiente',
+        /*
+         * Cuándo salió la PRIMERA caja. Distinta de `despachado_at`, que
+         * significa «ya salió todo» y se queda en NULL mientras falte algo.
+         *
+         * Va en el `$fillable` por la misma razón que las dos de arriba: sin
+         * eso `update()` la descarta sin quejarse.
+         */
+        'primer_despacho_at',
         'entregado_at', 'entregado_por_id', 'entrega_nota',
         // LOG-J5 · Cola Jorge · huella de alistamiento.
         'alistador_id', 'alistado_asignado_at', 'alistado_inicio_at', 'alistado_fin_at', 'alistado_notas',
@@ -62,6 +80,9 @@ class PedidoCliente extends Model implements AuditableContract
         'rechazado_at' => 'datetime',
         'facturado_at' => 'datetime',
         'despachado_at' => 'datetime',
+        'primer_despacho_at' => 'datetime',
+        'despacho_parcial' => 'boolean',
+        'resto_pendiente' => 'boolean',
         'entregado_at' => 'datetime',
         'retenido_at' => 'datetime',
         'retencion_liberada_at' => 'datetime',
@@ -122,7 +143,7 @@ class PedidoCliente extends Model implements AuditableContract
         if ($this->entregado_at) {
             return $E::Entregada;
         }
-        if (! $this->despachado_at) {
+        if (! $this->salidaDeBodega()) {
             return $E::Pendiente;
         }
 
@@ -138,15 +159,47 @@ class PedidoCliente extends Model implements AuditableContract
         return $E::ATiempo;
     }
 
+    /**
+     * CUÁNDO SALIÓ DE BODEGA, DE VERDAD.
+     *
+     * `despachado_at` significa «ya salió TODO», y en un despacho parcial se
+     * deja en NULL a propósito —el candado de idempotencia lo mira— para que el
+     * pedido pueda volver por un segundo viaje. El efecto secundario era que un
+     * pedido cuya primera caja salió hace ocho días figuraba como si no hubiera
+     * salido nunca: ni días en tránsito, ni alarma de «no entregada», ni forma
+     * de reclamarle a la transportadora por esa caja.
+     *
+     * `primer_despacho_at` es la fecha de la primera caja y se escribe una sola
+     * vez. Para un pedido que salió completo de una, las dos fechas coinciden,
+     * así que nada cambia para los pedidos normales.
+     *
+     * El `??` cubre además lo viejo: la migración llenó `primer_despacho_at`
+     * sólo en lo que ya estaba despachado, y cualquier fila que entre por otro
+     * camino sigue funcionando con la de siempre.
+     */
+    public function salidaDeBodega(): ?\Carbon\CarbonInterface
+    {
+        return $this->primer_despacho_at ?? $this->despachado_at;
+    }
+
     /** Días enteros desde que salió de bodega. Null si no ha salido. */
     public function diasEnTransito(): ?int
     {
-        if (! $this->despachado_at) {
+        $salida = $this->salidaDeBodega();
+
+        if (! $salida) {
             return null;
         }
 
-        return (int) $this->despachado_at->startOfDay()
-            ->diffInDays(($this->entregado_at ?? now())->startOfDay());
+        /*
+         * El `copy()` NO es adorno: `startOfDay()` MUTA el objeto. Carbon acá
+         * es mutable —el proyecto no usa CarbonImmutable— así que sin copiar,
+         * cualquier código que lea la fecha después en la misma petición la
+         * vería movida a medianoche. Antes era inofensivo de casualidad: la
+         * pantalla serializaba la fecha ANTES de llamar a este método.
+         */
+        return (int) $salida->copy()->startOfDay()
+            ->diffInDays(($this->entregado_at ?? now())->copy()->startOfDay());
     }
 
     /**
@@ -172,13 +225,43 @@ class PedidoCliente extends Model implements AuditableContract
 
         $buscado = $normalizar($this->transportadora);
         foreach ($urls as $nombre => $url) {
-            if ($normalizar((string) $nombre) === $buscado) {
-                return str_replace('{guia}', rawurlencode($this->guia_transportadora), (string) $url);
+            if ($normalizar((string) $nombre) !== $buscado) {
+                continue;
             }
+
+            /*
+             * Una url vacía es una respuesta, no un error: esa transportadora
+             * está en el catálogo pero no tiene rastreo en línea. Estelar,
+             * Exprecar y Veloenvíos están así.
+             *
+             * Sin este corte se devolvía la cadena vacía y la pantalla pintaba
+             * un enlace que no lleva a ninguna parte. Quien lo pulsa cree que
+             * el sistema está roto; la verdad es que esa empresa no publica
+             * rastreo.
+             */
+            if (trim((string) $url) === '') {
+                return null;
+            }
+
+            return str_replace('{guia}', rawurlencode($this->guia_transportadora), (string) $url);
         }
 
         return null;
     }
 
     public function entregadoPor(): BelongsTo { return $this->belongsTo(User::class, 'entregado_por_id'); }
+
+    /**
+     * Las cajas en que salió el pedido, cada una con su guía.
+     *
+     * `guia_transportadora` sigue existiendo y lleva la PRIMERA: es lo que
+     * leen la pantalla de seguimiento, el descuento de stock y
+     * `urlDeRastreo()`. Esta relación tiene el detalle completo, que es lo que
+     * hace falta con Interrapidísimo —una guía por caja— y para saber cuántos
+     * bultos salieron con las demás.
+     */
+    public function cajas(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(PedidoCaja::class, 'pedido_id')->orderBy('numero');
+    }
 }

@@ -578,6 +578,52 @@ class InventarioGestionController extends Controller implements HasMiddleware
             );
         }
 
+        /*
+         * UNA SOLA TOMA ABIERTA POR SITIO.
+         *
+         * No había candado: se podían crear dos tomas sobre la misma ubicación
+         * y las dos congelaban el mismo saldo teórico. El resultado es un
+         * descuadre que después nadie explica — saldo 10, real 8: las dos
+         * cuentan 8, las dos cierran con −2, y el kardex termina en 6 con dos
+         * asientos de faltante por el mismo faltante.
+         *
+         * La guarda de idempotencia que ya existía mira los movimientos de ESA
+         * toma (CerrarTomaFisica), así que no ve a la hermana. Este es el
+         * candado que faltaba, y va en el único sitio donde una toma nace.
+         */
+        /*
+         * Y el choque se mide por ALCANCE, no por id.
+         *
+         * Contar una bodega cuenta también sus racks, así que una toma de la
+         * sede y otra de uno de sus estantes congelan las mismas unidades
+         * físicas aunque sus `ubicacion_id` sean distintos.
+         */
+        $abierta = TomaFisica::abiertaQueChoqueCon((int) $data['ubicacion_id']);
+
+        if ($abierta) {
+            $mismoSitio = (int) $abierta->ubicacion_id === (int) $data['ubicacion_id'];
+
+            /*
+             * El texto no dice quién abarca a quién: el choque es el mismo en
+             * los dos sentidos —pedir la bodega con un rack suyo contándose, o
+             * pedir el rack con la bodega contándose— y escribirlo al revés es
+             * peor que no explicarlo.
+             */
+            return back()->withErrors(['ubicacion_id' => sprintf(
+                $mismoSitio
+                    ? 'Ya hay una toma abierta en ese sitio: %s (%s). Ciérrala o anúlala antes de empezar otra; '
+                        .'dos conteos sobre el mismo sitio ajustan dos veces el mismo faltante.'
+                    : 'La toma %s (%s) ya está contando %s, y es la misma mercancía que la de este sitio '
+                        .'—contar una bodega cuenta también sus estantes—. Ciérrala o anúlala antes de '
+                        .'empezar otra: las dos ajustarían el mismo faltante.',
+                $abierta->numero,
+                $abierta->estado instanceof \App\Modules\Inventario\Enums\EstadoTomaFisica
+                    ? $abierta->estado->value
+                    : (string) $abierta->estado,
+                $abierta->ubicacion?->codigo ?? 'otra ubicación'
+            )]);
+        }
+
         // Re-audit M3 PATRÓN η · uso `TomaFisica::siguienteNumero()` atómico.
         //   Antes: `count()+1` bajo concurrencia = colisión. Además formato
         //   TF-ymd-NNN divergía del TF-YYYY-NNNNNN del método del modelo.
@@ -586,6 +632,7 @@ class InventarioGestionController extends Controller implements HasMiddleware
         $data['fecha_conteo'] = now('America/Bogota')->toDateString();
         $data['estado'] = \App\Modules\Inventario\Enums\EstadoTomaFisica::Borrador;
         $toma = TomaFisica::create($data);
+
         return back()->with('success', "Toma {$toma->numero} creada.");
     }
 

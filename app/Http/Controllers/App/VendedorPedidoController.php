@@ -80,7 +80,15 @@ class VendedorPedidoController extends Controller implements HasMiddleware
             ->with(['contacto:id,razon_social,nombre_completo'])
             ->orderByDesc('created_at')
             ->limit(10)
-            ->get(['id', 'numero', 'contacto_id', 'estado', 'total', 'created_at', 'motivo_retencion'])
+            /*
+             * `resto_pendiente` VA EN ESTA LISTA DE COLUMNAS.
+             *
+             * El `get([...])` recorta, y el proyecto no activa
+             * `Model::shouldBeStrict()`: una columna que no se trajo vale null
+             * en silencio. Leerla abajo sin pedirla acá daría `false` siempre,
+             * sin un solo error, y la marca del parcial no aparecería nunca.
+             */
+            ->get(['id', 'numero', 'contacto_id', 'estado', 'total', 'created_at', 'motivo_retencion', 'resto_pendiente'])
             ->map(fn ($p) => [
                 'id' => $p->id,
                 'numero' => $p->numero,
@@ -89,6 +97,9 @@ class VendedorPedidoController extends Controller implements HasMiddleware
                 'total' => (float) $p->total,
                 'fecha' => $p->created_at?->format('Y-m-d H:i'),
                 'motivo_retencion' => $p->motivo_retencion,
+                // Un parcial vuelve a «facturado», así que en esta bandeja se
+                // veía igual que uno que todavía no ha salido de bodega.
+                'resto_pendiente' => (bool) $p->resto_pendiente,
             ]);
 
         // Buscador de clientes para armar pedido nuevo · un vendedor sólo ve su
@@ -221,7 +232,7 @@ class VendedorPedidoController extends Controller implements HasMiddleware
         ]);
     }
 
-    /** Miracle port · Seguimiento (pendientes · por cobrar · últimos). */
+    /** Miracle port · Seguimiento (pendientes · incompletos · por cobrar · últimos). */
     public function seguimiento(Request $r, SeguimientoVendedorService $sv): Response
     {
         $u = $r->user();
@@ -230,6 +241,9 @@ class VendedorPedidoController extends Controller implements HasMiddleware
 
         return Inertia::render('Vendedor/Seguimiento', [
             'pendientes' => $data['pendientes'],
+            // Facturados completos a los que les falta mercancía. Es la razón
+            // por la que varios «por cobrar» no se pagan.
+            'incompletos' => $data['incompletos'],
             'por_cobrar' => $data['por_cobrar'],
             'ultimos' => $data['ultimos'],
             'totales' => $data['totales'],

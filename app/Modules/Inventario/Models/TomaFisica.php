@@ -81,6 +81,45 @@ class TomaFisica extends Model implements AuditableContract
     }
 
     /**
+     * LA TOMA ABIERTA QUE CHOCA CON ESTE SITIO, SI LA HAY.
+     *
+     * No basta con mirar el mismo `ubicacion_id`. Una toma sobre una SEDE
+     * cuenta la sede más todas sus posiciones (`PrepararTomaFisica` congela la
+     * suma), así que choca con cualquier toma de uno de sus racks — y al
+     * revés. Comparando el id exacto, las dos conviven, las dos congelan las
+     * mismas unidades físicas y las dos escriben su ajuste: el kardex baja dos
+     * veces el mismo faltante y quedan dos asientos contables por una sola
+     * diferencia.
+     *
+     * Se mira en los dos sentidos:
+     *   • una toma abierta cuyo sitio cae DENTRO del alcance que se pide
+     *     (pedir la bodega cuando ya se está contando uno de sus racks);
+     *   • una toma abierta de la sede a la que pertenece el sitio pedido
+     *     (pedir un rack cuando ya se está contando la bodega entera).
+     *
+     * La jerarquía del ERP es de dos niveles —sede y posiciones colgando de
+     * ella—, así que con el padre y las hijas se cubre. Si algún día se
+     * anidara un tercer nivel, esto habría que volverlo recursivo.
+     */
+    public static function abiertaQueChoqueCon(int $ubicacionId): ?self
+    {
+        $alcance = InventarioUbicacion::query()
+            ->where('bodega_id', $ubicacionId)
+            ->pluck('id')
+            ->map(fn ($x) => (int) $x)
+            ->push($ubicacionId)
+            ->all();
+
+        $padre = (int) (InventarioUbicacion::whereKey($ubicacionId)->value('bodega_id') ?? 0);
+
+        return static::query()
+            ->whereIn('estado', [EstadoTomaFisica::Borrador, EstadoTomaFisica::EnConteo])
+            ->whereIn('ubicacion_id', $padre ? [...$alcance, $padre] : $alcance)
+            ->with('ubicacion:id,codigo,nombre')
+            ->first();
+    }
+
+    /**
      * Re-audit M3 PATRÓN π (FUNC-M2) · consecutivo atómico basado en MAX(SUBSTRING)
      *   por seguridad frente a filas con id físico desordenado (seed/import
      *   con id alto y año viejo).

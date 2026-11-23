@@ -201,17 +201,36 @@ class SeguimientoVendedorService
     }
 
     /**
-     * Seguimiento de pedidos del vendedor · 3 grupos:
+     * Seguimiento de pedidos del vendedor · 4 grupos:
      *   - PENDIENTES: aún no facturado (enviado/retenido/aprobado) → qué queda por cerrar
+     *   - INCOMPLETOS: facturado completo pero la mercancía salió a medias
      *   - POR COBRAR: facturado pero saldo > 0 (la factura asociada aún tiene deuda)
      *   - ÚLTIMOS: 20 más recientes del vendedor sin filtro
      * Portado del Miracle::seguimientoPedidos, adaptado a GB.
+     *
+     * INCOMPLETOS es el grupo nuevo, y existe por una razón de cobranza: la
+     * factura se emite completa, pero si de la bodega salió media caja el
+     * cliente no paga, y el vendedor —que es quien llama a cobrar— no tenía
+     * forma de saberlo. Aparecía en «por cobrar» como una mora cualquiera,
+     * sin la explicación de por qué no pagan.
+     *
+     * Va como grupo HERMANO, nunca dentro de `conteos`: ese es el GROUP BY por
+     * estado de la dona, y un parcial sigue siendo «facturado». Metiéndolo ahí
+     * el mismo pedido se contaría dos veces y la tasa de conversión saldría
+     * inflada.
      */
     public function seguimientoPedidos(?int $vendedorId, int $topUltimos = 20): array
     {
         $base = PedidoCliente::query()
             ->when($vendedorId, fn ($q) => $q->where('vendedor_id', $vendedorId))
-            ->with(['contacto:id,razon_social,nombre_completo', 'factura:id,numero,saldo,total']);
+            ->with(['contacto:id,razon_social,nombre_completo', 'factura:id,numero,saldo,total'])
+            /*
+             * En unidades y en SQL. `mapPedidoCard` las usa en los cuatro
+             * grupos, así que viven en `$base`: calculadas por fila serían
+             * una consulta por tarjeta, y acá se pintan hasta 120.
+             */
+            ->withSum('items as unidades_pedidas', 'cantidad')
+            ->withSum('items as unidades_despachadas', 'cantidad_despachada');
 
         $pendientes = (clone $base)
             ->whereIn('estado', $this->estadosPipeline)
@@ -232,6 +251,31 @@ class SeguimientoVendedorService
             ->values()
             ->all();
 
+        /*
+         * LO QUE SE FACTURÓ COMPLETO Y SALIÓ A MEDIAS.
+         *
+         * `resto_pendiente` y no `despacho_parcial`: la segunda es pegajosa y
+         * se queda en true para siempre, así que este grupo nunca se vaciaría
+         * —un pedido que ya se completó en dos viajes seguiría colgado acá—.
+         *
+         * Se ordena por la salida real: lo que lleva más días debiéndose es lo
+         * primero que hay que resolver, y `despachado_at` en un parcial es
+         * NULL a propósito.
+         */
+        $deben = (clone $base)
+            ->whereIn('estado', ['facturado', 'despachado'])
+            ->where('resto_pendiente', true)
+            ->orderByRaw('COALESCE(primer_despacho_at, despachado_at)')
+            ->get();
+
+        // La TABLA se recorta a 50 —más no se lee—, pero los totales de abajo
+        // se calculan sobre todos: un número topado presentado como total
+        // miente, y éste es el que el vendedor lleva a pedir el despacho.
+        $incompletos = $deben->take(50)
+            ->map(fn ($p) => $this->mapPedidoCard($p))
+            ->values()
+            ->all();
+
         $ultimos = (clone $base)
             ->orderByDesc('created_at')
             ->limit($topUltimos)
@@ -242,18 +286,54 @@ class SeguimientoVendedorService
 
         return [
             'pendientes' => $pendientes,
+            'incompletos' => $incompletos,
             'por_cobrar' => $porCobrar,
             'ultimos' => $ultimos,
             'totales' => [
                 'pendientes' => count($pendientes),
+                /*
+                 * El conteo es de TODOS, no de los 50 que caben en la tabla.
+                 *
+                 * `resto_pendiente` se queda en true hasta que salga el segundo
+                 * viaje, así que estos se acumulan. Contando sobre la lista
+                 * recortada, el tablero diría «50» para siempre y las unidades
+                 * debidas serían las de 50 pedidos presentadas como el total.
+                 * Un número topado que se lee como total es peor que no tenerlo.
+                 */
+                'incompletos' => $deben->count(),
+                // Cuántas unidades se le deben al cliente en total: el número
+                // con el que el vendedor pelea internamente por su despacho.
+                'unidades_debidas' => (int) $deben->sum(
+                    fn ($p) => max(0, (int) $p->unidades_pedidas - (int) $p->unidades_despachadas)
+                ),
                 'por_cobrar' => array_sum(array_column($porCobrar, 'saldo_factura')),
                 'ultimos' => count($ultimos),
             ],
         ];
     }
 
+    /**
+     * Una tarjeta del seguimiento.
+     *
+     * Requiere que la consulta traiga `unidades_pedidas` y
+     * `unidades_despachadas` (los `withSum` de `$base`). Es privado y sólo lo
+     * llama `seguimientoPedidos`, así que eso está garantizado; si alguna vez
+     * se llama desde otra consulta sin esos agregados, las unidades salen en 0
+     * y la fracción no se pinta, pero nada explota.
+     */
     private function mapPedidoCard(PedidoCliente $p): array
     {
+        /*
+         * NULL se lee como CERO acá.
+         *
+         * En `cantidad_despachada` el NULL significa «sale completo» para el
+         * descuento de stock, pero para PINTAR es lo contrario: un pedido que
+         * nunca salió de bodega tiene NULL en todas sus líneas, y leerlo como
+         * «la cantidad pedida» le diría al vendedor que ya se despachó todo.
+         */
+        $pedidas = (int) ($p->unidades_pedidas ?? 0);
+        $despachadas = (int) ($p->unidades_despachadas ?? 0);
+
         return [
             'id' => $p->id,
             'numero' => $p->numero,
@@ -265,6 +345,13 @@ class SeguimientoVendedorService
             'factura' => $p->factura?->numero,
             'saldo_factura' => (float) ($p->factura?->saldo ?? 0),
             'motivo_retencion' => $p->motivo_retencion,
+            // El estado no distingue «salió a medias» de «no ha salido»: los
+            // dos dicen facturado. Para quien cobra, esa es la diferencia.
+            'resto_pendiente' => (bool) $p->resto_pendiente,
+            'unidades_pedidas' => $pedidas,
+            'unidades_despachadas' => $despachadas,
+            'unidades_pendientes' => max(0, $pedidas - $despachadas),
+            'salio_at' => $p->salidaDeBodega()?->format('Y-m-d'),
         ];
     }
 

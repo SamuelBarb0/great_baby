@@ -895,6 +895,10 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     Route::post('/logistica/cola-jorge/{pedido}/iniciar', [\App\Http\Controllers\App\ColaJorgeController::class, 'iniciar'])->middleware('throttle:60,1')->name('app.cola-jorge.iniciar');
     Route::post('/logistica/cola-jorge/{pedido}/finalizar', [\App\Http\Controllers\App\ColaJorgeController::class, 'finalizar'])->middleware('throttle:60,1')->name('app.cola-jorge.finalizar');
     // LOG-J5-fix · resolver novedad del alistamiento (gerencia/admin de bodega).
+    // Traer de Exhibición lo que falta para completar un pedido. Es el único
+    // traslado que un alistador puede hacer sin el permiso `traslados`, y
+    // está acotado a los dos extremos: ver surtirDesdeRespaldo().
+    Route::post('/logistica/cola-jorge/{pedido}/surtir', [\App\Http\Controllers\App\ColaJorgeController::class, 'surtirDesdeRespaldo'])->middleware('throttle:60,1')->name('app.cola-jorge.surtir');
     Route::post('/logistica/cola-jorge/{pedido}/resolver-novedad', [\App\Http\Controllers\App\ColaJorgeController::class, 'resolverNovedad'])->middleware('throttle:30,1')->name('app.cola-jorge.resolver-novedad');
     // LOG-J6 · hoja de picking imprimible con Rack · Sección · Nivel.
     // La oleada va ANTES de la ruta con {pedido}: si fuera despues, Laravel

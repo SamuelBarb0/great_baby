@@ -1,10 +1,18 @@
 <script setup>
 import { Head, Link } from '@inertiajs/vue3';
 import AppLayout from '@/Layouts/AppLayout.vue';
-import { Clock, DollarSign, History, Eye, CheckCircle2 } from 'lucide-vue-next';
+import { Clock, DollarSign, History, Eye, CheckCircle2, PackageX } from 'lucide-vue-next';
 
 defineProps({
     pendientes: Array,
+    /*
+     * Facturados completos a los que les falta mercancía.
+     *
+     * Va como grupo aparte y NO dentro de los conteos por estado: un parcial
+     * sigue siendo «facturado», y meterlo ahí lo contaría dos veces. Para el
+     * vendedor es el grupo que explica por qué varios «por cobrar» no se pagan.
+     */
+    incompletos: { type: Array, default: () => [] },
     por_cobrar: Array,
     ultimos: Array,
     totales: Object,
@@ -97,6 +105,72 @@ const fechaCorta = (iso) => {
                 </div>
             </div>
 
+            <!--
+                FACTURADO COMPLETO, DESPACHADO A MEDIAS.
+
+                El vendedor es quien llama a cobrar, y este caso es la razón
+                número uno de que un cliente no pague: la factura llegó entera
+                y la mercancía no. Antes esto no se veía desde ninguna parte —el
+                pedido decía «facturado» igual que los demás— así que el
+                vendedor insistía sobre una mora que no era mora.
+
+                Sólo se dibuja si hay alguno: no es un apartado permanente, es
+                una alarma.
+            -->
+            <div v-if="incompletos.length" class="card overflow-hidden ring-2 ring-amber-400">
+                <div class="px-4 py-3 border-b border-surface-200 dark:border-surface-800 flex items-center justify-between bg-amber-50/60 dark:bg-amber-950/30">
+                    <h3 class="font-semibold flex items-center gap-2">
+                        <PackageX class="h-5 w-5 text-amber-600"/>
+                        Les falta mercancía
+                    </h3>
+                    <span class="px-2 py-0.5 bg-amber-100 text-amber-900 text-xs rounded font-semibold">
+                        {{ totales.incompletos }} pedido{{ totales.incompletos === 1 ? '' : 's' }}
+                        · {{ totales.unidades_debidas }} unidades
+                    </span>
+                </div>
+                <div class="px-4 py-2 text-xs text-surface-600 dark:text-surface-400 border-b border-surface-100 dark:border-surface-800">
+                    Se facturó todo y salió una parte. Antes de cobrar, revisa qué falta.
+                </div>
+                <div class="overflow-x-auto">
+                    <table v-tabla-movil class="w-full text-sm">
+                        <thead class="text-xs uppercase text-surface-500 bg-surface-50 dark:bg-surface-900">
+                            <tr>
+                                <th class="p-3 text-left">N.º</th>
+                                <th class="p-3 text-left">Cliente</th>
+                                <th class="p-3 text-center">Salieron</th>
+                                <th class="p-3 text-right">Monto</th>
+                                <th class="p-3 text-left">Salió el</th>
+                                <th class="p-3 text-center">Acción</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-surface-100 dark:divide-surface-800">
+                            <tr v-for="p in incompletos" :key="p.id" class="hover:bg-amber-50/40 dark:hover:bg-amber-950/20">
+                                <td class="p-3 font-mono text-xs font-bold">{{ p.numero }}</td>
+                                <td class="p-3">
+                                    <div>{{ p.cliente }}</div>
+                                    <div v-if="p.factura" class="text-[10px] text-surface-500">{{ p.factura }}</div>
+                                </td>
+                                <td class="p-3 text-center">
+                                    <span class="font-bold">{{ p.unidades_despachadas }}</span>
+                                    <span class="text-surface-500">/{{ p.unidades_pedidas }}</span>
+                                    <div class="text-[10px] font-bold text-amber-700 dark:text-amber-300">
+                                        faltan {{ p.unidades_pendientes }}
+                                    </div>
+                                </td>
+                                <td class="p-3 text-right font-bold">{{ money(p.total) }}</td>
+                                <td class="p-3 text-xs text-surface-600">{{ p.salio_at || '—' }}</td>
+                                <td class="p-3 text-center">
+                                    <Link :href="`/app/pedidos-b2b/${p.id}`"
+                                          class="inline-flex items-center gap-1 px-2 py-1 bg-brand-50 hover:bg-brand-100 text-brand-700 rounded text-xs font-semibold">
+                                        <Eye class="h-3 w-3"/> Ver
+                                    </Link>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
             <!-- Pagos por cobrar -->
             <div class="card overflow-hidden">
                 <div class="px-4 py-3 border-b border-surface-200 dark:border-surface-800 flex items-center justify-between">
@@ -130,7 +204,16 @@ const fechaCorta = (iso) => {
                             <tr v-for="p in por_cobrar" :key="p.id" class="hover:bg-amber-50/40 dark:hover:bg-amber-950/20 bg-amber-50/20">
                                 <td class="p-3 font-mono text-xs font-bold">{{ p.numero }}</td>
                                 <td class="p-3 text-xs text-surface-600">{{ p.factura || '—' }}</td>
-                                <td class="p-3">{{ p.cliente }}</td>
+                                <td class="p-3">
+                                    {{ p.cliente }}
+                                    <!-- Acá es donde el vendedor está parado cuando
+                                         llama a cobrar: si falta mercancía, tiene que
+                                         saberlo ANTES de levantar el teléfono. -->
+                                    <div v-if="p.resto_pendiente"
+                                         class="text-[10px] font-bold text-amber-700 dark:text-amber-300 mt-0.5">
+                                        ⏳ le faltan {{ p.unidades_pendientes }} unidades
+                                    </div>
+                                </td>
                                 <td class="p-3 text-right font-bold text-amber-700">{{ money(p.saldo_factura) }}</td>
                                 <td class="p-3 text-xs text-surface-600">{{ p.facturado_at || '—' }}</td>
                                 <td class="p-3 text-center">
@@ -181,6 +264,13 @@ const fechaCorta = (iso) => {
                                 <td class="p-3">
                                     <span class="px-2 py-0.5 rounded text-xs font-semibold" :class="estadoChip(p.estado)">
                                         {{ p.estado }}
+                                    </span>
+                                    <!-- El chip de estado dice «facturado» tanto para
+                                         el que salió completo como para el que salió a
+                                         medias. La marca va al lado, no dentro. -->
+                                    <span v-if="p.resto_pendiente"
+                                          class="ml-1 px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200">
+                                        falta resto
                                     </span>
                                 </td>
                                 <td class="p-3 text-xs text-surface-600">{{ p.fecha }}</td>

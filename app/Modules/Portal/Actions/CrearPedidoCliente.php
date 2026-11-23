@@ -241,7 +241,7 @@ class CrearPedidoCliente
             return $ped;
         });
 
-        Cache::forget("portal.kpis.{$cliente->id}");
+        Cache::forget(\App\Http\Controllers\Portal\PortalHomeController::llaveKpis((int) $cliente->id));
 
         // COM-1 · El comentario del vendedor le llega a Contabilidad.
         //

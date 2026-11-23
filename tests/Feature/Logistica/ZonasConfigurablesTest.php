@@ -154,6 +154,30 @@ it('la hoja dice por qué zona se camina y quién responde', function () {
         ->and($props['pedido']['numero_picking'])->toStartWith('PCK-');
 });
 
+it('con las zonas numéricas de fábrica también imprime el nombre del responsable', function () {
+    /*
+     * Este caso existe por un fallo que los demás no veían: todos repartían con
+     * zonas de LETRA («A», «B», «C»), y el reparto de fábrica —el que entregó el
+     * área— las nombra «1», «2» y «3».
+     *
+     * PHP convierte en entero toda clave de array que parezca un número, así
+     * que la zona «1» se guardaba como 1 y después se comparaba con === contra
+     * el texto «1» que devuelve el mapa de racks: siempre false. La hoja caía
+     * al genérico «Responsable 1» en TODA instalación con la configuración de
+     * fábrica, que es justo lo que el código dice explícitamente que no debe
+     * pasar.
+     */
+    reparto(['1' => ['1', '2'], '2' => ['7'], '3' => ['12']]);
+
+    $responsable = User::factory()->create(['name' => 'Yeison Alistador']);
+    $rack = posicionEnRack('R2-S1-N1-D', '2', $responsable->id);
+
+    $props = hojaDelPedido($this, productoRepartido([$rack->id => 40]), 5);
+
+    expect($props['pedido']['zona'])->toBe('1')
+        ->and($props['pedido']['responsable_zona'])->toBe('Yeison Alistador');
+});
+
 it('cae al número de la zona sólo si nadie responde por la ubicación', function () {
     reparto(['A' => ['1'], 'B' => ['7']]);
 

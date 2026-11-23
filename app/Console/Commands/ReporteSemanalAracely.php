@@ -28,8 +28,20 @@ class ReporteSemanalAracely extends Command
         $desde = now('America/Bogota')->subDays(7)->startOfDay();
         $hasta = now('America/Bogota')->endOfDay();
 
-        // KPIs de la semana
-        $ventasB2b = (float) PedidoCliente::whereBetween('created_at', [$desde, $hasta])->where('estado', 'facturado')->sum('total');
+        /*
+         * KPIs de la semana.
+         *
+         * «Facturado» acá son los dos estados, no uno: un pedido pasa a
+         * «despachado» cuando sale de bodega, así que con `where('estado',
+         * 'facturado')` a secas el número BAJABA cuando la bodega despachaba,
+         * y la misma venta desaparecía del reporte. Con el despacho parcial se
+         * volvió peor: el pedido se queda en «facturado» mientras falte el
+         * resto y pasa a «despachado» al completarse, así que entraba y salía
+         * del reporte según el viaje. Es la misma pregunta que ya responden
+         * así `CrmController` y el seguimiento del vendedor.
+         */
+        $ventasB2b = (float) PedidoCliente::whereBetween('created_at', [$desde, $hasta])
+            ->whereIn('estado', ['facturado', 'despachado'])->sum('total');
         $pedidosB2bNuevos = PedidoCliente::whereBetween('created_at', [$desde, $hasta])->count();
         $ventasDropiSemana = (float) DropiPedido::whereBetween('pagado_at', [$desde, $hasta])->where('estado', 'pagado')->sum('monto_esperado_proveedor');
         $facturasEmitidas = FacturaVenta::whereBetween('fecha_emision', [$desde->toDateString(), $hasta->toDateString()])->count();

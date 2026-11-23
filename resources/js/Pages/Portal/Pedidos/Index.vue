@@ -17,6 +17,8 @@ const badgeEstado = (e) => ({
     aprobado: 'bg-emerald-100 text-emerald-800',
     rechazado: 'bg-red-100 text-red-800',
     facturado: 'bg-brand-100 text-brand-800',
+    // Faltaba: un pedido ya despachado caía al gris de «estado desconocido».
+    despachado: 'bg-indigo-100 text-indigo-800',
     anulado: 'bg-surface-200 text-surface-600',
 }[e] || 'bg-surface-100 text-surface-700');
 
@@ -27,6 +29,9 @@ const tabs = [
     { key: 'enviado', label: 'Enviados' },
     { key: 'aprobado', label: 'Aprobados' },
     { key: 'facturado', label: 'Facturados' },
+    // El controlador ya contaba los despachados y nadie los pintaba: el número
+    // llegaba y se tiraba, y el cliente no tenía cómo filtrar «qué me enviaron».
+    { key: 'despachado', label: 'Despachados' },
     { key: 'rechazado', label: 'Rechazados' },
 ];
 </script>
@@ -59,12 +64,24 @@ const tabs = [
                     <div>
                         <div class="font-bold">{{ p.numero }}</div>
                         <div class="text-xs text-surface-500">{{ p.fecha }} · {{ p.items_count }} ítems</div>
+                        <!-- Que ya salió de bodega, en la lista: antes había que
+                             abrir el pedido para enterarse, y ni ahí se decía. -->
+                        <div v-if="p.salio_at" class="text-xs text-surface-500 mt-0.5">
+                            Despachado el {{ p.salio_at }}
+                        </div>
                     </div>
                     <div class="text-right">
                         <div class="font-bold text-brand-600">{{ money(p.total) }}</div>
                         <span :class="['inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase mt-1', badgeEstado(p.estado)]">
                             {{ p.estado }}
                         </span>
+                        <!-- El estado dice «facturado» igual que un pedido que no
+                             ha salido. Para quien está esperando la mercancía, esa
+                             diferencia es la única que importa. -->
+                        <div v-if="p.resto_pendiente"
+                             class="text-[10px] font-bold text-amber-700 dark:text-amber-300 mt-1">
+                            salió en partes · {{ p.unidades_despachadas }}/{{ p.unidades_pedidas }}
+                        </div>
                     </div>
                 </Link>
             </div>
