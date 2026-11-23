@@ -4,6 +4,7 @@ namespace App\Http\Controllers\App;
 
 use App\Http\Controllers\Controller;
 use App\Modules\Dropi\Actions\ConfirmarEmpaqueYSiguiente;
+use App\Modules\Dropi\Actions\GenerarGuiaDropi;
 use App\Modules\Dropi\Actions\ProcesarEscaneoEmpaque;
 use App\Modules\Dropi\Enums\EstadoPedidoDropi;
 use App\Modules\Dropi\Models\DropiPedido;
@@ -240,12 +241,17 @@ class EstacionEmpaqueController extends Controller implements HasMiddleware
             $res = ConfirmarEmpaqueYSiguiente::run($pedidoActivoId, $request->user()->id, $gps);
             $request->session()->forget('empaque.pedidoActivoId');
 
+            // Ya empacado: la guía se pide fuera de la transacción del empaque.
+            //   Si Dropi falla, el empaque queda y la guía se reintenta.
+            $guia = $this->guiaAlEmpacar($pedidoActivoId, $request->user()->id);
+
             $siguiente = $this->colaProximos(null)[0] ?? null;
             $sig = $siguiente ? " Siguiente: {$siguiente['guia']}, {$siguiente['ciudad']}." : '';
+            $mensaje = '✅ ' . $res['msg'] . ($guia['texto'] ?? '') . $sig;
 
             return back()->with([
-                'success' => '✅ ' . $res['msg'] . $sig,
-                'empaqueResultado' => ['sonido' => 'ok', 'mensaje' => '✅ ' . $res['msg'] . $sig, 'confeti' => true],
+                'success' => $mensaje,
+                'empaqueResultado' => ['sonido' => 'ok', 'mensaje' => $mensaje, 'confeti' => true] + ($guia['flash'] ?? []),
             ]);
         } catch (\Throwable $e) {
             return back()->with([
@@ -253,6 +259,80 @@ class EstacionEmpaqueController extends Controller implements HasMiddleware
                 'empaqueResultado' => ['sonido' => 'error', 'mensaje' => $e->getMessage()],
             ]);
         }
+    }
+
+    /**
+     * «Imprimir sticker» / «Reintentar guía» de un pedido ya empacado: genera
+     * la guía si le falta (con la regla prendida) y devuelve su sticker. Sólo
+     * quien lo empacó, o Aracely.
+     */
+    public function guia(Request $request): RedirectResponse
+    {
+        $data = $request->validate(['pedido_id' => ['required', 'integer']]);
+        $u = $request->user();
+
+        $pedido = DropiPedido::find($data['pedido_id']);
+        $loEmpaco = EmpaqueRegistro::where('pedido_id', $data['pedido_id'])
+            ->where('estado', 'completado')->where('operario_id', $u->id)->exists();
+        abort_unless($pedido && ($loEmpaco || $u->esAracely()), 403, 'Solo quien empacó el pedido (o Aracely) puede pedir su guía.');
+
+        if (! $pedido->tieneGuiaReal() && ! GenerarGuiaDropi::activa()) {
+            return back()->with([
+                'warning' => 'Este pedido no tiene guía. Generar la guía desde el ERP está apagado en Reglas.',
+                'empaqueResultado' => ['sonido' => 'warn', 'mensaje' => '⚠ Sin guía: se genera en Dropi'],
+            ]);
+        }
+
+        try {
+            $g = GenerarGuiaDropi::make()->handle($pedido, $u->id);
+        } catch (\Throwable $e) {
+            return back()->with([
+                'error' => 'Dropi no dio la guía: ' . $e->getMessage(),
+                'empaqueResultado' => ['sonido' => 'error', 'mensaje' => 'Dropi no dio la guía: ' . $e->getMessage(), 'guia_pedido_id' => $pedido->id],
+            ]);
+        }
+
+        $mensaje = $g['sticker_url']
+            ? "🏷 Guía {$g['guia']}: sticker listo para imprimir."
+            : "🏷 Guía {$g['guia']}: Dropi aún no publica el sticker, reintenta en un momento.";
+
+        return back()->with([
+            'success' => $mensaje,
+            'empaqueResultado' => ['sonido' => $g['sticker_url'] ? 'ok' : 'warn', 'mensaje' => $mensaje,
+                'sticker_url' => $g['sticker_url'], 'guia_pedido_id' => $pedido->id],
+        ]);
+    }
+
+    /**
+     * Al confirmar el empaque: la guía del pedido, si la regla está prendida o
+     * si ya la tenía (sólo hay que imprimir su sticker).
+     *
+     * @return array{texto: string, flash: array}|null
+     */
+    private function guiaAlEmpacar(int $pedidoId, int $userId): ?array
+    {
+        $pedido = DropiPedido::find($pedidoId);
+        if (! $pedido?->dropi_orden_id || (! $pedido->tieneGuiaReal() && ! GenerarGuiaDropi::activa())) {
+            return null;
+        }
+
+        try {
+            $g = GenerarGuiaDropi::make()->handle($pedido, $userId);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('dropi.guia.al_empacar_fallo', ['pedido_id' => $pedidoId, 'msg' => $e->getMessage()]);
+
+            return [
+                'texto' => ' ⚠ Sin guía: Dropi respondió «' . mb_substr($e->getMessage(), 0, 160) . '». Reintenta abajo.',
+                'flash' => ['guia_pedido_id' => $pedidoId],
+            ];
+        }
+
+        return [
+            'texto' => $g['sticker_url']
+                ? " 🏷 Guía {$g['guia']}: imprime el sticker."
+                : " 🏷 Guía {$g['guia']}: el sticker aún no está, reintenta abajo.",
+            'flash' => ['sticker_url' => $g['sticker_url'], 'guia_pedido_id' => $pedidoId],
+        ];
     }
 
     public function cancelar(Request $request): RedirectResponse

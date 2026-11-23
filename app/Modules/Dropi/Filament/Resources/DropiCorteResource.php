@@ -118,6 +118,24 @@ class DropiCorteResource extends Resource
                     ->url(fn (DropiCorte $record) => route('dropi.manifiesto.descargar', $record))
                     ->openUrlInNewTab(),
                 self::accionPedidosPdf(),
+                // Empacados que quedaron sin guía (Dropi la rechazó o no
+                //   respondió al empacar): se piden todas de una vez.
+                Action::make('guias_pendientes')
+                    ->label(fn (DropiCorte $record) => 'Guías pendientes (' . \App\Modules\Dropi\Actions\GenerarGuiaDropi::sinGuia($record)->count() . ')')
+                    ->icon('heroicon-o-truck')
+                    ->color('warning')
+                    ->visible(fn (DropiCorte $record) => \App\Modules\Dropi\Actions\GenerarGuiaDropi::activa()
+                        && \App\Modules\Dropi\Actions\GenerarGuiaDropi::sinGuia($record)->exists())
+                    ->requiresConfirmation()
+                    ->modalHeading('Generar las guías pendientes en Dropi')
+                    ->modalDescription('Pide a Dropi la guía de cada pedido empacado de este corte que todavía no la tiene. Las guías son reales: la transportadora las registra. Los stickers se imprimen desde la Estación de Empaque.')
+                    ->action(function (DropiCorte $record) {
+                        $r = \App\Modules\Dropi\Actions\GenerarGuiaDropi::make()->pendientesDelCorte($record, auth()->id());
+                        $n = Notification::make()
+                            ->title("Guías generadas: {$r['generadas']}")
+                            ->body($r['errores'] ? 'Sin guía: ' . implode(' · ', array_slice($r['errores'], 0, 5)) : null);
+                        ($r['errores'] ? $n->warning()->persistent() : $n->success())->send();
+                    }),
                 Action::make('generar_remisiones')
                     ->label('Solo remisiones ARI')
                     ->icon('heroicon-o-document-plus')

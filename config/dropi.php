@@ -45,6 +45,9 @@ return [
         'wallet_desde' => env('DROPI_WALLET_DESDE', '2026-09-01'),
         // Bodega de Dropi donde el ERP carga stock (Mimitos, Bucaramanga).
         'bodega_id' => (int) env('DROPI_WEB_BODEGA_ID', 10548),
+        // Donde Dropi publica el PDF del sticker de cada guía (la ruta viene en
+        //   `guia_urls3` de la lista de pedidos). Verificado el 23-nov-2026.
+        'stickers_url' => env('DROPI_WEB_STICKERS_URL', 'https://d39ru7awumhhs2.cloudfront.net'),
     ],
 
     'mock' => [

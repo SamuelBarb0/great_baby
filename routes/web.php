@@ -975,6 +975,7 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
         Route::post('/estacion-empaque/escanear', [\App\Http\Controllers\App\EstacionEmpaqueController::class, 'escanear'])->name('app.estacion.escanear');
         Route::post('/estacion-empaque/foto', [\App\Http\Controllers\App\EstacionEmpaqueController::class, 'guardarFoto'])->name('app.estacion.foto');
         Route::post('/estacion-empaque/confirmar', [\App\Http\Controllers\App\EstacionEmpaqueController::class, 'confirmar'])->name('app.estacion.confirmar');
+        Route::post('/estacion-empaque/guia', [\App\Http\Controllers\App\EstacionEmpaqueController::class, 'guia'])->name('app.estacion.guia');
         Route::post('/estacion-empaque/cancelar', [\App\Http\Controllers\App\EstacionEmpaqueController::class, 'cancelar'])->name('app.estacion.cancelar');
     });
 });
