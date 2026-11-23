@@ -342,6 +342,56 @@ class User extends Authenticatable implements FilamentUser
     }
 
     /**
+     * QUÉ PUEDE CONTAR, que no es lo mismo que qué puede OPERAR.
+     *
+     * `bodegasAsignadasIds()` gobierna mover mercancía —traslados incluidos— y
+     * sólo hereda la responsabilidad de una ubicación si el rol es AdminBodega,
+     * porque de esa misma casilla cuelgan los traslados entre bodegas. Eso está
+     * bien para mover y mal para contar.
+     *
+     * El efecto se vio el 23-nov-2026: los tres responsables de zona tienen rol
+     * Alistador, así que `bodegasAsignadasIds()` les devolvía un array vacío, y
+     * `in_array($ubicacion, [])` es siempre falso. Entraban a la pantalla de
+     * conteos —el middleware sí los deja—, escribían las cantidades contadas y
+     * recibían 403 al guardar. El callejón sin salida completo: ver la pantalla,
+     * hacer el trabajo y no poder guardarlo.
+     *
+     * Contar un estante del que uno responde no es operar la bodega: no mueve
+     * mercancía de sitio, la cuenta donde está. Por eso este alcance es ADITIVO
+     * —nadie pierde nada de lo que ya tenía— y hereda por `responsable_user_id`
+     * sin pedir rol, igual que `bodegasQueVeIds()` hace para mirar.
+     *
+     * Las posiciones hijas entran con la sede: quien responde por una bodega
+     * responde por sus racks, que es donde ocurre el conteo de verdad.
+     *
+     * @return array<int, int>
+     */
+    public function ubicacionesQuePuedeContar(): array
+    {
+        $operables = $this->bodegasAsignadasIds();
+
+        try {
+            $suyas = \DB::table('inventario_ubicaciones')
+                ->where('responsable_user_id', $this->id)
+                ->where('activa', true)
+                ->pluck('id')->map(fn ($x) => (int) $x)->all();
+
+            if (! empty($suyas)) {
+                $dentro = \DB::table('inventario_ubicaciones')
+                    ->where('activa', true)
+                    ->whereIn('bodega_id', $suyas)
+                    ->pluck('id')->map(fn ($x) => (int) $x)->all();
+
+                $suyas = array_merge($suyas, $dentro);
+            }
+        } catch (\Throwable) {
+            $suyas = [];
+        }
+
+        return array_values(array_unique([...$operables, ...$suyas]));
+    }
+
+    /**
      * The attributes that are mass assignable.
      *
      * @var list<string>

@@ -906,6 +906,25 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     Route::get('/logistica/cola-jorge/oleada', [\App\Http\Controllers\App\ColaJorgeController::class, 'oleada'])->name('app.cola-jorge.oleada');
     Route::get('/logistica/cola-jorge/{pedido}/picking', [\App\Http\Controllers\App\ColaJorgeController::class, 'imprimir'])->name('app.cola-jorge.picking');
 
+    /*
+     * Devoluciones del cliente · entran al almacén 08 y se revisan al día
+     * siguiente (procedimiento del área, 23-nov-2026).
+     *
+     * Las dos rutas de búsqueda van ANTES de la que lleva {devolucion}: si
+     * fueran después, Laravel tomaría «clientes» como el id y respondería 404.
+     */
+    Route::get('/logistica/devoluciones-cliente', [\App\Http\Controllers\App\DevolucionClienteController::class, 'index'])->name('app.devoluciones-cliente');
+    Route::get('/logistica/devoluciones-cliente/nueva', [\App\Http\Controllers\App\DevolucionClienteController::class, 'crear'])->name('app.devoluciones-cliente.crear');
+    Route::get('/logistica/devoluciones-cliente/clientes', [\App\Http\Controllers\App\DevolucionClienteController::class, 'clientes'])->name('app.devoluciones-cliente.clientes');
+    Route::get('/logistica/devoluciones-cliente/pedidos', [\App\Http\Controllers\App\DevolucionClienteController::class, 'pedidosDelCliente'])->name('app.devoluciones-cliente.pedidos');
+    Route::post('/logistica/devoluciones-cliente', [\App\Http\Controllers\App\DevolucionClienteController::class, 'guardar'])->name('app.devoluciones-cliente.guardar');
+    Route::get('/logistica/devoluciones-cliente/{devolucion}', [\App\Http\Controllers\App\DevolucionClienteController::class, 'show'])->name('app.devoluciones-cliente.show');
+    Route::post('/logistica/devoluciones-cliente/{devolucion}/items', [\App\Http\Controllers\App\DevolucionClienteController::class, 'itemGuardar'])->name('app.devoluciones-cliente.item');
+    Route::delete('/logistica/devoluciones-cliente/{devolucion}/items/{item}', [\App\Http\Controllers\App\DevolucionClienteController::class, 'itemEliminar'])->name('app.devoluciones-cliente.item-eliminar');
+    Route::post('/logistica/devoluciones-cliente/{devolucion}/confirmar', [\App\Http\Controllers\App\DevolucionClienteController::class, 'confirmar'])->name('app.devoluciones-cliente.confirmar');
+    Route::post('/logistica/devoluciones-cliente/{devolucion}/revisada', [\App\Http\Controllers\App\DevolucionClienteController::class, 'marcarRevisada'])->name('app.devoluciones-cliente.revisada');
+    Route::delete('/logistica/devoluciones-cliente/{devolucion}', [\App\Http\Controllers\App\DevolucionClienteController::class, 'descartar'])->name('app.devoluciones-cliente.descartar');
+
     // LOG-J1 + Miracle port · Panel de Gestión Comercial del Vendedor.
     Route::get('/vendedor', [\App\Http\Controllers\App\VendedorPedidoController::class, 'index'])->name('app.vendedor.index');
     Route::get('/vendedor/ventas-por-cliente', [\App\Http\Controllers\App\VendedorPedidoController::class, 'ventasPorCliente'])->name('app.vendedor.ventas-por-cliente');

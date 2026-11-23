@@ -200,6 +200,10 @@ const groups = [
             // «despachado» y el primero en enterarse de un retraso era el
             // cliente llamando a reclamar.
             { name: '🚚 Seguimiento de guías', href: '/app/logistica/guias', icon: Truck, permiso: 'logistica' },
+            // Lo que el cliente devuelve. Va acá y no en garantías porque lo
+            // que se registra es la ENTRADA de mercancía a la bodega: el
+            // ticket de garantía es otra cosa y no mueve inventario.
+            { name: '↩ Devoluciones de cliente', href: '/app/logistica/devoluciones-cliente', icon: Package, permiso: 'logistica' },
             // Va junto a la cola porque es lo que decide si un pedido aparece
             // en ella: sin regla de ruteo el pedido nace sin bodega y bodega
             // nunca lo ve.

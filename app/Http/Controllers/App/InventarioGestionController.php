@@ -567,14 +567,16 @@ class InventarioGestionController extends Controller implements HasMiddleware
             'observaciones' => ['nullable', 'string', 'max:500'],
         ]);
 
-        // Re-audit M3 λ (SEG-M2) · Alistador sólo crea toma en bodegas asignadas.
+        // Re-audit M3 λ (SEG-M2) · sólo se crea toma donde uno cuenta. El
+        // alcance es el de CONTAR —que incluye los estantes de los que uno
+        // responde— y no el de operar, que exige rol de bodega por los
+        // traslados.
         $u = $r->user();
         if (! $u->esAracely()) {
-            $bodegas = $u->bodegasAsignadasIds();
             abort_unless(
-                in_array((int) $data['ubicacion_id'], $bodegas, true),
+                in_array((int) $data['ubicacion_id'], $u->ubicacionesQuePuedeContar(), true),
                 403,
-                'Sólo puedes crear tomas en bodegas asignadas a tu perfil.'
+                'Sólo podés crear conteos en las bodegas o estantes que tenés a cargo.'
             );
         }
 
@@ -624,14 +626,29 @@ class InventarioGestionController extends Controller implements HasMiddleware
             )]);
         }
 
-        // Re-audit M3 PATRÓN η · uso `TomaFisica::siguienteNumero()` atómico.
-        //   Antes: `count()+1` bajo concurrencia = colisión. Además formato
-        //   TF-ymd-NNN divergía del TF-YYYY-NNNNNN del método del modelo.
-        $data['numero'] = TomaFisica::siguienteNumero();
-        $data['creada_por'] = auth()->id();
-        $data['fecha_conteo'] = now('America/Bogota')->toDateString();
-        $data['estado'] = \App\Modules\Inventario\Enums\EstadoTomaFisica::Borrador;
-        $toma = TomaFisica::create($data);
+        /*
+         * El número y la toma, en la MISMA transacción.
+         *
+         * `siguienteNumero()` toma su `lockForUpdate` dentro de su propia
+         * transacción y la cierra al devolver: entre ese commit y el insert de
+         * acá cabía otra petición, que leía el mismo máximo y devolvía el
+         * mismo número. El segundo INSERT chocaba contra el unique y quien lo
+         * intentó veía un 500 en vez de su toma.
+         *
+         * Envolviendo las dos cosas, la transacción anidada se vuelve un
+         * savepoint y el candado se sostiene hasta que la fila está escrita.
+         */
+        $toma = DB::transaction(function () use ($data) {
+            // Re-audit M3 PATRÓN η · uso `TomaFisica::siguienteNumero()` atómico.
+            //   Antes: `count()+1` bajo concurrencia = colisión. Además formato
+            //   TF-ymd-NNN divergía del TF-YYYY-NNNNNN del método del modelo.
+            $data['numero'] = TomaFisica::siguienteNumero();
+            $data['creada_por'] = auth()->id();
+            $data['fecha_conteo'] = now('America/Bogota')->toDateString();
+            $data['estado'] = \App\Modules\Inventario\Enums\EstadoTomaFisica::Borrador;
+
+            return TomaFisica::create($data);
+        });
 
         return back()->with('success', "Toma {$toma->numero} creada.");
     }
@@ -875,10 +892,16 @@ class InventarioGestionController extends Controller implements HasMiddleware
         if (! $u || $u->esAracely()) {
             return;
         }
+        /*
+         * El alcance de CONTAR, no el de operar. Con `bodegasAsignadasIds()`,
+         * el responsable de una zona —rol Alistador— recibía 403 sobre su
+         * propio estante: ese método sólo hereda la responsabilidad para
+         * AdminBodega, porque de esa casilla cuelgan los traslados.
+         */
         abort_unless(
-            in_array((int) $toma->ubicacion_id, $u->bodegasAsignadasIds(), true),
+            in_array((int) $toma->ubicacion_id, $u->ubicacionesQuePuedeContar(), true),
             403,
-            'Esta toma física es de otra bodega.'
+            'Esa toma física es de una bodega que no tenés a cargo.'
         );
     }
 
@@ -1606,7 +1629,9 @@ class InventarioGestionController extends Controller implements HasMiddleware
         );
         $u = $r->user();
         if (! $u->esAracely()) {
-            abort_unless(in_array((int) $toma->ubicacion_id, $u->bodegasAsignadasIds(), true), 403);
+            // Mismo alcance que el resto del conteo: subir las cantidades en
+            // Excel es contar, no mover mercancía.
+            abort_unless(in_array((int) $toma->ubicacion_id, $u->ubicacionesQuePuedeContar(), true), 403);
         }
 
         $filas = $this->parsearArchivoSku($r);

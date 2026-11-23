@@ -49,7 +49,7 @@ function almacen(string $codigo): Almacen
     return Almacen::where('codigo', $codigo)->firstOrFail();
 }
 
-it('siembra las cinco oficinas y los siete almacenes del área', function () {
+it('siembra las cinco oficinas y los ocho almacenes del área', function () {
     expect(Oficina::pluck('nombre', 'codigo')->all())->toBe([
         '10' => 'GREAT BABY',
         '11' => 'DROPI',
@@ -58,14 +58,18 @@ it('siembra las cinco oficinas y los siete almacenes del área', function () {
         '14' => 'EXHIBICIÓN',
     ]);
 
-    expect(Almacen::count())->toBe(7)
+    // El octavo lo pidio el area el 23-nov-2026: la devolucion de un
+    // cliente no tenia donde entrar.
+    expect(Almacen::count())->toBe(8)
         ->and(almacen('01')->nombre)->toBe('PRINCIPAL')
-        ->and(almacen('07')->nombre)->toBe('GARANTÍA DE PROVEEDOR');
+        ->and(almacen('07')->nombre)->toBe('GARANTÍA DE PROVEEDOR')
+        ->and(almacen('08')->nombre)->toBe('DEVOLUCIONES Y GARANTÍAS DE CLIENTES');
 });
 
 it('sólo admite ingreso directo donde el área lo permitió', function () {
     expect(Oficina::deIngreso()->pluck('codigo')->all())->toBe(['10', '11']);
-    expect(Almacen::deIngreso()->pluck('codigo')->all())->toBe(['01', '07']);
+    // El 08 entra acá: la devolución del cliente se recibe directo, no por traslado.
+    expect(Almacen::deIngreso()->pluck('codigo')->all())->toBe(['01', '07', '08']);
 });
 
 it('las averías leves, el outlet y los saldos se venden aunque no estén nuevos', function () {
@@ -153,7 +157,7 @@ it('correr el seeder otra vez no duplica ni pisa lo que el área editó', functi
 
     $this->seed(CatalogoOficinasAlmacenesSeeder::class);
 
-    expect(Almacen::count())->toBe(7)
+    expect(Almacen::count())->toBe(8)
         ->and(Oficina::count())->toBe(5)
         ->and(almacen('02')->nombre)->toBe('AVERÍAS LEVES (revisado)')
         ->and(almacen('02')->permite_ingreso_directo)->toBeTrue();

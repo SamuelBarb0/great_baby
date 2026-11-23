@@ -178,21 +178,28 @@ class ColaJorgeController extends Controller implements HasMiddleware
         $alistadores = User::query()
             ->whereHas('roles', fn ($q) => $q->whereIn('name', ['Alistador', 'AdminBodega']))
             /*
-             * Las cuentas que sólo marcan una zona no alistan nada.
+             * LOS RESPONSABLES DE ZONA VUELVEN A LA LISTA (23-nov-2026).
              *
-             * «Responsable 1/2/3» existen para decir quién responde por cada
-             * zona de la bodega, y nacen sin contraseña utilizable: nadie
-             * entra con ellas, y el ERP no tiene recuperación de clave para
-             * este guard. Llevan rol Alistador porque el sistema exige papel
-             * de bodega para ser responsable de una ubicación, así que caían
-             * en esta lista.
+             * Acá se excluían las cuentas «responsable1/2/3@greatbaby.com», y
+             * la razón era buena mientras fue cierta: el seeder las crea con
+             * una contraseña aleatoria de 48 caracteres justamente para que
+             * nadie entre con ellas, el ERP no tiene recuperación de clave
+             * para este guard, y asignarle un pedido a una cuenta en la que
+             * nadie puede entrar lo PARQUEA —queda a nombre de alguien que no
+             * va a tomarlo, y el alistador de verdad recibe 403 «este pedido
+             * es de otro»—.
              *
-             * Asignarle un pedido a una de ellas lo PARQUEA: queda a nombre de
-             * alguien que no puede entrar a tomarlo, y el alistador de verdad
-             * recibe 403 «este pedido es de otro» si intenta iniciarlo. El
-             * pedido sólo se desatasca reasignándolo desde acá.
+             * La premisa cambió: el 23-nov se les puso contraseña y se
+             * entregaron como las cuentas de los tres responsables de zona.
+             * Son personas que entran a trabajar, así que excluirlas de la
+             * lista dejaba a Don Jorge sin poder asignarles un solo pedido —
+             * medio sistema abierto para ellos y la puerta cerrada en la única
+             * pantalla donde se reparte el trabajo.
+             *
+             * Si algún día se abre una zona nueva y su cuenta queda sin dueño,
+             * el riesgo vuelve: no asignarle pedidos, y si alguno se parquea,
+             * se desatasca reasignándolo desde esta misma pantalla.
              */
-            ->whereNotIn('email', Zona::correosDeEtiqueta())
             ->orderBy('name')
             ->get(['id', 'name']);
 
@@ -310,7 +317,10 @@ class ColaJorgeController extends Controller implements HasMiddleware
             'origen_id' => ['required', 'integer', 'exists:inventario_ubicaciones,id'],
             'producto_id' => ['nullable', 'integer', 'exists:productos,id'],
             'variante_id' => ['nullable', 'integer', 'exists:producto_variantes,id'],
-            'cantidad' => ['required', 'numeric', 'min:0.0001'],
+            // Unidades enteras: Great Baby no vende fracciones, y un decimal
+            // acá descuadra Exhibición contra la bodega por la parte que el
+            // kardex trunca.
+            'cantidad' => ['required', 'integer', 'min:1'],
         ], [], [
             'origen_id' => 'ubicación de origen',
             'cantidad' => 'cantidad',
@@ -323,7 +333,7 @@ class ColaJorgeController extends Controller implements HasMiddleware
         );
 
         $u = $r->user();
-        $p = PedidoCliente::findOrFail($pedido);
+        $p = PedidoCliente::with('items')->findOrFail($pedido);
 
         abort_unless($p->ubicacion_origen_id, 422,
             'Este pedido no tiene bodega de origen: no hay a dónde traer la mercancía.');
@@ -341,6 +351,47 @@ class ColaJorgeController extends Controller implements HasMiddleware
             'Este pedido no es de una bodega suya.',
         );
 
+        /*
+         * Y SÓLO LO QUE ESTÉ EN EL PEDIDO, Y SÓLO LO QUE FALTE.
+         *
+         * Esto no se comprobaba. El endpoint validaba de dónde sale la
+         * mercancía y quién la pide, pero no QUÉ: cualquiera con rol de
+         * alistador podía tomar el id de un pedido suyo, pedir la referencia
+         * más cara del catálogo —que no está en ese pedido— en la cantidad que
+         * se le ocurriera, y el traslado se ejecutaba. Mercancía saliendo de
+         * Exhibición a nombre de un pedido que no la lleva.
+         *
+         * El tope es lo PENDIENTE de la línea, no la cantidad pedida: en un
+         * segundo viaje, lo que falta por traer es lo que no ha salido. Traer
+         * de más deja a Exhibición descuadrada contra una bodega que no
+         * necesitaba esas unidades.
+         */
+        /*
+         * El `??` importa: `validate()` NO devuelve las claves `nullable` que
+         * no vinieron en la petición, y acá una de las dos siempre falta —se
+         * manda variante O producto, nunca las dos—.
+         */
+        $varianteId = (int) ($datos['variante_id'] ?? 0);
+        $productoId = (int) ($datos['producto_id'] ?? 0);
+
+        $linea = $p->items->first(fn ($i) => $varianteId
+            ? (int) $i->variante_id === $varianteId
+            : ((int) $i->producto_id === $productoId && $i->variante_id === null));
+
+        abort_unless($linea, 422,
+            "Ese producto no está en el pedido {$p->numero}: de Exhibición sólo se trae lo que el pedido lleva.");
+
+        $pendiente = max(0, (int) $linea->cantidad - (int) (float) ($linea->cantidad_despachada ?? 0));
+
+        abort_if($pendiente <= 0, 422,
+            "De esa línea del pedido {$p->numero} ya salió todo: no hay qué traer.");
+
+        abort_if((int) $datos['cantidad'] > $pendiente, 422, sprintf(
+            'De %s el pedido %s sólo necesita %d unidad%s más, y estás trayendo %d.',
+            $linea->sku_snapshot ?: 'ese producto', $p->numero,
+            $pendiente, $pendiente === 1 ? '' : 'es', (int) $datos['cantidad']
+        ));
+
         $respaldo = \App\Modules\Inventario\Models\Oficina::respaldoDeSurtido();
 
         abort_unless($respaldo, 422,
@@ -353,7 +404,22 @@ class ColaJorgeController extends Controller implements HasMiddleware
         abort_unless((int) $oficinaDelOrigen === (int) $respaldo->id, 422,
             "De ahí no se surte: {$origen->codigo} no es del respaldo ({$respaldo->etiqueta()}).");
 
-        $traslado = DB::transaction(function () use ($datos, $p, $u, $origen, $respaldo) {
+        /*
+         * TODO EN UNA SOLA TRANSACCIÓN, el envío y la recepción incluidos.
+         *
+         * Antes el traslado se creaba y commiteaba acá, y `enviar()` y
+         * `recibir()` corrían afuera. Dos formas de romperse, las dos vistas en
+         * una bodega:
+         *
+         *   · si en Exhibición no alcanza, `enviar()` lanza y el traslado ya
+         *     commiteado queda huérfano en Borrador —uno por cada reintento—;
+         *   · y si `recibir()` falla después de `enviar()`, la mercancía salió
+         *     de Exhibición y no entró a la bodega: desaparece del sistema.
+         *
+         * Con todo adentro, o el movimiento completo queda escrito o no queda
+         * nada, que es lo único aceptable cuando se mueve stock.
+         */
+        $traslado = DB::transaction(function () use ($datos, $p, $u, $origen, $respaldo, $productoId, $varianteId) {
             $t = \App\Modules\Inventario\Models\Traslado::create([
                 'numero' => \App\Modules\Inventario\Models\Traslado::siguienteNumero(),
                 'origen_id' => $origen->id,
@@ -367,19 +433,21 @@ class ColaJorgeController extends Controller implements HasMiddleware
 
             \App\Modules\Inventario\Models\TrasladoItem::create([
                 'traslado_id' => $t->id,
-                'producto_id' => $datos['producto_id'],
-                'variante_id' => $datos['variante_id'],
+                // Mismas claves resueltas arriba: la que no vino vale null, no
+                // «clave inexistente».
+                'producto_id' => $productoId ?: null,
+                'variante_id' => $varianteId ?: null,
                 'cantidad_solicitada' => $datos['cantidad'],
             ]);
 
-            return $t->fresh('items');
+            $accion = app(\App\Modules\Inventario\Actions\EjecutarTraslado::class);
+
+            // La mercancía la tiene en la mano: sale y entra en el mismo acto.
+            $enviado = $accion->enviar($t->fresh('items'));
+            $accion->recibir($enviado->fresh('items'));
+
+            return $enviado->fresh('items');
         });
-
-        $accion = app(\App\Modules\Inventario\Actions\EjecutarTraslado::class);
-
-        // La mercancía la tiene en la mano: sale y entra en el mismo acto.
-        $traslado = $accion->enviar($traslado);
-        $accion->recibir($traslado->fresh('items'));
 
         return back()->with('success',
             "Traído de {$origen->codigo} · {$traslado->numero}. Exhibición quedó descontada.");
@@ -605,6 +673,29 @@ class ColaJorgeController extends Controller implements HasMiddleware
         // Un AdminBodega sólo imprime pedidos facturados · sanity check.
         abort_unless(in_array($p->estado, ['facturado', 'despachado', 'aprobado'], true), 422,
             'Sólo se imprime hoja de picking de pedidos aprobados/facturados.');
+
+        /*
+         * Y SÓLO DE SU BODEGA.
+         *
+         * Acá no se comprobaba de qué sede era el pedido: bastaba la casilla
+         * `logistica` —que tienen AdminBodega, Alistador y Despachador— para
+         * imprimir CUALQUIER pedido cambiando el número en la dirección. Y una
+         * hoja de picking no es una lista de referencias: lleva el nombre del
+         * cliente, su dirección, su teléfono y el nombre del asesor que vendió.
+         *
+         * Es el mismo criterio que ya aplica `oleada()` sobre los pedidos que
+         * se mandan a armar, con el mismo método: quien ve el pedido en su
+         * cola es quien puede imprimirlo. Va antes de buscar dónde está cada
+         * ítem, para no gastar esas consultas en una hoja que no va a salir.
+         */
+        $misBodegas = \App\Auth\Permisos::esRoot($r->user()) ? null : $r->user()->bodegasQueVeIds();
+
+        abort_if(
+            $misBodegas !== null && $p->ubicacion_origen_id
+                && ! in_array($p->ubicacion_origen_id, $misBodegas, true),
+            403,
+            "El pedido {$p->numero} es de otra bodega."
+        );
 
         $saldosPorSujeto = $this->dondeEstaCadaItem($p);
 

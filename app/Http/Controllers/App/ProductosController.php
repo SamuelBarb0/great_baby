@@ -57,9 +57,23 @@ class ProductosController extends Controller implements HasMiddleware
                 abort_unless(
                     \App\Auth\Permisos::puede($u, 'productos')
                         || $u?->esEquipoBodega()
-                        || $u?->esContable(),
+                        || $u?->esContable()
+                        /*
+                         * Y logística, que registra devoluciones de cliente.
+                         *
+                         * `esEquipoBodega()` mira la casilla `bodega`, que sólo
+                         * tiene AdminBodega: un Alistador —y los tres
+                         * responsables de zona lo son— recibía 403 al buscar el
+                         * producto que acababa de recibir devuelto. La pantalla
+                         * se le abría y el buscador no le devolvía nada.
+                         *
+                         * Abrir el buscador NO abre la lista de precios: el
+                         * precio de venta sale más abajo sólo para quien ya
+                         * podía verlo (`$veElPrecio`).
+                         */
+                        || \App\Auth\Permisos::puede($u, 'logistica'),
                     403,
-                    'Este buscador es de catálogo, compras y facturación.',
+                    'Este buscador es de catálogo, compras, facturación y logística.',
                 );
 
                 return $next($r);

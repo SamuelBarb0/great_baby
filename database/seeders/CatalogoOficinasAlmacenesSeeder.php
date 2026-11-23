@@ -59,6 +59,18 @@ class CatalogoOficinasAlmacenesSeeder extends Seeder
         ['05', 'REPUESTOS POR DESPIECE','DESPERFECTO', false, false, 'averia_reparar',    'Uso interno como repuesto de piezas. Sólo por traslado.'],
         ['06', 'SALDOS POR UNIDAD',     'BUENO',       true,  false, 'venta',             'Venta por unidad con descuento, siendo mayoristas. Sólo por traslado.'],
         ['07', 'GARANTÍA DE PROVEEDOR', 'AVERÍA',      false, true,  'garantia',          'Ingreso directo desde cuarentena, para el reclamo al proveedor.'],
+        /*
+         * El octavo lo pidió el área el 23-nov-2026, y hasta entonces la
+         * mercancía que devuelve un cliente no tenía dónde entrar: o se
+         * quedaba en el piso sin existir para el sistema, o se metía al 01 y
+         * volvía a ofrecerse a otro cliente antes de que nadie la mirara.
+         *
+         * Ingreso directo —la devolución entra acá— y NO comercial: esa
+         * casilla es la que impide que salga en un pedido mientras no se
+         * revise. «Por revisar» es estar acá; se sale con un traslado al
+         * almacén que diga la inspección.
+         */
+        ['08', 'DEVOLUCIONES Y GARANTÍAS DE CLIENTES', 'POR REVISAR', false, true, 'garantia', 'Entra la devolución del cliente y se revisa al día siguiente; de acá sale por traslado al almacén que corresponda.'],
     ];
 
     public function run(): void

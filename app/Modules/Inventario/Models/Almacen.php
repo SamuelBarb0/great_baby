@@ -43,10 +43,23 @@ class Almacen extends Model
         return $q->where('activo', true);
     }
 
-    /** Los que admiten mercancía directo del contenedor. Hoy: principal y garantía. */
+    /**
+     * Los que admiten mercancía sin pasar por un traslado.
+     *
+     * Hoy: principal, garantía de proveedor y devoluciones de cliente.
+     *
+     * El `orderBy` NO es cosmético. Sin él, el orden lo decidía el id —o sea,
+     * en qué orden se insertaron las filas—, así que un almacén agregado por
+     * migración sobre una base nueva aparecía ANTES que el principal en todo
+     * selector que use este scope. La tabla tiene columna `orden` justamente
+     * para que el catálogo se lea como lo pensó el área.
+     */
     public function scopeDeIngreso(Builder $q): Builder
     {
-        return $q->where('activo', true)->where('permite_ingreso_directo', true);
+        return $q->where('activo', true)
+            ->where('permite_ingreso_directo', true)
+            ->orderBy('orden')
+            ->orderBy('codigo');
     }
 
     /**
