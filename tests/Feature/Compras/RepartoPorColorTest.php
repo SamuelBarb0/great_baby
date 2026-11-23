@@ -122,7 +122,13 @@ it('contar más que el total pide el motivo y, con él, se guarda', function () 
 
     $p = Producto::where('referencia', '902')->firstOrFail();
     expect((float) InventarioMovimiento::where('producto_id', $p->id)->sum('cantidad'))->toBe(105.0)
-        ->and(RecepcionCompra::first()->observaciones)->toContain('Vinieron 5 de cortesía');
+        /*
+         * El motivo vive en SU columna desde el 20-nov-2026, no pegado al final
+         * de `observaciones`. Antes no se podían listar «las recepciones que
+         * llegaron con exceso» sin buscar una frase dentro de un texto libre, y
+         * editar las observaciones se llevaba la constancia por delante.
+         */
+        ->and(RecepcionCompra::first()->motivo_exceso)->toContain('Vinieron 5 de cortesía');
 });
 
 it('sin colores nada cambia: el producto nuevo sigue siendo uno solo', function () {
