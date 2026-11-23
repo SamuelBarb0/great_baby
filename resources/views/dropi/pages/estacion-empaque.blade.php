@@ -163,8 +163,8 @@
                                 {{-- Un ítem es de una variante o de un producto agregado (sin variantes):
                                      el agregado se escanea por su referencia (ProcesarEscaneoEmpaque). --}}
                                 <div style="font-weight:600;color:#e5e7eb;">{{ ($it->variante?->producto ?? $it->producto)?->nombre ?? $it->sku_dropi }}</div>
-                                @if($it->variante)
-                                    <div style="font-size:.8rem;color:#9ca3af;">{{ $it->variante->color_nombre }}@if($it->variante->talla) · T{{ $it->variante->talla }}@endif</div>
+                                @if(($varItem = $it->nombreVariante()) !== '')
+                                    <div style="font-size:.8rem;color:#9ca3af;">{{ $varItem }}</div>
                                 @endif
                                 <div style="font-family:monospace;font-size:.72rem;color:#cbd5e1;margin-top:.25rem;">{{ $it->variante?->codigo_barras ?? $it->producto?->referencia ?? '—' }}</div>
                             </div>

@@ -281,3 +281,46 @@ it('las dos estaciones de empaque traen el botón para escanear con la cámara',
         ->and(file_exists(public_path('js/gb-camara-codigos.js')))->toBeTrue()
         ->and(file_exists(public_path('js/vendor/zxing-0.21.3.min.js')))->toBeTrue();
 });
+
+/**
+ * Bodega, 23-nov-2026: la hoja salía con «—» en VARIANTE en todas las filas.
+ * Casi todo lo de Dropi está vinculado a un producto SIN variantes: no hay
+ * variante del ERP, pero Dropi manda la variación en cada línea del pedido.
+ */
+it('la recolección, el PDF y el empaque muestran la variación de Dropi cuando no hay variante del ERP', function () {
+    $cuatrimoto = Producto::create(['referencia' => 'BY-002', 'nombre' => 'Cuatrimoto', 'desglose_stock' => false]);
+    app(VincularProductoDropi::class)->aProducto('DV-2427000', $cuatrimoto->id);
+    app(VincularProductoDropi::class)->aProducto('DV-2427001', $cuatrimoto->id);
+
+    app(SincronizarPedidosDropi::class)->importarPedidos([new PedidoDropiDTO(
+        guia: 'G-VAR', dropiOrdenId: 'O-G-VAR', transportadora: 'X', tienda: 'T', vendedorNombre: 'Vendedora',
+        vendedorIdentificacion: null, clienteNombre: 'Ana', clienteDoc: null, clienteTelefono: null,
+        clienteDireccion: null, clienteCiudad: null, clienteDepto: null, estadoDropi: 'sin_estado',
+        montoEsperadoProveedor: 30000, montoClienteFinal: null, gananciaVendedor: null, fleteTransportadora: null,
+        items: [
+            new ItemDropiDTO('DV-2427000', 1, 30000, 'CUATRIMOTO', 'VERDE'),
+            new ItemDropiDTO('DV-2427001', 2, 30000, 'CUATRIMOTO', 'ROJO'),
+            new ItemDropiDTO('DV-555', 1, 30000, 'COCHE', 'AZUL DROPI'),
+        ],
+        creadoAt: CarbonImmutable::now(),
+    )]);
+    $p = DropiPedido::where('guia', 'G-VAR')->firstOrFail();
+    $this->actingAs($this->aracely);
+
+    $r = recoleccionPorSku();
+    expect($r['DV-2427000'])->producto->toBe('Cuatrimoto')->variante->toBe('VERDE')
+        ->and($r['DV-2427001'])->variante->toBe('ROJO')
+        // Con variante del ERP manda la del ERP.
+        ->and($r['DV-555'])->variante->toBe('Azul');
+
+    $html = view('dropi.pdf.recoleccion', [
+        'corte' => $p->corte, 'filas' => app(\App\Modules\Dropi\Support\RecoleccionDelCorte::class)->conMarcas($p->corte_id),
+        'unidades' => 4, 'generado' => now(),
+    ])->render();
+    expect($html)->toContain('<td>VERDE</td>')->toContain('<td>ROJO</td>');
+
+    // Empaque y escáner usan lo mismo; un producto simple de Dropi no tiene variación.
+    $items = $p->items()->get()->keyBy('sku_dropi');
+    expect($items['DV-2427001']->nombreVariante())->toBe('ROJO')
+        ->and((new \App\Modules\Dropi\Models\DropiPedidoItem(['variacion' => null]))->nombreVariante())->toBe('');
+});
