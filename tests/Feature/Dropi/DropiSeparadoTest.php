@@ -117,6 +117,143 @@ it('importa compras de Dropi desde Excel: una orden por referencia, como Dropi y
         ->and($oc->proveedor->en_erp)->toBeFalse();
 });
 
+it('importa por color: una fila por color, y al recibir cada color nace como variante con su stock aparte', function () {
+    $this->actingAs($this->user);
+    $guitarra = Producto::sinKardexAutomatico(fn () => Producto::create(['referencia' => 'GUIT-001', 'nombre' => 'GUITARRA', 'desglose_stock' => false]));
+
+    $r = app(ImportadorOrdenesCompraDropi::class)->importar(sepExcel([
+        ['referencia_oc' => 'F-1', 'proveedor_nit' => '900333001', 'proveedor_nombre' => 'Confecciones Uno', 'producto_referencia' => 'GUIT-001', 'color' => 'ROJO', 'cantidad' => 96, 'costo_unitario' => 11020, 'iva_pct' => 0],
+        ['referencia_oc' => 'F-1', 'proveedor_nit' => '900333001', 'producto_referencia' => 'GUIT-001', 'color' => 'azul', 'cantidad' => 192, 'costo_unitario' => 11020, 'iva_pct' => 0],
+    ]));
+    expect($r['errores'])->toBe([])->and($r['ok'])->toBe(1);
+
+    $oc = OrdenCompra::where('numero', $r['ordenes'][0])->with('items')->sole();
+    expect($oc->items->pluck('color_nombre')->all())->toBe(['ROJO', 'azul'])
+        ->and($oc->items->pluck('descripcion')->all())->toBe(['GUITARRA · ROJO', 'GUITARRA · azul'])
+        // La variante nace al importar: la recepción de una compra nacional no crea colores.
+        ->and($oc->items->every(fn ($i) => $i->variante_id !== null))->toBeTrue();
+
+    // Quien la importó no la aprueba (segregación de funciones): otra persona.
+    $this->actingAs(App\Models\User::factory()->create()->assignRole(Spatie\Permission\Models\Role::findOrCreate('Aracely')));
+    App\Modules\Compras\Actions\AprobarOrdenCompra::run($oc);
+    App\Modules\Compras\Actions\RegistrarRecepcion::run([
+        'orden_id' => $oc->id,
+        'items' => $oc->items->map(fn ($i) => ['orden_item_id' => $i->id, 'cantidad_recibida' => (float) $i->cantidad])->all(),
+    ]);
+
+    $guitarra->refresh()->load('variantes');
+    $stock = fn (string $color) => (float) InventarioMovimiento::where('variante_id', $guitarra->variantes->firstWhere('color_nombre', $color)?->id)->sum('cantidad');
+    expect($guitarra->desglose_stock)->toBeTrue()
+        ->and($guitarra->variantes->pluck('color_nombre')->sort()->values()->all())->toBe(['ROJO', 'azul'])
+        ->and($guitarra->variantes->every(fn ($v) => filled($v->codigo_barras)))->toBeTrue()
+        ->and($stock('ROJO'))->toBe(96.0)
+        ->and($stock('azul'))->toBe(192.0);
+});
+
+it('el color toma la variante que ya existe, y un producto con inventario sin colores rechaza la fila', function () {
+    $this->actingAs($this->user);
+    $body = Producto::create(['referencia' => 'SEP-BODY', 'nombre' => 'Body', 'desglose_stock' => true]);
+    $azul = App\Modules\Dropi\Models\ProductoVariante::create(['producto_id' => $body->id, 'color_codigo' => 'AZU', 'color_nombre' => 'Azul', 'codigo_barras' => 'SEP-BODY-AZU']);
+    $gorro = Producto::create(['referencia' => 'SEP-GORRO', 'nombre' => 'Gorro', 'desglose_stock' => false]);
+    InventarioMovimiento::create(['producto_id' => $gorro->id, 'ubicacion_id' => $this->bodegaDropi->id, 'tipo' => 'ingreso', 'cantidad' => 5, 'costo_unit' => 1000, 'created_at' => now()]);
+
+    $r = app(ImportadorOrdenesCompraDropi::class)->importar(sepExcel([
+        ['referencia_oc' => 'B-1', 'proveedor_nit' => '900333001', 'proveedor_nombre' => 'Confecciones Uno', 'producto_referencia' => 'SEP-BODY', 'color' => 'AZUL', 'cantidad' => 10, 'costo_unitario' => 5000],
+        ['referencia_oc' => 'G-1', 'proveedor_nit' => '900333001', 'producto_referencia' => 'SEP-GORRO', 'color' => 'ROJO', 'cantidad' => 3, 'costo_unitario' => 2000],
+    ]));
+
+    expect($r['ok'])->toBe(1)
+        ->and($r['errores'])->toHaveCount(1)
+        ->and($r['errores'][0])->toContain('G-1')->toContain('SEP-GORRO')->toContain('sin colores');
+    $item = OrdenCompra::where('numero', $r['ordenes'][0])->with('items')->sole()->items->sole();
+    expect($item->variante_id)->toBe($azul->id)->and($item->color_nombre)->toBe('Azul');
+});
+
+it('un producto que estrena colores en el archivo no admite una fila sin color, y si la orden falla no deja variantes', function () {
+    $this->actingAs($this->user);
+    $tren = Producto::sinKardexAutomatico(fn () => Producto::create(['referencia' => 'SEP-TREN', 'nombre' => 'TREN', 'desglose_stock' => false]));
+
+    $r = app(ImportadorOrdenesCompraDropi::class)->importar(sepExcel([
+        ['referencia_oc' => 'E-1', 'proveedor_nit' => '900333001', 'proveedor_nombre' => 'Uno', 'producto_referencia' => 'SEP-TREN', 'color' => 'ROJO', 'cantidad' => 5, 'costo_unitario' => 100],
+        ['referencia_oc' => 'E-1', 'proveedor_nit' => '900333001', 'producto_referencia' => 'SEP-TREN', 'cantidad' => 5, 'costo_unitario' => 100],
+    ]));
+
+    expect($r['ok'])->toBe(0)->and($r['errores'])->toHaveCount(1)
+        ->and($r['errores'][0])->toContain('fila 3')->toContain('se carga por colores')
+        ->and($tren->variantes()->count())->toBe(0)
+        ->and($tren->fresh()->desglose_stock)->toBeFalse();
+});
+
+it('el color casa con la variante del ERP sin importar mayúsculas, tildes ni espacios', function () {
+    $this->actingAs($this->user);
+    $peluche = Producto::create(['referencia' => 'SEP-PEL', 'nombre' => 'PELUCHE', 'desglose_stock' => true]);
+    $rosa = App\Modules\Dropi\Models\ProductoVariante::create(['producto_id' => $peluche->id, 'color_codigo' => 'ROS', 'color_nombre' => 'ROSA', 'codigo_barras' => 'SEP-PEL-ROS']);
+    $azul = App\Modules\Dropi\Models\ProductoVariante::create(['producto_id' => $peluche->id, 'color_codigo' => 'AZU', 'color_nombre' => 'Azul Cielo', 'codigo_barras' => 'SEP-PEL-AZU']);
+
+    $r = app(ImportadorOrdenesCompraDropi::class)->importar(sepExcel([
+        ['referencia_oc' => 'P-1', 'proveedor_nit' => '900333001', 'proveedor_nombre' => 'Uno', 'producto_referencia' => 'SEP-PEL', 'color' => ' rosá ', 'cantidad' => 60, 'costo_unitario' => 23492],
+        ['referencia_oc' => 'P-1', 'proveedor_nit' => '900333001', 'producto_referencia' => 'SEP-PEL', 'color' => 'AZUL  CIELO', 'cantidad' => 60, 'costo_unitario' => 23492],
+    ]));
+
+    expect($r['errores'])->toBe([])->and($r['ok'])->toBe(1);
+    $items = OrdenCompra::where('numero', $r['ordenes'][0])->with('items')->sole()->items;
+    expect($items->pluck('variante_id')->all())->toBe([$rosa->id, $azul->id])
+        ->and($items->pluck('color_nombre')->all())->toBe(['ROSA', 'Azul Cielo'])
+        ->and($items->pluck('descripcion')->all())->toBe(['PELUCHE · ROSA', 'PELUCHE · Azul Cielo'])
+        ->and($peluche->variantes()->count())->toBe(2);
+});
+
+it('un producto con variantes no inventa otra: el color que no está o la fila sin color se rechazan diciendo cuáles hay', function () {
+    $this->actingAs($this->user);
+    $peluche = Producto::create(['referencia' => 'SEP-PEL', 'nombre' => 'PELUCHE', 'desglose_stock' => true]);
+    App\Modules\Dropi\Models\ProductoVariante::create(['producto_id' => $peluche->id, 'color_codigo' => 'ROS', 'color_nombre' => 'ROSA', 'codigo_barras' => 'SEP-PEL-ROS']);
+    App\Modules\Dropi\Models\ProductoVariante::create(['producto_id' => $peluche->id, 'color_codigo' => 'AZU', 'color_nombre' => 'AZUL', 'codigo_barras' => 'SEP-PEL-AZU']);
+
+    $r = app(ImportadorOrdenesCompraDropi::class)->importar(sepExcel([
+        ['referencia_oc' => 'X-1', 'proveedor_nit' => '900333001', 'proveedor_nombre' => 'Uno', 'producto_referencia' => 'SEP-PEL', 'color' => 'FUCSIA', 'cantidad' => 5, 'costo_unitario' => 100],
+        ['referencia_oc' => 'X-2', 'proveedor_nit' => '900333001', 'proveedor_nombre' => 'Uno', 'producto_referencia' => 'SEP-PEL', 'cantidad' => 5, 'costo_unitario' => 100],
+    ]));
+
+    expect($r['ok'])->toBe(0)->and($r['errores'])->toHaveCount(2)
+        ->and($r['errores'][0])->toContain('fila 2')->toContain('FUCSIA')->toContain('Tiene: ROSA, AZUL')
+        ->and($r['errores'][1])->toContain('fila 3')->toContain('escriba en «color»')->toContain('Tiene: ROSA, AZUL')
+        ->and($peluche->variantes()->count())->toBe(2)
+        ->and(OrdenCompra::count())->toBe(0);
+});
+
+it('el mismo color en varias tallas pide el código de la variante', function () {
+    $this->actingAs($this->user);
+    $body = Producto::create(['referencia' => 'SEP-BT', 'nombre' => 'Body', 'desglose_stock' => true]);
+    App\Modules\Dropi\Models\ProductoVariante::create(['producto_id' => $body->id, 'color_codigo' => 'AZU', 'color_nombre' => 'AZUL', 'talla' => '2', 'codigo_barras' => 'SEP-BT-AZU-2']);
+    $t3 = App\Modules\Dropi\Models\ProductoVariante::create(['producto_id' => $body->id, 'color_codigo' => 'AZU', 'color_nombre' => 'AZUL', 'talla' => '3', 'codigo_barras' => 'SEP-BT-AZU-3']);
+
+    $r = app(ImportadorOrdenesCompraDropi::class)->importar(sepExcel([
+        ['referencia_oc' => 'T-1', 'proveedor_nit' => '900333001', 'proveedor_nombre' => 'Uno', 'producto_referencia' => 'SEP-BT', 'color' => 'azul', 'cantidad' => 5, 'costo_unitario' => 100],
+        ['referencia_oc' => 'T-2', 'proveedor_nit' => '900333001', 'proveedor_nombre' => 'Uno', 'producto_referencia' => 'SEP-BT', 'variante_codigo' => 'SEP-BT-AZU-3', 'cantidad' => 5, 'costo_unitario' => 100],
+    ]));
+
+    expect($r['ok'])->toBe(1)->and($r['errores'])->toHaveCount(1)
+        ->and($r['errores'][0])->toContain('T-1')->toContain('variante_codigo')->toContain('SEP-BT-AZU-2')->toContain('SEP-BT-AZU-3');
+    expect(OrdenCompra::where('numero', $r['ordenes'][0])->with('items')->sole()->items->sole()->variante_id)->toBe($t3->id);
+});
+
+it('un Excel sin la columna color se sigue importando igual', function () {
+    $this->actingAs($this->user);
+    Producto::create(['referencia' => 'SEP-A', 'nombre' => 'Body', 'desglose_stock' => false]);
+    $sinColor = array_values(array_diff(ImportadorOrdenesCompraDropi::COLUMNAS, ['color']));
+    $ruta = tempnam(sys_get_temp_dir(), 'ocd').'.xlsx';
+    $w = new Writer();
+    $w->openToFile($ruta);
+    $w->addRow(Row::fromValues($sinColor));
+    $fila = ['referencia_oc' => 'V-1', 'proveedor_nit' => '900333001', 'proveedor_nombre' => 'Uno', 'producto_referencia' => 'SEP-A', 'cantidad' => 2, 'costo_unitario' => 100];
+    $w->addRow(Row::fromValues(array_map(fn ($c) => $fila[$c] ?? '', $sinColor)));
+    $w->close();
+
+    $r = app(ImportadorOrdenesCompraDropi::class)->importar($ruta);
+
+    expect($r['ok'])->toBe(1)->and($r['errores'])->toBe([]);
+});
+
 // ───────────────────────── traslado desde Great Baby ─────────────────────────
 
 function sepCargaTraslado(array $filas, int $origen, int $destino, int $userId): Carga

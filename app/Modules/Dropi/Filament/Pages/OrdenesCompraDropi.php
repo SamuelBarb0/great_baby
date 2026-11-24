@@ -48,13 +48,16 @@ class OrdenesCompraDropi extends PaginaTablaDropi
                 ->color('gray')
                 ->visible(fn () => \App\Modules\Dropi\Filament\Support\ComprasDropi::puedeArmar(auth()->user()))
                 ->modalHeading('Importar órdenes de compra de Dropi')
-                ->modalDescription('Cada fila es un producto; las filas con la misma «referencia_oc» forman una orden. Quedan en borrador, como las de «Nueva OC». Una orden con una fila mala no se crea y se dice cuál fila falló.')
-                ->modalSubmitActionLabel('Importar')
+                ->modalDescription('Cada fila es un producto; las filas con la misma «referencia_oc» forman una orden. Si el producto tiene variantes, escriba en «color» cuál llega (una fila por color), tal como está en el ERP. Antes de crear nada, cada orden se abre en «Nueva OC» para revisarla y escoger lo que falte.')
+                ->modalSubmitActionLabel('Revisar')
                 ->schema([
                     \Filament\Forms\Components\FileUpload::make('archivo')->label('Archivo (.xlsx)')
                         ->acceptedFileTypes(['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/octet-stream'])
-                        ->disk('local')->directory('imports')->required(),
+                        ->disk('local')->directory('imports')->storeFileNamesIn('archivo_nombre')->required(),
                 ])
+                // Vista previa (24-nov-2026): el Excel no crea nada al subirlo. Se lee
+                //   (analizar) y cada orden se abre llena en «Nueva OC», donde se
+                //   revisa, se escoge el producto o la variante que no casó y se crea.
                 ->action(function (array $data) {
                     $rel = (string) ($data['archivo'] ?? '');
                     $ruta = collect([storage_path('app/private/'.$rel), storage_path('app/'.$rel)])
@@ -65,19 +68,18 @@ class OrdenesCompraDropi extends PaginaTablaDropi
                         return;
                     }
                     try {
-                        $r = app(\App\Modules\Dropi\Services\ImportadorOrdenesCompraDropi::class)->importar($ruta);
+                        $r = app(\App\Modules\Dropi\Services\ImportadorOrdenesCompraDropi::class)->analizar($ruta);
                     } finally {
                         @unlink($ruta);
                     }
-                    $cuerpo = $r['ok'] ? 'Creadas en borrador: '.implode(', ', $r['ordenes']).'.' : 'No se creó ninguna orden.';
                     if ($r['errores']) {
-                        $cuerpo .= "\n\nNo se importaron:\n· ".implode("\n· ", array_slice($r['errores'], 0, 15))
-                            .(count($r['errores']) > 15 ? "\n· … y ".(count($r['errores']) - 15).' más.' : '');
+                        \Filament\Notifications\Notification::make()->title('No se pudo leer el archivo')
+                            ->body(implode("\n", $r['errores']))->danger()->persistent()->send();
+
+                        return;
                     }
-                    \Filament\Notifications\Notification::make()
-                        ->title("{$r['ok']} orden(es) importada(s)".($r['errores'] ? ' · '.count($r['errores']).' con error' : ''))
-                        ->body($cuerpo)->color($r['errores'] ? ($r['ok'] ? 'warning' : 'danger') : 'success')
-                        ->persistent()->send();
+                    NuevaOrdenCompraDropi::empezarImportacion($r['ordenes'], (string) ($data['archivo_nombre'] ?? basename($rel)));
+                    $this->redirect(NuevaOrdenCompraDropi::getUrl(['desde' => 'excel']));
                 }),
             \Filament\Actions\Action::make('plantilla')->label('Plantilla')->icon('heroicon-o-arrow-down-tray')
                 ->color('gray')->link()
