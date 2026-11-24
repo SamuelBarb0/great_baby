@@ -39,6 +39,41 @@ class ResolverEstadoInicial
     }
 
     /**
+     * Como porSku(), pero descontando lo que ya se apartó para otros pedidos en
+     * la misma revisión (LiberarPedidosPorStock): dos pedidos no se quedan con la
+     * misma unidad. Si alcanza, aparta lo suyo en $apartado.
+     *
+     * @param  array<int, array{sku:string, cantidad:int}>  $items
+     * @param  array<string, int>  $apartado  'v:{id}' / 'p:{id}' => unidades ya apartadas
+     */
+    public function alcanzaConApartado(array $items, array &$apartado): bool
+    {
+        $pide = [];
+        foreach ($items as $it) {
+            $destino = $this->destinoPara($it['sku']);
+            if (! $destino) {
+                return false;
+            }
+            $llave = $destino['variante_id'] ? 'v:'.$destino['variante_id'] : 'p:'.$destino['producto_id'];
+            $pide[$llave] = ($pide[$llave] ?? 0) + (int) $it['cantidad'];
+        }
+
+        foreach ($pide as $llave => $cantidad) {
+            [$tipo, $id] = explode(':', $llave);
+            $disponible = $tipo === 'v' ? $this->stockDisponible((int) $id) : $this->stockDisponibleAgregado((int) $id);
+            if ($disponible - ($apartado[$llave] ?? 0) < $cantidad) {
+                return false;
+            }
+        }
+
+        foreach ($pide as $llave => $cantidad) {
+            $apartado[$llave] = ($apartado[$llave] ?? 0) + $cantidad;
+        }
+
+        return true;
+    }
+
+    /**
      * Variante del catálogo GB para una llave de Dropi: primero el vínculo que
      * alguien hizo a mano (Productos sin vincular), después el código de barras.
      */

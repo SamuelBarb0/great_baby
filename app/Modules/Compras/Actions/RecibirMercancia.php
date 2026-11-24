@@ -207,6 +207,23 @@ class RecibirMercancia
                 PushRecepcionASiigo::dispatch($recepcion->id);
             });
 
+            // Lo que entró apto puede destrabar pedidos de Dropi que esperaban ese
+            //   stock (24-nov-2026): vuelven a Pending y aparecen en las colas. Va
+            //   después del commit y no tumba la recepción si algo falla.
+            $aptos = $recepcion->items->filter(fn ($i) => ($i->clasificacion ?? 'apto') === 'apto' && (float) $i->cantidad_recibida > 0);
+            DB::afterCommit(function () use ($aptos, $recepcion) {
+                try {
+                    \App\Modules\Dropi\Actions\LiberarPedidosPorStock::run(
+                        $aptos->pluck('variante_id')->filter()->all(),
+                        $aptos->whereNull('variante_id')->pluck('producto_id')->filter()->all(),
+                        auth()->id(),
+                        ['recepcion' => $recepcion->numero],
+                    );
+                } catch (\Throwable $e) {
+                    report($e);
+                }
+            });
+
             return $recepcion->fresh(['items', 'orden']);
         });
     }
