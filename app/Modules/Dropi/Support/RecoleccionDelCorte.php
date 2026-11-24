@@ -39,7 +39,7 @@ class RecoleccionDelCorte
         EstadoPedidoDropi::Empacado, EstadoPedidoDropi::Despachado,
         EstadoPedidoDropi::Entregado, EstadoPedidoDropi::Pagado,
         EstadoPedidoDropi::CanceladoDropi, EstadoPedidoDropi::CanceladoGb,
-        EstadoPedidoDropi::Devuelto,
+        EstadoPedidoDropi::Devuelto, EstadoPedidoDropi::GestionadoEnDropi,
     ];
 
     /**
@@ -49,12 +49,22 @@ class RecoleccionDelCorte
      */
     public function totales(int $corteId): array
     {
-        $pedidos = DropiPedido::query()
+        return $this->totalesDe(DropiPedido::query()
             ->where('corte_id', $corteId)
             ->whereNotIn('estado', self::ESTADOS_FUERA)
             ->with(['items.variante.producto', 'items.producto'])
-            ->get();
+            ->get());
+    }
 
+    /**
+     * Lo mismo para unos pedidos escogidos: la lista que acompaña las guías
+     * que Aracely imprime de una selección (24-nov-2026).
+     *
+     * @param  Collection<int, DropiPedido>  $pedidos  con items.variante.producto e items.producto
+     * @return array<string, array<string, mixed>>
+     */
+    public function totalesDe(Collection $pedidos): array
+    {
         $items = $pedidos->flatMap->items;
         $ubicaciones = $this->ubicacionesDe($items);
 

@@ -16,6 +16,7 @@ const MAPA = {
     pagado: { label: 'Pagado', cls: 'bg-green-600 text-white' },
     cancelado_dropi: { label: 'Cancelado (Dropi)', cls: 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200' },
     cancelado_gb: { label: 'Cancelado (GB)', cls: 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200' },
+    gestionado_en_dropi: { label: 'Gestionado en Dropi', cls: 'bg-surface-100 text-surface-700 dark:bg-surface-800 dark:text-surface-300' },
 };
 
 export function usePedidoBadge() {

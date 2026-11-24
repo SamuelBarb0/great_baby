@@ -138,6 +138,7 @@ class TorreControl extends Page
                 EstadoPedidoDropi::CanceladoDropi,
                 EstadoPedidoDropi::CanceladoGb,
                 EstadoPedidoDropi::Pagado,
+                EstadoPedidoDropi::GestionadoEnDropi,
             ])
             ->selectRaw('estado, COUNT(*) as total')
             ->groupBy('estado')

@@ -15,6 +15,13 @@ enum EstadoPedidoDropi: string
     case Pagado = 'pagado';
     case CanceladoDropi = 'cancelado_dropi';
     case CanceladoGb = 'cancelado_gb';
+    /**
+     * Arranque del ERP (24-nov-2026): pedidos que Aracely ya trabajó en Dropi
+     * con el flujo anterior (guía generada allá) o que Dropi ya no muestra.
+     * No entran a ninguna cola del ERP; la sincronización los sigue moviendo
+     * (despachado, entregado, cancelado…) cuando Dropi los reporte.
+     */
+    case GestionadoEnDropi = 'gestionado_en_dropi';
 
     public function label(): string
     {
@@ -30,6 +37,7 @@ enum EstadoPedidoDropi: string
             self::Pagado => 'Pagado',
             self::CanceladoDropi => 'Cancelado por Dropi',
             self::CanceladoGb => 'Cancelado por GB',
+            self::GestionadoEnDropi => 'Gestionado en Dropi (flujo anterior)',
         };
     }
 
@@ -39,7 +47,7 @@ enum EstadoPedidoDropi: string
             self::Pending, self::Alistando, self::Empacado => 'warning',
             self::PendienteInventario => 'danger',
             self::Despachado, self::Entregado, self::Pagado => 'success',
-            self::DevolucionEnCamino, self::Devuelto => 'gray',
+            self::DevolucionEnCamino, self::Devuelto, self::GestionadoEnDropi => 'gray',
             self::CanceladoDropi, self::CanceladoGb => 'danger',
         };
     }
@@ -68,7 +76,7 @@ enum EstadoPedidoDropi: string
     {
         return in_array($this, [
             self::Despachado, self::Entregado, self::Pagado, self::DevolucionEnCamino,
-            self::Devuelto, self::CanceladoDropi,
+            self::Devuelto, self::CanceladoDropi, self::GestionadoEnDropi,
         ], true);
     }
 
@@ -120,6 +128,7 @@ enum EstadoPedidoDropi: string
             self::Pagado->value => [],         // terminal manualmente
             self::CanceladoDropi->value => [],
             self::CanceladoGb->value => [],
+            self::GestionadoEnDropi->value => [self::CanceladoGb],
         ];
 
         return in_array($nuevo, $transiciones[$this->value] ?? [], true);

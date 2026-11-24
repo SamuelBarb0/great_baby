@@ -23,6 +23,18 @@ class DropiEstadoBitacora extends Model
         'created_at' => 'datetime',
     ];
 
+    /**
+     * La hora la pone PHP, no el DEFAULT CURRENT_TIMESTAMP de la columna: en
+     * producción MySQL corre en UTC y la app en Bogotá, y la bitácora quedaba
+     * 5 h adelantada frente al resto del ERP (24-nov-2026).
+     */
+    protected static function booted(): void
+    {
+        static::creating(function (self $b) {
+            $b->created_at ??= now();
+        });
+    }
+
     public function pedido(): BelongsTo
     {
         return $this->belongsTo(DropiPedido::class, 'pedido_id');

@@ -19,6 +19,19 @@ class DropiAlistadorLock extends Model
         'heartbeat_at' => 'datetime',
     ];
 
+    /**
+     * Las horas las pone PHP, no el DEFAULT CURRENT_TIMESTAMP: en producción
+     * MySQL corre en UTC y la app en Bogotá (24-nov-2026). Con la hora de MySQL,
+     * LiberarLocksAlistador veía el candado 5 h «en el futuro».
+     */
+    protected static function booted(): void
+    {
+        static::creating(function (self $l) {
+            $l->locked_at ??= now();
+            $l->heartbeat_at ??= now();
+        });
+    }
+
     public function pedido(): BelongsTo
     {
         return $this->belongsTo(DropiPedido::class, 'pedido_id');

@@ -111,6 +111,7 @@ class DashboardController extends Controller
             EstadoPedidoDropi::CanceladoDropi,
             EstadoPedidoDropi::CanceladoGb,
             EstadoPedidoDropi::Pagado,
+            EstadoPedidoDropi::GestionadoEnDropi,
         ])
             ->selectRaw('estado, COUNT(*) as total')
             ->groupBy('estado')->pluck('total', 'estado')->toArray();

@@ -79,7 +79,7 @@ class DropiOperacionController extends Controller implements HasMiddleware
                     EstadoPedidoDropi::Empacado, EstadoPedidoDropi::Despachado,
                     EstadoPedidoDropi::Entregado, EstadoPedidoDropi::Pagado,
                     EstadoPedidoDropi::CanceladoDropi, EstadoPedidoDropi::CanceladoGb,
-                    EstadoPedidoDropi::Devuelto,
+                    EstadoPedidoDropi::Devuelto, EstadoPedidoDropi::GestionadoEnDropi,
                 ])
                 ->with(['items.variante.producto', 'items.producto'])
                 ->get();
