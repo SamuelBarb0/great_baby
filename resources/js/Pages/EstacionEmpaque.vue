@@ -50,6 +50,11 @@ const procesarFlash = (r) => {
     if (! r) return;
     beep(r.sonido);
     doFlash(r.sonido);
+    // Sticker de la guía recién generada: se abre solo; si el navegador
+    //   bloquea la ventana, queda el botón «Imprimir sticker».
+    if (r.sticker_url) {
+        try { window.open(r.sticker_url, '_blank', 'noopener'); } catch (e) {}
+    }
 
     if (r.mensaje?.startsWith('✅')) {
         hablar(r.mensaje.replace(/[✅✓]/g, '').trim());
@@ -163,6 +168,17 @@ const confirmar = async () => {
         preserveScroll: true,
         preserveState: false,
         onFinish: () => { procesandoConfirmar.value = false; },
+    });
+};
+// Guía de Dropi de un pedido ya empacado (reintento o sticker que no estaba).
+const procesandoGuia = ref(false);
+const pedirGuia = (pedidoId) => {
+    if (procesandoGuia.value || ! pedidoId) return;
+    procesandoGuia.value = true;
+    router.post('/app/estacion-empaque/guia', { pedido_id: pedidoId }, {
+        preserveScroll: true,
+        preserveState: false,
+        onFinish: () => { procesandoGuia.value = false; },
     });
 };
 // Modal Vue (no window.confirm — evita robar el foco a la pistola en tablets)
@@ -283,6 +299,19 @@ const fmtTime = (s) => {
                                  'bg-red-500/15 text-red-400 border-red-500': $page.props.flash.empaqueResultado.sonido === 'error',
                              }">
                             {{ $page.props.flash.empaqueResultado.mensaje }}
+                            <!-- Guía de Dropi del pedido recién empacado: imprimir el sticker o reintentar. -->
+                            <div v-if="$page.props.flash.empaqueResultado.sticker_url || $page.props.flash.empaqueResultado.guia_pedido_id"
+                                 class="mt-2 flex flex-wrap gap-2">
+                                <a v-if="$page.props.flash.empaqueResultado.sticker_url"
+                                   :href="$page.props.flash.empaqueResultado.sticker_url" target="_blank" rel="noopener"
+                                   class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-600 text-white font-bold hover:bg-emerald-700">
+                                    🖨 Imprimir sticker
+                                </a>
+                                <button v-else type="button" :disabled="procesandoGuia" @click="pedirGuia($page.props.flash.empaqueResultado.guia_pedido_id)"
+                                        class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-600 text-white font-bold hover:bg-amber-700 disabled:opacity-50">
+                                    {{ procesandoGuia ? 'Pidiendo a Dropi…' : '↻ Reintentar guía' }}
+                                </button>
+                            </div>
                         </div>
                     </transition>
                 </div>

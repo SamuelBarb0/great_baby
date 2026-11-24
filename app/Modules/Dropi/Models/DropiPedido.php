@@ -47,6 +47,21 @@ class DropiPedido extends Model implements AuditableContract
         'flete_transportadora' => 'decimal:2',
     ];
 
+    /** ¿Ya tiene la guía de la transportadora? (no la provisional SIN-GUIA-<orden> del sync). */
+    public function tieneGuiaReal(): bool
+    {
+        return filled($this->guia)
+            && ! str_starts_with((string) $this->guia, \App\Modules\Dropi\Services\MapearPedidoDropiWeb::PREFIJO_SIN_GUIA);
+    }
+
+    /** El PDF del sticker de la guía, publicado por Dropi (ver GenerarGuiaDropi). */
+    public function stickerUrl(): ?string
+    {
+        return $this->sticker_path
+            ? rtrim((string) config('dropi.web.stickers_url'), '/') . '/' . ltrim($this->sticker_path, '/')
+            : null;
+    }
+
     public function corte(): BelongsTo
     {
         return $this->belongsTo(DropiCorte::class, 'corte_id');

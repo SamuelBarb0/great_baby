@@ -137,6 +137,7 @@ class SincronizarDropiWeb
         $guardados = DropiPedido::whereIn('dropi_orden_id', collect($dtos)->pluck('dropiOrdenId'))
             ->pluck('dropi_orden_id')->map(fn ($id) => (string) $id)->all();
         $this->marcarSincronizados(array_filter($cambiados, fn ($o) => in_array((string) $o['id'], $guardados, true)));
+        self::guardarStickers($lista);
 
         return [
             'modo' => $modo,
@@ -296,6 +297,31 @@ class SincronizarDropiWeb
         DB::table('dropi_web_huellas')->whereIn('dropi_orden_id', $lista->keys())->update(['visto_at' => now()]);
 
         return $lista->filter(fn ($o, $id) => ($guardadas[$id] ?? null) !== self::huella($o))->values()->all();
+    }
+
+    /**
+     * La ruta del sticker de la guía (`guia_urls3`) sólo viene en la lista, no
+     * en el detalle. Se guarda para todo pedido de la lista que aún no la
+     * tenga o la tenga distinta (guía anulada y vuelta a generar), aunque su
+     * huella no haya cambiado: así entran también los que ya tenían guía.
+     */
+    public static function guardarStickers(array $lista): void
+    {
+        $rutas = collect($lista)
+            ->filter(fn ($o) => isset($o['id']) && filled($o['guia_urls3'] ?? null))
+            ->mapWithKeys(fn ($o) => [(string) $o['id'] => mb_substr((string) $o['guia_urls3'], 0, 255)]);
+        if ($rutas->isEmpty()) {
+            return;
+        }
+
+        DropiPedido::whereIn('dropi_orden_id', $rutas->keys())
+            ->get(['id', 'dropi_orden_id', 'sticker_path'])
+            ->each(function (DropiPedido $p) use ($rutas) {
+                $ruta = $rutas[(string) $p->dropi_orden_id];
+                if ($p->sticker_path !== $ruta) {
+                    DropiPedido::whereKey($p->id)->update(['sticker_path' => $ruta]);
+                }
+            });
     }
 
     protected function marcarSincronizados(array $pedidos): void
