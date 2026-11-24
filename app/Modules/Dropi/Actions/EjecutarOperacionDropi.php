@@ -5,7 +5,9 @@ namespace App\Modules\Dropi\Actions;
 use App\Modules\Dropi\Clients\DropiWebClient;
 use App\Modules\Dropi\Models\DropiCargaOperacion as Op;
 use App\Modules\Dropi\Models\DropiCargaProducto as Carga;
+use App\Modules\Dropi\Models\DropiVinculoProducto;
 use App\Modules\Dropi\Models\Producto;
+use App\Modules\Dropi\Services\MapearPedidoDropiWeb;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -35,6 +37,7 @@ class EjecutarOperacionDropi
         try {
             $op->tipo === Op::CREAR ? $this->crear($op, $carga) : $this->actualizar($op, $carga);
             $this->enlazar($op);
+            $this->vincularFichaErp($op);
         } catch (\Throwable $e) {
             Log::warning('dropi.carga.operacion_fallida', ['op' => $op->id, 'error' => $e->getMessage()]);
             $op->forceFill(['estado' => Op::ERROR, 'error' => mb_substr($e->getMessage(), 0, 2000), 'procesado_at' => now()])->save();
@@ -176,6 +179,50 @@ class EjecutarOperacionDropi
             return;
         }
         Producto::where('referencia', $op->ref_excel)->whereNull('dropi_sku')->first()?->forceFill(['dropi_sku' => $id])->save();
+    }
+
+    /**
+     * «Crear en Dropi» desde «Vincular con el ERP» (24-nov-2026): el producto
+     * nace en Dropi ya vinculado con la ficha del ERP, variación por variación,
+     * para que los pedidos que lleguen traigan producto. Si un vínculo falla el
+     * producto igual quedó creado: se avisa en el log y se vincula a mano.
+     */
+    private function vincularFichaErp(Op $op): void
+    {
+        $erpId = $op->detalle['erp_producto_id'] ?? null;
+        if ($op->tipo !== Op::CREAR || $op->estado !== Op::OK || ! $erpId || ! $op->dropi_producto_id) {
+            return;
+        }
+        $producto = Producto::with('variantes')->find($erpId);
+        if (! $producto) {
+            return;
+        }
+
+        try {
+            if (! $producto->dropi_sku) {
+                $producto->forceFill(['dropi_sku' => (string) $op->dropi_producto_id])->save();
+            }
+            $accion = VincularProductoDropi::make();
+            $norm = fn (?string $s) => mb_strtoupper(trim(\Illuminate\Support\Str::ascii((string) $s)));
+            foreach ($op->detalle['lineas'] ?? [] as $l) {
+                $llave = MapearPedidoDropiWeb::claveVinculo($l['variation_id'] ?? null, $op->detalle['sku'] ?? null, $op->dropi_producto_id);
+                if (! $llave || DropiVinculoProducto::where('sku_dropi', $llave)->exists()) {
+                    continue;
+                }
+                $nombres = ['producto_nombre' => mb_substr((string) $op->dropi_nombre, 0, 150), 'variacion' => ($l['variation_id'] ?? null) ? mb_substr((string) $l['etiqueta'], 0, 80) : null];
+                if (! $producto->desglose_stock) {
+                    $accion->aProducto($llave, $producto->id, null, $nombres);
+
+                    continue;
+                }
+                $variante = $producto->variantes->first(fn ($v) => $norm($v->color_nombre) !== '' && $norm($v->color_nombre) === $norm($l['etiqueta'] ?? ''));
+                if ($variante) {
+                    $accion->handle($llave, $variante->id, null, $nombres);
+                }
+            }
+        } catch (\Throwable $e) {
+            Log::warning('dropi.carga.vincular_ficha_erp', ['op' => $op->id, 'producto' => $erpId, 'error' => $e->getMessage()]);
+        }
     }
 
     public static function stockDe(array $producto, ?int $variacionId, int $bodegaId): int

@@ -644,3 +644,168 @@ it('el ingreso al ERP usa el producto traído de Dropi aunque la referencia del 
         ->and((float) $erp->fresh()->precio_proveedor)->toBe(4754.0)
         ->and($carga->fresh()->ingreso_erp['resultado'])->toMatchArray(['creados' => 0, 'actualizados' => 1]);
 });
+
+/*
+ * «Vincular con el ERP» en el otro sentido y el stock que sube al recibir
+ * (reunión con la señora Lahida, 24-nov-2026: de 16 productos del SA383, 15 no
+ * existían en Dropi y la recepción no tenía a dónde mandar el stock).
+ */
+describe('lo recibido en el ERP llega a Dropi (24-nov-2026)', function () {
+    beforeEach(function () {
+        \Illuminate\Support\Facades\Queue::fake();
+        \Illuminate\Support\Facades\Storage::fake('local');
+        $this->seed(\Database\Seeders\PermisosSeeder::class);
+        $u = \App\Models\User::factory()->create();
+        $u->assignRole(\Spatie\Permission\Models\Role::firstOrCreate(['name' => 'Aracely', 'guard_name' => 'web']));
+        $this->actingAs($u);
+        $this->bodegaErp = \App\Modules\Dropi\Models\InventarioUbicacion::create(['codigo' => 'VD-RA1', 'nombre' => 'Rack A · Nivel 01',
+            'categoria' => \App\Modules\Dropi\Enums\CategoriaUbicacion::Venta, 'activa' => true, 'disponible_para_venta' => true]);
+        $this->proveedor = \App\Models\Contacto::create(['tipo_documento' => 'NIT', 'numero_documento' => '901738354', 'nombre_completo' => 'GREAT BABY', 'es_proveedor' => true, 'en_dropi' => true, 'activo' => true]);
+        // La foto del catálogo de Dropi, como la deja «Leer de Dropi».
+        \Illuminate\Support\Facades\Storage::disk('local')->put(\App\Modules\Dropi\Services\CatalogoDropi::FOTO, json_encode([
+            'leido_at' => now()->toIso8601String(),
+            'productos' => array_map(fn ($p) => \App\Modules\Dropi\Services\CatalogoDropi::resumir($p), array_values($this->dropi->productos)),
+        ]));
+    });
+
+    it('lo recibido que Dropi no conoce aparece en «Del ERP, no están en Dropi»; lo vinculado no', function () {
+        $nuevo = vdProducto('VD-TIB', 'TIBURON');
+        $conDropi = vdProducto('VD-PAT', 'Patito');
+        $conDropi->forceFill(['dropi_sku' => '100'])->save();
+        vdRecibir([[$nuevo, null, 192], [$conDropi, null, 10]]);
+
+        $lista = app(\App\Modules\Dropi\Services\ProductosSinDropi::class)->lista();
+
+        expect(array_column($lista, 'referencia'))->toBe(['VD-TIB'])
+            ->and($lista[0]['stock'])->toBe(192);
+    });
+
+    it('«Asociar» vincula cada llave de Dropi con la ficha y «Igualar» deja en Dropi el stock del ERP', function () {
+        $p = vdProducto('VD-PAT', 'Pato de hule');
+        vdRecibir([[$p, null, 20]]);
+        $servicio = app(\App\Modules\Dropi\Services\ProductosSinDropi::class);
+
+        $servicio->asociar($p, 100, auth()->id());
+
+        expect($p->fresh()->dropi_sku)->toBe('100')
+            ->and(\App\Modules\Dropi\Models\DropiVinculoProducto::where('sku_dropi', '8899-303')->value('producto_id'))->toBe($p->id)
+            ->and($servicio->lista())->toBe([]);
+
+        // Igualar: borrador con el antes y el después; nada sube hasta ejecutarlo.
+        $carga = $servicio->cargaIgualar($p->fresh(), auth()->id());
+        $op = $carga->operaciones()->first();
+        expect($carga->estado)->toBe(Carga::BORRADOR)
+            ->and($op->estado)->toBe(Op::LISTO)
+            ->and($this->dropi->stock(100))->toBe(432);
+
+        app(EjecutarOperacionDropi::class)->handle($op);
+
+        expect($op->fresh()->estado)->toBe(Op::OK)
+            ->and($this->dropi->stock(100))->toBe(20);
+    });
+
+    it('«Asociar» no vincula nada si a la ficha le falta un color de Dropi', function () {
+        $p = vdProducto('VD-GUI', 'Guitarra', ['ROSADO']);
+
+        expect(fn () => app(\App\Modules\Dropi\Services\ProductosSinDropi::class)->asociar($p, 200, auth()->id()))
+            ->toThrow(\DomainException::class, 'AZUL');
+
+        expect(\App\Modules\Dropi\Models\DropiVinculoProducto::count())->toBe(0)
+            ->and($p->fresh()->dropi_sku)->toBeNull();
+    });
+
+    it('«Crear en Dropi» arma el producto con los colores y el stock del ERP y nace vinculado por color', function () {
+        $p = vdProducto('VD-CAR', 'Carro didáctico', ['ROJO', 'AZUL']);
+        [$rojo, $azul] = [$p->variantes->firstWhere('color_nombre', 'ROJO'), $p->variantes->firstWhere('color_nombre', 'AZUL')];
+        vdRecibir([[$p, $rojo, 5], [$p, $azul, 3]]);
+
+        $carga = app(\App\Modules\Dropi\Services\ProductosSinDropi::class)->cargaCrear($p, auth()->id());
+        $op = $carga->operaciones()->first();
+        expect($op->tipo)->toBe(Op::CREAR)
+            ->and(collect($op->detalle['variaciones'])->pluck('cantidad', 'valor')->all())->toBe(['Rojo' => 5, 'Azul' => 3]);
+
+        // Lo que bodega llena en la carga antes de confirmar.
+        $carga->forceFill(['defaults_crear' => ['categoria' => ['id' => 26, 'name' => 'Jugueteria'], 'peso' => 1, 'largo' => 10, 'ancho' => 10, 'alto' => 10,
+            'privado' => false, 'garantia_dias' => 10, 'garantia_texto' => 'Garantía por defectos de fábrica']])->save();
+        $op->forceFill(['estado' => Op::LISTO, 'detalle' => ['precio' => 20000, 'sugerido' => 40000] + $op->detalle])->save();
+
+        app(EjecutarOperacionDropi::class)->handle($op);
+
+        $op->refresh();
+        $id = $op->dropi_producto_id;
+        $vars = collect($this->dropi->productos[$id]['variations'])->mapWithKeys(fn ($v) => [$v['attribute_values'][0]['value'] => $v['id']]);
+        expect($op->estado)->toBe(Op::OK)
+            ->and($p->fresh()->dropi_sku)->toBe((string) $id)
+            ->and($this->dropi->stock($id, $vars['Rojo']))->toBe(5)
+            ->and($this->dropi->stock($id, $vars['Azul']))->toBe(3)
+            ->and(\App\Modules\Dropi\Models\DropiVinculoProducto::where('sku_dropi', 'DV-' . $vars['Rojo'])->value('variante_id'))->toBe($rojo->id)
+            ->and(\App\Modules\Dropi\Models\DropiVinculoProducto::where('sku_dropi', 'DV-' . $vars['Azul'])->value('variante_id'))->toBe($azul->id);
+    });
+
+    it('al recibir, lo apto se SUMA al stock de Dropi y queda la carga como constancia; lo que Dropi no conoce queda omitido', function () {
+        $guitarra = vdProducto('VD-GUI', 'Guitarra', ['ROSADO', 'AZUL']);
+        $guitarra->forceFill(['dropi_sku' => '200'])->save();
+        $sinDropi = vdProducto('VD-TIB', 'TIBURON');
+        $rec = vdRecibir([
+            [$guitarra, $guitarra->variantes->firstWhere('color_nombre', 'ROSADO'), 4],
+            [$guitarra, $guitarra->variantes->firstWhere('color_nombre', 'AZUL'), 6],
+            [$sinDropi, null, 192],
+        ]);
+
+        \Illuminate\Support\Facades\Queue::assertPushed(\App\Modules\Dropi\Jobs\EnviarStockRecepcionADropiJob::class);
+        app()->call([new \App\Modules\Dropi\Jobs\EnviarStockRecepcionADropiJob($rec->id), 'handle']);
+
+        $carga = Carga::where('recepcion_id', $rec->id)->firstOrFail();
+        $ops = $carga->operaciones->keyBy('ref_excel');
+        expect($carga->estado)->toBe(Carga::TERMINADO)
+            ->and($carga->modo)->toBe('sumar')
+            ->and($ops['VD-GUI']->estado)->toBe(Op::OK)
+            ->and($ops['VD-TIB']->estado)->toBe(Op::OMITIDO)
+            ->and($this->dropi->stock(200, 201))->toBe(105 + 4)
+            ->and($this->dropi->stock(200, 202))->toBe(105 + 6);
+
+        // Si el job corre otra vez no suma dos veces.
+        app()->call([new \App\Modules\Dropi\Jobs\EnviarStockRecepcionADropiJob($rec->id), 'handle']);
+        expect($this->dropi->stock(200, 201))->toBe(109)
+            ->and(Carga::where('recepcion_id', $rec->id)->count())->toBe(1);
+    });
+
+    it('con la regla apagada no sube nada', function () {
+        \App\Support\Reglas::set('dropi.stock_al_recibir', '0');
+        $p = vdProducto('VD-PAT', 'Pato');
+        $p->forceFill(['dropi_sku' => '100'])->save();
+        $rec = vdRecibir([[$p, null, 10]]);
+
+        app()->call([new \App\Modules\Dropi\Jobs\EnviarStockRecepcionADropiJob($rec->id), 'handle']);
+
+        expect(Carga::where('recepcion_id', $rec->id)->exists())->toBeFalse()
+            ->and($this->dropi->stock(100))->toBe(432);
+    });
+});
+
+/** Compra de Dropi aprobada y recibida apta: [[producto, variante|null, cantidad], …]. */
+function vdRecibir(array $lineas): \App\Modules\Compras\Models\RecepcionCompra
+{
+    $oc = \App\Modules\Compras\Actions\CrearOrdenCompra::run([
+        'proveedor_id' => test()->proveedor->id, 'bodega_id' => test()->bodegaErp->id, 'tipo' => 'nacional',
+        'moneda' => 'COP', 'tasa_cambio' => 1, 'linea_negocio' => \App\Modules\Contabilidad\Enums\LineaNegocio::Dropi,
+        'items' => array_map(fn ($l) => ['producto_id' => $l[0]->id, 'variante_id' => $l[1]?->id, 'descripcion' => $l[0]->nombre,
+            'cantidad' => $l[2], 'precio_unit' => 1000, 'descuento_pct' => 0, 'iva_pct' => 0], $lineas),
+    ]);
+    \App\Modules\Compras\Actions\AprobarOrdenCompra::run($oc);
+
+    return \App\Modules\Compras\Actions\RegistrarRecepcion::run([
+        'orden_id' => $oc->id, 'factura_proveedor' => 'SA383',
+        'items' => $oc->items->map(fn ($i) => ['orden_item_id' => $i->id, 'cantidad_recibida' => $i->cantidad, 'clasificacion' => 'apto'])->all(),
+    ]);
+}
+
+function vdProducto(string $ref, string $nombre, array $colores = []): Producto
+{
+    $p = Producto::sinKardexAutomatico(fn () => Producto::create(['referencia' => $ref, 'nombre' => $nombre, 'activo' => true, 'desglose_stock' => $colores !== []]));
+    foreach ($colores as $c) {
+        \App\Modules\Dropi\Models\ProductoVariante::create(['producto_id' => $p->id, 'color_nombre' => $c, 'color_codigo' => $c, 'codigo_barras' => "{$ref}-{$c}"]);
+    }
+
+    return $p->load('variantes');
+}

@@ -3,6 +3,7 @@
         $previa = $this->previa;
         $r = $previa['resumen'];
         $filas = $this->filas;
+        $sinDropi = $this->sinDropi;
         $money = fn ($v) => $v === null ? '—' : '$' . number_format((float) $v, 0, ',', '.');
         $grupos = [
             'enlazar' => ['Se vinculan', '#059669'],
@@ -41,6 +42,10 @@
                 <div style="font-size:.7rem;text-transform:uppercase;color:#ea580c;">⏳ Con pedidos esperando</div>
                 <div style="font-size:1.5rem;font-weight:700;margin-top:.2rem;">{{ $r['con_pedidos'] ?? 0 }}</div>
             </button>
+            <button type="button" wire:click="verGrupo('sin_dropi')" style="{{ $tarjeta($this->filtro === 'sin_dropi') }}">
+                <div style="font-size:.7rem;text-transform:uppercase;color:#be123c;">Del ERP, no están en Dropi</div>
+                <div style="font-size:1.5rem;font-weight:700;margin-top:.2rem;">{{ count($sinDropi) }}</div>
+            </button>
             @foreach($grupos as $clave => [$titulo, $color])
                 <button type="button" wire:click="verGrupo('{{ $clave }}')" style="{{ $tarjeta($this->filtro === $clave) }}">
                     <div style="font-size:.7rem;text-transform:uppercase;color:{{ $color }};">{{ $titulo }}</div>
@@ -56,10 +61,49 @@
                         <x-filament::input type="search" wire:model.live.debounce.400ms="buscar" placeholder="Buscar por nombre, SKU o referencia" />
                     </x-filament::input.wrapper>
                 </div>
-                <span style="font-size:.8rem;color:#9ca3af;">{{ count($filas) }} filas</span>
+                <span style="font-size:.8rem;color:#9ca3af;">{{ $this->filtro === 'sin_dropi' ? count($sinDropi) : count($filas) }} filas</span>
             </div>
 
-            @if(empty($filas))
+            @if($this->filtro === 'sin_dropi')
+                <p style="font-size:.85rem;color:#9ca3af;margin-bottom:.75rem;">
+                    Entraron en una compra de Dropi pero Dropi no los conoce: su stock no puede subir allá.
+                    <b>Crear en Dropi</b> si es un producto nuevo; <b>Asociar</b> si ya existe en Dropi con otro nombre o SKU.
+                </p>
+                @if(empty($sinDropi))
+                    <p style="color:#9ca3af;">Todo lo recibido ya está en Dropi.</p>
+                @else
+                    <div style="overflow-x:auto;">
+                        <table style="width:100%;border-collapse:collapse;font-size:.88rem;">
+                            <thead>
+                                <tr style="text-align:left;color:#9ca3af;border-bottom:1px solid rgba(148,163,184,.25);font-size:.75rem;text-transform:uppercase;">
+                                    <th style="padding:.5rem;">Producto en el ERP</th>
+                                    <th style="padding:.5rem;">Compra</th>
+                                    <th style="padding:.5rem;text-align:right;">Stock ERP</th>
+                                    <th style="padding:.5rem;"></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach($sinDropi as $p)
+                                    <tr wire:key="sd-{{ $p['id'] }}" style="border-bottom:1px solid rgba(148,163,184,.12);vertical-align:top;">
+                                        <td style="padding:.5rem;">
+                                            <div style="font-weight:500;">{{ $p['nombre'] }}</div>
+                                            <div style="font-size:.75rem;color:#9ca3af;">
+                                                {{ $p['referencia'] }}{{ $p['por_color'] ? ' · ' . collect($p['por_color'])->map(fn ($n, $c) => "{$c}: {$n}")->implode(', ') : '' }}
+                                            </div>
+                                        </td>
+                                        <td style="padding:.5rem;font-size:.8rem;">{{ $p['oc'] ?? '—' }}</td>
+                                        <td style="padding:.5rem;text-align:right;font-weight:600;">{{ $p['stock'] }}</td>
+                                        <td style="padding:.5rem;text-align:right;white-space:nowrap;">
+                                            {{ ($this->crearEnDropiAction)(['producto_id' => $p['id'], 'nombre' => $p['nombre']]) }}
+                                            {{ ($this->asociarADropiAction)(['producto_id' => $p['id'], 'nombre' => $p['nombre']]) }}
+                                        </td>
+                                    </tr>
+                                @endforeach
+                            </tbody>
+                        </table>
+                    </div>
+                @endif
+            @elseif(empty($filas))
                 <p style="color:#9ca3af;">Nada en este grupo.</p>
             @else
                 <div style="overflow-x:auto;">

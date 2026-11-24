@@ -79,4 +79,49 @@
             <div style="color:#9ca3af;font-size:.85rem;">Todavía no se ha recibido nada de esta orden.</div>
         @endforelse
     </x-filament::section>
+
+    @php
+        $cargas = $this->getStockEnDropi($o);
+        $estadoOp = [
+            'ok' => ['Subió a Dropi', '#059669'], 'error' => ['Error', '#dc2626'], 'omitido' => ['No está en Dropi', '#be123c'],
+            'revisar' => ['Para revisar', '#d97706'], 'listo' => ['En cola', '#0284c7'],
+        ];
+    @endphp
+    @if($o->recepciones->where('estado', 'confirmada')->isNotEmpty())
+        <x-filament::section>
+            <x-slot name="heading">Stock en Dropi</x-slot>
+            @forelse ($cargas as $carga)
+                <div style="display:flex;flex-wrap:wrap;gap:1rem;justify-content:space-between;font-size:.85rem;margin-bottom:.5rem;">
+                    <strong>{{ $carga->numero }} · {{ $carga->concepto }}</strong>
+                    <a href="{{ route('app.dropi.carga-productos.show', $carga) }}" style="color:#f59e0b;">Ver la carga →</a>
+                </div>
+                @foreach ($carga->operaciones as $op)
+                    <div style="{{ $celda }}font-size:.85rem;display:flex;flex-wrap:wrap;gap:1rem;justify-content:space-between;">
+                        <span><b>{{ $op->nombre_excel }}</b> <span style="color:#9ca3af;">{{ $op->ref_excel }}</span></span>
+                        <span>
+                            @foreach ($op->detalle['lineas'] ?? [] as $l)
+                                @if (($l['movimiento'] ?? null) !== null)
+                                    <span style="margin-left:.75rem;">{{ $l['etiqueta'] }}: {{ $l['antes'] ?? '—' }} → {{ $l['despues'] ?? ($l['objetivo'] ?? '—') }}</span>
+                                @endif
+                            @endforeach
+                        </span>
+                        <span style="font-weight:600;color:{{ $estadoOp[$op->estado][1] ?? '#9ca3af' }};" title="{{ $op->error ?: $op->motivo }}">
+                            {{ $estadoOp[$op->estado][0] ?? $op->estado }}
+                        </span>
+                    </div>
+                    @if ($op->estado !== 'ok' && ($op->error || $op->motivo))
+                        <div style="font-size:.75rem;color:#9ca3af;margin:-.25rem 0 .5rem;">{{ $op->error ?: $op->motivo }}</div>
+                    @endif
+                @endforeach
+            @empty
+                <div style="color:#9ca3af;font-size:.85rem;">
+                    @if (setting('dropi.stock_al_recibir', true))
+                        Subiendo a Dropi lo recibido… (tarda un minuto; recarga la página).
+                    @else
+                        Subir el stock a Dropi al recibir está apagado en Configuración: se carga a mano.
+                    @endif
+                </div>
+            @endforelse
+        </x-filament::section>
+    @endif
 </x-filament-panels::page>

@@ -5,11 +5,14 @@ namespace App\Modules\Dropi\Filament\Pages;
 use App\Auth\Permisos;
 use App\Modules\Dropi\Actions\CrearProductosNuevosDropi;
 use App\Modules\Dropi\Jobs\LeerCatalogoDropiJob;
+use App\Modules\Dropi\Models\Producto;
 use App\Modules\Dropi\Services\CatalogoDropi;
+use App\Modules\Dropi\Services\ProductosSinDropi;
 use App\Modules\Dropi\Support\DestinosVinculo;
 use BackedEnum;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Select;
+use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Illuminate\Support\Facades\Cache;
@@ -67,7 +70,8 @@ class ProductosDeDropi extends Page
         // Se pinta en cada página del panel: se guarda un minuto en vez de
         // cruzar el catálogo entero en cada clic.
         $n = (int) Cache::remember(CatalogoDropi::CACHE_BADGE, 60,
-            fn () => app(CatalogoDropi::class)->previsualizar()['resumen']['con_pedidos'] ?? 0);
+            fn () => (app(CatalogoDropi::class)->previsualizar()['resumen']['con_pedidos'] ?? 0)
+                + count(app(ProductosSinDropi::class)->lista()));
 
         return $n > 0 ? (string) $n : null;
     }
@@ -76,12 +80,27 @@ class ProductosDeDropi extends Page
     {
         // Se arranca por lo que frena despachos; si no hay nada esperando, por lo vinculable.
         $r = $this->previa['resumen'];
-        $this->filtro = ($r['con_pedidos'] ?? 0) > 0 ? null : (($r['enlazar'] ?? 0) > 0 ? 'enlazar' : 'revisar');
+        $this->filtro = match (true) {
+            ($r['con_pedidos'] ?? 0) > 0 => null,
+            $this->sinDropi !== [] => 'sin_dropi',
+            ($r['enlazar'] ?? 0) > 0 => 'enlazar',
+            default => 'revisar',
+        };
     }
 
     public function getPreviaProperty(): array
     {
         return app(CatalogoDropi::class)->previsualizar();
+    }
+
+    /** Lo recibido en compras de Dropi que Dropi no conoce (grupo «Del ERP, no están en Dropi»). */
+    public function getSinDropiProperty(): array
+    {
+        $t = mb_strtolower(trim($this->buscar));
+
+        return collect(app(ProductosSinDropi::class)->lista())
+            ->filter(fn ($p) => $t === '' || str_contains(mb_strtolower($p['nombre'] . ' ' . $p['referencia']), $t))
+            ->values()->all();
     }
 
     public function getLecturaProperty(): ?array
@@ -206,6 +225,107 @@ class ProductosDeDropi extends Page
                 Notification::make()->title("«{$r['nombre']}» creado en el ERP")
                     ->body("Referencia {$r['referencia']} · " . count($r['llaves']) . ' llave(s) vinculada(s).')->success()->send();
             });
+    }
+
+    /**
+     * «Crear en Dropi» de un producto del ERP que Dropi no conoce: abre la carga
+     * individual ya armada (colores y stock del ERP) para poner el precio, la
+     * categoría y las medidas, y confirmarla allá.
+     */
+    public function crearEnDropiAction(): Action
+    {
+        return Action::make('crearEnDropi')
+            ->label('Crear en Dropi')
+            ->size('sm')
+            ->outlined()
+            ->visible(fn () => $this->puedeEditar)
+            ->requiresConfirmation()
+            ->modalHeading(fn (array $arguments) => 'Crear «' . ($arguments['nombre'] ?? '') . '» en Dropi')
+            ->modalDescription('Se abre una carga con el producto armado desde el ERP: sus colores y el stock vendible de hoy. Ahí pones el precio, el sugerido, la categoría y las medidas, y la confirmas. Al crearse queda vinculado con esta ficha.')
+            ->modalSubmitActionLabel('Armar la carga')
+            ->action(function (array $arguments) {
+                $this->exigirEdicion();
+                try {
+                    $carga = app(ProductosSinDropi::class)->cargaCrear(Producto::findOrFail((int) $arguments['producto_id']), auth()->id());
+                } catch (\DomainException $e) {
+                    Notification::make()->title('No se armó la carga')->body($e->getMessage())->danger()->send();
+
+                    return;
+                }
+                $this->redirect(route('app.dropi.carga-productos.show', $carga));
+            });
+    }
+
+    /** «Asociar a uno de Dropi»: el producto ya existe allá con otro nombre o SKU. */
+    public function asociarADropiAction(): Action
+    {
+        return Action::make('asociarADropi')
+            ->label('Asociar a uno de Dropi')
+            ->size('sm')
+            ->outlined()
+            ->color('gray')
+            ->visible(fn () => $this->puedeEditar)
+            ->modalHeading(fn (array $arguments) => 'Asociar «' . ($arguments['nombre'] ?? '') . '» a un producto de Dropi')
+            ->modalDescription('Cada variación de Dropi queda vinculada con esta ficha (por color si el ERP lleva el stock por variante). Busca en la última lectura de Dropi.')
+            ->modalSubmitActionLabel('Asociar')
+            ->schema([
+                Select::make('dropi_id')
+                    ->label('Producto de Dropi')
+                    ->placeholder('Busca por nombre, SKU o id')
+                    ->searchable()
+                    ->required()
+                    ->getSearchResultsUsing(fn (string $search) => self::buscarEnFoto($search))
+                    ->getOptionLabelUsing(fn ($value) => self::etiquetaFoto((int) $value)),
+                Toggle::make('igualar')
+                    ->label('Después, igualar el stock de Dropi al del ERP')
+                    ->helperText('Abre una carga con lo que hay en Dropi y lo que quedaría; nada se manda hasta que la confirmes.')
+                    ->default(true),
+            ])
+            ->action(function (array $data, array $arguments) {
+                $this->exigirEdicion();
+                $producto = Producto::findOrFail((int) $arguments['producto_id']);
+                $servicio = app(ProductosSinDropi::class);
+                try {
+                    $r = $servicio->asociar($producto, (int) $data['dropi_id'], auth()->id());
+                } catch (\DomainException $e) {
+                    Notification::make()->title('No se asoció')->body($e->getMessage())->danger()->send();
+
+                    return;
+                }
+                Notification::make()->title("«{$producto->nombre}» asociado a Dropi")
+                    ->body("{$r['vinculos']} variación(es) vinculada(s) · {$r['pedidos_liberados']} pedido(s) salieron de «pendiente por inventario».")
+                    ->success()->send();
+
+                if (! empty($data['igualar'])) {
+                    $this->redirect(route('app.dropi.carga-productos.show', $servicio->cargaIgualar($producto->refresh(), auth()->id())));
+                }
+            });
+    }
+
+    /** @return array<string, string> id => etiqueta, de la última lectura de Dropi */
+    private static function buscarEnFoto(string $search): array
+    {
+        $t = mb_strtolower(trim($search));
+
+        return collect(app(CatalogoDropi::class)->foto()['productos'] ?? [])
+            ->filter(fn ($p) => (string) $p['id'] === $t || str_contains(mb_strtolower($p['nombre'] . ' ' . ($p['sku'] ?? '')), $t))
+            ->take(25)
+            ->mapWithKeys(fn ($p) => [(string) $p['id'] => self::etiquetaDe($p)])
+            ->all();
+    }
+
+    private static function etiquetaFoto(int $id): ?string
+    {
+        $p = collect(app(CatalogoDropi::class)->foto()['productos'] ?? [])->firstWhere('id', $id);
+
+        return $p ? self::etiquetaDe($p) : null;
+    }
+
+    private static function etiquetaDe(array $p): string
+    {
+        $stock = array_sum(array_column($p['llaves'], 'stock'));
+
+        return "{$p['nombre']} · id {$p['id']}" . ($p['sku'] ? " · SKU {$p['sku']}" : '') . ' · ' . count($p['llaves']) . " variación(es) · stock {$stock}";
     }
 
     /** «Vincular…» de una fila: producto agregado (`p:`) o variante (`v:`). */

@@ -224,6 +224,13 @@ class RecibirMercancia
                 }
             });
 
+            // Y sube a Dropi (24-nov-2026): lo que entró apto se suma al stock de
+            //   Dropi, con una carga DC- como constancia en la OC. En cola: son
+            //   llamadas a Dropi que no deben frenar ni tumbar la recepción.
+            if ($recepcion->linea_negocio === \App\Modules\Contabilidad\Enums\LineaNegocio::Dropi) {
+                DB::afterCommit(fn () => \App\Modules\Dropi\Jobs\EnviarStockRecepcionADropiJob::dispatch($recepcion->id));
+            }
+
             return $recepcion->fresh(['items', 'orden']);
         });
     }

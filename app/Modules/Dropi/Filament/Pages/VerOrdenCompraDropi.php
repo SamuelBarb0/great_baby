@@ -53,6 +53,21 @@ class VerOrdenCompraDropi extends Page
                 'recepciones' => fn ($q) => $q->orderByDesc('id')]);
     }
 
+    /**
+     * «Stock en Dropi»: la constancia de lo que cada recepción subió a Dropi
+     * (EnviarStockRecepcionADropiJob), con el antes y el después releído allá.
+     *
+     * @return \Illuminate\Support\Collection<int, \App\Modules\Dropi\Models\DropiCargaProducto>
+     */
+    public function getStockEnDropi(OrdenCompra $o): \Illuminate\Support\Collection
+    {
+        return \App\Modules\Dropi\Models\DropiCargaProducto::query()
+            ->whereIn('recepcion_id', $o->recepciones->pluck('id'))
+            ->with('operaciones')
+            ->orderByDesc('id')
+            ->get();
+    }
+
     protected function getHeaderActions(): array
     {
         $o = fn () => $this->getOrden();
