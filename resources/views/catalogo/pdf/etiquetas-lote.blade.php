@@ -33,7 +33,10 @@
                                     <div class="marca">GREAT BABY</div>
                                     <div class="nombre">{{ \Illuminate\Support\Str::limit($e['nombre'] ?? '—', 28) }}</div>
                                     <div class="var">{{ $e['detalle'] }}</div>
-                                    <div class="precio">${{ number_format($e['precio'], 0, ',', '.') }}</div>
+                                    {{-- Sin precio cargado no se imprime «$0». --}}
+                                    @if(($e['precio'] ?? 0) > 0)
+                                        <div class="precio">${{ number_format($e['precio'], 0, ',', '.') }}</div>
+                                    @endif
                                 </td>
                             </tr>
                             <tr>

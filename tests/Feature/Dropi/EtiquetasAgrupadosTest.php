@@ -96,3 +96,59 @@ it('la etiqueta de Dropi escribe el color solo cuando lo trae (agrupado)', funct
 
     expect(substr_count($html, 'class="color"'))->toBe(1)->and($html)->toContain('>Rojo</div>');
 });
+
+describe('el selector de etiquetas (bodega, 23-nov-2026)', function () {
+    beforeEach(function () {
+        $this->body = Producto::create(['referencia' => 'BODY-1', 'nombre' => 'Body', 'desglose_stock' => true, 'precio_proveedor' => 15000]);
+        $this->azul = ProductoVariante::create(['producto_id' => $this->body->id, 'color_codigo' => 'AZU', 'color_nombre' => 'Azul', 'codigo_barras' => 'BODY-1-AZU']);
+        $this->rosa = ProductoVariante::create(['producto_id' => $this->body->id, 'color_codigo' => 'ROS', 'color_nombre' => 'Rosa', 'codigo_barras' => 'BODY-1-ROS']);
+    });
+
+    it('ofrece el producto original, sus variantes y, en un agrupado, los colores de Dropi', function () {
+        $this->actingAs($this->aracely);
+
+        $this->getJson(route('catalogo.etiquetas.opciones', $this->body->id))->assertOk()
+            ->assertJsonPath('producto.referencia', 'BODY-1')
+            ->assertJsonPath('variantes.0.codigo', 'BODY-1-AZU')
+            ->assertJsonCount(2, 'variantes')
+            ->assertJsonCount(0, 'colores');
+
+        $this->getJson(route('catalogo.etiquetas.opciones', $this->tetero->id))->assertOk()
+            ->assertJsonCount(0, 'variantes')
+            ->assertJsonPath('colores', ['Azul', 'Rojo', 'Verde']);
+    });
+
+    it('imprime sólo lo escogido: el original y una variante exacta, con copias', function () {
+        $this->actingAs($this->aracely)->get(route('catalogo.etiquetas.lote', [
+            'productos' => [$this->body->id], 'seleccion' => 1, 'original' => 1,
+            'variantes' => [$this->rosa->id], 'copias' => 2,
+        ]))->assertOk()->assertHeader('content-type', 'application/pdf');
+
+        expect(array_column($this->vistas['catalogo.pdf.etiquetas-lote'], 'codigo'))
+            ->toBe(['BODY-1', 'BODY-1', 'BODY-1-ROS', 'BODY-1-ROS']);
+    });
+
+    it('de un agrupado imprime sólo los colores marcados, y en el rollo de la térmica si se pide', function () {
+        $this->actingAs($this->aracely)->get(route('catalogo.etiquetas.lote', [
+            'productos' => [$this->tetero->id], 'seleccion' => 1, 'colores' => ['rojo'], 'formato' => 'rollo',
+        ]))->assertOk();
+
+        $e = $this->vistas['catalogo.pdf.etiquetas-dropi'];
+        expect(array_column($e, 'color'))->toBe(['Rojo'])->and(array_column($e, 'codigo'))->toBe(['202510-5']);
+    });
+
+    it('sin nada escogido no imprime una hoja vacía', function () {
+        $this->actingAs($this->aracely)->get(route('catalogo.etiquetas.lote', [
+            'productos' => [$this->body->id], 'seleccion' => 1,
+        ]))->assertStatus(422);
+    });
+
+    it('la etiqueta no dice $0 cuando el producto no tiene precio', function () {
+        $html = view('catalogo.pdf.etiquetas-lote', ['etiquetas' => [
+            ['nombre' => 'LORO', 'detalle' => 'ROJO', 'precio' => 0, 'codigo' => 'AND2410-458', 'qr' => 'data:image/png;base64,AAA', 'barras' => 'data:image/png;base64,AAA'],
+            ['nombre' => 'Body', 'detalle' => 'Azul', 'precio' => 15000, 'codigo' => 'BODY-1-AZU', 'qr' => 'data:image/png;base64,AAA', 'barras' => 'data:image/png;base64,AAA'],
+        ]])->render();
+
+        expect($html)->not->toContain('$0')->and($html)->toContain('$15.000');
+    });
+});

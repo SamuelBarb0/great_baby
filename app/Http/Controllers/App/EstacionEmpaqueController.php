@@ -87,7 +87,47 @@ class EstacionEmpaqueController extends Controller implements HasMiddleware
             'metricas' => $this->metricas($request->user()->id),
             'ranking' => $this->ranking(),
             'colaProximos' => $this->colaProximos($pedidoActivoId),
+            'misStickers' => $this->misStickers($request->user()->id),
         ]);
+    }
+
+    /**
+     * Lo que este operario empacó hoy, con la guía de Dropi y su sticker, para
+     * imprimirlo o reintentar la guía aunque se haya recargado la página
+     * (recorrido del 23-nov-2026: el aviso con el sticker se perdía).
+     *
+     * @return list<array{pedido_id:int, orden:?string, guia:?string, transportadora:?string, ciudad:?string, hora:?string, sticker_url:?string}>
+     */
+    private function misStickers(int $operarioId): array
+    {
+        $registros = EmpaqueRegistro::query()
+            ->where('operario_id', $operarioId)
+            ->where('estado', 'completado')
+            ->where('fin_at', '>=', today())
+            ->orderByDesc('fin_at')
+            ->limit(30)
+            ->get(['pedido_id', 'fin_at']);
+
+        $pedidos = DropiPedido::whereIn('id', $registros->pluck('pedido_id'))
+            ->whereNotNull('dropi_orden_id')
+            ->get(['id', 'dropi_orden_id', 'guia', 'sticker_path', 'transportadora', 'cliente_ciudad'])
+            ->keyBy('id');
+
+        return $registros->unique('pedido_id')
+            ->filter(fn ($r) => $pedidos->has($r->pedido_id))
+            ->map(function ($r) use ($pedidos) {
+                $p = $pedidos[$r->pedido_id];
+
+                return [
+                    'pedido_id' => $p->id,
+                    'orden' => $p->dropi_orden_id,
+                    'guia' => $p->tieneGuiaReal() ? $p->guia : null,
+                    'transportadora' => $p->transportadora,
+                    'ciudad' => $p->cliente_ciudad,
+                    'hora' => $r->fin_at?->format('g:i a'),
+                    'sticker_url' => $p->stickerUrl(),
+                ];
+            })->values()->all();
     }
 
     public function escanear(Request $request): RedirectResponse
@@ -402,7 +442,9 @@ class EstacionEmpaqueController extends Controller implements HasMiddleware
                 return [
                     'id' => $it->id,
                     'producto' => $it->variante?->producto?->nombre ?? $it->producto?->nombre ?? '—',
-                    'color' => $esAgregado ? 'colores surtidos' : $it->variante?->color_nombre,
+                    // En un agregado el color lo pide el cliente en Dropi (la
+                    //   variación): es el que hay que sacar, no «surtidos».
+                    'color' => $esAgregado ? (trim((string) $it->variacion) ?: null) : $it->variante?->color_nombre,
                     'talla' => $it->variante?->talla,
                     'codigo' => $it->variante?->codigo_barras ?? $it->producto?->referencia,
                     'es_agregado' => $esAgregado,

@@ -208,3 +208,86 @@ it('al cierre del corte se piden de una vez las guías de los empacados que qued
     expect($r['generadas'])->toBe(1)->and($r['errores'])->toBe([])
         ->and(GenerarGuiaDropi::sinGuia($pedido->corte)->count())->toBe(0);
 });
+
+describe('observaciones del recorrido del 23-nov-2026', function () {
+    beforeEach(function () {
+        $this->seed(\Database\Seeders\PermisosSeeder::class);
+        $this->aracely = User::factory()->create(['name' => 'Aracely']);
+        $this->aracely->assignRole(Role::firstOrCreate(['name' => 'Aracely', 'guard_name' => 'web']));
+        Reglas::set('empaque.foto_obligatoria', false);
+    });
+
+    it('la hora de inicio del empaque no se reescribe al escanear ni al confirmar', function () {
+        $p = ggdPedido(EstadoPedidoDropi::Alistando);
+        $inicio = now()->subMinutes(3)->startOfSecond();
+        $r = EmpaqueRegistro::create([
+            'pedido_id' => $p->id, 'operario_id' => $this->aracely->id, 'inicio_at' => $inicio,
+            'items_totales' => 1, 'items_escaneados' => 0, 'estado' => 'en_curso',
+        ]);
+        $p->items()->update(['cantidad_pickeada' => 1]);
+
+        EmpaqueRegistro::whereKey($r->id)->increment('items_escaneados');
+        expect($r->fresh()->inicio_at->equalTo($inicio))->toBeTrue();
+
+        Http::fake();
+        $this->actingAs($this->aracely)->withSession(['empaque.pedidoActivoId' => $p->id])
+            ->post('/app/estacion-empaque/confirmar');
+
+        $r->refresh();
+        expect($r->estado)->toBe(\App\Modules\Dropi\Enums\EstadoEmpaque::Completado)
+            ->and($r->inicio_at->equalTo($inicio))->toBeTrue()
+            ->and($r->duracion_segundos)->toBeGreaterThanOrEqual(180)->toBeLessThan(240);
+    });
+
+    it('ninguna de las cinco fechas queda con ON UPDATE en la base', function () {
+        if (! in_array(\Illuminate\Support\Facades\DB::getDriverName(), ['mysql', 'mariadb'], true)) {
+            $this->markTestSkipped('Requiere MySQL.');
+        }
+        $conOnUpdate = collect(\Illuminate\Support\Facades\DB::select(
+            "SELECT CONCAT(TABLE_NAME, '.', COLUMN_NAME) c FROM information_schema.COLUMNS
+              WHERE TABLE_SCHEMA = DATABASE() AND EXTRA LIKE '%on update%'"))->pluck('c');
+
+        expect($conOnUpdate->intersect(['empaques_registro.inicio_at', 'dropi_devoluciones.recibido_at',
+            'garantia_tickets.plazo_concepto_at', 'cobranzas_registro.enviado_at', 'dropi_sanciones.detectada_at'])->all())->toBe([]);
+    });
+
+    it('«Mis stickers de hoy» deja imprimir el sticker aunque se recargue la página, sólo del propio operario', function () {
+        Reglas::set('dropi.guia_al_empacar', true);
+        $p = ggdPedido(EstadoPedidoDropi::Alistando);
+        $p->items()->update(['cantidad_pickeada' => 1]);
+        EmpaqueRegistro::create([
+            'pedido_id' => $p->id, 'operario_id' => $this->aracely->id, 'inicio_at' => now(),
+            'items_totales' => 1, 'items_escaneados' => 1, 'estado' => 'en_curso',
+        ]);
+        ggdDropiDaLaGuia();
+        $this->actingAs($this->aracely)->withSession(['empaque.pedidoActivoId' => $p->id])
+            ->post('/app/estacion-empaque/confirmar');
+
+        $this->get('/app/estacion-empaque')->assertInertia(fn ($page) => $page
+            ->where('misStickers.0.pedido_id', $p->id)
+            ->where('misStickers.0.guia', '240099990001')
+            ->where('misStickers.0.sticker_url', 'https://stickers.test/' . GGD_RUTA));
+
+        $otro = User::factory()->create();
+        $otro->assignRole(Role::firstOrCreate(['name' => 'Aracely', 'guard_name' => 'web']));
+        $this->actingAs($otro)->get('/app/estacion-empaque')->assertInertia(fn ($page) => $page->where('misStickers', []));
+    });
+
+    it('la estación muestra el color que pidió el cliente en Dropi en un producto agregado', function () {
+        $loro = \App\Modules\Dropi\Models\Producto::sinKardexAutomatico(fn () => \App\Modules\Dropi\Models\Producto::create(
+            ['referencia' => 'AND2410-458', 'nombre' => 'LORO MUSICAL FELPA', 'desglose_stock' => false]));
+        $p = ggdPedido(EstadoPedidoDropi::Alistando);
+        $p->items()->update(['producto_id' => $loro->id, 'variante_id' => null, 'variacion' => 'ROJO']);
+        EmpaqueRegistro::create([
+            'pedido_id' => $p->id, 'operario_id' => $this->aracely->id, 'inicio_at' => now(),
+            'items_totales' => 1, 'items_escaneados' => 0, 'estado' => 'en_curso',
+        ]);
+
+        $this->actingAs($this->aracely)->withSession(['empaque.pedidoActivoId' => $p->id])
+            ->get('/app/estacion-empaque')
+            ->assertInertia(fn ($page) => $page->where('pedidoActivo.items.0.color', 'ROJO')->where('pedidoActivo.items.0.es_agregado', true));
+
+        $r = \App\Modules\Dropi\Actions\ProcesarEscaneoEmpaque::run('AND2410-458', $p->id, $this->aracely->id);
+        expect($r['tipo'])->toBe('variante_marcada')->and($r['mensaje'])->toContain('ROJO')->not->toContain('surtidos');
+    });
+});

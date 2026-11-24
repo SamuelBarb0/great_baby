@@ -214,9 +214,12 @@ class ProcesarEscaneoEmpaque
             $sufijo = $restanteItem > 0 ? " (faltan {$restanteItem})" : '';
 
             // C-F2 R2 · Mensaje polimórfico para el operario en pantalla + audio.
-            $descColor = $variante
-                ? " — {$variante->color_nombre}"
-                : ' — AGREGADO (colores surtidos)';
+            // En un agregado, el color que pidió el cliente en Dropi (la variación).
+            $descColor = match (true) {
+                (bool) $variante => " — {$variante->color_nombre}",
+                filled(trim((string) $item->variacion)) => ' — ' . trim((string) $item->variacion),
+                default => ' — AGREGADO (colores surtidos)',
+            };
             return [
                 'tipo' => 'variante_marcada',
                 'mensaje' => "✓ {$nombreItem}{$descColor}{$sufijo}",

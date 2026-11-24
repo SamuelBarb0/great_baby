@@ -14,6 +14,9 @@ const { money } = useMoney();
 
 import EtiquetaYReferencias from '@/Components/EtiquetaYReferencias.vue';
 import AbrirEnDropi from '@/Components/AbrirEnDropi.vue';
+import SelectorEtiquetas from '@/Components/SelectorEtiquetas.vue';
+
+const selectorEtiquetas = ref(false);
 
 const props = defineProps({
     historial: { type: Array, default: () => [] },
@@ -1099,12 +1102,14 @@ const matrizDisenos = ref([]);
                 </p>
                 <!-- Un producto agrupado (sin variantes) también imprime: una etiqueta
                      por color de Dropi, todas con la referencia (bodega, 23-nov-2026). -->
-                <a v-if="producto?.id"
-                   :href="`/catalogo/etiquetas-lote?productos[]=${producto.id}`" target="_blank"
-                   class="btn btn-secondary text-xs inline-flex items-center gap-1">
-                    <Printer class="w-4 h-4"/>
-                    {{ form.variantes.some(v => v.id) ? 'Imprimir etiquetas de todas las variantes' : 'Imprimir etiquetas (una por color de Dropi)' }}
-                </a>
+                <!-- Se escoge qué imprimir: producto original, variantes exactas o
+                     todas, colores de Dropi, copias y formato (bodega, 23-nov-2026). -->
+                <button v-if="producto?.id" type="button" @click="selectorEtiquetas = true"
+                        class="btn btn-secondary text-xs inline-flex items-center gap-1">
+                    <Printer class="w-4 h-4"/> Imprimir etiquetas…
+                </button>
+                <SelectorEtiquetas v-if="producto?.id" :producto-id="producto.id" :abierto="selectorEtiquetas"
+                                   @cerrar="selectorEtiquetas = false"/>
             </div>
 
             <!-- PESTAÑA 3: COMERCIAL -->

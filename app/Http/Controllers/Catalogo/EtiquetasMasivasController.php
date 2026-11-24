@@ -44,6 +44,10 @@ class EtiquetasMasivasController extends Controller
             ->orderBy('id')
             ->get();
 
+        if ($request->boolean('seleccion')) {
+            return $this->seleccionadas($request, $productos, $catalogo);
+        }
+
         // Con variantes, una etiqueta por variante. Un producto agrupado no tiene
         //   variantes en el ERP (bodega, 23-nov-2026: «no puedo imprimir las
         //   variaciones»): sale una por cada color de Dropi, todas con su referencia.
@@ -63,6 +67,80 @@ class EtiquetasMasivasController extends Controller
         }
 
         return $this->lote($etiquetas, 'etiquetas-lote');
+    }
+
+    /**
+     * Lo que se puede imprimir de un producto, para el selector de la ficha
+     * (bodega, 23-nov-2026: escoger el producto original, una variante exacta,
+     * todas, o los colores de Dropi de un agrupado).
+     */
+    public function opciones(int $producto, CatalogoDropi $catalogo): \Illuminate\Http\JsonResponse
+    {
+        abort_unless(auth()->check(), 401);
+
+        $p = Producto::with(['variantes' => fn ($q) => $q->orderBy('codigo_barras')])->findOrFail($producto);
+
+        return response()->json([
+            'producto' => ['id' => $p->id, 'referencia' => $p->referencia, 'nombre' => $p->nombre],
+            'variantes' => $p->variantes->filter(fn (ProductoVariante $v) => filled($v->codigo_barras))
+                ->map(fn (ProductoVariante $v) => [
+                    'id' => $v->id,
+                    'nombre' => self::deVariante($v->setRelation('producto', $p))['detalle'] ?: 'Variante',
+                    'codigo' => $v->codigo_barras,
+                ])->values(),
+            // Los colores de Dropi sólo cuentan en un agrupado: con variantes, cada
+            //   color ya es una variante con su propio código.
+            'colores' => $p->variantes->isEmpty() ? self::coloresDeDropi($p, self::nombresDeDropi($catalogo)) : [],
+        ]);
+    }
+
+    /**
+     * Las etiquetas que se escogieron en el selector: el producto original (su
+     * referencia), las variantes marcadas, los colores de Dropi marcados, con
+     * N copias de cada una, en hoja carta o en el rollo de la térmica.
+     */
+    private function seleccionadas(Request $request, $productos, CatalogoDropi $catalogo): Response
+    {
+        $datos = $request->validate([
+            'original' => ['nullable', 'boolean'],
+            'variantes' => ['nullable', 'array'], 'variantes.*' => ['integer'],
+            'colores' => ['nullable', 'array'], 'colores.*' => ['string', 'max:120'],
+            'copias' => ['nullable', 'integer', 'min:1', 'max:100'],
+            'formato' => ['nullable', 'in:carta,rollo'],
+        ]);
+        $variantes = array_map('intval', $datos['variantes'] ?? []);
+        $colores = collect($datos['colores'] ?? [])->map(fn ($c) => mb_strtoupper(trim($c)))->filter()->all();
+        $nombres = $colores ? self::nombresDeDropi($catalogo) : [];
+
+        $etiquetas = [];
+        foreach ($productos as $p) {
+            if ($request->boolean('original')) {
+                $etiquetas[] = self::deAgregado($p, null);
+            }
+            foreach ($p->variantes->whereIn('id', $variantes) as $v) {
+                $etiquetas[] = self::deVariante($v->setRelation('producto', $p));
+            }
+            if ($colores && $p->variantes->isEmpty()) {
+                foreach (self::coloresDeDropi($p, $nombres) as $color) {
+                    if (in_array(mb_strtoupper($color), $colores, true)) {
+                        $etiquetas[] = self::deAgregado($p, $color);
+                    }
+                }
+            }
+        }
+        abort_if($etiquetas === [], 422, 'Escoge al menos una etiqueta para imprimir.');
+
+        $copias = (int) ($datos['copias'] ?? 1);
+        $etiquetas = collect($etiquetas)->flatMap(fn ($e) => array_fill(0, $copias, $e))->values()->all();
+
+        return $this->lote($etiquetas, 'etiquetas', soloBarras: ($datos['formato'] ?? 'carta') === 'rollo');
+    }
+
+    /** Nombre de cada variación de Dropi (llave => «ROJO»), de la última lectura, sin llamar a Dropi. */
+    private static function nombresDeDropi(CatalogoDropi $catalogo): array
+    {
+        return collect($catalogo->misProductos()['productos'])->flatMap(fn ($x) => $x['variaciones'])
+            ->pluck('variacion', 'llave')->filter()->all();
     }
 
     /**
@@ -150,7 +228,25 @@ class EtiquetasMasivasController extends Controller
      */
     private static function deAgrupado(Producto $p, array $nombrePorLlave): array
     {
-        $colores = DropiVinculoProducto::query()
+        $colores = self::coloresDeDropi($p, $nombrePorLlave);
+
+        if ($colores === []) {
+            return [self::deAgregado($p, null)];
+        }
+
+        return array_map(fn (string $color) => self::deAgregado($p, $color), $colores);
+    }
+
+    /**
+     * Los colores de Dropi con que está vinculado un producto agrupado. El nombre
+     * viene del catálogo de Dropi; si no está, el que guardó el vínculo.
+     *
+     * @param  array<string, string>  $nombrePorLlave
+     * @return list<string>
+     */
+    private static function coloresDeDropi(Producto $p, array $nombrePorLlave): array
+    {
+        return DropiVinculoProducto::query()
             ->where('producto_id', $p->id)
             ->whereNull('variante_id')
             ->get(['sku_dropi', 'variacion'])
@@ -158,13 +254,8 @@ class EtiquetasMasivasController extends Controller
             ->sort()
             ->filter()
             ->unique(fn ($v) => mb_strtoupper($v))
-            ->values();
-
-        if ($colores->isEmpty()) {
-            return [self::deAgregado($p, null)];
-        }
-
-        return $colores->map(fn (string $color) => self::deAgregado($p, $color))->all();
+            ->values()
+            ->all();
     }
 
     /**

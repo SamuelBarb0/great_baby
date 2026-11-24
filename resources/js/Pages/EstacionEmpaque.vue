@@ -20,6 +20,7 @@ const props = defineProps({
     metricas: { type: Object, required: true },
     ranking: { type: Array, required: true },
     colaProximos: { type: Array, required: true },
+    misStickers: { type: Array, default: () => [] },
 });
 
 const page = usePage();
@@ -50,11 +51,9 @@ const procesarFlash = (r) => {
     if (! r) return;
     beep(r.sonido);
     doFlash(r.sonido);
-    // Sticker de la guía recién generada: se abre solo; si el navegador
-    //   bloquea la ventana, queda el botón «Imprimir sticker».
-    if (r.sticker_url) {
-        try { window.open(r.sticker_url, '_blank', 'noopener'); } catch (e) {}
-    }
+    // El sticker NO se abre solo: abrir otra pestaña le quitaba el foco a la
+    //   estación (y a la pistola) y, si el navegador la bloqueaba, se perdía el
+    //   aviso (recorrido del 23-nov-2026). Queda en «Mis stickers de hoy».
 
     if (r.mensaje?.startsWith('✅')) {
         hablar(r.mensaje.replace(/[✅✓]/g, '').trim());
@@ -164,10 +163,16 @@ const confirmar = async () => {
     procesandoConfirmar.value = true;
     // Capa de seguridad: desde dónde se confirmó el empaque (ver Trazabilidad).
     const gps = await obtenerUbicacion();
+    // Pedir la guía a Dropi puede tardar: si en 45 s la respuesta no llega, se
+    //   recarga la estación; lo empacado aparece en «Mis stickers de hoy».
+    const respaldo = setTimeout(() => {
+        procesandoConfirmar.value = false;
+        router.reload({ preserveScroll: true });
+    }, 45_000);
     router.post('/app/estacion-empaque/confirmar', { gps }, {
         preserveScroll: true,
         preserveState: false,
-        onFinish: () => { procesandoConfirmar.value = false; },
+        onFinish: () => { clearTimeout(respaldo); procesandoConfirmar.value = false; },
     });
 };
 // Guía de Dropi de un pedido ya empacado (reintento o sticker que no estaba).
@@ -378,10 +383,11 @@ const fmtTime = (s) => {
                                     <div class="font-semibold text-surface-800 dark:text-surface-100 truncate">{{ it.producto }}</div>
                                     <!-- Fix ALTO UX/UI re-audit · badge amber para item agregado (colores surtidos).
                                          Antes el alistador no lo distinguía y buscaba color específico. -->
-                                    <span v-if="it.es_agregado" class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500 text-white uppercase tracking-wide">Surtido</span>
+                                    <span v-if="it.es_agregado && ! it.color" class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500 text-white uppercase tracking-wide">Surtido</span>
                                 </div>
                                 <div class="text-xs" :class="it.es_agregado ? 'text-amber-700 dark:text-amber-300 font-medium' : 'text-surface-500'">
-                                    <span v-if="it.es_agregado">Colores surtidos según disponibilidad</span>
+                                    <span v-if="it.es_agregado && it.color">Color pedido: <strong>{{ it.color }}</strong></span>
+                                    <span v-else-if="it.es_agregado">Colores surtidos según disponibilidad</span>
                                     <template v-else>{{ it.color }}<span v-if="it.talla"> · T{{ it.talla }}</span></template>
                                 </div>
                                 <div class="font-mono text-xs text-surface-400 mt-1 truncate">{{ it.codigo }}</div>
@@ -406,6 +412,33 @@ const fmtTime = (s) => {
                 <div class="text-5xl">📦</div>
                 <div class="text-lg text-surface-500 mt-3">Escanea una guía de pedido con la pistola para empezar</div>
                 <div class="text-xs text-surface-500 mt-1">o escribe el número y presiona Enter</div>
+            </div>
+
+            <!-- Lo empacado hoy por este operario, con su guía de Dropi: el sticker
+                 se imprime desde aquí aunque la página se haya recargado. -->
+            <div v-if="misStickers.length" class="card p-4">
+                <div class="text-xs uppercase tracking-wider font-semibold text-surface-600 mb-2">
+                    🏷 Mis stickers de hoy ({{ misStickers.length }})
+                </div>
+                <div class="divide-y divide-surface-200 dark:divide-surface-700">
+                    <div v-for="s in misStickers" :key="s.pedido_id" class="flex flex-wrap items-center gap-x-4 gap-y-1 py-2">
+                        <div class="min-w-0 flex-1">
+                            <div class="font-mono text-sm font-semibold">
+                                {{ s.guia || 'Sin guía' }}
+                                <span class="text-surface-500 font-normal">· orden {{ s.orden }}</span>
+                            </div>
+                            <div class="text-xs text-surface-500">{{ s.transportadora }} · {{ s.ciudad }} · {{ s.hora }}</div>
+                        </div>
+                        <a v-if="s.sticker_url" :href="s.sticker_url" target="_blank" rel="noopener"
+                           class="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-sm font-bold hover:bg-emerald-700">
+                            🖨 Imprimir sticker
+                        </a>
+                        <button v-else type="button" :disabled="procesandoGuia" @click="pedirGuia(s.pedido_id)"
+                                class="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber-600 text-white text-sm font-bold hover:bg-amber-700 disabled:opacity-50">
+                            {{ procesandoGuia ? 'Pidiendo a Dropi…' : (s.guia ? '↻ Traer sticker' : '↻ Pedir guía') }}
+                        </button>
+                    </div>
+                </div>
             </div>
 
             <!-- Cola sugerida -->
