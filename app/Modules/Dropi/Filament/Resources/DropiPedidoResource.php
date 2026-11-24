@@ -209,6 +209,14 @@ class DropiPedidoResource extends Resource
                 BadgeColumn::make('estado')
                     ->formatStateUsing(fn ($state) => $state instanceof EstadoPedidoDropi ? $state->label() : $state)
                     ->color(fn ($state) => $state instanceof EstadoPedidoDropi ? $state->color() : 'gray'),
+                // Como en Dropi (24-nov-2026): Aracely arma el corte con el estatus de allá.
+                TextColumn::make('huella.estatus_dropi')->label('En Dropi')->badge()
+                    ->color(fn ($state) => match ($state) { 'PENDIENTE' => 'warning', 'GUIA_GENERADA' => 'info', default => 'gray' })
+                    ->placeholder('—'),
+                \Filament\Tables\Columns\IconColumn::make('impresa')->label('Impresa')
+                    ->state(fn (DropiPedido $record) => $record->tieneGuiaImpresa())
+                    ->boolean()->trueIcon('heroicon-o-printer')->falseIcon('heroicon-o-minus')
+                    ->trueColor('success')->falseColor('gray'),
                 TextColumn::make('monto_esperado_proveedor')
                     ->label('Esperado')->money('COP')->alignEnd()->sortable(),
                 TextColumn::make('despachado_at')->label('Despachado')->dateTime('Y-m-d H:i')->toggleable(isToggledHiddenByDefault: true)->sortable(),
@@ -219,9 +227,31 @@ class DropiPedidoResource extends Resource
             //   refresca al mismo ritmo sin recargar la página (conserva filtros,
             //   búsqueda y paginación). Livewire pausa el sondeo si la pestaña no se ve.
             ->poll('15s')
+            ->modifyQueryUsing(fn (Builder $query) => $query->with('huella'))
             ->filters([
                 SelectFilter::make('estado')
                     ->options(collect(EstadoPedidoDropi::cases())->mapWithKeys(fn ($e) => [$e->value => $e->label()])),
+                // Los filtros con que Aracely arma el corte en Dropi (reunión del 24-nov-2026).
+                SelectFilter::make('estatus_dropi')->label('Estado en Dropi')->multiple()
+                    ->options(fn () => \App\Modules\Dropi\Models\DropiWebHuella::query()->whereNotNull('estatus_dropi')->where('estatus_dropi', '!=', '')
+                        ->distinct()->orderBy('estatus_dropi')->pluck('estatus_dropi', 'estatus_dropi')->toArray())
+                    ->query(fn (Builder $query, array $data) => $query->when($data['values'] ?? [],
+                        fn ($q, $v) => $q->whereHas('huella', fn ($h) => $h->whereIn('estatus_dropi', $v)))),
+                SelectFilter::make('impresa')->label('Guía impresa')
+                    ->options(['no' => 'No impresas', 'si' => 'Impresas'])
+                    ->query(fn (Builder $query, array $data) => match ($data['value'] ?? null) {
+                        'no' => $query->guiaImpresa(false),
+                        'si' => $query->guiaImpresa(true),
+                        default => $query,
+                    }),
+                SelectFilter::make('cliente_depto')->label('Departamento')
+                    ->options(fn () => DropiPedido::query()->whereNotNull('cliente_depto')
+                        ->distinct()->orderBy('cliente_depto')->pluck('cliente_depto', 'cliente_depto')->toArray()),
+                Filter::make('producto')
+                    ->schema([\Filament\Forms\Components\TextInput::make('producto')->label('Producto (nombre o SKU)')])
+                    ->query(fn (Builder $query, array $data) => $query->when(trim((string) ($data['producto'] ?? '')), fn ($q, $t) => $q->whereHas('items',
+                        fn ($i) => $i->where('producto_nombre', 'like', "%{$t}%")->orWhere('sku_dropi', 'like', "%{$t}%"))))
+                    ->indicateUsing(fn (array $data) => filled($data['producto'] ?? null) ? ['Producto: ' . $data['producto']] : []),
                 SelectFilter::make('corte_id')
                     ->label('Corte')
                     ->relationship('corte', 'fecha')
@@ -267,6 +297,62 @@ class DropiPedidoResource extends Resource
                     ->visible(fn (DropiPedido $record) => filled($record->dropi_orden_id) && self::puedeCambiarEnDropi()),
             ])
             ->toolbarActions([
+                // El corte desde el ERP (reunión con la señora Lahida, 24-nov-2026):
+                //   filtrar PENDIENTE en Dropi → «Generar guías» → «Imprimir guías».
+                \Filament\Actions\BulkAction::make('generarGuias')
+                    ->label('Generar guías')
+                    ->icon('heroicon-o-truck')
+                    ->color('warning')
+                    ->visible(fn () => self::puedeCambiarEnDropi())
+                    ->requiresConfirmation()
+                    ->modalHeading('Generar las guías en Dropi')
+                    ->modalDescription(function (\Illuminate\Support\Collection $records) {
+                        $records->loadMissing('huella');
+                        $van = $records->filter(fn (DropiPedido $p) => self::pideGuia($p))->count();
+                        $saltan = $records->count() - $van;
+
+                        return "Se pedirán {$van} guía(s) REALES en Dropi: la transportadora las registra y la de un pedido que al final no sale hay que anularla."
+                            . ($saltan ? " {$saltan} de lo escogido no está PENDIENTE en Dropi o ya tiene guía y se salta." : '')
+                            . ' Se generan en segundo plano; el avance sale arriba de la tabla.';
+                    })
+                    ->modalSubmitActionLabel('Generar guías')
+                    ->action(function (\Illuminate\Support\Collection $records) {
+                        self::exigirCambiarEnDropi();
+                        $records->loadMissing('huella');
+                        $ids = $records->filter(fn (DropiPedido $p) => self::pideGuia($p))->pluck('id')->all();
+                        if (! $ids) {
+                            \Filament\Notifications\Notification::make()->title('Nada que generar')
+                                ->body('Ninguno de los escogidos está PENDIENTE en Dropi sin guía.')->warning()->send();
+
+                            return;
+                        }
+                        \App\Modules\Dropi\Jobs\GenerarGuiasEnBloqueJob::lanzar($ids, auth()->id());
+                        \Filament\Notifications\Notification::make()->title('Generando ' . count($ids) . ' guía(s)')
+                            ->body('Van en segundo plano. Cuando terminen, filtra «Guía impresa: No impresas» y dale «Imprimir guías».')->success()->send();
+                    })
+                    ->deselectRecordsAfterCompletion(),
+                \Filament\Actions\BulkAction::make('imprimirGuias')
+                    ->label('Imprimir guías')
+                    ->icon('heroicon-o-printer')
+                    ->color('success')
+                    ->visible(fn () => self::puedeCambiarEnDropi())
+                    ->action(function (\Illuminate\Support\Collection $records, $livewire) {
+                        self::exigirCambiarEnDropi();
+                        $conGuia = $records->filter(fn (DropiPedido $p) => $p->tieneGuiaReal());
+                        if ($conGuia->isEmpty()) {
+                            \Filament\Notifications\Notification::make()->title('Ninguno tiene guía todavía')
+                                ->body('Primero «Generar guías».')->warning()->send();
+
+                            return;
+                        }
+                        $url = route('dropi.guias.imprimir', \App\Modules\Dropi\Services\ImprimirGuiasDropi::preparar($conGuia->pluck('id')->all()));
+                        $livewire->js('window.open(' . json_encode($url) . ', "_blank")');
+                        $sin = $records->count() - $conGuia->count();
+                        \Filament\Notifications\Notification::make()->title('Abriendo ' . $conGuia->count() . ' guía(s) en un solo PDF')
+                            ->body('Primero la lista de alistamiento y después los stickers, en el orden de empaque. Quedan marcadas «impresas».'
+                                . ($sin ? " {$sin} sin guía todavía no van." : ''))->success()->send();
+                    })
+                    ->deselectRecordsAfterCompletion(),
                 \Filament\Actions\BulkActionGroup::make([
                     \pxlrbt\FilamentExcel\Actions\Tables\ExportBulkAction::make()
                         ->exports([
@@ -287,6 +373,12 @@ class DropiPedidoResource extends Resource
     protected static function puedeCambiarEnDropi(): bool
     {
         return \App\Auth\Permisos::puede(auth()->user(), 'dropi_cambiar_en_dropi');
+    }
+
+    /** ¿«Generar guías» le pide guía a este pedido? Sólo PENDIENTE en Dropi y sin guía. */
+    protected static function pideGuia(DropiPedido $p): bool
+    {
+        return filled($p->dropi_orden_id) && ! $p->tieneGuiaReal() && $p->huella?->estatus_dropi === 'PENDIENTE';
     }
 
     protected static function exigirCambiarEnDropi(): void

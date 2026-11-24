@@ -9,6 +9,7 @@ use App\Modules\Dropi\Actions\ProcesarEscaneoEmpaque;
 use App\Modules\Dropi\Enums\EstadoPedidoDropi;
 use App\Modules\Dropi\Models\DropiPedido;
 use App\Modules\Dropi\Models\EmpaqueRegistro;
+use App\Modules\Dropi\Support\ColaDeEmpaque;
 use BackedEnum;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
@@ -79,6 +80,12 @@ class EstacionEmpaque extends Page
             operarioId: auth()->id(),
         );
 
+        // Producto escaneado sin pedido abierto: se abre el primero de la cola que
+        //   lo lleva y se marca (24-nov-2026: «escanea el producto y que le salga la guía»).
+        if ($resultado['tipo'] === 'variante_sin_pedido' && ($desdeProducto = $this->abrirPorProducto($this->codigo))) {
+            $resultado = $desdeProducto;
+        }
+
         if ($resultado['tipo'] === 'pedido_abierto') {
             $this->pedidoActivoId = $resultado['pedido_id'];
         }
@@ -125,16 +132,75 @@ class EstacionEmpaque extends Page
             $n = Notification::make()->title($res['msg'])->body(trim((string) ($guia['texto'] ?? '')) ?: null);
             ($guia['error'] ?? false) ? $n->warning()->persistent()->send() : $n->success()->send();
 
-            // Anunciar siguiente pedido en cola si existe
-            $siguiente = $this->proximosPedidos(1)[0] ?? null;
-            $sig = $siguiente
-                ? " Siguiente: {$siguiente['guia']}, {$siguiente['ciudad']}."
-                : '';
+            // El siguiente de la cola se abre solo: escanear → confirmar → siguiente
+            //   (24-nov-2026: «entre menos clics, mejor»; son 300 a 800 paquetes).
+            $abierto = $this->abrirSiguiente();
+            $sig = $abierto
+                ? ' Siguiente: ' . DropiPedido::find($this->pedidoActivoId)?->guia . '.'
+                : ' No quedan pedidos en la cola.';
 
             $this->dispatch('empaque-scan', sonido: ($guia['error'] ?? false) ? 'warn' : 'ok', mensaje: '✅ ' . $res['msg'] . ($guia['texto'] ?? '') . $sig);
         } catch (\Throwable $e) {
             Notification::make()->title('No se pudo confirmar')->body($e->getMessage())->danger()->send();
         }
+    }
+
+    /** «▶ Siguiente pedido»: abre el primero libre de la cola, sin escanear la guía. */
+    public function siguientePedido(): void
+    {
+        if ($this->pedidoActivoId) {
+            return;
+        }
+        if (! $this->abrirSiguiente()) {
+            $this->dispatch('empaque-scan', sonido: 'warn', mensaje: 'No hay pedidos en la cola del corte.');
+
+            return;
+        }
+        $this->dispatch('empaque-scan', sonido: 'ok', mensaje: $this->ultimoResultado['mensaje'] ?? '');
+    }
+
+    /** Abre el siguiente libre de la cola; false si no queda ninguno. */
+    private function abrirSiguiente(): bool
+    {
+        $cola = app(ColaDeEmpaque::class);
+        $operario = (int) auth()->id();
+        // Si otro lo toma en el mismo instante, ProcesarEscaneoEmpaque lo rechaza: se prueba con el que sigue.
+        $intentados = [];
+        while (count($intentados) < 5 && ($p = $cola->pedidos($operario)->first(fn ($x) => ! in_array($x->id, $intentados, true)))) {
+            $intentados[] = $p->id;
+            $r = ProcesarEscaneoEmpaque::run(codigo: (string) $p->guia, pedidoActivoId: null, operarioId: $operario);
+            if ($r['tipo'] === 'pedido_abierto') {
+                $this->pedidoActivoId = $r['pedido_id'];
+                $this->ultimoResultado = $r;
+                $this->registroCache = null;
+
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /** El pedido de la cola que lleva el producto escaneado, abierto y con ese producto ya marcado. */
+    private function abrirPorProducto(string $codigo): ?array
+    {
+        $codigo = strtoupper(trim($codigo)); // como ProcesarEscaneoEmpaque
+        $variante =\App\Modules\Dropi\Models\ProductoVariante::where('codigo_barras', $codigo)->first();
+        $producto = $variante ? null : \App\Modules\Dropi\Models\Producto::where('desglose_stock', false)->where('referencia', $codigo)->first();
+        $pedido = app(ColaDeEmpaque::class)->siguienteCon((int) auth()->id(), $variante?->id, $producto?->id);
+        if (! $pedido) {
+            return null;
+        }
+
+        $abierto = ProcesarEscaneoEmpaque::run(codigo: (string) $pedido->guia, pedidoActivoId: null, operarioId: (int) auth()->id());
+        if ($abierto['tipo'] !== 'pedido_abierto') {
+            return null;
+        }
+        $this->pedidoActivoId = $abierto['pedido_id'];
+        $this->registroCache = null;
+        $marcado = ProcesarEscaneoEmpaque::run(codigo: $codigo, pedidoActivoId: $this->pedidoActivoId, operarioId: (int) auth()->id());
+
+        return ['mensaje' => "Pedido {$pedido->guia} abierto por el producto · " . $marcado['mensaje']] + $marcado + ['pedido_id' => $this->pedidoActivoId];
     }
 
     /** «🏷 Mis stickers de hoy»: lo que este operario empacó hoy, con su guía y sticker. */
@@ -240,17 +306,9 @@ class EstacionEmpaque extends Page
      */
     public function proximosPedidos(int $limit = 5): array
     {
-        // Los 20 más viejos (nadie se queda esperando) en el orden de la ruta
-        //   de la bodega, igual que la cola de la Vista del Alistador.
-        $cola = DropiPedido::query()
-            ->whereIn('estado', [EstadoPedidoDropi::Pending, EstadoPedidoDropi::Alistando])
-            ->when($this->pedidoActivoId, fn ($q) => $q->where('id', '!=', $this->pedidoActivoId))
-            ->with('items')
-            ->orderBy('created_at', 'asc')
-            ->limit(20)
-            ->get();
-
-        return app(\App\Modules\Dropi\Support\RecoleccionDelCorte::class)->ordenarPorRuta($cola)
+        // El corte en trabajo, en el orden de la pila de stickers (ColaDeEmpaque).
+        return app(ColaDeEmpaque::class)->pedidos((int) auth()->id())
+            ->reject(fn ($p) => $p->id === $this->pedidoActivoId)
             ->take($limit)
             ->map(fn ($p) => [
                 'id' => $p->id,
@@ -306,7 +364,7 @@ class EstacionEmpaque extends Page
             return null;
         }
 
-        return DropiPedido::with(['items.variante.producto', 'items.producto', 'corte'])->find($this->pedidoActivoId);
+        return DropiPedido::with(['items.variante.producto.imagenes', 'items.producto.imagenes', 'corte'])->find($this->pedidoActivoId);
     }
 
     /**

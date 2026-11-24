@@ -23,6 +23,27 @@ class ListDropiPedidos extends ListRecords
     /** Sin una vuelta buena en este tiempo, el botón avisa (el cron corre cada 15 s). */
     public const MINUTOS_SIN_SYNC = 2;
 
+    /** El avance de «Generar guías» (se refresca con el sondeo de 15 s de la tabla). */
+    public function getSubheading(): ?string
+    {
+        $a = \App\Modules\Dropi\Jobs\GenerarGuiasEnBloqueJob::avance(auth()->id());
+        if (! $a) {
+            return null;
+        }
+        $listas = $a['hechas'] + $a['saltadas'] + count($a['errores']);
+        $texto = $listas < $a['total']
+            ? "Generando guías: {$listas} de {$a['total']}"
+            : "Guías generadas: {$a['hechas']} de {$a['total']}";
+        if ($a['saltadas']) {
+            $texto .= " · {$a['saltadas']} saltadas (no estaban PENDIENTE en Dropi)";
+        }
+        if ($a['errores']) {
+            $texto .= ' · ' . count($a['errores']) . ' con error: ' . implode(' | ', array_slice($a['errores'], 0, 3));
+        }
+
+        return $texto;
+    }
+
     protected function getHeaderActions(): array
     {
         // La tabla hace poll cada 15 s, así que la etiqueta se refresca sola.

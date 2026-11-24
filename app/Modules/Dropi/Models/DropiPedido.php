@@ -45,7 +45,31 @@ class DropiPedido extends Model implements AuditableContract
         'monto_cliente_final' => 'decimal:2',
         'ganancia_vendedor' => 'decimal:2',
         'flete_transportadora' => 'decimal:2',
+        'guia_impresa_at' => 'datetime',
     ];
+
+    /** Lo último que el sync vio de este pedido en Dropi (estatus tal cual, guía descargada). */
+    public function huella(): HasOne
+    {
+        return $this->hasOne(DropiWebHuella::class, 'dropi_orden_id', 'dropi_orden_id');
+    }
+
+    /**
+     * Guía ya impresa: desde el ERP (`guia_impresa_at`) o descargada en Dropi.
+     * Es el «IMPRESAS / NO IMPRESAS» con que Aracely separa un corte del otro.
+     */
+    public function scopeGuiaImpresa($query, bool $impresa = true)
+    {
+        $marca = fn ($q) => $q->whereNotNull('guia_impresa_at')
+            ->orWhereHas('huella', fn ($h) => $h->where('guia_descargada', true));
+
+        return $impresa ? $query->where($marca) : $query->whereNot($marca);
+    }
+
+    public function tieneGuiaImpresa(): bool
+    {
+        return $this->guia_impresa_at !== null || (bool) $this->huella?->guia_descargada;
+    }
 
     /** ¿Ya tiene la guía de la transportadora? (no la provisional SIN-GUIA-<orden> del sync). */
     public function tieneGuiaReal(): bool

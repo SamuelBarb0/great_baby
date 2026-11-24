@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
     <meta charset="utf-8">
-    <title>Recolección · {{ $corte->etiqueta() }}</title>
+    <title>Recolección · {{ $titulo ?? $corte->etiqueta() }}</title>
     <style>
         @page { margin: 14mm 12mm; }
         body { font-family: DejaVu Sans, sans-serif; font-size: 10px; color: #111; }
@@ -22,7 +22,7 @@
     </style>
 </head>
 <body>
-    <h1>Recolección · {{ $corte->etiqueta() }}</h1>
+    <h1>Recolección · {{ $titulo ?? $corte->etiqueta() }}</h1>
     <div class="sub">
         {{ count($filas) }} referencias · {{ $unidades }} unidades · en el orden del recorrido de la bodega ·
         generado {{ $generado->format('d/m/Y H:i') }}

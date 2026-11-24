@@ -295,6 +295,7 @@ class SincronizarDropiWeb
             ->pluck('huella', 'dropi_orden_id');
 
         DB::table('dropi_web_huellas')->whereIn('dropi_orden_id', $lista->keys())->update(['visto_at' => now()]);
+        self::guardarGuiaDescargada($lista->all());
 
         return $lista->filter(fn ($o, $id) => ($guardadas[$id] ?? null) !== self::huella($o))->values()->all();
     }
@@ -324,19 +325,35 @@ class SincronizarDropiWeb
             });
     }
 
+    /**
+     * «IMPRESAS / NO IMPRESAS» de Dropi (`guide_was_downloaded`, 24-nov-2026).
+     * Va aparte de la huella a propósito: meterlo en ella haría que todo
+     * pedido «cambiara» y se volviera a importar entero.
+     */
+    public static function guardarGuiaDescargada(array $lista): void
+    {
+        $porValor = collect($lista)
+            ->filter(fn ($o) => isset($o['id']) && array_key_exists('guide_was_downloaded', $o))
+            ->groupBy(fn ($o) => (bool) $o['guide_was_downloaded'] ? 1 : 0);
+        foreach ($porValor as $valor => $ordenes) {
+            DB::table('dropi_web_huellas')->whereIn('dropi_orden_id', $ordenes->pluck('id'))->update(['guia_descargada' => (bool) $valor]);
+        }
+    }
+
     protected function marcarSincronizados(array $pedidos): void
     {
         $filas = array_map(fn ($o) => [
             'dropi_orden_id' => $o['id'],
             'huella' => self::huella($o),
             'estatus_dropi' => mb_substr((string) ($o['status'] ?? ''), 0, 60),
+            'guia_descargada' => array_key_exists('guide_was_downloaded', $o) ? (bool) $o['guide_was_downloaded'] : null,
             'etiquetas' => json_encode(self::idsEtiquetas($o)),
             'visto_at' => now(),
             'sincronizado_at' => now(),
         ], array_values($pedidos));
 
         if ($filas) {
-            DB::table('dropi_web_huellas')->upsert($filas, ['dropi_orden_id'], ['huella', 'estatus_dropi', 'etiquetas', 'visto_at', 'sincronizado_at']);
+            DB::table('dropi_web_huellas')->upsert($filas, ['dropi_orden_id'], ['huella', 'estatus_dropi', 'guia_descargada', 'etiquetas', 'visto_at', 'sincronizado_at']);
         }
     }
 }

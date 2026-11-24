@@ -1107,6 +1107,17 @@ Route::middleware(['web', 'auth'])->group(function () {
     Route::get('/dropi/recoleccion/{corte}/pdf', [\App\Http\Controllers\Dropi\RecoleccionPdfController::class, 'descargar'])
         ->name('dropi.recoleccion.pdf');
 
+    // Guías escogidas en «Pedidos Dropi», en un solo PDF (24-nov-2026).
+    Route::get('/dropi/guias/imprimir/{token}', [\App\Http\Controllers\Dropi\GuiasDropiController::class, 'imprimir'])
+        ->where('token', '[A-Za-z0-9]{32}')
+        ->middleware('throttle:20,1')
+        ->name('dropi.guias.imprimir');
+
+    // PDF / Excel de un manifiesto de Dropi guardado en el ERP (24-nov-2026).
+    Route::get('/dropi/manifiestos/{manifiesto}/{tipo}', \App\Http\Controllers\Dropi\ManifiestoDropiArchivoController::class)
+        ->where('tipo', 'pdf|excel')
+        ->name('dropi.manifiestos.archivo');
+
     // Pedidos del corte en PDF (todos o `?pedido=ID`), abierto o cerrado. El
     //   controlador pide Cortes Dropi + Pedidos Dropi: trae nombres de clientes.
     Route::get('/dropi/corte/{corte}/pedidos/pdf', [\App\Http\Controllers\Dropi\PedidosCortePdfController::class, 'descargar'])

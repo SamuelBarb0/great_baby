@@ -19,6 +19,8 @@
         "openspout/openspout": "^4.28",
         "owen-it/laravel-auditing": "^14.0",
         "pxlrbt/filament-excel": "^4.1",
+        "setasign/fpdf": "^1.8.6",
+        "setasign/fpdi": "^2.6",
         "smalot/pdfparser": "^2.13",
         "spatie/laravel-medialibrary": "^11.23",
         "spatie/laravel-permission": "^6.25"

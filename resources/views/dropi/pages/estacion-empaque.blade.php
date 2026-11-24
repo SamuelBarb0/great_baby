@@ -110,7 +110,10 @@
             <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:1rem;">
                 <div>
                     <div style="font-size:.75rem;color:#f59e0b;text-transform:uppercase;letter-spacing:2px;font-weight:700;">📦 Pedido activo</div>
-                    <div style="font-family:ui-monospace,monospace;font-size:1.5rem;font-weight:700;color:#f59e0b;">{{ $p->guia }}</div>
+                    <div style="font-family:ui-monospace,monospace;font-size:2.25rem;font-weight:800;color:#f59e0b;line-height:1.1;">{{ $p->guia }}</div>
+                    @if($p->tieneGuiaReal())
+                        <div style="font-size:.85rem;color:#fbbf24;">🏷 Pega el sticker de esta guía</div>
+                    @endif
                     <div style="color:#e5e7eb;margin-top:.25rem;">{{ $p->cliente_nombre }} · {{ $p->cliente_ciudad }}</div>
                     <div style="font-size:.85rem;color:#9ca3af;">{{ $p->transportadora }} · Corte {{ $p->corte?->numero }}</div>
                 </div>
@@ -159,12 +162,17 @@
                     @php $isPicked = ! is_null($it->pickeado_at ?? null); @endphp
                     <div style="padding:.75rem 1rem;background:{{ $isPicked ? 'rgba(16,185,129,.18)' : '#0f172a' }};border-left:3px solid {{ $isPicked ? '#10b981' : '#6b7280' }};border-radius:.5rem;">
                         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:.5rem;">
+                            {{-- La foto del producto, para reconocerlo en la mesa sin leer (24-nov-2026). --}}
+                            @if($img = ($it->variante?->producto ?? $it->producto)?->imagenes->first())
+                                <img src="{{ $img->url() }}" alt="" loading="lazy"
+                                     style="width:72px;height:72px;object-fit:cover;border-radius:.5rem;flex-shrink:0;background:#1f2937;">
+                            @endif
                             <div style="flex:1;min-width:0;">
                                 {{-- Un ítem es de una variante o de un producto agregado (sin variantes):
                                      el agregado se escanea por su referencia (ProcesarEscaneoEmpaque). --}}
                                 <div style="font-weight:600;color:#e5e7eb;">{{ ($it->variante?->producto ?? $it->producto)?->nombre ?? $it->sku_dropi }}</div>
                                 @if(($varItem = $it->nombreVariante()) !== '')
-                                    <div style="font-size:.8rem;color:#9ca3af;">{{ $varItem }}</div>
+                                    <div style="font-size:1rem;font-weight:700;color:#fbbf24;">{{ $varItem }}</div>
                                 @endif
                                 <div style="font-family:monospace;font-size:.72rem;color:#cbd5e1;margin-top:.25rem;">{{ $it->variante?->codigo_barras ?? $it->producto?->referencia ?? '—' }}</div>
                             </div>
@@ -184,8 +192,13 @@
     @else
         <div style="margin-top:1rem;padding:2.5rem;text-align:center;background:rgba(255,255,255,.03);border:2px dashed rgba(156,163,175,.3);border-radius:1rem;">
             <div style="font-size:3rem;">📦</div>
-            <div style="font-size:1.1rem;color:#9ca3af;margin-top:.5rem;">Escanea una guía de pedido con la pistola para empezar</div>
-            <div style="font-size:.85rem;color:#6b7280;margin-top:.25rem;">o escribe el número y presiona Enter</div>
+            {{-- En fila con la pila de stickers (ColaDeEmpaque, 24-nov-2026). --}}
+            <button type="button" wire:click="siguientePedido" wire:loading.attr="disabled" wire:target="siguientePedido"
+                    style="margin-top:.75rem;padding:1rem 2rem;background:linear-gradient(90deg,#f59e0b,#b45309);color:white;border:0;border-radius:.75rem;font-weight:800;font-size:1.25rem;cursor:pointer;box-shadow:0 4px 14px rgba(245,158,11,.4);">
+                ▶ Siguiente pedido
+            </button>
+            <div style="font-size:.9rem;color:#9ca3af;margin-top:.75rem;">o escanea un producto: se abre el pedido que lo lleva</div>
+            <div style="font-size:.8rem;color:#6b7280;margin-top:.25rem;">(también sirve escanear la guía)</div>
         </div>
     @endif
 
