@@ -124,17 +124,35 @@ describe('el selector de etiquetas (bodega, 23-nov-2026)', function () {
             'variantes' => [$this->rosa->id], 'copias' => 2,
         ]))->assertOk()->assertHeader('content-type', 'application/pdf');
 
-        expect(array_column($this->vistas['catalogo.pdf.etiquetas-lote'], 'codigo'))
+        // Siempre en el rollo de la térmica: ya no se escoge formato.
+        expect(array_column($this->vistas['catalogo.pdf.etiquetas-dropi'], 'codigo'))
             ->toBe(['BODY-1', 'BODY-1', 'BODY-1-ROS', 'BODY-1-ROS']);
     });
 
-    it('de un agrupado imprime sólo los colores marcados, y en el rollo de la térmica si se pide', function () {
+    it('de un agrupado imprime sólo los colores marcados, en el rollo de la térmica', function () {
         $this->actingAs($this->aracely)->get(route('catalogo.etiquetas.lote', [
-            'productos' => [$this->tetero->id], 'seleccion' => 1, 'colores' => ['rojo'], 'formato' => 'rollo',
+            'productos' => [$this->tetero->id], 'seleccion' => 1, 'colores' => ['rojo'],
         ]))->assertOk();
 
         $e = $this->vistas['catalogo.pdf.etiquetas-dropi'];
         expect(array_column($e, 'color'))->toBe(['Rojo'])->and(array_column($e, 'codigo'))->toBe(['202510-5']);
+    });
+
+    it('cuántas de cada una: muchos rojos y pocos azules (la señora Lahida, 24-nov-2026)', function () {
+        $this->actingAs($this->aracely)->get(route('catalogo.etiquetas.lote', [
+            'productos' => [$this->tetero->id], 'seleccion' => 1, 'colores' => ['Rojo', 'Azul'],
+            'copias' => 1, 'cant' => ['c:Rojo' => 3, 'c:Azul' => 1],
+        ]))->assertOk();
+        $porColor = array_count_values(array_column($this->vistas['catalogo.pdf.etiquetas-dropi'], 'color'));
+        expect($porColor)->toBe(['Azul' => 1, 'Rojo' => 3]);
+
+        // Por variante también; la que no trae su número usa «copias».
+        $this->actingAs($this->aracely)->get(route('catalogo.etiquetas.lote', [
+            'productos' => [$this->body->id], 'seleccion' => 1, 'variantes' => [$this->azul->id, $this->rosa->id],
+            'copias' => 2, 'cant' => ["v:{$this->azul->id}" => 4],
+        ]))->assertOk();
+        expect(array_count_values(array_column($this->vistas['catalogo.pdf.etiquetas-dropi'], 'codigo')))
+            ->toBe(['BODY-1-AZU' => 4, 'BODY-1-ROS' => 2]);
     });
 
     it('sin nada escogido no imprime una hoja vacía', function () {

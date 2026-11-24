@@ -2,8 +2,10 @@
 /**
  * Escoger qué etiquetas imprimir de un producto (bodega, 23-nov-2026): el
  * producto original (su referencia), una variante exacta, todas, o los colores
- * de Dropi de un agrupado; con copias y en hoja carta o en el rollo de la
- * térmica. El PDF se abre en otra pestaña (EtiquetasMasivasController).
+ * de Dropi de un agrupado. Cuántas de cada una (24-nov-2026, la señora Lahida:
+ * «llegan muchos rojos y pocos amarillos»): el número general las pone todas
+ * igual y cada una se puede cambiar. Siempre en el rollo de la térmica, sin
+ * escoger formato. El PDF se abre en otra pestaña (EtiquetasMasivasController).
  */
 import { ref, computed, watch } from 'vue';
 import axios from 'axios';
@@ -22,7 +24,10 @@ const original = ref(false);
 const variantes = ref([]);
 const colores = ref([]);
 const copias = ref(1);
-const formato = ref('carta');
+/** Cuántas de cada etiqueta: 'original', 'v:<id>', 'c:<color>'. */
+const cantidades = ref({});
+
+const limitar = (n) => Math.min(500, Math.max(1, Math.trunc(Number(n)) || 1));
 
 watch(() => props.abierto, async (abierto) => {
     if (! abierto) return;
@@ -36,6 +41,8 @@ watch(() => props.abierto, async (abierto) => {
         variantes.value = data.variantes.map((v) => v.id);
         colores.value = [...data.colores];
         original.value = data.variantes.length === 0 && data.colores.length === 0;
+        copias.value = 1;
+        cantidades.value = {};
     } catch (e) {
         error.value = 'No se pudieron traer las opciones de etiquetas. Cierra y vuelve a intentar.';
     } finally {
@@ -43,7 +50,23 @@ watch(() => props.abierto, async (abierto) => {
     }
 }, { immediate: true });
 
-const total = computed(() => ((original.value ? 1 : 0) + variantes.value.length + colores.value.length) * (Number(copias.value) || 1));
+// El número general las pone todas iguales; después cada una se ajusta.
+watch(copias, (n) => {
+    const todas = {};
+    Object.keys(cantidades.value).forEach((k) => { todas[k] = limitar(n); });
+    cantidades.value = todas;
+});
+
+const cuantas = (clave) => cantidades.value[clave] ?? limitar(copias.value);
+const poner = (clave, n) => { cantidades.value = { ...cantidades.value, [clave]: limitar(n) }; };
+
+const escogidas = computed(() => [
+    ...(original.value ? ['original'] : []),
+    ...variantes.value.map((id) => `v:${id}`),
+    ...colores.value.map((c) => `c:${c}`),
+]);
+
+const total = computed(() => escogidas.value.reduce((s, k) => s + cuantas(k), 0));
 
 const url = computed(() => {
     const q = new URLSearchParams();
@@ -52,8 +75,8 @@ const url = computed(() => {
     if (original.value) q.append('original', '1');
     variantes.value.forEach((id) => q.append('variantes[]', id));
     colores.value.forEach((c) => q.append('colores[]', c));
-    q.append('copias', String(Math.min(100, Math.max(1, Number(copias.value) || 1))));
-    q.append('formato', formato.value);
+    q.append('copias', String(limitar(copias.value)));
+    escogidas.value.forEach((k) => q.append(`cant[${k}]`, String(cuantas(k))));
     return `/catalogo/etiquetas-lote?${q.toString()}`;
 });
 
@@ -75,11 +98,18 @@ const todas = (lista, destino) => { destino.value = destino.value.length === lis
             <p v-else-if="error" class="text-sm text-rose-600">{{ error }}</p>
 
             <template v-else-if="opciones">
-                <label class="flex items-start gap-2 text-sm">
-                    <input id="etq-original" v-model="original" type="checkbox" class="mt-1">
-                    <span><strong>Producto original</strong> · código <span class="font-mono">{{ opciones.producto.referencia }}</span>
-                        <span class="block text-xs text-surface-500">Una etiqueta con la referencia del producto, sin color.</span></span>
+                <label class="block text-xs font-semibold text-surface-600">Cuántas de cada una
+                    <input id="etq-copias" v-model.number="copias" type="number" min="1" max="500" class="input w-32 mt-1 block">
+                    <span class="block font-normal text-surface-500 mt-0.5">Las pone todas iguales; al lado de cada una puedes cambiar la suya.</span>
                 </label>
+
+                <div class="flex items-start gap-2 text-sm">
+                    <input id="etq-original" v-model="original" type="checkbox" class="mt-1">
+                    <label for="etq-original" class="flex-1"><strong>Producto original</strong> · código <span class="font-mono">{{ opciones.producto.referencia }}</span>
+                        <span class="block text-xs text-surface-500">Una etiqueta con la referencia del producto, sin color.</span></label>
+                    <input v-if="original" :id="'etq-cant-original'" :value="cuantas('original')" type="number" min="1" max="500"
+                           class="input w-20 py-1" aria-label="Cuántas del producto original" @input="poner('original', $event.target.value)">
+                </div>
 
                 <div v-if="opciones.variantes.length" class="space-y-1">
                     <div class="flex items-center justify-between">
@@ -88,10 +118,12 @@ const todas = (lista, destino) => { destino.value = destino.value.length === lis
                             {{ variantes.length === opciones.variantes.length ? 'Quitar todas' : 'Marcar todas' }}
                         </button>
                     </div>
-                    <label v-for="v in opciones.variantes" :key="v.id" class="flex items-center gap-2 text-sm">
+                    <div v-for="v in opciones.variantes" :key="v.id" class="flex items-center gap-2 text-sm">
                         <input :id="`etq-var-${v.id}`" v-model="variantes" :value="v.id" type="checkbox">
-                        <span>{{ v.nombre }} · <span class="font-mono text-xs">{{ v.codigo }}</span></span>
-                    </label>
+                        <label :for="`etq-var-${v.id}`" class="flex-1">{{ v.nombre }} · <span class="font-mono text-xs">{{ v.codigo }}</span></label>
+                        <input v-if="variantes.includes(v.id)" :id="`etq-cant-v-${v.id}`" :value="cuantas(`v:${v.id}`)" type="number" min="1" max="500"
+                               class="input w-20 py-1" :aria-label="`Cuántas de ${v.nombre}`" @input="poner(`v:${v.id}`, $event.target.value)">
+                    </div>
                 </div>
 
                 <div v-if="opciones.colores.length" class="space-y-1">
@@ -102,22 +134,12 @@ const todas = (lista, destino) => { destino.value = destino.value.length === lis
                         </button>
                     </div>
                     <p class="text-xs text-surface-500">Llevan el color escrito y el mismo código de la referencia: este producto no tiene variantes.</p>
-                    <label v-for="c in opciones.colores" :key="c" class="flex items-center gap-2 text-sm">
+                    <div v-for="c in opciones.colores" :key="c" class="flex items-center gap-2 text-sm">
                         <input :id="`etq-color-${c}`" v-model="colores" :value="c" type="checkbox">
-                        <span>{{ c }}</span>
-                    </label>
-                </div>
-
-                <div class="grid grid-cols-2 gap-3">
-                    <label class="text-xs font-semibold text-surface-600">Copias de cada una
-                        <input id="etq-copias" v-model.number="copias" type="number" min="1" max="100" class="input w-full mt-1">
-                    </label>
-                    <label class="text-xs font-semibold text-surface-600">Formato
-                        <select id="etq-formato" v-model="formato" class="input w-full mt-1">
-                            <option value="carta">Hoja carta</option>
-                            <option value="rollo">Rollo térmica 100 × 25 mm</option>
-                        </select>
-                    </label>
+                        <label :for="`etq-color-${c}`" class="flex-1">{{ c }}</label>
+                        <input v-if="colores.includes(c)" :id="`etq-cant-c-${c}`" :value="cuantas(`c:${c}`)" type="number" min="1" max="500"
+                               class="input w-20 py-1" :aria-label="`Cuántas de ${c}`" @input="poner(`c:${c}`, $event.target.value)">
+                    </div>
                 </div>
 
                 <div class="flex items-center justify-between gap-3 pt-1">

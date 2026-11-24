@@ -97,7 +97,7 @@ class EtiquetasMasivasController extends Controller
     /**
      * Las etiquetas que se escogieron en el selector: el producto original (su
      * referencia), las variantes marcadas, los colores de Dropi marcados, con
-     * N copias de cada una, en hoja carta o en el rollo de la térmica.
+     * N copias de cada una, en el rollo de la térmica.
      */
     private function seleccionadas(Request $request, $productos, CatalogoDropi $catalogo): Response
     {
@@ -105,35 +105,42 @@ class EtiquetasMasivasController extends Controller
             'original' => ['nullable', 'boolean'],
             'variantes' => ['nullable', 'array'], 'variantes.*' => ['integer'],
             'colores' => ['nullable', 'array'], 'colores.*' => ['string', 'max:120'],
-            'copias' => ['nullable', 'integer', 'min:1', 'max:100'],
-            'formato' => ['nullable', 'in:carta,rollo'],
+            'copias' => ['nullable', 'integer', 'min:1', 'max:500'],
+            // Cuántas de cada una (reunión con la señora Lahida, 24-nov-2026: «llegan
+            //   muchos rojos y pocos amarillos»): `cant[original]`, `cant[v:ID]`,
+            //   `cant[c:COLOR]`. Lo que no venga usa `copias`.
+            'cant' => ['nullable', 'array'], 'cant.*' => ['integer', 'min:1', 'max:500'],
         ]);
         $variantes = array_map('intval', $datos['variantes'] ?? []);
         $colores = collect($datos['colores'] ?? [])->map(fn ($c) => mb_strtoupper(trim($c)))->filter()->all();
         $nombres = $colores ? self::nombresDeDropi($catalogo) : [];
+        $copias = (int) ($datos['copias'] ?? 1);
+        $cant = collect($datos['cant'] ?? [])->mapWithKeys(fn ($n, $k) => [mb_strtoupper((string) $k) => (int) $n]);
+        $cuantas = fn (string $clave) => $cant->get(mb_strtoupper($clave), $copias);
 
         $etiquetas = [];
         foreach ($productos as $p) {
             if ($request->boolean('original')) {
-                $etiquetas[] = self::deAgregado($p, null);
+                $etiquetas[] = [self::deAgregado($p, null), $cuantas('original')];
             }
             foreach ($p->variantes->whereIn('id', $variantes) as $v) {
-                $etiquetas[] = self::deVariante($v->setRelation('producto', $p));
+                $etiquetas[] = [self::deVariante($v->setRelation('producto', $p)), $cuantas("v:{$v->id}")];
             }
             if ($colores && $p->variantes->isEmpty()) {
                 foreach (self::coloresDeDropi($p, $nombres) as $color) {
                     if (in_array(mb_strtoupper($color), $colores, true)) {
-                        $etiquetas[] = self::deAgregado($p, $color);
+                        $etiquetas[] = [self::deAgregado($p, $color), $cuantas("c:{$color}")];
                     }
                 }
             }
         }
         abort_if($etiquetas === [], 422, 'Escoge al menos una etiqueta para imprimir.');
 
-        $copias = (int) ($datos['copias'] ?? 1);
-        $etiquetas = collect($etiquetas)->flatMap(fn ($e) => array_fill(0, $copias, $e))->values()->all();
+        $etiquetas = collect($etiquetas)->flatMap(fn ($e) => array_fill(0, $e[1], $e[0]))->values()->all();
 
-        return $this->lote($etiquetas, 'etiquetas', soloBarras: ($datos['formato'] ?? 'carta') === 'rollo');
+        // Siempre en el rollo de la térmica (24-nov-2026: «quitar lo de formato
+        //   de hoja»): es lo que la bodega pega en el producto.
+        return $this->lote($etiquetas, 'etiquetas', soloBarras: true);
     }
 
     /** Nombre de cada variación de Dropi (llave => «ROJO»), de la última lectura, sin llamar a Dropi. */
