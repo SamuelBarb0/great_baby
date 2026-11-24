@@ -205,6 +205,14 @@ it('no esconde en el menú pantallas que la persona sí puede abrir', function (
                 continue;
             }
 
+            // «Mi espacio» sin ficha de empleado responde 200 A PROPÓSITO: es la
+            // pantalla que explica a quién pedirle la ficha (MiEspacioSinFicha),
+            // no la del portal. El menú no la ofrece porque no hay nada que ver.
+            if ($href === '/app/mi-espacio'
+                && ! \App\Modules\Rrhh\Models\Empleado::where('user_id', $u->id)->exists()) {
+                continue;
+            }
+
             if ($this->actingAs($u)->get($href)->getStatusCode() === 200) {
                 $ocultos[] = "{$rol} puede abrir {$href} y el menú no se lo muestra";
             }

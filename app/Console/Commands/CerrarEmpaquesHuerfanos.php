@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Modules\Dropi\Enums\EstadoEmpaque;
 use App\Modules\Dropi\Enums\EstadoPedidoDropi;
 use App\Modules\Dropi\Models\DropiPedido;
 use App\Modules\Dropi\Models\EmpaqueRegistro;
@@ -10,7 +11,9 @@ use Illuminate\Support\Facades\DB;
 
 /**
  * Cierra registros de empaque en_curso abandonados (browser cerrado, operario cambió de turno).
- * Los marca como 'abandonado' y devuelve el pedido a Pending si no completó.
+ * Los marca como «anulado» (no existe un estado «abandonado»: escribirlo reventaba
+ * el comando cada 15 minutos, 23-nov-2026) y devuelve el pedido a Pending si no completó.
+ * La nota del registro dice que fue por inactividad.
  * Programado cada 15 min en console/kernel.
  */
 class CerrarEmpaquesHuerfanos extends Command
@@ -39,7 +42,7 @@ class CerrarEmpaquesHuerfanos extends Command
         DB::transaction(function () use ($huerfanos, &$cerrados, &$pedidosReset) {
             foreach ($huerfanos as $r) {
                 $r->update([
-                    'estado' => 'abandonado',
+                    'estado' => EstadoEmpaque::Anulado,
                     'fin_at' => now(),
                     'notas' => trim(($r->notas ?? '') . "\n[auto] cerrado por inactividad > {$this->option('minutos')} min"),
                 ]);
@@ -50,8 +53,17 @@ class CerrarEmpaquesHuerfanos extends Command
                 if ($pedido && $pedido->estado === EstadoPedidoDropi::Alistando) {
                     $totalPickeado = $pedido->items()->where('cantidad_pickeada', '>', 0)->count();
                     if ($totalPickeado === 0) {
-                        $pedido->update(['estado' => EstadoPedidoDropi::Pending]);
-                        $pedidosReset++;
+                        // `estado` está en $guarded: el `update()` de antes no
+                        // hacía nada y el pedido se quedaba en «Alistando»
+                        // para siempre. Se cambia como en LiberarLocksAlistador.
+                        try {
+                            $pedido->transicionar(EstadoPedidoDropi::Pending, 'sistema', null, ['origen' => 'empaque_huerfano', 'empaque_id' => $r->id]);
+                            $pedidosReset++;
+                        } catch (\Throwable $e) {
+                            \Illuminate\Support\Facades\Log::warning('dropi.empaque_huerfano.revert_bloqueado', [
+                                'empaque_id' => $r->id, 'pedido_id' => $r->pedido_id, 'msg' => $e->getMessage(),
+                            ]);
+                        }
                     }
                 }
             }
