@@ -149,6 +149,8 @@ Schedule::command('dropi:web-wallet-sync')->everyThirtyMinutes()->withoutOverlap
 // Productos que bodega crea directo en Dropi y llegan en pedidos sin existir en
 //   el ERP: se crean y vinculan solos (CrearProductosNuevosDropi, 23-nov-2026).
 Schedule::command('dropi:crear-productos-nuevos')->everyFiveMinutes()->withoutOverlapping(10)->when($dropiWebSync);
+// Manifiestos de entrega a las transportadoras con su PDF y Excel (24-nov-2026).
+Schedule::command('dropi:manifiestos')->everyFifteenMinutes()->withoutOverlapping(14)->when($dropiWebSync);
 
 /*
  * Compras · lo que se atrasa en el camino. Son de main (7-nov).

@@ -544,6 +544,35 @@ class DropiWebClient implements DropiClientInterface
         return $this->auth->requestLegacy();
     }
 
+    /**
+     * «Logistic Management → Salidas»: los manifiestos que se arman al entregar
+     * paquetes a la transportadora (con Ecom Scanner), los más nuevos primero.
+     * Verificado el 24-nov-2026 (ver memoria dropi-logistic-api).
+     *
+     * @return array{objetos: list<array>, total: int}
+     */
+    public function salidas(int $inicio = 0, int $tamano = 50): array
+    {
+        $body = $this->legacyJson($this->legacy()->get('/logisticManagement/index', [
+            'type_logistic_management' => 'Salidas', 'startData' => $inicio, 'pageSize' => $tamano,
+        ]), 'leer las salidas');
+
+        return ['objetos' => array_values($body['objects'] ?? []), 'total' => (int) ($body['count'] ?? 0)];
+    }
+
+    /** El PDF o el Excel del manifiesto de una salida, tal cual lo genera Dropi. */
+    public function manifiestoArchivo(int $salidaId, string $tipo): string
+    {
+        abort_unless(in_array($tipo, ['pdf', 'excel'], true), 422);
+        $r = $this->legacy()->timeout(60)->get("/logisticManagement/manifiest/{$tipo}/{$salidaId}", ['typeLogisticManagement' => 'Salidas']);
+        $esperado = $tipo === 'pdf' ? '%PDF' : "PK\x03\x04";
+        if (! $r->successful() || ! str_starts_with($r->body(), $esperado)) {
+            throw new \RuntimeException("Dropi no entregó el {$tipo} del manifiesto {$salidaId} (HTTP {$r->status()}).");
+        }
+
+        return $r->body();
+    }
+
     /** Respuesta del API clásico: {isSuccess, message, objects}. Lanza con el mensaje de Dropi. */
     protected function legacyJson(\Illuminate\Http\Client\Response $resp, string $que): array
     {
