@@ -243,7 +243,7 @@ it('la estación de empaque del panel deja confirmar sin foto cuando la regla es
 });
 
 it('el panel enlaza a Dropi para el escaneo de la entrega a la transportadora', function () {
-    $item = fn () => collect(Filament::getPanel('admin')->getNavigationItems())->first(fn ($i) => $i->getLabel() === 'Escaneo Dropi');
+    $item = fn () => collect(Filament::getPanel('admin')->getNavigationItems())->first(fn ($i) => $i->getLabel() === 'Transportadora');
 
     $this->actingAs($this->aracely);
     expect($item())->not->toBeNull()
@@ -272,7 +272,7 @@ it('el escáner de guías por cámara sale del menú y del buscador: la entrega 
 
     $menu = collect(Filament::getPanel('admin')->getNavigationItems())->map(fn ($i) => $i->getLabel());
     expect($menu)->not->toContain('Escáner cámara')
-        ->and($menu)->toContain('Escaneo Dropi')
+        ->and($menu)->toContain('Transportadora')
         ->and(json_encode($this->getJson('/app/buscar?q=camara')->json()))->not->toContain('escaner-camara');
 });
 

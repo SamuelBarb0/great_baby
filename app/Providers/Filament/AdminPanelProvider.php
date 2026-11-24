@@ -93,7 +93,9 @@ class AdminPanelProvider extends PanelProvider
                 // La entrega a la transportadora: todas las guías se escanean
                 //   en Dropi (reunión del 19-nov-2026). Solo abre Dropi, en
                 //   pestaña aparte con la sesión de Dropi de la persona.
-                NavigationItem::make('Escaneo Dropi')
+                //   Se llamaba «Escaneo Dropi»; desde que la guía sale al
+                //   confirmar el empaque es «Transportadora» (24-nov-2026).
+                NavigationItem::make('Transportadora')
                     ->url(self::DROPI_ESCANEO, shouldOpenInNewTab: true)
                     ->icon('heroicon-o-truck')
                     ->group('Operación')

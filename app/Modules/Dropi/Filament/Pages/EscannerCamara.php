@@ -31,7 +31,7 @@ class EscannerCamara extends Page
 
     /**
      * Fuera del menú desde el 20-nov-2026: la entrega a la transportadora se
-     * escanea en Dropi («Escaneo Dropi»), y la lectura por cámara se pasó a la
+     * escanea en Dropi («Transportadora», antes «Escaneo Dropi»), y la lectura por cámara se pasó a la
      * Estación de Empaque. La pantalla sigue en su dirección por si hace falta.
      */
     protected static bool $shouldRegisterNavigation = false;
