@@ -53,7 +53,9 @@ class VistaAlistador extends Page
 
     public function mount(): void
     {
-        $corte = DropiCorte::query()->orderByDesc('fecha')->orderByDesc('numero')->first();
+        // El corte que se está empacando (cerrado, en despacho) antes que el
+        //   nuevo que abrió «Cerrar corte» (24-nov-2026).
+        $corte = DropiCorte::enTrabajo();
         $this->corteId = $corte?->id;
     }
 

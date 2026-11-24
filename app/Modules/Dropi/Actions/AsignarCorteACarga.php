@@ -65,9 +65,12 @@ class AsignarCorteACarga
         return $corte;
     }
 
+    /**
+     * ¿Ya no recibe pedidos? Finalizado o con la entrada cerrada («Cerrar
+     * corte», en despacho): en los dos casos el pedido nuevo va a otro corte.
+     */
     private function esCerrado(DropiCorte $corte): bool
     {
-        return ($corte->estado instanceof EstadoCorte && $corte->estado === EstadoCorte::Cerrado)
-            || (is_string($corte->estado) && $corte->estado === EstadoCorte::Cerrado->value);
+        return ! EstadoCorte::de($corte->estado)?->recibePedidos();
     }
 }

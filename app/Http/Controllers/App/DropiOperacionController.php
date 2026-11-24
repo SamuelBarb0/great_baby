@@ -67,7 +67,9 @@ class DropiOperacionController extends Controller implements HasMiddleware
         $modo = (string) $request->input('modo', 'recoleccion');
         if (! in_array($modo, ['recoleccion', 'empaque'], true)) $modo = 'recoleccion';
 
-        $corte = DropiCorte::orderByDesc('fecha')->orderByDesc('numero')->first();
+        // El corte que se está empacando (cerrado, en despacho) antes que el
+        //   nuevo que abrió «Cerrar corte» (24-nov-2026).
+        $corte = DropiCorte::enTrabajo();
         $corteId = $corte?->id;
 
         $recoleccion = [];

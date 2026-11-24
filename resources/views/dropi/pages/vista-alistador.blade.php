@@ -17,7 +17,7 @@
                     <div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.1em;color:#9ca3af;">Corte activo</div>
                     <div style="font-size:1.75rem;font-weight:700;margin-top:.25rem;">{{ $corte->etiqueta() }}</div>
                     <div style="margin-top:.5rem;">
-                        <x-filament::badge color="warning">{{ $corte->estado->label() }}</x-filament::badge>
+                        <x-filament::badge :color="$corte->estado->color()">{{ $corte->estado->label() }}</x-filament::badge>
                     </div>
                 </div>
                 <div class="alistador-cifras" style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1rem;text-align:center;">

@@ -78,36 +78,53 @@ class DropiCorteResource extends Resource
                 TextColumn::make('numero')->label('#')->badge(),
                 BadgeColumn::make('estado')
                     ->formatStateUsing(fn ($state) => $state instanceof EstadoCorte ? $state->label() : $state)
-                    ->color(fn ($state) => match ($state) {
-                        EstadoCorte::Abierto => 'gray',
-                        // Estados legacy removidos (P6): alistando/empacando/despachado.
-                        EstadoCorte::Cerrado => 'success',
-                        default => 'gray',
-                    }),
+                    ->color(fn ($state) => $state instanceof EstadoCorte ? $state->color() : 'gray'),
                 TextColumn::make('pedidos_totales')->label('Total')->alignEnd(),
                 TextColumn::make('pedidos_pendientes_inv')->label('Pend. inv.')->alignEnd()->color('danger'),
                 TextColumn::make('pedidos_despachados')->label('Despachados')->alignEnd()->color('success'),
-                TextColumn::make('cerrado_at')->label('Cerrado')->dateTime('Y-m-d H:i')->toggleable(),
+                TextColumn::make('cortado_at')->label('Cerrado')->dateTime('Y-m-d H:i')->toggleable(),
+                TextColumn::make('cerrado_at')->label('Finalizado')->dateTime('Y-m-d H:i')->toggleable(),
             ])
             ->defaultSort('fecha', 'desc')
             ->recordActions([
+                // Primero se cierra la entrada y se empaca; al final se congela
+                //   (24-nov-2026: «desde cerrar corte poder hacer todo el proceso
+                //   de empacado»). Ver EstadoCorte.
+                Action::make('cerrar_entrada')
+                    ->label('Cerrar corte')
+                    ->icon('heroicon-o-scissors')
+                    ->color('warning')
+                    ->requiresConfirmation()
+                    ->modalHeading(fn (DropiCorte $record) => 'Cerrar el corte '.$record->etiqueta())
+                    ->modalDescription('Desde ahora este corte no recibe pedidos: los nuevos de Dropi van al siguiente corte. Sus pedidos se siguen recolectando, empacando y despachando. Cuando todo esté empacado, «Finalizar corte» lo congela con el manifiesto.')
+                    ->modalSubmitActionLabel('Cerrar corte')
+                    ->visible(fn (DropiCorte $record) => EstadoCorte::de($record->estado) === EstadoCorte::Abierto)
+                    ->action(function (DropiCorte $record) {
+                        try {
+                            \App\Modules\Dropi\Actions\CortarEntradaCorte::run($record->id, auth()->id());
+                            Notification::make()->title('Corte cerrado: ya no recibe pedidos')
+                                ->body('Sigan recolectando y empacando. Los pedidos nuevos entran al siguiente corte.')->success()->send();
+                        } catch (\Throwable $e) {
+                            Notification::make()->title('No se pudo cerrar')->body($e->getMessage())->danger()->send();
+                        }
+                    }),
                 Action::make('cerrar_corte')
-                    ->label('Cerrar corte + Manifiesto')
+                    ->label('Finalizar corte + Manifiesto')
                     ->icon('heroicon-o-lock-closed')
                     ->color('success')
                     ->requiresConfirmation()
-                    ->modalDescription('Congela el corte, genera manifiesto PDF con QR y hash SHA-256, y produce remisiones 1:1 listas para ARI. Al cerrar no se puede editar.')
+                    ->modalDescription('Congela el corte, genera manifiesto PDF con QR y hash SHA-256, y produce remisiones 1:1 listas para ARI. Pide que no queden pedidos sin empacar. Al finalizar no se puede editar.')
                     ->visible(fn (DropiCorte $record) => $record->estado !== EstadoCorte::Cerrado)
                     ->action(function (DropiCorte $record) {
                         try {
                             $r = CerrarCorte::run($record->id, auth()->id());
                             Notification::make()
-                                ->title('✅ Corte cerrado y manifiesto generado')
+                                ->title('✅ Corte finalizado y manifiesto generado')
                                 ->body("Hash: " . substr($r['hash'], 0, 12) . "… · Remisiones: {$r['remisiones']} · Descarga el PDF desde el botón 'Manifiesto PDF' del corte.")
                                 ->success()
                                 ->send();
                         } catch (\Throwable $e) {
-                            Notification::make()->title('No se pudo cerrar')->body($e->getMessage())->danger()->send();
+                            Notification::make()->title('No se pudo finalizar')->body($e->getMessage())->danger()->send();
                         }
                     }),
                 Action::make('descargar_manifiesto')

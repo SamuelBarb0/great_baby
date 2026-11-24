@@ -22,7 +22,8 @@ class ResumenCorteActivoWidget extends StatsOverviewWidget
 
     protected function getStats(): array
     {
-        $corte = DropiCorte::query()->orderByDesc('fecha')->orderByDesc('numero')->first();
+        // El que se está empacando (cerrado, en despacho) antes que el nuevo.
+        $corte = DropiCorte::enTrabajo();
         $pedidosAcumulados = DropiPedido::query()->count();
         $porConciliar = DropiPedido::query()
             ->whereIn('estado', [EstadoPedidoDropi::Despachado, EstadoPedidoDropi::Entregado])
@@ -38,11 +39,7 @@ class ResumenCorteActivoWidget extends StatsOverviewWidget
         return [
             Stat::make('Corte activo', $corte->etiqueta())
                 ->description(ucfirst($corte->estado->label()))
-                ->color(match ($corte->estado->value) {
-                    'cerrado' => 'success',
-                    'despachado' => 'info',
-                    default => 'warning',
-                })
+                ->color($corte->estado->color())
                 ->icon('heroicon-o-clipboard-document-list')
                 ->url(DropiCorteResource::getUrl('edit', ['record' => $corte->id])),
 
