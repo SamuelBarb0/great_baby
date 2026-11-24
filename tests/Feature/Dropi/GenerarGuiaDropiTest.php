@@ -291,3 +291,68 @@ describe('observaciones del recorrido del 23-nov-2026', function () {
         expect($r['tipo'])->toBe('variante_marcada')->and($r['mensaje'])->toContain('ROJO')->not->toContain('surtidos');
     });
 });
+
+describe('en la Estación de Empaque del panel (/admin)', function () {
+    beforeEach(function () {
+        $this->seed(\Database\Seeders\PermisosSeeder::class);
+        \Filament\Facades\Filament::setCurrentPanel('admin');
+        $this->aracely = User::factory()->create(['name' => 'Aracely']);
+        $this->aracely->assignRole(Role::firstOrCreate(['name' => 'Aracely', 'guard_name' => 'web']));
+        $this->aracely->givePermissionTo(\App\Auth\Permisos::permiso('estacion_empaque'));
+        Reglas::set('empaque.foto_obligatoria', false);
+    });
+
+    it('confirmar el empaque pide la guía y el sticker queda en «Mis stickers de hoy»', function () {
+        Reglas::set('dropi.guia_al_empacar', true);
+        $p = ggdListoParaConfirmar($this);
+        ggdDropiDaLaGuia();
+        $this->actingAs($this->aracely);
+
+        $pagina = \Livewire\Livewire::test(\App\Modules\Dropi\Filament\Pages\EstacionEmpaque::class)
+            ->assertSet('pedidoActivoId', $p->id)
+            ->call('confirmarYSiguiente')
+            ->assertNotified();
+
+        expect($p->fresh()->estado)->toBe(EstadoPedidoDropi::Empacado)
+            ->and($p->fresh()->guia)->toBe('240099990001');
+
+        $stickers = $pagina->instance()->misStickers();
+        expect($stickers)->toHaveCount(1)
+            ->and($stickers[0]['guia'])->toBe('240099990001')
+            ->and($stickers[0]['sticker_url'])->toBe('https://stickers.test/' . GGD_RUTA);
+        $pagina->assertSee('Mis stickers de hoy (1)')->assertSee('Imprimir sticker');
+    });
+
+    it('si Dropi rechaza la guía, el empaque queda y «↻ Pedir guía» la consigue después', function () {
+        Reglas::set('dropi.guia_al_empacar', true);
+        $p = ggdListoParaConfirmar($this);
+        Http::fake(['legacy.test/*' => Http::response(['isSuccess' => false, 'message' => 'La orden no está confirmada'], 400)]);
+        $this->actingAs($this->aracely);
+
+        $pagina = \Livewire\Livewire::test(\App\Modules\Dropi\Filament\Pages\EstacionEmpaque::class)
+            ->call('confirmarYSiguiente');
+
+        expect($p->fresh()->estado)->toBe(EstadoPedidoDropi::Empacado)
+            ->and($p->fresh()->tieneGuiaReal())->toBeFalse();
+        $pagina->assertSee('Mis stickers de hoy (1)')->assertSee('Pedir guía');
+
+        Http::swap(new \Illuminate\Http\Client\Factory);
+        ggdDropiDaLaGuia();
+        $pagina->call('pedirGuia', $p->id)->assertNotified();
+
+        expect($p->fresh()->guia)->toBe('240099990001');
+        $pagina->assertSee('Imprimir sticker');
+    });
+
+    it('con la regla apagada y sin guía, confirmar no le pide nada a Dropi', function () {
+        Reglas::set('dropi.guia_al_empacar', false);
+        $p = ggdListoParaConfirmar($this);
+        Http::fake();
+        $this->actingAs($this->aracely);
+
+        \Livewire\Livewire::test(\App\Modules\Dropi\Filament\Pages\EstacionEmpaque::class)->call('confirmarYSiguiente');
+
+        expect($p->fresh()->estado)->toBe(EstadoPedidoDropi::Empacado);
+        Http::assertNothingSent();
+    });
+});

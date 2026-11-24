@@ -40,6 +40,38 @@ class GenerarGuiaDropi
     }
 
     /**
+     * Al confirmar el empaque, en cualquiera de las dos estaciones (/app y la
+     * del panel): la guía si la regla está prendida, o el sticker si el pedido
+     * ya la tenía. Un fallo de Dropi no tumba el empaque: queda para reintentar
+     * en «Mis stickers de hoy».
+     *
+     * @return array{texto: string, sticker_url: ?string, error: bool}|null  null = no aplica
+     */
+    public static function alEmpacar(int $pedidoId, int $userId): ?array
+    {
+        $pedido = DropiPedido::find($pedidoId);
+        if (! $pedido?->dropi_orden_id || (! $pedido->tieneGuiaReal() && ! self::activa())) {
+            return null;
+        }
+
+        try {
+            $g = self::make()->handle($pedido, $userId);
+        } catch (\Throwable $e) {
+            Log::warning('dropi.guia.al_empacar_fallo', ['pedido_id' => $pedidoId, 'msg' => $e->getMessage()]);
+
+            return ['texto' => ' ⚠ Sin guía: Dropi respondió «'.mb_substr($e->getMessage(), 0, 160).'». Reintenta abajo.', 'sticker_url' => null, 'error' => true];
+        }
+
+        return [
+            'texto' => $g['sticker_url']
+                ? " 🏷 Guía {$g['guia']}: imprime el sticker."
+                : " 🏷 Guía {$g['guia']}: el sticker aún no está, reintenta abajo.",
+            'sticker_url' => $g['sticker_url'],
+            'error' => false,
+        ];
+    }
+
+    /**
      * @return array{guia: ?string, transportadora: ?string, sticker_url: ?string, generada: bool}
      */
     public function handle(DropiPedido $pedido, ?int $userId = null): array

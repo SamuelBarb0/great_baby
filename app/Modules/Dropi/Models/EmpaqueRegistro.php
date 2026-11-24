@@ -39,4 +39,43 @@ class EmpaqueRegistro extends Model
     {
         return $this->belongsTo(User::class, 'operario_id');
     }
+
+    /**
+     * «Mis stickers de hoy» de las dos estaciones: lo que este operario empacó
+     * hoy, con la guía de Dropi y su sticker, para imprimirlo o reintentar la
+     * guía aunque se haya recargado la página (recorrido del 23-nov-2026).
+     *
+     * @return list<array{pedido_id:int, orden:?string, guia:?string, transportadora:?string, ciudad:?string, hora:?string, sticker_url:?string}>
+     */
+    public static function stickersDeHoy(int $operarioId): array
+    {
+        $registros = static::query()
+            ->where('operario_id', $operarioId)
+            ->where('estado', EstadoEmpaque::Completado->value)
+            ->where('fin_at', '>=', today())
+            ->orderByDesc('fin_at')
+            ->limit(30)
+            ->get(['pedido_id', 'fin_at']);
+
+        $pedidos = DropiPedido::whereIn('id', $registros->pluck('pedido_id'))
+            ->whereNotNull('dropi_orden_id')
+            ->get(['id', 'dropi_orden_id', 'guia', 'sticker_path', 'transportadora', 'cliente_ciudad'])
+            ->keyBy('id');
+
+        return $registros->unique('pedido_id')
+            ->filter(fn ($r) => $pedidos->has($r->pedido_id))
+            ->map(function ($r) use ($pedidos) {
+                $p = $pedidos[$r->pedido_id];
+
+                return [
+                    'pedido_id' => $p->id,
+                    'orden' => $p->dropi_orden_id,
+                    'guia' => $p->tieneGuiaReal() ? $p->guia : null,
+                    'transportadora' => $p->transportadora,
+                    'ciudad' => $p->cliente_ciudad,
+                    'hora' => $r->fin_at?->format('g:i a'),
+                    'sticker_url' => $p->stickerUrl(),
+                ];
+            })->values()->all();
+    }
 }

@@ -4,6 +4,7 @@ namespace App\Modules\Dropi\Filament\Pages;
 
 use App\Auth\Permisos;
 use App\Modules\Dropi\Actions\ConfirmarEmpaqueYSiguiente;
+use App\Modules\Dropi\Actions\GenerarGuiaDropi;
 use App\Modules\Dropi\Actions\ProcesarEscaneoEmpaque;
 use App\Modules\Dropi\Enums\EstadoPedidoDropi;
 use App\Modules\Dropi\Models\DropiPedido;
@@ -112,10 +113,17 @@ class EstacionEmpaque extends Page
         }
 
         try {
-            $res = ConfirmarEmpaqueYSiguiente::run($this->pedidoActivoId, auth()->id(), $gps);
-            Notification::make()->title($res['msg'])->success()->send();
+            $pedidoId = $this->pedidoActivoId;
+            $res = ConfirmarEmpaqueYSiguiente::run($pedidoId, auth()->id(), $gps);
             $this->pedidoActivoId = null;
             $this->ultimoResultado = null;
+
+            // La guía de Dropi y su sticker, como en la estación de /app (24-nov-2026:
+            //   «tiene que ser aquí en admin/estacion-empaque»). Queda en «Mis
+            //   stickers de hoy» para imprimirla o reintentarla.
+            $guia = GenerarGuiaDropi::alEmpacar($pedidoId, auth()->id());
+            $n = Notification::make()->title($res['msg'])->body(trim((string) ($guia['texto'] ?? '')) ?: null);
+            ($guia['error'] ?? false) ? $n->warning()->persistent()->send() : $n->success()->send();
 
             // Anunciar siguiente pedido en cola si existe
             $siguiente = $this->proximosPedidos(1)[0] ?? null;
@@ -123,10 +131,51 @@ class EstacionEmpaque extends Page
                 ? " Siguiente: {$siguiente['guia']}, {$siguiente['ciudad']}."
                 : '';
 
-            $this->dispatch('empaque-scan', sonido: 'ok', mensaje: '✅ ' . $res['msg'] . $sig);
+            $this->dispatch('empaque-scan', sonido: ($guia['error'] ?? false) ? 'warn' : 'ok', mensaje: '✅ ' . $res['msg'] . ($guia['texto'] ?? '') . $sig);
         } catch (\Throwable $e) {
             Notification::make()->title('No se pudo confirmar')->body($e->getMessage())->danger()->send();
         }
+    }
+
+    /** «🏷 Mis stickers de hoy»: lo que este operario empacó hoy, con su guía y sticker. */
+    public function misStickers(): array
+    {
+        return EmpaqueRegistro::stickersDeHoy((int) auth()->id());
+    }
+
+    /**
+     * «↻ Pedir guía» / «↻ Traer sticker» de un pedido ya empacado. Sólo quien lo
+     * empacó, o Aracely (igual que la estación de /app).
+     */
+    public function pedirGuia(int $pedidoId): void
+    {
+        $u = auth()->user();
+        $pedido = DropiPedido::find($pedidoId);
+        $loEmpaco = EmpaqueRegistro::where('pedido_id', $pedidoId)
+            ->where('estado', 'completado')->where('operario_id', $u->id)->exists();
+        if (! $pedido || ! ($loEmpaco || $u->esAracely())) {
+            Notification::make()->title('Solo quien empacó el pedido (o Aracely) puede pedir su guía.')->danger()->send();
+
+            return;
+        }
+        if (! $pedido->tieneGuiaReal() && ! GenerarGuiaDropi::activa()) {
+            Notification::make()->title('Este pedido no tiene guía')
+                ->body('Generar la guía desde el ERP está apagado en Reglas: se genera en Dropi.')->warning()->send();
+
+            return;
+        }
+
+        try {
+            $g = GenerarGuiaDropi::make()->handle($pedido, $u->id);
+        } catch (\Throwable $e) {
+            Notification::make()->title('Dropi no dio la guía')->body($e->getMessage())->danger()->persistent()->send();
+
+            return;
+        }
+
+        $g['sticker_url']
+            ? Notification::make()->title("Guía {$g['guia']}: sticker listo para imprimir.")->success()->send()
+            : Notification::make()->title("Guía {$g['guia']}: Dropi aún no publica el sticker, reintenta en un momento.")->warning()->send();
     }
 
     /**

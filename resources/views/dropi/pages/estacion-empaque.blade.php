@@ -189,6 +189,39 @@
         </div>
     @endif
 
+    {{-- Lo empacado hoy por este operario, con su guía de Dropi: el sticker se
+         imprime desde aquí aunque la página se haya recargado (24-nov-2026). --}}
+    @php $stickers = $this->misStickers(); @endphp
+    @if(!empty($stickers))
+        <div style="margin-top:1rem;padding:1rem 1.25rem;background:#111827;border:1px solid rgba(16,185,129,.35);border-radius:1rem;">
+            <div style="font-size:.75rem;color:#10b981;text-transform:uppercase;letter-spacing:2px;font-weight:700;margin-bottom:.6rem;">
+                🏷 Mis stickers de hoy ({{ count($stickers) }})
+            </div>
+            @foreach($stickers as $s)
+                <div style="display:flex;flex-wrap:wrap;align-items:center;gap:.5rem 1rem;padding:.55rem 0;{{ $loop->last ? '' : 'border-bottom:1px solid rgba(255,255,255,.08);' }}">
+                    <div style="flex:1;min-width:0;">
+                        <div style="font-family:ui-monospace,monospace;font-weight:700;color:#e5e7eb;font-size:.9rem;">
+                            {{ $s['guia'] ?: 'Sin guía' }} <span style="color:#9ca3af;font-weight:400;">· orden {{ $s['orden'] }}</span>
+                        </div>
+                        <div style="font-size:.75rem;color:#9ca3af;">{{ $s['transportadora'] }} · {{ $s['ciudad'] }} · {{ $s['hora'] }}</div>
+                    </div>
+                    @if($s['sticker_url'])
+                        <a href="{{ $s['sticker_url'] }}" target="_blank" rel="noopener"
+                           style="padding:.45rem .9rem;background:#059669;color:white;border-radius:.5rem;font-weight:700;font-size:.85rem;text-decoration:none;">
+                            🖨 Imprimir sticker
+                        </a>
+                    @else
+                        <button type="button" wire:click="pedirGuia({{ $s['pedido_id'] }})" wire:loading.attr="disabled" wire:target="pedirGuia"
+                                style="padding:.45rem .9rem;background:#d97706;color:white;border:0;border-radius:.5rem;font-weight:700;font-size:.85rem;cursor:pointer;">
+                            <span wire:loading.remove wire:target="pedirGuia">{{ $s['guia'] ? '↻ Traer sticker' : '↻ Pedir guía' }}</span>
+                            <span wire:loading wire:target="pedirGuia">Pidiendo a Dropi…</span>
+                        </button>
+                    @endif
+                </div>
+            @endforeach
+        </div>
+    @endif
+
     {{-- Cola sugerida (próximos pedidos por empacar) --}}
     @php $cola = $this->proximosPedidos(6); @endphp
     @if(!empty($cola))

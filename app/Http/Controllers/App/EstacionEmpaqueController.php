@@ -100,34 +100,8 @@ class EstacionEmpaqueController extends Controller implements HasMiddleware
      */
     private function misStickers(int $operarioId): array
     {
-        $registros = EmpaqueRegistro::query()
-            ->where('operario_id', $operarioId)
-            ->where('estado', 'completado')
-            ->where('fin_at', '>=', today())
-            ->orderByDesc('fin_at')
-            ->limit(30)
-            ->get(['pedido_id', 'fin_at']);
-
-        $pedidos = DropiPedido::whereIn('id', $registros->pluck('pedido_id'))
-            ->whereNotNull('dropi_orden_id')
-            ->get(['id', 'dropi_orden_id', 'guia', 'sticker_path', 'transportadora', 'cliente_ciudad'])
-            ->keyBy('id');
-
-        return $registros->unique('pedido_id')
-            ->filter(fn ($r) => $pedidos->has($r->pedido_id))
-            ->map(function ($r) use ($pedidos) {
-                $p = $pedidos[$r->pedido_id];
-
-                return [
-                    'pedido_id' => $p->id,
-                    'orden' => $p->dropi_orden_id,
-                    'guia' => $p->tieneGuiaReal() ? $p->guia : null,
-                    'transportadora' => $p->transportadora,
-                    'ciudad' => $p->cliente_ciudad,
-                    'hora' => $r->fin_at?->format('g:i a'),
-                    'sticker_url' => $p->stickerUrl(),
-                ];
-            })->values()->all();
+        // La misma lista que la estación del panel.
+        return EmpaqueRegistro::stickersDeHoy($operarioId);
     }
 
     public function escanear(Request $request): RedirectResponse
@@ -351,27 +325,17 @@ class EstacionEmpaqueController extends Controller implements HasMiddleware
      */
     private function guiaAlEmpacar(int $pedidoId, int $userId): ?array
     {
-        $pedido = DropiPedido::find($pedidoId);
-        if (! $pedido?->dropi_orden_id || (! $pedido->tieneGuiaReal() && ! GenerarGuiaDropi::activa())) {
+        // La misma lógica que la estación del panel (GenerarGuiaDropi::alEmpacar).
+        $g = GenerarGuiaDropi::alEmpacar($pedidoId, $userId);
+        if ($g === null) {
             return null;
         }
 
-        try {
-            $g = GenerarGuiaDropi::make()->handle($pedido, $userId);
-        } catch (\Throwable $e) {
-            \Illuminate\Support\Facades\Log::warning('dropi.guia.al_empacar_fallo', ['pedido_id' => $pedidoId, 'msg' => $e->getMessage()]);
-
-            return [
-                'texto' => ' ⚠ Sin guía: Dropi respondió «' . mb_substr($e->getMessage(), 0, 160) . '». Reintenta abajo.',
-                'flash' => ['guia_pedido_id' => $pedidoId],
-            ];
-        }
-
         return [
-            'texto' => $g['sticker_url']
-                ? " 🏷 Guía {$g['guia']}: imprime el sticker."
-                : " 🏷 Guía {$g['guia']}: el sticker aún no está, reintenta abajo.",
-            'flash' => ['sticker_url' => $g['sticker_url'], 'guia_pedido_id' => $pedidoId],
+            'texto' => $g['texto'],
+            'flash' => $g['error']
+                ? ['guia_pedido_id' => $pedidoId]
+                : ['sticker_url' => $g['sticker_url'], 'guia_pedido_id' => $pedidoId],
         ];
     }
 
