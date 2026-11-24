@@ -195,7 +195,13 @@ const cotizar = () => {
                     <div v-if="!query" class="text-sm text-surface-400 italic">
                         Buscá por nombre de producto, SKU, referencia o color para ir agregando.
                     </div>
-                    <div v-else-if="!resultados.length" class="text-sm text-surface-500">Sin resultados.</div>
+                    <!-- QA 23-nov-2026: «Sin resultados» hacía creer que el producto no existe;
+                         casi siempre existe y no tiene precio en la lista de este cliente. -->
+                    <div v-else-if="!resultados.length" class="text-sm text-surface-500">
+                        Sin resultados en la lista <b>{{ cliente.lista || 'del cliente' }}</b>.
+                        Aquí sólo aparecen los productos que tienen precio en esa lista: si el producto existe pero no sale,
+                        hay que ponerle precio en Catálogo → Listas de precios.
+                    </div>
                     <div v-else class="divide-y divide-surface-200 dark:divide-surface-800 max-h-[500px] overflow-y-auto">
                         <div v-for="v in resultados" :key="claveDe(v)"
                              class="flex items-center justify-between gap-2 py-2">

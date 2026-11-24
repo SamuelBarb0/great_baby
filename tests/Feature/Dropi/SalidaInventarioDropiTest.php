@@ -85,10 +85,15 @@ function saldoVariante(int $varianteId, int $ubicacionId): int
 function costoCausado(DropiPedido $p): array
 {
     $m = MovimientoContable::where('origen_type', DropiPedido::class)->where('origen_id', $p->id)->get();
+    // QA 23-nov-2026: un producto de Dropi sin familia ya no cae en los GRUPOS
+    // 6135/1435 (no admiten movimiento): va a las hojas de las reglas de Dropi.
+    // Las llaves '6135'/'1435' se quedan como nombre de «costo» e «inventario».
+    $costo = (string) setting('contable.cta_dropi_costo_default');
+    $inventario = (string) setting('contable.cta_dropi_inventario_default');
 
     return [
-        '6135' => round((float) $m->where('cuenta_puc', '6135')->sum('debe') - (float) $m->where('cuenta_puc', '6135')->sum('haber'), 2),
-        '1435' => round((float) $m->where('cuenta_puc', '1435')->sum('haber') - (float) $m->where('cuenta_puc', '1435')->sum('debe'), 2),
+        '6135' => round((float) $m->where('cuenta_puc', $costo)->sum('debe') - (float) $m->where('cuenta_puc', $costo)->sum('haber'), 2),
+        '1435' => round((float) $m->where('cuenta_puc', $inventario)->sum('haber') - (float) $m->where('cuenta_puc', $inventario)->sum('debe'), 2),
     ];
 }
 

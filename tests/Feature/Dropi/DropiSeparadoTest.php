@@ -428,3 +428,19 @@ it('las plantillas de terceros y de compras se descargan', function () {
     Livewire\Livewire::test(App\Modules\Dropi\Filament\Pages\OrdenesCompraDropi::class)
         ->callAction('plantilla')->assertFileDownloaded('plantilla-compras-dropi.xlsx');
 });
+
+// ───────────────────────── QA 23-nov: cuentas hoja ─────────────────────────
+
+it('un producto de Dropi sin familia no cae en la cuenta grupo del ERP: usa la regla de Dropi', function () {
+    foreach ([['1435', false], ['143504', true], ['6135', false], ['61350504', true], ['143502', true]] as [$c, $hoja]) {
+        App\Modules\Contabilidad\Models\PlanCuenta::firstOrCreate(['codigo' => $c], ['nombre' => "Cuenta {$c}",
+            'clase' => $c[0], 'nivel' => strlen($c) > 4 ? 5 : 3, 'naturaleza' => 'debito', 'permite_movimiento' => $hoja, 'activa' => true]);
+    }
+    $sinFamilia = Producto::create(['referencia' => 'SIN-FAM', 'nombre' => 'Sin familia', 'desglose_stock' => false]);
+    $conCuenta = Producto::create(['referencia' => 'CON-CTA', 'nombre' => 'Con cuenta', 'desglose_stock' => false, 'cta_inventario' => '143502']);
+
+    expect(App\Modules\Dropi\Support\CuentasDropi::inventario($sinFamilia))->toBe('143504')
+        ->and(App\Modules\Dropi\Support\CuentasDropi::costo($sinFamilia))->toBe('61350504')
+        // Lo que la ficha dice y es hoja, se respeta.
+        ->and(App\Modules\Dropi\Support\CuentasDropi::inventario($conCuenta))->toBe('143502');
+});

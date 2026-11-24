@@ -102,17 +102,35 @@ class CuentasDropi
      */
     public static function costo(?Producto $producto): ?string
     {
-        return self::hermanaDelIngreso($producto, '613505')
-            ?? $producto?->cta('costo')
-            ?? setting('contable.cta_costo_default');
+        return self::hojaODropi(
+            self::hermanaDelIngreso($producto, '613505') ?? $producto?->cta('costo') ?? setting('contable.cta_costo_default'),
+            'contable.cta_dropi_costo_default',
+        );
+    }
+
+    /**
+     * QA 23-nov-2026: 361 de 364 productos no tienen categoría, así que la
+     * familia no se encontraba y caía a la regla del ERP (6135 / 1435), que son
+     * GRUPOS: no admiten movimiento y SIIGO los rechaza. Para Dropi, si lo que
+     * sale no es una cuenta hoja, se usa la regla propia de Dropi.
+     */
+    private static function hojaODropi(?string $cuenta, string $reglaDropi): ?string
+    {
+        if (filled($cuenta) && \App\Modules\Contabilidad\Models\PlanCuenta::where('codigo', $cuenta)->where('permite_movimiento', true)->exists()) {
+            return (string) $cuenta;
+        }
+        $dropi = (string) setting($reglaDropi);
+
+        return $dropi !== '' ? $dropi : $cuenta;
     }
 
     /** Inventario de un producto de Dropi: la hoja de 1435 de su familia. Ver costo(). */
     public static function inventario(?Producto $producto): ?string
     {
-        return self::hermanaDelIngreso($producto, '1435')
-            ?? $producto?->cta('inventario')
-            ?? setting('contable.cta_inventario_default');
+        return self::hojaODropi(
+            self::hermanaDelIngreso($producto, '1435') ?? $producto?->cta('inventario') ?? setting('contable.cta_inventario_default'),
+            'contable.cta_dropi_inventario_default',
+        );
     }
 
     private static function hermanaDelIngreso(?Producto $producto, string $prefijo): ?string
