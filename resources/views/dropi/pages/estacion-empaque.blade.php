@@ -114,6 +114,13 @@
                     @if($p->tieneGuiaReal())
                         <div style="font-size:.85rem;color:#fbbf24;">🏷 Pega el sticker de esta guía</div>
                     @endif
+                    {{-- Mientras se carga el inventario del ERP también se empaca lo que
+                         no tiene stock allá (regla «Exigir stock del ERP», 24-nov-2026). --}}
+                    @if($p->abiertoSinStockErp())
+                        <div style="display:inline-block;margin-top:.35rem;padding:.2rem .6rem;background:rgba(244,63,94,.15);border:1px solid rgba(244,63,94,.5);color:#fda4af;border-radius:.4rem;font-size:.8rem;font-weight:700;">
+                            ⚠ Sin stock en el ERP: empácalo con la mercancía de la bodega
+                        </div>
+                    @endif
                     <div style="color:#e5e7eb;margin-top:.25rem;">{{ $p->cliente_nombre }} · {{ $p->cliente_ciudad }}</div>
                     <div style="font-size:.85rem;color:#9ca3af;">{{ $p->transportadora }} · Corte {{ $p->corte?->numero }}</div>
                 </div>
@@ -190,15 +197,33 @@
             </div>
         </div>
     @else
-        <div style="margin-top:1rem;padding:2.5rem;text-align:center;background:rgba(255,255,255,.03);border:2px dashed rgba(156,163,175,.3);border-radius:1rem;">
+        {{-- Lo que Aracely imprimió, en fila con la pila de stickers (ColaDeEmpaque,
+             24-nov-2026). En turno, la pantalla mira cada 10 s y abre el siguiente sola. --}}
+        @php $info = $this->colaInfo; @endphp
+        <div @if($enTurno) wire:poll.10s="esperarPedido" @endif
+             style="margin-top:1rem;padding:2.5rem;text-align:center;background:rgba(255,255,255,.03);border:2px dashed rgba(156,163,175,.3);border-radius:1rem;">
             <div style="font-size:3rem;">📦</div>
-            {{-- En fila con la pila de stickers (ColaDeEmpaque, 24-nov-2026). --}}
-            <button type="button" wire:click="siguientePedido" wire:loading.attr="disabled" wire:target="siguientePedido"
-                    style="margin-top:.75rem;padding:1rem 2rem;background:linear-gradient(90deg,#f59e0b,#b45309);color:white;border:0;border-radius:.75rem;font-weight:800;font-size:1.25rem;cursor:pointer;box-shadow:0 4px 14px rgba(245,158,11,.4);">
-                ▶ Siguiente pedido
-            </button>
-            <div style="font-size:.9rem;color:#9ca3af;margin-top:.75rem;">o escanea un producto: se abre el pedido que lo lleva</div>
-            <div style="font-size:.8rem;color:#6b7280;margin-top:.25rem;">(también sirve escanear la guía)</div>
+            @if($enTurno)
+                <div style="font-size:1.25rem;font-weight:800;color:#f59e0b;">Esperando guías impresas…</div>
+                <div style="font-size:.9rem;color:#9ca3af;margin-top:.5rem;">Apenas Aracely imprima, el pedido se abre solo aquí.</div>
+                <button type="button" wire:click="pausarTurno"
+                        style="margin-top:.75rem;padding:.5rem 1.25rem;background:transparent;color:#9ca3af;border:1px solid rgba(156,163,175,.4);border-radius:.5rem;font-weight:600;cursor:pointer;">
+                    ⏸ Pausar
+                </button>
+            @else
+                <button type="button" wire:click="siguientePedido" wire:loading.attr="disabled" wire:target="siguientePedido"
+                        style="margin-top:.75rem;padding:1rem 2rem;background:linear-gradient(90deg,#f59e0b,#b45309);color:white;border:0;border-radius:.75rem;font-weight:800;font-size:1.25rem;cursor:pointer;box-shadow:0 4px 14px rgba(245,158,11,.4);">
+                    ▶ Empezar a empacar
+                </button>
+                <div style="font-size:.9rem;color:#9ca3af;margin-top:.75rem;">Desde ahí los pedidos van llegando solos, en el orden de los stickers.</div>
+                <div style="font-size:.8rem;color:#6b7280;margin-top:.25rem;">También puedes escanear un producto o una guía.</div>
+            @endif
+            <div style="font-size:.85rem;color:#d1d5db;margin-top:1rem;">
+                {{ $info['en_cola'] }} impreso(s) por empacar
+                @if($info['sin_imprimir'] > 0)
+                    · <span style="color:#f59e0b;">{{ $info['sin_imprimir'] }} pendiente(s) sin imprimir: no llegan hasta que Aracely los imprima</span>
+                @endif
+            </div>
         </div>
     @endif
 

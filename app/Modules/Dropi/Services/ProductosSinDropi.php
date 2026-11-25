@@ -127,6 +127,16 @@ class ProductosSinDropi
     public function cargaCrear(Producto $p, ?int $userId): Carga
     {
         $this->exigirSinDropi($p);
+
+        // Un segundo clic no arma otra carga: dos cargas mandadas serían dos
+        //   productos iguales en Dropi. Se reabre la que sigue abierta.
+        $abierta = Carga::whereIn('estado', [Carga::BORRADOR, Carga::PROCESANDO])
+            ->whereHas('operaciones', fn ($q) => $q->where('tipo', Op::CREAR)->where('detalle->erp_producto_id', $p->id))
+            ->latest('id')->first();
+        if ($abierta) {
+            return $abierta;
+        }
+
         $s = self::stockErp($p);
 
         $variaciones = [];

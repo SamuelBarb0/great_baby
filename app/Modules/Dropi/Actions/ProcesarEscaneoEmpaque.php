@@ -96,6 +96,23 @@ class ProcesarEscaneoEmpaque
                     ]
                 );
 
+                $sinStock = $pedido->estado === EstadoPedidoDropi::PendienteInventario;
+                if ($sinStock && setting('dropi.exigir_stock_erp', false)) {
+                    return [
+                        'tipo' => 'error',
+                        'mensaje' => "Pedido {$codigo} no tiene stock en el ERP: se empaca cuando llegue la mercancía.",
+                        'sonido' => 'error',
+                    ];
+                }
+
+                // Nadie lo estaba empacando (sin empaque en curso): un escaneo que
+                //   quedó de antes no cuenta, o sale en «1/1 ✔» y se confirma sin
+                //   escanear (24-nov-2026). Quien retoma su propio empaque lo conserva.
+                if (! $enCurso) {
+                    $pedido->items()->update(['cantidad_pickeada' => 0, 'pickeado_at' => null, 'pickeado_por' => null]);
+                    $pedido->load('items.variante.producto');
+                }
+
                 if ($pedido->estado !== EstadoPedidoDropi::Alistando) {
                     $pedido->transicionar(
                         EstadoPedidoDropi::Alistando,
@@ -107,7 +124,8 @@ class ProcesarEscaneoEmpaque
 
                 return [
                     'tipo' => 'pedido_abierto',
-                    'mensaje' => "Pedido {$codigo} abierto — {$pedido->items->count()} " . ($pedido->items->count() === 1 ? 'ítem' : 'ítems') . ' para empacar',
+                    'mensaje' => "Pedido {$codigo} abierto — {$pedido->items->count()} " . ($pedido->items->count() === 1 ? 'ítem' : 'ítems') . ' para empacar'
+                        . ($sinStock ? ' · ⚠ sin stock en el ERP: empácalo con la mercancía de la bodega' : ''),
                     'pedido_id' => $pedido->id,
                     'sonido' => 'ok',
                 ];

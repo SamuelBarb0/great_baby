@@ -1107,11 +1107,12 @@ Route::middleware(['web', 'auth'])->group(function () {
     Route::get('/dropi/recoleccion/{corte}/pdf', [\App\Http\Controllers\Dropi\RecoleccionPdfController::class, 'descargar'])
         ->name('dropi.recoleccion.pdf');
 
-    // Guías escogidas en «Pedidos Dropi», en un solo PDF (24-nov-2026).
-    Route::get('/dropi/guias/imprimir/{token}', [\App\Http\Controllers\Dropi\GuiasDropiController::class, 'imprimir'])
-        ->where('token', '[A-Za-z0-9]{32}')
-        ->middleware('throttle:20,1')
-        ->name('dropi.guias.imprimir');
+    // Una parte del PDF de un lote de «Imprimir guías» (24-nov-2026: son 300 a
+    //   800 paquetes, el PDF se arma en segundo plano y sale en partes de 200).
+    Route::get('/dropi/guias/lote/{lote}/parte/{parte}', [\App\Http\Controllers\Dropi\GuiasDropiController::class, 'parte'])
+        ->whereNumber('parte')
+        ->middleware('throttle:30,1')
+        ->name('dropi.guias.parte');
 
     // PDF / Excel de un manifiesto de Dropi guardado en el ERP (24-nov-2026).
     Route::get('/dropi/manifiestos/{manifiesto}/{tipo}', \App\Http\Controllers\Dropi\ManifiestoDropiArchivoController::class)

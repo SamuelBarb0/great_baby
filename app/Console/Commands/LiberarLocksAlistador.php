@@ -65,6 +65,13 @@ class LiberarLocksAlistador extends Command
                                 null,
                                 ['origen' => 'lock_expirado', 'alistador_id' => $lock->alistador_id],
                             );
+                            // Lo escaneado se borra como en «Cancelar»: si no, el
+                            //   siguiente empacador lo abre en «1/1 ✔» y lo confirma
+                            //   sin escanear el producto (prueba del 24-nov-2026). Todos los
+                            //   ítems: el lock era el único dueño, y un parcial (1 de 2)
+                            //   no lleva pickeado_por.
+                            \App\Modules\Dropi\Models\DropiPedidoItem::where('pedido_id', $lock->pedido_id)
+                                ->update(['cantidad_pickeada' => 0, 'pickeado_at' => null, 'pickeado_por' => null]);
                             $pedidosReiniciados++;
                         } catch (\Throwable $inner) {
                             // Log para trazabilidad — no silencioso.

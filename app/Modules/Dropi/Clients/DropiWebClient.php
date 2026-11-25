@@ -553,7 +553,9 @@ class DropiWebClient implements DropiClientInterface
      */
     public function salidas(int $inicio = 0, int $tamano = 50): array
     {
-        $body = $this->legacyJson($this->legacy()->get('/logisticManagement/index', [
+        // Dropi tarda a veces más de 20 s en esta lista (prueba del 24-nov-2026);
+        //   corre en segundo plano, así que se le espera como a los archivos.
+        $body = $this->legacyJson($this->legacy()->timeout(60)->get('/logisticManagement/index', [
             'type_logistic_management' => 'Salidas', 'startData' => $inicio, 'pageSize' => $tamano,
         ]), 'leer las salidas');
 

@@ -8,7 +8,6 @@
  */
 
 use App\Models\User;
-use App\Modules\Dropi\Actions\CortarEntradaCorte;
 use App\Modules\Dropi\Actions\SincronizarPedidosDropi;
 use App\Modules\Dropi\Actions\VincularProductoDropi;
 use App\Modules\Dropi\DTOs\ItemDropiDTO;
@@ -18,10 +17,12 @@ use App\Modules\Dropi\Filament\Pages\EstacionEmpaque;
 use App\Modules\Dropi\Models\DropiPedido;
 use App\Modules\Dropi\Models\EmpaqueRegistro;
 use App\Modules\Dropi\Models\Producto;
+use App\Modules\Dropi\Services\ImprimirGuiasDropi;
 use App\Modules\Dropi\Support\ColaDeEmpaque;
 use App\Support\Reglas;
 use Carbon\CarbonImmutable;
 use Filament\Facades\Filament;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Livewire\Livewire;
 use Spatie\Permission\Models\Role;
@@ -43,7 +44,8 @@ beforeEach(function () {
     }
 });
 
-function erPedido(string $guia, string $ref, string $creado): DropiPedido
+/** Un pedido listo para empacar; por defecto con la guía ya impresa, que es lo que entra a la cola. */
+function erPedido(string $guia, string $ref, string $creado, bool $impreso = true): DropiPedido
 {
     app(SincronizarPedidosDropi::class)->importarPedidos([new PedidoDropiDTO(
         guia: $guia, dropiOrdenId: 'O-'.$guia, transportadora: 'X', tienda: 'T', vendedorNombre: 'Vendedora',
@@ -57,6 +59,10 @@ function erPedido(string $guia, string $ref, string $creado): DropiPedido
     // Con stock o sin él, para la cola cuenta que esté listo para empacar.
     $p->estado = EstadoPedidoDropi::Pending;
     $p->save();
+    if ($impreso) {
+        // Impreso sin posición en la pila, como lo que se imprime en Dropi.
+        DropiPedido::whereKey($p->id)->update(['guia_impresa_at' => now()]);
+    }
 
     return $p;
 }
@@ -71,13 +77,57 @@ it('la cola va como la pila de stickers: el producto con más pedidos primero, e
     expect($orden)->toBe([$vol1->id, $vol2->id, $tapete->id]);
 });
 
-it('con un corte cerrado («Cerrar corte») sólo se empaca ese', function () {
-    $delCerrado = erPedido('ER-10', 'ER-VOL', '2026-11-24 09:00');
-    CortarEntradaCorte::run($delCerrado->corte_id, $this->empacador->id);
-    $nuevo = erPedido('ER-11', 'ER-VOL', '2026-11-24 09:10');
+it('sólo se empaca lo que Aracely imprimió: lo del ERP en el orden de la pila, lote tras lote, y después lo impreso en Dropi', function () {
+    config()->set('dropi.web.stickers_url', 'https://stickers.test');
+    \Illuminate\Support\Facades\Storage::fake('local');
+    // El lote se arma con sus propios trabajos: que corran; lo demás sigue simulado.
+    Queue::fake([\App\Modules\Dropi\Jobs\GenerarGuiasEnBloqueJob::class]);
+    $f = new \FPDF('P', 'mm', [100, 150]);
+    $f->AddPage();
+    $sticker = $f->Output('S');
+    Http::fake(['stickers.test/*' => Http::response($sticker, 200, ['Content-Type' => 'application/pdf'])]);
 
-    expect($nuevo->corte_id)->not->toBe($delCerrado->corte_id)
-        ->and(app(ColaDeEmpaque::class)->pedidos()->pluck('id')->all())->toBe([$delCerrado->id]);
+    $a = erPedido('ER-50', 'ER-VOL', '2026-11-24 08:00', impreso: false);
+    $b = erPedido('ER-51', 'ER-TAP', '2026-11-24 08:10', impreso: false);
+    $sinImprimir = erPedido('ER-52', 'ER-VOL', '2026-11-24 08:20', impreso: false);
+    $enDropi = erPedido('ER-53', 'ER-TAP', '2026-11-24 07:00');
+    DropiPedido::whereIn('id', [$a->id, $b->id, $sinImprimir->id])->update(['sticker_path' => 'g.pdf']);
+
+    $cola = app(ColaDeEmpaque::class);
+    expect($cola->pedidos()->pluck('id')->all())->toBe([$enDropi->id])
+        ->and($cola->sinImprimir())->toBe(3);
+
+    // El lote de las 9 (sólo el tapete) y después el de las 11 (el volante).
+    app(ImprimirGuiasDropi::class)->lanzar([$b->id], $this->empacador->id);
+    app(ImprimirGuiasDropi::class)->lanzar([$a->id], $this->empacador->id);
+
+    expect($cola->pedidos()->pluck('id')->all())->toBe([$b->id, $a->id, $enDropi->id])
+        ->and($cola->sinImprimir())->toBe(1);
+
+    // Un corte cerrado no deja tocar sus pedidos: abrirlo tumbaba la estación (prueba del 24-nov-2026).
+    \App\Modules\Dropi\Models\DropiCorte::whereKey($enDropi->corte_id)->update(['estado' => \App\Modules\Dropi\Enums\EstadoCorte::Cerrado->value]);
+    expect($cola->pedidos()->pluck('id')->all())->not->toContain($enDropi->id);
+});
+
+it('en turno, con la cola vacía la estación abre sola el pedido apenas Aracely imprime; sin turno no toma nada', function () {
+    $p = erPedido('ER-60', 'ER-VOL', '2026-11-24 09:00', impreso: false);
+
+    $this->actingAs($this->empacador);
+    $estacion = Livewire::test(EstacionEmpaque::class)
+        ->call('siguientePedido')
+        ->assertSet('pedidoActivoId', null)
+        ->assertSet('enTurno', true);
+
+    // Quien sólo mira la estación no se queda con el pedido.
+    session()->flush(); // cada usuario tiene su sesión
+    $this->actingAs($this->otro);
+    $mirando = Livewire::test(EstacionEmpaque::class)->assertSet('enTurno', false);
+
+    DropiPedido::whereKey($p->id)->update(['guia_impresa_at' => now(), 'orden_empaque' => 1]);
+    $mirando->call('esperarPedido')->assertSet('pedidoActivoId', null);
+
+    $this->actingAs($this->empacador);
+    $estacion->call('esperarPedido')->assertSet('pedidoActivoId', $p->id);
 });
 
 it('«Siguiente pedido» abre el siguiente libre, y otro empacador recibe el que sigue', function () {
@@ -120,4 +170,28 @@ it('al confirmar se abre solo el siguiente de la cola', function () {
         ->assertSet('pedidoActivoId', $b->id);
 
     expect($a->fresh()->estado)->toBe(EstadoPedidoDropi::Empacado);
+});
+
+it('lo impreso sin stock en el ERP también llega a empaque, marcado; con «Exigir stock del ERP» no (la señora Lahida, 46:50)', function () {
+    $p = erPedido('ER-70', 'ER-VOL', '2026-11-24 09:00');
+    \Illuminate\Support\Facades\DB::table('dropi_pedidos')->where('id', $p->id)->update(['estado' => EstadoPedidoDropi::PendienteInventario->value]);
+
+    expect(app(ColaDeEmpaque::class)->pedidos()->pluck('id')->all())->toBe([$p->id]);
+    // Un escaneo que quedó de antes no cuenta al abrirlo.
+    $p->items()->update(['cantidad_pickeada' => 1, 'pickeado_at' => now()]);
+
+    $this->actingAs($this->empacador);
+    Livewire::test(EstacionEmpaque::class)->call('siguientePedido')
+        ->assertSet('pedidoActivoId', $p->id)
+        ->assertSee('Sin stock en el ERP');
+    expect($p->fresh()->estado)->toBe(EstadoPedidoDropi::Alistando)
+        ->and($p->fresh()->abiertoSinStockErp())->toBeTrue()
+        ->and($p->items()->first()->pickeado_at)->toBeNull();
+
+    // Con el inventario completo se exige stock: ni entra a la cola ni se deja abrir.
+    $q = erPedido('ER-71', 'ER-VOL', '2026-11-24 09:05');
+    \Illuminate\Support\Facades\DB::table('dropi_pedidos')->where('id', $q->id)->update(['estado' => EstadoPedidoDropi::PendienteInventario->value]);
+    Reglas::set('dropi.exigir_stock_erp', '1');
+    expect(app(ColaDeEmpaque::class)->pedidos()->pluck('id')->all())->not->toContain($q->id)
+        ->and(\App\Modules\Dropi\Actions\ProcesarEscaneoEmpaque::run(codigo: 'ER-71', pedidoActivoId: null, operarioId: $this->otro->id)['tipo'])->toBe('error');
 });

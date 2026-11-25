@@ -2,45 +2,38 @@
 
 namespace App\Modules\Dropi\Services;
 
+use App\Modules\Dropi\Jobs\ArmarParteLoteJob;
+use App\Modules\Dropi\Jobs\DescargarStickersLoteJob;
+use App\Modules\Dropi\Models\DropiLoteImpresion;
 use App\Modules\Dropi\Models\DropiPedido;
 use App\Modules\Dropi\Support\RecoleccionDelCorte;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Storage;
 use setasign\Fpdi\Fpdi;
 
 /**
- * Las guías de un corte en UN solo PDF (reunión con la señora Lahida,
+ * Las guías de un corte impresas desde el ERP (reunión con la señora Lahida,
  * 24-nov-2026): hoy Aracely las imprime desde Dropi, las corta y las separa
  * por producto a mano.
  *
- * Primero la lista de alistamiento de esos pedidos y después un sticker por
- * pedido, en el orden en que se empaca: el producto con más pedidos primero
- * (cien «celular táctil» seguidos), y dentro de cada producto el más viejo
- * primero. Al imprimir, los pedidos quedan marcados «impresos»: el siguiente
- * corte no los repite.
+ * Cada «Imprimir guías» es un LOTE: primero la lista de alistamiento y después
+ * un sticker por pedido, en el orden en que se empaca (el producto con más
+ * pedidos primero, y dentro el más viejo). Son 300 a 800 paquetes, así que se
+ * arma en segundo plano: los stickers se bajan de a 15 por trabajo (el worker
+ * de producción corre 55 s) y el PDF sale en partes de 200, que la impresora
+ * aguanta. Al terminar, los pedidos quedan «impresos», con su posición en la
+ * pila y su lote: eso es lo que llega a empaque.
  */
 class ImprimirGuiasDropi
 {
-    private const TTL_MIN = 30;
+    public const POR_PARTE = 200;
 
-    /** Guarda la selección y devuelve el token de la URL de impresión. */
-    public static function preparar(array $pedidoIds): string
-    {
-        $token = Str::random(32);
-        Cache::put("dropi:imprimir-guias:{$token}", array_values(array_map('intval', $pedidoIds)), now()->addMinutes(self::TTL_MIN));
-
-        return $token;
-    }
-
-    /** @return list<int>|null */
-    public static function seleccion(string $token): ?array
-    {
-        return Cache::get("dropi:imprimir-guias:{$token}");
-    }
+    public const POR_TRABAJO = 15;
 
     /**
      * El orden de empaque: por el producto con más pedidos y, dentro, el más viejo.
@@ -60,56 +53,170 @@ class ImprimirGuiasDropi
     }
 
     /**
+     * Arma un lote con los escogidos que ya tienen guía. Null si ninguno la tiene.
+     *
      * @param  list<int>  $pedidoIds
-     * @return array{pdf: string, impresos: int, sin_sticker: list<string>}
      */
-    public function generar(array $pedidoIds, ?int $userId): array
+    public function lanzar(array $pedidoIds, ?int $userId): ?DropiLoteImpresion
     {
-        $pedidos = self::ordenar(DropiPedido::query()->whereIn('id', $pedidoIds)
-            ->with(['items.variante.producto', 'items.producto'])->get());
+        $pedidos = self::ordenar(DropiPedido::query()->whereIn('id', $pedidoIds)->with('items')->get()
+            ->filter(fn (DropiPedido $p) => $p->tieneGuiaReal()));
+        if ($pedidos->isEmpty()) {
+            return null;
+        }
+
+        $lote = DropiLoteImpresion::create([
+            'user_id' => $userId,
+            'pedidos' => $pedidos->pluck('id')->all(),
+            'total' => $pedidos->count(),
+            'estado' => DropiLoteImpresion::DESCARGANDO,
+        ]);
+
+        foreach (array_chunk($lote->pedidos, self::POR_TRABAJO) as $ids) {
+            DescargarStickersLoteJob::dispatch($lote->id, $ids);
+        }
+
+        return $lote;
+    }
+
+    /**
+     * Baja los stickers de unos pedidos del lote; el último en terminar manda a
+     * armar el PDF.
+     *
+     * @param  list<int>  $ids
+     */
+    public function descargar(DropiLoteImpresion $lote, array $ids): void
+    {
+        $sinSticker = [];
+        $pedidos = DropiPedido::query()->whereIn('id', $ids)->get();
+        // Los 15 a la vez: uno tarda ~650 ms (medido en producción el 24-nov-2026),
+        //   uno tras otro 800 stickers serían 9 minutos.
+        $con = $pedidos->filter(fn (DropiPedido $p) => $p->stickerUrl() !== null);
+        $respuestas = $con->isEmpty() ? [] : Http::pool(fn ($pool) => $con->map(
+            fn (DropiPedido $p) => $pool->as((string) $p->id)->timeout(20)->get($p->stickerUrl())
+        )->all());
+        foreach ($pedidos as $p) {
+            $r = $respuestas[(string) $p->id] ?? null;
+            if ($p->stickerUrl() && ! ($r instanceof \Illuminate\Http\Client\Response && $r->successful())) {
+                // Un tropiezo de la red: un reintento, solo.
+                $r = rescue(fn () => Http::timeout(20)->get($p->stickerUrl()), null, false);
+            }
+            $bytes = $r instanceof \Illuminate\Http\Client\Response && $r->successful() ? $r->body() : null;
+            // Se valida aquí que se deje leer: al armar, las partes van por posición
+            //   y un sticker que se cayera ahí correría a todos los siguientes.
+            if ($bytes && str_starts_with($bytes, '%PDF') && $this->legible($bytes)) {
+                Storage::disk('local')->put("{$lote->carpeta()}/{$p->id}.pdf", $bytes);
+            } else {
+                $sinSticker[] = (string) ($p->dropi_orden_id ?: $p->guia);
+            }
+        }
+
+        // Los trabajos del lote corren a la vez: el avance se suma bajo candado.
+        $armar = Cache::lock("dropi:lote-impresion:{$lote->id}", 30)->block(20, function () use ($lote, $ids, $sinSticker) {
+            $l = $lote->fresh();
+            $l->update([
+                'descargados' => $l->descargados + count($ids),
+                'sin_sticker' => array_values(array_merge($l->sin_sticker ?? [], $sinSticker)),
+            ]);
+            if ($l->descargados >= $l->total && $l->estado === DropiLoteImpresion::DESCARGANDO) {
+                $l->update(['estado' => DropiLoteImpresion::ARMANDO]);
+
+                return true;
+            }
+
+            return false;
+        });
+
+        if ($armar) {
+            ArmarParteLoteJob::dispatch($lote->id, 1);
+        }
+    }
+
+    /**
+     * Una parte del PDF: la primera abre con la lista de alistamiento de TODO
+     * el lote; la última cierra con los que no tuvieron sticker. Al armar la
+     * última, los pedidos quedan impresos y a la cola de empaque.
+     */
+    public function armarParte(DropiLoteImpresion $lote, int $parte): void
+    {
+        $disco = Storage::disk('local');
+        $conSticker = array_values(array_filter($lote->pedidos, fn ($id) => $disco->exists("{$lote->carpeta()}/{$id}.pdf")));
+        $partes = max(1, (int) ceil(count($conSticker) / self::POR_PARTE));
 
         $out = new Fpdi();
         $out->SetAutoPageBreak(false);
 
-        // 1. La lista de alistamiento de estos pedidos.
-        $filas = array_map(fn ($f) => $f + ['marcada' => false, 'faltan' => 0], array_values(app(RecoleccionDelCorte::class)->totalesDe($pedidos)));
-        $lista = Pdf::loadView('dropi.pdf.recoleccion', [
-            'corte' => null,
-            'titulo' => count($pedidos) . ' guías · ' . now()->timezone('America/Bogota')->format('d/m/Y g:i a'),
-            'filas' => $filas,
-            'unidades' => array_sum(array_column($filas, 'total_unidades')),
-            'generado' => now(),
-        ])->setPaper('letter')->output();
-        $this->anexar($out, $lista);
-
-        // 2. Un sticker por pedido, en el orden de empaque.
-        $sinSticker = [];
-        $impresos = [];
-        foreach ($pedidos as $p) {
-            $url = $p->stickerUrl();
-            $bytes = $url ? rescue(fn () => Http::timeout(20)->retry(2, 500)->get($url)->throw()->body(), null, false) : null;
-            if (! $bytes || ! str_starts_with($bytes, '%PDF') || ! $this->anexar($out, $bytes)) {
-                $sinSticker[] = (string) ($p->dropi_orden_id ?: $p->guia);
-
-                continue;
-            }
-            $impresos[] = $p->id;
+        if ($parte === 1) {
+            $pedidos = DropiPedido::query()->whereIn('id', $conSticker)->with(['items.variante.producto', 'items.producto'])->get();
+            $filas = array_map(fn ($f) => $f + ['marcada' => false, 'faltan' => 0], array_values(app(RecoleccionDelCorte::class)->totalesDe($pedidos)));
+            $this->anexar($out, Pdf::loadView('dropi.pdf.recoleccion', [
+                'corte' => null,
+                'titulo' => $lote->titulo(),
+                'filas' => $filas,
+                'unidades' => array_sum(array_column($filas, 'total_unidades')),
+                'generado' => now(),
+            ])->setPaper('letter')->output());
         }
 
-        // 3. Lo que no se pudo, al final y a la vista.
-        if ($sinSticker) {
+        foreach (array_slice($conSticker, ($parte - 1) * self::POR_PARTE, self::POR_PARTE) as $id) {
+            $this->anexar($out, $disco->get("{$lote->carpeta()}/{$id}.pdf"));
+        }
+
+        $ultima = $parte >= $partes;
+        if ($ultima && $lote->sin_sticker) {
             $out->AddPage('P', 'Letter');
             $out->SetFont('Helvetica', 'B', 14);
-            $out->Cell(0, 10, $this->latin1('Pedidos sin sticker (' . count($sinSticker) . ')'), 0, 1);
+            $out->Cell(0, 10, $this->latin1('Pedidos sin sticker (' . count($lote->sin_sticker) . ')'), 0, 1);
             $out->SetFont('Helvetica', '', 10);
-            $out->MultiCell(0, 6, $this->latin1('Dropi todavía no publicó su guía o no se pudo descargar. Vuelve a imprimirlos en un momento: ' . implode(', ', $sinSticker)));
+            $out->MultiCell(0, 6, $this->latin1('Dropi todavía no publicó su guía o no se pudo descargar. Vuelve a imprimirlos en un momento: ' . implode(', ', $lote->sin_sticker)));
         }
 
-        if ($impresos) {
-            DropiPedido::whereIn('id', $impresos)->update(['guia_impresa_at' => now(), 'guia_impresa_por' => $userId]);
+        $ruta = "{$lote->carpeta()}/lote-{$lote->id}-parte-{$parte}-de-{$partes}.pdf";
+        $disco->put($ruta, $out->Output('S'));
+        $lote->update(['partes' => [...($lote->partes ?? []), $ruta]]);
+
+        if (! $ultima) {
+            ArmarParteLoteJob::dispatch($lote->id, $parte + 1);
+
+            return;
         }
 
-        return ['pdf' => $out->Output('S'), 'impresos' => count($impresos), 'sin_sticker' => $sinSticker];
+        $this->marcarImpresos($conSticker, $lote);
+        foreach ($conSticker as $id) {
+            $disco->delete("{$lote->carpeta()}/{$id}.pdf");
+        }
+        $lote->update(['estado' => DropiLoteImpresion::LISTO]);
+    }
+
+    /**
+     * Impresos y a la cola de empaque, en el orden de la pila: cada uno toma
+     * la posición siguiente a la última impresa, así un lote nuevo va detrás
+     * del anterior. Uno que se reimprime pasa a la pila nueva.
+     *
+     * @param  list<int>  $ids  en el orden del PDF
+     */
+    private function marcarImpresos(array $ids, DropiLoteImpresion $lote): void
+    {
+        Cache::lock('dropi:orden-empaque', 30)->block(10, function () use ($ids, $lote) {
+            $base = (int) DropiPedido::withTrashed()->max('orden_empaque');
+            DB::transaction(function () use ($ids, $lote, $base) {
+                foreach ($ids as $i => $id) {
+                    DropiPedido::whereKey($id)->update([
+                        'guia_impresa_at' => now(), 'guia_impresa_por' => $lote->user_id,
+                        'orden_empaque' => $base + $i + 1, 'lote_impresion_id' => $lote->id,
+                    ]);
+                }
+            });
+        });
+    }
+
+    private function legible(string $bytes): bool
+    {
+        try {
+            return (new Fpdi())->setSourceFile(\setasign\Fpdi\PdfParser\StreamReader::createByString($bytes)) > 0;
+        } catch (\Throwable) {
+            return false;
+        }
     }
 
     /** Pega todas las páginas de un PDF; false si no se pudo leer. */

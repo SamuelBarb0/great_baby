@@ -4,6 +4,7 @@ namespace App\Modules\Dropi\Support;
 
 use App\Modules\Dropi\Enums\CategoriaUbicacion;
 use App\Modules\Dropi\Enums\EstadoPedidoDropi;
+use App\Modules\Dropi\Models\DropiLoteImpresion;
 use App\Modules\Dropi\Models\DropiPedido;
 use App\Modules\Dropi\Models\DropiPedidoItem;
 use App\Modules\Dropi\Models\DropiRecoleccionMarca;
@@ -78,7 +79,10 @@ class RecoleccionDelCorte
 
             $grupos[$key] ??= [
                 'sku' => $key,
-                'producto' => $producto?->nombre ?? 'SKU sin match',
+                // Sin vínculo con el ERP, el nombre que trae Dropi: bodega no
+                //   reconoce «DV-1799321» (prueba del 24-nov-2026).
+                'producto' => $producto?->nombre ?? ($it->producto_nombre ?: 'SKU sin match'),
+                'vinculado' => $producto !== null,
                 'referencia' => $producto?->referencia ?? '—',
                 'variante' => $it->nombreVariante(),
                 'total_unidades' => 0,
@@ -101,9 +105,17 @@ class RecoleccionDelCorte
      */
     public function conMarcas(int $corteId): array
     {
-        $grupos = $this->totales($corteId);
-        $marcas = DropiRecoleccionMarca::query()
-            ->where('corte_id', $corteId)
+        return $this->marcar($this->totales($corteId), DropiRecoleccionMarca::query()->where('corte_id', $corteId));
+    }
+
+    /**
+     * @param  array<string, array<string, mixed>>  $grupos
+     * @param  \Illuminate\Database\Eloquent\Builder<DropiRecoleccionMarca>  $deDonde  las marcas del corte o del lote
+     * @return list<array<string, mixed>>
+     */
+    private function marcar(array $grupos, \Illuminate\Database\Eloquent\Builder $deDonde): array
+    {
+        $marcas = $deDonde
             ->whereIn('sku_dropi', array_keys($grupos))
             ->with('usuario:id,name')
             ->get()
@@ -121,6 +133,39 @@ class RecoleccionDelCorte
         unset($g);
 
         return array_values($grupos);
+    }
+
+    /**
+     * Lo mismo para un lote de «Imprimir guías»: la hoja que la encargada tiene
+     * en la mano (24-nov-2026). Las marcas de «recogido» son de ese lote.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function conMarcasDeLote(DropiLoteImpresion $lote): array
+    {
+        $grupos = $this->totalesDe(DropiPedido::query()
+            ->where('lote_impresion_id', $lote->id)
+            ->whereNotIn('estado', self::ESTADOS_FUERA)
+            ->with(['items.variante.producto', 'items.producto'])
+            ->get());
+
+        return $this->marcar($grupos, DropiRecoleccionMarca::query()->where('lote_impresion_id', $lote->id));
+    }
+
+    /**
+     * Los lotes impresos que todavía tienen algo por empacar, el más viejo
+     * primero: lo que la Vista del Alistador ofrece. Sin ninguno, no hay nada
+     * que recoger hasta que Aracely genere e imprima las guías.
+     *
+     * @return \Illuminate\Database\Eloquent\Collection<int, DropiLoteImpresion>
+     */
+    public function lotesAbiertos(): \Illuminate\Database\Eloquent\Collection
+    {
+        return DropiLoteImpresion::query()
+            ->where('estado', DropiLoteImpresion::LISTO)
+            ->whereHas('pedidosImpresos', fn ($q) => $q->whereIn('estado', DropiPedido::estadosDespachables()))
+            ->oldest('id')
+            ->get();
     }
 
     /**

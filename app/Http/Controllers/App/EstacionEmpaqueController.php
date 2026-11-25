@@ -476,21 +476,23 @@ class EstacionEmpaqueController extends Controller implements HasMiddleware
             ])->toArray();
     }
 
+    /**
+     * Lo mismo que la estación del panel: lo que Aracely imprimió, en el orden
+     * de la pila de stickers, sin lo que otro empacador ya tiene abierto
+     * (ColaDeEmpaque, 24-nov-2026). Antes eran todos los pendientes por fecha.
+     */
     private function colaProximos(?int $exceptoId, int $limit = 6): array
     {
-        return DropiPedido::query()
-            ->whereIn('estado', [EstadoPedidoDropi::Pending, EstadoPedidoDropi::Alistando])
-            ->when($exceptoId, fn ($q) => $q->where('id', '!=', $exceptoId))
-            ->withCount('items')
-            ->orderBy('created_at', 'asc')
-            ->limit($limit)
-            ->get()
+        return app(\App\Modules\Dropi\Support\ColaDeEmpaque::class)->pedidos((int) auth()->id(), $limit + 1)
+            ->when($exceptoId, fn ($c) => $c->reject(fn ($p) => $p->id === $exceptoId))
+            ->take($limit)
+            ->values()
             ->map(fn ($p) => [
                 'id' => $p->id,
                 'guia' => (string) $p->guia,
                 'cliente' => (string) $p->cliente_nombre,
                 'ciudad' => (string) $p->cliente_ciudad,
-                'items' => (int) $p->items_count,
+                'items' => $p->items->count(),
             ])->toArray();
     }
 }

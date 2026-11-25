@@ -66,6 +66,43 @@ class EstacionEmpaque extends Page
         if ($registro) {
             $this->pedidoActivoId = $registro->pedido_id;
         }
+        $this->enTurno = (bool) session(self::TURNO, false);
+    }
+
+    /**
+     * En turno, los pedidos llegan solos (24-nov-2026: «que los que empacan
+     * vayan teniendo un flujo de pedidos»): al confirmar se abre el siguiente y,
+     * con la cola vacía, la pantalla mira cada 10 s si Aracely imprimió otro
+     * lote. Se entra con un clic y no al abrir la página, para que quien sólo
+     * mira la estación no se quede con un pedido bloqueado.
+     */
+    public bool $enTurno = false;
+
+    private const TURNO = 'empaque.en_turno';
+
+    /** wire:poll con la cola vacía: abre el pedido apenas Aracely imprima. */
+    public function esperarPedido(): void
+    {
+        if (! $this->enTurno || $this->pedidoActivoId) {
+            return;
+        }
+        if ($this->abrirSiguiente()) {
+            $this->dispatch('empaque-scan', sonido: 'ok', mensaje: '📦 Llegó un pedido: ' . (DropiPedido::find($this->pedidoActivoId)?->guia ?? ''));
+        }
+    }
+
+    public function pausarTurno(): void
+    {
+        $this->enTurno = false;
+        session()->forget(self::TURNO);
+    }
+
+    /** @return array{en_cola: int, sin_imprimir: int} */
+    public function getColaInfoProperty(): array
+    {
+        $cola = app(ColaDeEmpaque::class);
+
+        return ['en_cola' => $cola->contar((int) auth()->id()), 'sin_imprimir' => $cola->sinImprimir()];
     }
 
     public function escanear(): void
@@ -137,7 +174,7 @@ class EstacionEmpaque extends Page
             $abierto = $this->abrirSiguiente();
             $sig = $abierto
                 ? ' Siguiente: ' . DropiPedido::find($this->pedidoActivoId)?->guia . '.'
-                : ' No quedan pedidos en la cola.';
+                : ' No quedan guías impresas: el siguiente llega solo cuando Aracely imprima.';
 
             $this->dispatch('empaque-scan', sonido: ($guia['error'] ?? false) ? 'warn' : 'ok', mensaje: '✅ ' . $res['msg'] . ($guia['texto'] ?? '') . $sig);
         } catch (\Throwable $e) {
@@ -151,8 +188,10 @@ class EstacionEmpaque extends Page
         if ($this->pedidoActivoId) {
             return;
         }
+        $this->enTurno = true;
+        session([self::TURNO => true]);
         if (! $this->abrirSiguiente()) {
-            $this->dispatch('empaque-scan', sonido: 'warn', mensaje: 'No hay pedidos en la cola del corte.');
+            $this->dispatch('empaque-scan', sonido: 'warn', mensaje: 'Todavía no hay guías impresas para empacar: llegan solas cuando Aracely imprima.');
 
             return;
         }
@@ -166,9 +205,17 @@ class EstacionEmpaque extends Page
         $operario = (int) auth()->id();
         // Si otro lo toma en el mismo instante, ProcesarEscaneoEmpaque lo rechaza: se prueba con el que sigue.
         $intentados = [];
-        while (count($intentados) < 5 && ($p = $cola->pedidos($operario)->first(fn ($x) => ! in_array($x->id, $intentados, true)))) {
+        // Sólo los primeros de la cola: con 800 impresos no se cargan todos por un clic.
+        foreach ($cola->pedidos($operario, 5) as $p) {
             $intentados[] = $p->id;
-            $r = ProcesarEscaneoEmpaque::run(codigo: (string) $p->guia, pedidoActivoId: null, operarioId: $operario);
+            // Si uno no se deja abrir, se salta: el flujo de pedidos no se detiene por uno.
+            try {
+                $r = ProcesarEscaneoEmpaque::run(codigo: (string) $p->guia, pedidoActivoId: null, operarioId: $operario);
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning('dropi.empaque.no_abre', ['pedido_id' => $p->id, 'msg' => $e->getMessage()]);
+
+                continue;
+            }
             if ($r['tipo'] === 'pedido_abierto') {
                 $this->pedidoActivoId = $r['pedido_id'];
                 $this->ultimoResultado = $r;
@@ -307,7 +354,7 @@ class EstacionEmpaque extends Page
     public function proximosPedidos(int $limit = 5): array
     {
         // El corte en trabajo, en el orden de la pila de stickers (ColaDeEmpaque).
-        return app(ColaDeEmpaque::class)->pedidos((int) auth()->id())
+        return app(ColaDeEmpaque::class)->pedidos((int) auth()->id(), $limit + 1)
             ->reject(fn ($p) => $p->id === $this->pedidoActivoId)
             ->take($limit)
             ->map(fn ($p) => [

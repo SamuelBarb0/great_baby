@@ -266,8 +266,9 @@ const errores = computed(() => page.props.errors || {});
                         <label class="text-sm inline-flex items-center gap-2"><input v-model="cargaForm.defaults.privado" type="checkbox"/> Crear como privados (solo los ve Great Baby)</label>
                         <p class="text-xs text-surface-500">Las fotos se suben después en Dropi. Las medidas aplican a todos los productos nuevos de esta carga.</p>
                     </div>
-                    <!-- Inventario del ERP: la misma mercancía, primero al kardex y al libro -->
-                    <div class="md:col-span-2 rounded-lg border border-surface-200 dark:border-surface-700 p-4 space-y-3">
+                    <!-- Inventario del ERP: la misma mercancía, primero al kardex y al libro.
+                         Sólo con Excel: una carga armada desde el ERP ya tiene su stock adentro. -->
+                    <div v-if="carga.filas_excel > 0" class="md:col-span-2 rounded-lg border border-surface-200 dark:border-surface-700 p-4 space-y-3">
                         <label class="text-sm font-medium inline-flex items-center gap-2">
                             <input v-model="cargaForm.ingreso_erp.activo" type="checkbox"/>
                             Registrar también el ingreso en el inventario del ERP (antes de mandar a Dropi)

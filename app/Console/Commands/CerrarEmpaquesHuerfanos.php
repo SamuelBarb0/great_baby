@@ -12,7 +12,7 @@ use Illuminate\Support\Facades\DB;
 /**
  * Cierra registros de empaque en_curso abandonados (browser cerrado, operario cambió de turno).
  * Los marca como «anulado» (no existe un estado «abandonado»: escribirlo reventaba
- * el comando cada 15 minutos, 23-nov-2026) y devuelve el pedido a Pending si no completó.
+ * el comando cada 15 minutos, 23-nov-2026) y devuelve el pedido a Pending sin lo escaneado.
  * La nota del registro dice que fue por inactividad.
  * Programado cada 15 min en console/kernel.
  */
@@ -48,22 +48,23 @@ class CerrarEmpaquesHuerfanos extends Command
                 ]);
                 $cerrados++;
 
-                // Si el pedido quedó en Alistando y ningún ítem se pickeó completo, volver a Pending
+                // El pedido vuelve a Pending y lo escaneado se borra: con el
+                //   empaque anulado ya no es de nadie, y si quedaba en «Alistando»
+                //   con ítems marcados la cola lo ofrecía en «1/1 ✔» para
+                //   confirmarlo sin escanear (prueba del 24-nov-2026).
                 $pedido = DropiPedido::find($r->pedido_id);
                 if ($pedido && $pedido->estado === EstadoPedidoDropi::Alistando) {
-                    $totalPickeado = $pedido->items()->where('cantidad_pickeada', '>', 0)->count();
-                    if ($totalPickeado === 0) {
-                        // `estado` está en $guarded: el `update()` de antes no
-                        // hacía nada y el pedido se quedaba en «Alistando»
-                        // para siempre. Se cambia como en LiberarLocksAlistador.
-                        try {
-                            $pedido->transicionar(EstadoPedidoDropi::Pending, 'sistema', null, ['origen' => 'empaque_huerfano', 'empaque_id' => $r->id]);
-                            $pedidosReset++;
-                        } catch (\Throwable $e) {
-                            \Illuminate\Support\Facades\Log::warning('dropi.empaque_huerfano.revert_bloqueado', [
-                                'empaque_id' => $r->id, 'pedido_id' => $r->pedido_id, 'msg' => $e->getMessage(),
-                            ]);
-                        }
+                    $pedido->items()->update(['cantidad_pickeada' => 0, 'pickeado_at' => null, 'pickeado_por' => null]);
+                    // `estado` está en $guarded: el `update()` de antes no
+                    // hacía nada y el pedido se quedaba en «Alistando»
+                    // para siempre. Se cambia como en LiberarLocksAlistador.
+                    try {
+                        $pedido->transicionar(EstadoPedidoDropi::Pending, 'sistema', null, ['origen' => 'empaque_huerfano', 'empaque_id' => $r->id]);
+                        $pedidosReset++;
+                    } catch (\Throwable $e) {
+                        \Illuminate\Support\Facades\Log::warning('dropi.empaque_huerfano.revert_bloqueado', [
+                            'empaque_id' => $r->id, 'pedido_id' => $r->pedido_id, 'msg' => $e->getMessage(),
+                        ]);
                     }
                 }
             }

@@ -19,7 +19,6 @@ use App\Modules\Dropi\DTOs\PedidoDropiDTO;
 use App\Modules\Dropi\Enums\EstadoCorte;
 use App\Modules\Dropi\Enums\EstadoPedidoDropi;
 use App\Modules\Dropi\Filament\Pages\EstacionEmpaque;
-use App\Modules\Dropi\Filament\Pages\VistaAlistador;
 use App\Modules\Dropi\Filament\Resources\DropiCorteResource\Pages\ListDropiCortes;
 use App\Modules\Dropi\Models\DropiCorte;
 use App\Modules\Dropi\Models\DropiPedido;
@@ -77,10 +76,10 @@ it('«Cerrar corte» deja de recibir pedidos: el nuevo cae en otro corte y lo de
     expect($nuevo->corte_id)->not->toBe($corte->id)
         ->and(EstadoCorte::de($nuevo->corte->estado))->toBe(EstadoCorte::Abierto);
 
-    // La vista del alistador trabaja el corte cerrado, no el nuevo.
+    // El corte en trabajo es el cerrado, no el nuevo (la Vista del Alistador
+    //   trabaja desde el 24-nov-2026 el lote impreso, no el corte).
     $this->actingAs($this->aracely);
-    expect(Livewire::test(VistaAlistador::class)->instance()->corteId)->toBe($corte->id)
-        ->and(DropiCorte::enTrabajo()->id)->toBe($corte->id);
+    expect(DropiCorte::enTrabajo()->id)->toBe($corte->id);
 
     // Y se empaca en la estación como siempre.
     $p->transicionar(EstadoPedidoDropi::Alistando, 'manual', $this->aracely->id);

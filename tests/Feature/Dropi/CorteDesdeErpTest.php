@@ -10,11 +10,13 @@ use App\Modules\Dropi\Actions\AsignarCorteACarga;
 use App\Modules\Dropi\Actions\GenerarGuiaDropi;
 use App\Modules\Dropi\Actions\SincronizarDropiWeb;
 use App\Modules\Dropi\Jobs\GenerarGuiasEnBloqueJob;
+use App\Modules\Dropi\Models\DropiLoteImpresion;
 use App\Modules\Dropi\Models\DropiPedido;
 use App\Modules\Dropi\Services\ImprimirGuiasDropi;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Storage;
 
 beforeEach(function () {
     config()->set('dropi.web.stickers_url', 'https://stickers.test');
@@ -65,6 +67,25 @@ it('«Generar guías» sólo le pide guía a lo que en Dropi sigue PENDIENTE y d
     expect(GenerarGuiasEnBloqueJob::avance(7))->toMatchArray(['total' => 3, 'hechas' => 1, 'saltadas' => 2, 'errores' => []]);
 });
 
+it('sin stock en el ERP también se genera la guía mientras no se exija; con la regla prendida se salta (la señora Lahida, 46:50)', function () {
+    $conStock = cdePedido('111', 'PENDIENTE');
+    $sinStock = cdePedido('112', 'PENDIENTE');
+    DB::table('dropi_pedidos')->where('id', $sinStock->id)->update(['estado' => \App\Modules\Dropi\Enums\EstadoPedidoDropi::PendienteInventario->value]);
+
+    // Mientras se carga el inventario del ERP: «que podamos hacer todo».
+    $generar = $this->mock(GenerarGuiaDropi::class);
+    $generar->shouldReceive('handle')->twice()->andReturn([]);
+    GenerarGuiasEnBloqueJob::lanzar([$conStock->id, $sinStock->id], 8);
+    expect(GenerarGuiasEnBloqueJob::avance(8))->toMatchArray(['total' => 2, 'hechas' => 2, 'saltadas' => 0]);
+
+    // Con el inventario completo, Aracely prende «Exigir stock del ERP».
+    \App\Support\Reglas::set('dropi.exigir_stock_erp', '1');
+    $generar = $this->mock(GenerarGuiaDropi::class);
+    $generar->shouldReceive('handle')->once()->withArgs(fn (DropiPedido $p) => $p->id === $conStock->id)->andReturn([]);
+    GenerarGuiasEnBloqueJob::lanzar([$conStock->id, $sinStock->id], 9);
+    expect(GenerarGuiasEnBloqueJob::avance(9))->toMatchArray(['total' => 2, 'hechas' => 1, 'saltadas' => 1]);
+});
+
 it('si Dropi rechaza una guía, las demás siguen y el error queda en el avance', function () {
     $malo = cdePedido('201', 'PENDIENTE');
     $bueno = cdePedido('202', 'PENDIENTE');
@@ -100,6 +121,17 @@ it('«impresa» es la marca de Dropi o la del ERP; el sync guarda la de Dropi', 
         ->and($dropi->fresh()->tieneGuiaImpresa())->toBeTrue();
 });
 
+it('la lista para bodega usa el nombre de Dropi cuando el producto no está vinculado al ERP', function () {
+    cdePedido('501', 'GUIA_GENERADA', 'DV-1799321');
+
+    $fila = collect(app(\App\Modules\Dropi\Support\RecoleccionDelCorte::class)->totalesDe(DropiPedido::with('items.variante.producto', 'items.producto')->get()))->first();
+    expect($fila['producto'])->toBe('Producto DV-1799321')->and($fila['vinculado'])->toBeFalse();
+
+    $html = view('dropi.pdf.recoleccion', ['titulo' => 'Recolección', 'filas' => [$fila + ['marcada' => false, 'faltan' => 0]],
+        'corte' => null, 'generado' => now(), 'unidades' => 1])->render();
+    expect($html)->toContain('Producto DV-1799321')->toContain('sin vincular al ERP')->not->toContain('SKU sin match');
+});
+
 it('ordena las guías para empacar: el producto con más pedidos primero, y dentro el más viejo', function () {
     $tapete = cdePedido('401', 'GUIA_GENERADA', 'TAPETE');
     $cel1 = cdePedido('402', 'GUIA_GENERADA', 'CELULAR');
@@ -111,30 +143,54 @@ it('ordena las guías para empacar: el producto con más pedidos primero, y dent
     expect($orden)->toBe([$cel2->id, $cel1->id, $tapete->id]);
 });
 
-it('«Imprimir guías» arma un solo PDF (lista + stickers), marca impresas y avisa lo que no tiene sticker', function () {
+it('«Imprimir guías» arma un lote en segundo plano (lista + stickers), marca impresas y avisa lo que no tiene sticker', function () {
+    Storage::fake('local');
     $a = cdePedido('501', 'GUIA_GENERADA', cambios: ['guia' => 'G-501', 'sticker_path' => 'g/501.pdf']);
     $b = cdePedido('502', 'GUIA_GENERADA', cambios: ['guia' => 'G-502', 'sticker_path' => 'g/502.pdf']);
     $sinPublicar = cdePedido('503', 'GUIA_GENERADA', cambios: ['guia' => 'G-503', 'sticker_path' => 'g/503.pdf']);
+    $sinGuia = cdePedido('504', 'PENDIENTE');
     Http::fake([
         'stickers.test/g/501.pdf' => Http::response(cdeStickerPdf('501')),
         'stickers.test/g/502.pdf' => Http::response(cdeStickerPdf('502')),
         'stickers.test/*' => Http::response('', 404),
     ]);
 
-    $r = app(ImprimirGuiasDropi::class)->generar([$a->id, $b->id, $sinPublicar->id], null);
+    $lote = app(ImprimirGuiasDropi::class)->lanzar([$a->id, $b->id, $sinPublicar->id, $sinGuia->id], null)->fresh();
 
-    expect($r['pdf'])->toStartWith('%PDF')
-        ->and($r['impresos'])->toBe(2)
-        ->and($r['sin_sticker'])->toBe(['503'])
+    expect($lote->estado)->toBe(DropiLoteImpresion::LISTO)
+        ->and($lote->total)->toBe(3) // el que no tiene guía no entra
+        ->and($lote->sin_sticker)->toBe(['503'])
+        ->and($lote->partes)->toHaveCount(1)
         // 1 página de lista + 2 stickers + 1 de «sin sticker».
-        ->and(cdePaginas($r['pdf']))->toBe(4)
+        ->and(cdePaginas(Storage::disk('local')->get($lote->partes[0])))->toBe(4)
         ->and($a->fresh()->guia_impresa_at)->not->toBeNull()
+        ->and($a->fresh()->lote_impresion_id)->toBe($lote->id)
         ->and($sinPublicar->fresh()->guia_impresa_at)->toBeNull();
 });
 
-it('la impresión sólo la abre quien cambia pedidos en Dropi, y vence', function () {
-    $token = ImprimirGuiasDropi::preparar([1]);
-    $this->actingAs(\App\Models\User::factory()->create());
+it('un lote masivo sale en partes de 200 y la pila sigue de una parte a la otra', function () {
+    Storage::fake('local');
+    Http::fake(['stickers.test/*' => Http::response(cdeStickerPdf('x'))]);
+    $ids = [];
+    foreach (range(1, 205) as $i) {
+        $ids[] = cdePedido((string) (7000 + $i), 'GUIA_GENERADA', cambios: ['guia' => "G-{$i}", 'sticker_path' => "g/{$i}.pdf"])->id;
+    }
 
-    $this->get(route('dropi.guias.imprimir', $token))->assertForbidden();
+    $lote = app(ImprimirGuiasDropi::class)->lanzar($ids, null)->fresh();
+
+    expect($lote->estado)->toBe(DropiLoteImpresion::LISTO)
+        ->and($lote->partes)->toHaveCount(2)
+        ->and(cdePaginas(Storage::disk('local')->get($lote->partes[0])))->toBe(1 + 200) // la lista abre la primera
+        ->and(cdePaginas(Storage::disk('local')->get($lote->partes[1])))->toBe(5)
+        ->and(DropiPedido::whereIn('id', $ids)->orderBy('orden_empaque')->pluck('id')->all())->toBe($lote->pedidos);
+});
+
+it('las partes del lote sólo las baja quien cambia pedidos en Dropi', function () {
+    Storage::fake('local');
+    Http::fake(['stickers.test/*' => Http::response(cdeStickerPdf('x'))]);
+    $p = cdePedido('601', 'GUIA_GENERADA', cambios: ['guia' => 'G-601', 'sticker_path' => 'g/601.pdf']);
+    $lote = app(ImprimirGuiasDropi::class)->lanzar([$p->id], null);
+
+    $this->actingAs(\App\Models\User::factory()->create());
+    $this->get(route('dropi.guias.parte', [$lote, 1]))->assertForbidden();
 });

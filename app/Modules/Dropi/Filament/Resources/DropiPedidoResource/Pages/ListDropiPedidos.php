@@ -23,25 +23,43 @@ class ListDropiPedidos extends ListRecords
     /** Sin una vuelta buena en este tiempo, el botón avisa (el cron corre cada 15 s). */
     public const MINUTOS_SIN_SYNC = 2;
 
-    /** El avance de «Generar guías» (se refresca con el sondeo de 15 s de la tabla). */
-    public function getSubheading(): ?string
+    /** El avance de «Generar guías» y de los lotes de «Imprimir guías» (se refresca con el sondeo de 15 s de la tabla). */
+    public function getSubheading(): string|\Illuminate\Contracts\Support\Htmlable|null
     {
+        $lineas = [];
+
         $a = \App\Modules\Dropi\Jobs\GenerarGuiasEnBloqueJob::avance(auth()->id());
-        if (! $a) {
-            return null;
-        }
-        $listas = $a['hechas'] + $a['saltadas'] + count($a['errores']);
-        $texto = $listas < $a['total']
-            ? "Generando guías: {$listas} de {$a['total']}"
-            : "Guías generadas: {$a['hechas']} de {$a['total']}";
-        if ($a['saltadas']) {
-            $texto .= " · {$a['saltadas']} saltadas (no estaban PENDIENTE en Dropi)";
-        }
-        if ($a['errores']) {
-            $texto .= ' · ' . count($a['errores']) . ' con error: ' . implode(' | ', array_slice($a['errores'], 0, 3));
+        if ($a) {
+            $listas = $a['hechas'] + $a['saltadas'] + count($a['errores']);
+            $texto = $listas < $a['total']
+                ? "Generando guías: {$listas} de {$a['total']}"
+                : "Guías generadas: {$a['hechas']} de {$a['total']}";
+            if ($a['saltadas']) {
+                $texto .= " · {$a['saltadas']} saltadas (no estaban PENDIENTE en Dropi)";
+            }
+            if ($a['errores']) {
+                $texto .= ' · ' . count($a['errores']) . ' con error: ' . implode(' | ', array_slice($a['errores'], 0, 3));
+            }
+            $lineas[] = e($texto);
         }
 
-        return $texto;
+        // Los lotes de «Imprimir guías» de hoy: el avance y, listos, sus partes.
+        $lotes = \App\Modules\Dropi\Models\DropiLoteImpresion::query()
+            ->where('created_at', '>=', now('America/Bogota')->startOfDay())
+            ->latest('id')->limit(3)->get();
+        foreach ($lotes as $l) {
+            $linea = e($l->titulo()) . ': ';
+            $linea .= match ($l->estado) {
+                \App\Modules\Dropi\Models\DropiLoteImpresion::DESCARGANDO => e("bajando stickers, {$l->descargados} de {$l->total}…"),
+                \App\Modules\Dropi\Models\DropiLoteImpresion::ARMANDO => e('armando el PDF, parte ' . (count($l->partes ?? []) + 1) . '…'),
+                \App\Modules\Dropi\Models\DropiLoteImpresion::ERROR => e('falló: ' . $l->error),
+                default => collect($l->partes ?? [])->keys()->map(fn ($i) => '<a href="' . e(route('dropi.guias.parte', [$l, $i + 1])) . '" target="_blank" rel="noopener" style="text-decoration:underline;font-weight:600">🖨 Parte ' . ($i + 1) . '</a>')->implode(' · ')
+                    . ($l->sin_sticker ? e(' · ' . count($l->sin_sticker) . ' sin sticker') : ''),
+            };
+            $lineas[] = $linea;
+        }
+
+        return $lineas ? new \Illuminate\Support\HtmlString(implode('<br>', $lineas)) : null;
     }
 
     protected function getHeaderActions(): array

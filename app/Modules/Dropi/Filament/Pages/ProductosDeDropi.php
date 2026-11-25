@@ -266,7 +266,10 @@ class ProductosDeDropi extends Page
             ->color('gray')
             ->visible(fn () => $this->puedeEditar)
             ->modalHeading(fn (array $arguments) => 'Asociar «' . ($arguments['nombre'] ?? '') . '» a un producto de Dropi')
-            ->modalDescription('Cada variación de Dropi queda vinculada con esta ficha (por color si el ERP lleva el stock por variante). Busca en la última lectura de Dropi.')
+            ->modalDescription(fn () => 'Cada variación de Dropi queda vinculada con esta ficha (por color si el ERP lleva el stock por variante). '
+                . (($leido = app(CatalogoDropi::class)->foto()['leido_at'] ?? null)
+                    ? 'Busca en la lectura de Dropi del ' . \Illuminate\Support\Carbon::parse($leido)->timezone('America/Bogota')->format('d/m H:i') . '.'
+                    : 'Todavía no se ha leído el catálogo de Dropi: cierra, dale «Leer de Dropi» arriba y vuelve cuando termine.'))
             ->modalSubmitActionLabel('Asociar')
             ->schema([
                 Select::make('dropi_id')
@@ -275,6 +278,9 @@ class ProductosDeDropi extends Page
                     ->searchable()
                     ->required()
                     ->getSearchResultsUsing(fn (string $search) => self::buscarEnFoto($search))
+                    ->noSearchResultsMessage(fn () => app(CatalogoDropi::class)->foto()
+                        ? 'Nada con ese nombre, SKU o id en la última lectura de Dropi.'
+                        : 'No hay catálogo de Dropi leído todavía: dale «Leer de Dropi» arriba.')
                     ->getOptionLabelUsing(fn ($value) => self::etiquetaFoto((int) $value)),
                 Toggle::make('igualar')
                     ->label('Después, igualar el stock de Dropi al del ERP')

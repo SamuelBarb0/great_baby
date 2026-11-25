@@ -1,43 +1,50 @@
 <x-filament-panels::page>
     @php
-        $corte = $this->corte;
+        $lote = $this->lote;
+        $lotes = $this->lotes;
+        $cifras = $this->cifras;
         $recoleccion = $this->recoleccion;
         $empaque = $this->empaque;
         $ubicacionesEmpaque = $modo === 'empaque' ? app(\App\Modules\Dropi\Support\RecoleccionDelCorte::class)->ubicacionPorItem($empaque) : [];
-        $progreso = $corte && $corte->pedidos_totales > 0
-            ? round(($corte->pedidos_despachados / $corte->pedidos_totales) * 100)
-            : 0;
+        $progreso = $cifras['total'] > 0 ? round(($cifras['empacados'] / $cifras['total']) * 100) : 0;
     @endphp
 
-    {{-- Header del corte activo --}}
+    {{-- El lote impreso que se trabaja: la misma hoja que la encargada tiene en la mano (24-nov-2026). --}}
     <x-filament::section>
-        @if($corte)
+        @if($lote)
             <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:1rem;">
                 <div>
-                    <div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.1em;color:#9ca3af;">Corte activo</div>
-                    <div style="font-size:1.75rem;font-weight:700;margin-top:.25rem;">{{ $corte->etiqueta() }}</div>
-                    <div style="margin-top:.5rem;">
-                        <x-filament::badge :color="$corte->estado->color()">{{ $corte->estado->label() }}</x-filament::badge>
-                    </div>
+                    <div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.1em;color:#9ca3af;">Lote impreso</div>
+                    <div style="font-size:1.75rem;font-weight:700;margin-top:.25rem;">{{ $lote->titulo() }}</div>
+                    @if($lotes->count() > 1)
+                        <div style="display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.5rem;">
+                            @foreach($lotes as $l)
+                                <button type="button" wire:click="escogerLote({{ $l->id }})"
+                                        style="padding:.3rem .7rem;border-radius:9999px;font-size:.8rem;font-weight:600;cursor:pointer;border:1px solid {{ $l->id === $lote->id ? '#f59e0b' : 'rgba(156,163,175,.4)' }};background:{{ $l->id === $lote->id ? 'rgba(245,158,11,.15)' : 'transparent' }};">
+                                    Lote {{ $l->id }} · {{ $l->created_at->timezone('America/Bogota')->format('g:i a') }}
+                                </button>
+                            @endforeach
+                        </div>
+                    @endif
                 </div>
                 <div class="alistador-cifras" style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1rem;text-align:center;">
                     <div style="padding:.75rem 1rem;border-radius:.75rem;background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);">
-                        <div style="font-size:1.5rem;font-weight:700;">{{ $corte->pedidos_totales }}</div>
-                        <div style="font-size:.7rem;color:#9ca3af;margin-top:.25rem;text-transform:uppercase;">Total</div>
+                        <div style="font-size:1.5rem;font-weight:700;">{{ $cifras['total'] }}</div>
+                        <div style="font-size:.7rem;color:#9ca3af;margin-top:.25rem;text-transform:uppercase;">Guías</div>
                     </div>
                     <div style="padding:.75rem 1rem;border-radius:.75rem;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);">
-                        <div style="font-size:1.5rem;font-weight:700;color:#f87171;">{{ $corte->pedidos_pendientes_inv }}</div>
-                        <div style="font-size:.7rem;color:#9ca3af;margin-top:.25rem;text-transform:uppercase;">Pend. inv.</div>
+                        <div style="font-size:1.5rem;font-weight:700;color:#f87171;">{{ $cifras['por_empacar'] }}</div>
+                        <div style="font-size:.7rem;color:#9ca3af;margin-top:.25rem;text-transform:uppercase;">Por empacar</div>
                     </div>
                     <div style="padding:.75rem 1rem;border-radius:.75rem;background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.3);">
-                        <div style="font-size:1.5rem;font-weight:700;color:#4ade80;">{{ $corte->pedidos_despachados }}</div>
-                        <div style="font-size:.7rem;color:#9ca3af;margin-top:.25rem;text-transform:uppercase;">Despachados</div>
+                        <div style="font-size:1.5rem;font-weight:700;color:#4ade80;">{{ $cifras['empacados'] }}</div>
+                        <div style="font-size:.7rem;color:#9ca3af;margin-top:.25rem;text-transform:uppercase;">Empacados</div>
                     </div>
                 </div>
             </div>
             <div style="margin-top:1rem;">
                 <div style="display:flex;justify-content:space-between;font-size:.75rem;color:#9ca3af;margin-bottom:.25rem;">
-                    <span>Progreso del corte</span>
+                    <span>Progreso del lote</span>
                     <span style="font-weight:700;">{{ $progreso }}%</span>
                 </div>
                 <div style="height:.5rem;border-radius:9999px;background:rgba(156,163,175,.2);overflow:hidden;">
@@ -45,8 +52,11 @@
                 </div>
             </div>
         @else
-            <div style="text-align:center;padding:2rem;color:#9ca3af;">
-                No hay cortes activos. Sincronice pedidos desde Dropi para crear el primero.
+            {{-- Aquí se trabaja DESPUÉS de Aracely: sin guías impresas no hay nada que recoger. --}}
+            <div style="text-align:center;padding:2.5rem 1rem;">
+                <div style="font-size:2.5rem;">🖨</div>
+                <div style="font-size:1.25rem;font-weight:700;margin-top:.5rem;">Todavía no hay guías impresas</div>
+                <div style="color:#9ca3af;margin-top:.5rem;">Aracely: en Pedidos Dropi selecciona los pedidos → <strong>Generar guías</strong> → <strong>Imprimir guías</strong>. Cuando el lote esté impreso, aparece aquí.</div>
             </div>
         @endif
     </x-filament::section>
@@ -69,6 +79,7 @@
         .alistador-hecha > div:last-child { opacity: .55; }
     </style>
 
+    @if($lote)
     {{-- Selector de modo con tabs --}}
     <x-filament::tabs style="margin-top:1.5rem;">
         <x-filament::tabs.item :active="$modo === 'recoleccion'" wire:click="cambiarModo('recoleccion')" icon="heroicon-o-clipboard-document-list">
@@ -84,16 +95,17 @@
         <x-filament::section class="alistador-seccion" style="margin-top:1rem;">
             <x-slot name="heading">Modo Recolección</x-slot>
             <x-slot name="description">Ve el total de unidades por referencia, en el orden del recorrido de la bodega, para pasar una sola vez. Toca cada referencia cuando la recojas: queda marcada para todos. Cuando termines, cambia a Empaque.</x-slot>
-            @if($corte)
+            {{-- La hoja del lote: la lista de alistamiento abre la parte 1. --}}
+            @if($lote->partes)
                 <x-slot name="afterHeader">
-                    <x-filament::button tag="a" :href="route('dropi.recoleccion.pdf', $corte)" target="_blank" icon="heroicon-o-printer" color="gray">
-                        Imprimir PDF
+                    <x-filament::button tag="a" :href="route('dropi.guias.parte', [$lote, 1])" target="_blank" icon="heroicon-o-printer" color="gray">
+                        Hoja del lote
                     </x-filament::button>
                 </x-slot>
             @endif
 
             @if(count($recoleccion) === 0)
-                <div style="text-align:center;padding:2rem;color:#9ca3af;">Nada por recoger en este corte.</div>
+                <div style="text-align:center;padding:2rem;color:#9ca3af;">Todo lo de este lote ya se empacó.</div>
             @else
                 @php
                     $recogidas = collect($recoleccion)->where('marcada', true)->count();
@@ -184,7 +196,7 @@
     @if($modo === 'empaque')
         <x-filament::section style="margin-top:1rem;">
             <x-slot name="heading">Modo Empaque · Cola compartida</x-slot>
-            <x-slot name="description">En el orden del recorrido de la bodega. Al tomar un pedido queda bloqueado para ti — nadie más puede empacarlo hasta que termines o pasen 10 minutos sin actividad.</x-slot>
+            <x-slot name="description">En el orden de la pila de stickers, igual que la Estación de Empaque. Al tomar un pedido queda bloqueado para ti — nadie más puede empacarlo hasta que termines o pasen 10 minutos sin actividad.</x-slot>
 
             @if($empaque->isEmpty())
                 <div style="text-align:center;padding:2rem;color:#9ca3af;">Cola vacía. Revisa Recolección o vuelve luego.</div>
@@ -224,9 +236,9 @@
                                         <div style="font-weight:700;font-size:1.05rem;">${{ number_format((float) $pedido->monto_esperado_proveedor, 0, ',', '.') }}</div>
                                     </div>
                                     <div style="display:flex;gap:.5rem;">
-                                        @if($pedido->estado->value === 'pending')
+                                        @if($pedido->estado->value !== 'alistando')
                                             <x-filament::button size="lg" color="info" wire:click="tomarPedido({{ $pedido->id }})">Tomar</x-filament::button>
-                                        @elseif($pedido->estado->value === 'alistando')
+                                        @else
                                             <x-filament::button size="lg" color="success" wire:click="empacarPedido({{ $pedido->id }})">Empacar</x-filament::button>
                                         @endif
                                     </div>
@@ -237,5 +249,6 @@
                 </div>
             @endif
         </x-filament::section>
+    @endif
     @endif
 </x-filament-panels::page>

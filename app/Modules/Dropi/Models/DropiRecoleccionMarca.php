@@ -14,7 +14,7 @@ class DropiRecoleccionMarca extends Model
 {
     protected $table = 'dropi_recoleccion_marcas';
 
-    protected $fillable = ['corte_id', 'sku_dropi', 'cantidad', 'marcado_por', 'marcado_at'];
+    protected $fillable = ['corte_id', 'lote_impresion_id', 'sku_dropi', 'cantidad', 'marcado_por', 'marcado_at'];
 
     protected $casts = [
         'cantidad' => 'integer',

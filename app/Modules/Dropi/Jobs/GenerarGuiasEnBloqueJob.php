@@ -63,7 +63,7 @@ class GenerarGuiasEnBloqueJob implements ShouldQueue
     {
         $p = DropiPedido::with('huella')->find($this->pedidoId);
 
-        if (! $p || ! $p->dropi_orden_id || $p->tieneGuiaReal() || $p->huella?->estatus_dropi !== 'PENDIENTE') {
+        if (! $p || ! $p->dropi_orden_id || $p->tieneGuiaReal() || $p->huella?->estatus_dropi !== 'PENDIENTE' || ! $p->listoParaDespachar()) {
             $this->anotar(fn (array $a) => ['saltadas' => $a['saltadas'] + 1] + $a);
 
             return;

@@ -6,8 +6,8 @@ use App\Modules\Dropi\Enums\EstadoPedidoDropi;
 use App\Modules\Dropi\Events\PedidoDespachado;
 use App\Modules\Dropi\Jobs\NotificarClienteDespachoJob;
 use App\Modules\Dropi\Models\DropiAlistadorLock;
-use App\Modules\Dropi\Models\DropiCorte;
 use App\Modules\Dropi\Models\DropiEstadoBitacora;
+use App\Modules\Dropi\Models\DropiLoteImpresion;
 use App\Modules\Dropi\Models\DropiPedido;
 use App\Modules\Dropi\Models\DropiRecoleccionMarca;
 use App\Modules\Dropi\Support\RecoleccionDelCorte;
@@ -22,9 +22,14 @@ use Illuminate\Database\Eloquent\Collection;
  * §5, §6, §11 Diseño Dropi — Vista operativa del alistador.
  * Simplificada, distinta a la vista de gestión de Aracely.
  *
- * Dos modos secuenciales dentro del corte:
- *   RECOLECCIÓN — agrupado por producto, para recorrer bodega una vez.
- *   EMPAQUE     — por pedido, con cola compartida + bloqueo al abrir (2-3 personas).
+ * Va DESPUÉS de Aracely (24-nov-2026): ella escoge los pedidos, genera las
+ * guías e imprime; cada «Imprimir guías» es un lote, y la encargada de bodega
+ * trabaja ese lote con la hoja en la mano. Sin un lote impreso no hay nada que
+ * hacer aquí.
+ *
+ * Dos modos secuenciales dentro del lote:
+ *   RECOLECCIÓN — agrupado por producto, la misma suma de la hoja, para recorrer bodega una vez.
+ *   EMPAQUE     — por pedido, la misma cola de la Estación de Empaque, con bloqueo al abrir.
  */
 class VistaAlistador extends Page
 {
@@ -42,7 +47,7 @@ class VistaAlistador extends Page
 
     public string $modo = 'recoleccion'; // recoleccion | empaque
 
-    public ?int $corteId = null;
+    public ?int $loteId = null;
 
     // §24 · Solo Alistador/Aracely acceden. SAC ve pedidos pero no esta vista operativa.
     public static function canAccess(): bool
@@ -53,10 +58,39 @@ class VistaAlistador extends Page
 
     public function mount(): void
     {
-        // El corte que se está empacando (cerrado, en despacho) antes que el
-        //   nuevo que abrió «Cerrar corte» (24-nov-2026).
-        $corte = DropiCorte::enTrabajo();
-        $this->corteId = $corte?->id;
+        // El lote impreso más viejo que todavía tiene algo por empacar.
+        $this->loteId = app(RecoleccionDelCorte::class)->lotesAbiertos()->first()?->id;
+    }
+
+    public function escogerLote(int $loteId): void
+    {
+        $this->loteId = $this->lotes->contains('id', $loteId) ? $loteId : $this->loteId;
+    }
+
+    /** @return \Illuminate\Database\Eloquent\Collection<int, DropiLoteImpresion> */
+    public function getLotesProperty(): \Illuminate\Database\Eloquent\Collection
+    {
+        return app(RecoleccionDelCorte::class)->lotesAbiertos();
+    }
+
+    public function getLoteProperty(): ?DropiLoteImpresion
+    {
+        return $this->loteId ? DropiLoteImpresion::find($this->loteId) : null;
+    }
+
+    /** @return array{total: int, por_empacar: int, empacados: int} */
+    public function getCifrasProperty(): array
+    {
+        if (! $this->loteId) {
+            return ['total' => 0, 'por_empacar' => 0, 'empacados' => 0];
+        }
+        $q = fn () => DropiPedido::query()->where('lote_impresion_id', $this->loteId);
+
+        return [
+            'total' => $q()->count(),
+            'por_empacar' => $q()->whereIn('estado', DropiPedido::estadosDespachables())->count(),
+            'empacados' => $q()->whereIn('estado', [EstadoPedidoDropi::Empacado, EstadoPedidoDropi::Despachado, EstadoPedidoDropi::Entregado, EstadoPedidoDropi::Pagado])->count(),
+        ];
     }
 
     public function cambiarModo(string $modo): void
@@ -64,19 +98,14 @@ class VistaAlistador extends Page
         $this->modo = in_array($modo, ['recoleccion', 'empaque'], true) ? $modo : 'recoleccion';
     }
 
-    public function getCorteProperty(): ?DropiCorte
-    {
-        return $this->corteId ? DropiCorte::find($this->corteId) : null;
-    }
-
     /**
-     * §5, §6 modo recolección — totales por producto en el corte, en el orden
+     * §5, §6 modo recolección — totales por producto del lote, en el orden
      * del recorrido de la bodega y con el «chulito» de quien ya recogió cada
      * referencia (ver RecoleccionDelCorte).
      */
     public function getRecoleccionProperty(): array
     {
-        return $this->corteId ? app(RecoleccionDelCorte::class)->conMarcas($this->corteId) : [];
+        return $this->lote ? app(RecoleccionDelCorte::class)->conMarcasDeLote($this->lote) : [];
     }
 
     /**
@@ -85,19 +114,19 @@ class VistaAlistador extends Page
      */
     public function marcarRecogido(string $sku): void
     {
-        if (! static::canAccess() || ! $this->corteId) {
+        if (! static::canAccess() || ! $this->lote) {
             return;
         }
 
-        $total = app(RecoleccionDelCorte::class)->totales($this->corteId)[$sku]['total_unidades'] ?? null;
+        $total = collect(app(RecoleccionDelCorte::class)->conMarcasDeLote($this->lote))->firstWhere('sku', $sku)['total_unidades'] ?? null;
         if ($total === null) {
-            Notification::make()->title('Esa referencia ya no está por recoger en este corte.')->warning()->send();
+            Notification::make()->title('Esa referencia ya no está por recoger en este lote.')->warning()->send();
 
             return;
         }
 
         $marca = DropiRecoleccionMarca::query()
-            ->where('corte_id', $this->corteId)
+            ->where('lote_impresion_id', $this->loteId)
             ->where('sku_dropi', $sku)
             ->first();
 
@@ -108,18 +137,19 @@ class VistaAlistador extends Page
         }
 
         DropiRecoleccionMarca::query()->updateOrCreate(
-            ['corte_id' => $this->corteId, 'sku_dropi' => $sku],
+            ['lote_impresion_id' => $this->loteId, 'sku_dropi' => $sku],
             ['cantidad' => $total, 'marcado_por' => auth()->id(), 'marcado_at' => now()],
         );
     }
 
     /**
-     * §6 modo empaque — cola compartida. No incluye los que están bloqueados por otro alistador
-     * (excepto por mí, que puedo continuar los que ya tomé).
+     * §6 modo empaque — la misma cola de la Estación de Empaque (lo impreso, en
+     * el orden de la pila), sólo la de este lote. No incluye los que están
+     * bloqueados por otro alistador (excepto por mí, que puedo continuar los que ya tomé).
      */
     public function getEmpaqueProperty(): Collection
     {
-        if (! $this->corteId) {
+        if (! $this->loteId) {
             return DropiPedido::query()->whereRaw('1=0')->get();
         }
 
@@ -128,21 +158,13 @@ class VistaAlistador extends Page
         $bloqueadosPorOtros = DropiAlistadorLock::query()
             ->where('alistador_id', '!=', auth()->id())
             ->where('heartbeat_at', '>=', now()->subMinutes(10))
-            ->pluck('pedido_id');
+            ->pluck('pedido_id')->all();
 
-        // Los 20 más viejos, como antes (nadie se queda esperando), pero en
-        //   el orden de la ruta de la bodega: reunión del 19-nov-2026, «hacer
-        //   lo mismo para el empaque».
-        $cola = DropiPedido::query()
-            ->where('corte_id', $this->corteId)
-            ->whereIn('estado', [EstadoPedidoDropi::Pending, EstadoPedidoDropi::Alistando])
-            ->whereNotIn('id', $bloqueadosPorOtros)
-            ->with(['items.variante.producto', 'items.producto'])
-            ->orderBy('created_at')
-            ->limit(20)
-            ->get();
+        $cola = app(\App\Modules\Dropi\Support\ColaDeEmpaque::class)->delLote($this->loteId, (int) auth()->id(), 20 + count($bloqueadosPorOtros))
+            ->reject(fn (DropiPedido $p) => in_array($p->id, $bloqueadosPorOtros, true))
+            ->take(20);
 
-        return new Collection(app(RecoleccionDelCorte::class)->ordenarPorRuta($cola)->all());
+        return new Collection($cola->values()->all());
     }
 
     /**

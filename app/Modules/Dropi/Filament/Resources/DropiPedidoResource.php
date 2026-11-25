@@ -309,10 +309,17 @@ class DropiPedidoResource extends Resource
                     ->modalDescription(function (\Illuminate\Support\Collection $records) {
                         $records->loadMissing('huella');
                         $van = $records->filter(fn (DropiPedido $p) => self::pideGuia($p))->count();
-                        $saltan = $records->count() - $van;
+                        // Sin stock en el ERP: se avisa y se genera igual, o se salta si
+                        //   la regla «Exigir stock del ERP» está prendida (24-nov-2026).
+                        $sinStock = $records->filter(fn (DropiPedido $p) => $p->sinStockErp() && self::pideGuia($p))->count();
+                        $exige = (bool) setting('dropi.exigir_stock_erp', false);
+                        $sinStockSalta = $exige ? $records->filter(fn (DropiPedido $p) => $p->sinStockErp())->count() : 0;
+                        $saltan = $records->count() - $van - $sinStockSalta;
 
                         return "Se pedirán {$van} guía(s) REALES en Dropi: la transportadora las registra y la de un pedido que al final no sale hay que anularla."
-                            . ($saltan ? " {$saltan} de lo escogido no está PENDIENTE en Dropi o ya tiene guía y se salta." : '')
+                            . ($sinStock ? " Ojo: {$sinStock} de ellas no tiene(n) stock en el ERP (pendiente por inventario); se generan igual y en empaque salen marcadas «sin stock en el ERP»." : '')
+                            . ($sinStockSalta ? " {$sinStockSalta} no tiene(n) stock en el ERP y se salta(n): la regla «Exigir stock del ERP» está prendida." : '')
+                            . ($saltan > 0 ? " {$saltan} de lo escogido no está PENDIENTE en Dropi o ya tiene guía y se salta." : '')
                             . ' Se generan en segundo plano; el avance sale arriba de la tabla.';
                     })
                     ->modalSubmitActionLabel('Generar guías')
@@ -322,7 +329,7 @@ class DropiPedidoResource extends Resource
                         $ids = $records->filter(fn (DropiPedido $p) => self::pideGuia($p))->pluck('id')->all();
                         if (! $ids) {
                             \Filament\Notifications\Notification::make()->title('Nada que generar')
-                                ->body('Ninguno de los escogidos está PENDIENTE en Dropi sin guía.')->warning()->send();
+                                ->body('Ninguno de los escogidos está PENDIENTE en Dropi sin guía' . (setting('dropi.exigir_stock_erp', false) ? ' y con stock en el ERP.' : '.'))->warning()->send();
 
                             return;
                         }
@@ -336,20 +343,21 @@ class DropiPedidoResource extends Resource
                     ->icon('heroicon-o-printer')
                     ->color('success')
                     ->visible(fn () => self::puedeCambiarEnDropi())
-                    ->action(function (\Illuminate\Support\Collection $records, $livewire) {
+                    // Son 300 a 800 paquetes: el PDF se arma en segundo plano y sale
+                    //   en partes de 200; los enlaces aparecen arriba de la tabla.
+                    ->action(function (\Illuminate\Support\Collection $records) {
                         self::exigirCambiarEnDropi();
-                        $conGuia = $records->filter(fn (DropiPedido $p) => $p->tieneGuiaReal());
-                        if ($conGuia->isEmpty()) {
+                        $lote = app(\App\Modules\Dropi\Services\ImprimirGuiasDropi::class)->lanzar($records->pluck('id')->all(), auth()->id());
+                        if (! $lote) {
                             \Filament\Notifications\Notification::make()->title('Ninguno tiene guía todavía')
                                 ->body('Primero «Generar guías».')->warning()->send();
 
                             return;
                         }
-                        $url = route('dropi.guias.imprimir', \App\Modules\Dropi\Services\ImprimirGuiasDropi::preparar($conGuia->pluck('id')->all()));
-                        $livewire->js('window.open(' . json_encode($url) . ', "_blank")');
-                        $sin = $records->count() - $conGuia->count();
-                        \Filament\Notifications\Notification::make()->title('Abriendo ' . $conGuia->count() . ' guía(s) en un solo PDF')
-                            ->body('Primero la lista de alistamiento y después los stickers, en el orden de empaque. Quedan marcadas «impresas».'
+                        $sin = $records->count() - $lote->total;
+                        \Filament\Notifications\Notification::make()->title("Armando el lote {$lote->id}: {$lote->total} guía(s)")
+                            ->body('Primero la lista de alistamiento y después los stickers, en el orden de empaque, en partes de '
+                                . \App\Modules\Dropi\Services\ImprimirGuiasDropi::POR_PARTE . '. Los enlaces salen arriba de la tabla cuando estén listos; al terminar quedan «impresas» y pasan a empaque.'
                                 . ($sin ? " {$sin} sin guía todavía no van." : ''))->success()->send();
                     })
                     ->deselectRecordsAfterCompletion(),
@@ -378,7 +386,8 @@ class DropiPedidoResource extends Resource
     /** ¿«Generar guías» le pide guía a este pedido? Sólo PENDIENTE en Dropi y sin guía. */
     protected static function pideGuia(DropiPedido $p): bool
     {
-        return filled($p->dropi_orden_id) && ! $p->tieneGuiaReal() && $p->huella?->estatus_dropi === 'PENDIENTE';
+        return filled($p->dropi_orden_id) && ! $p->tieneGuiaReal() && $p->huella?->estatus_dropi === 'PENDIENTE'
+            && $p->listoParaDespachar();
     }
 
     protected static function exigirCambiarEnDropi(): void

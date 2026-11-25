@@ -22,6 +22,7 @@ use App\Modules\Dropi\Models\DropiPedido;
 use App\Modules\Dropi\Models\DropiRecoleccionMarca;
 use App\Modules\Dropi\Models\EmpaqueRegistro;
 use App\Modules\Dropi\Models\InventarioMovimiento;
+use App\Modules\Dropi\Models\DropiLoteImpresion;
 use App\Modules\Dropi\Models\InventarioUbicacion;
 use App\Modules\Dropi\Models\Producto;
 use App\Modules\Dropi\Models\ProductoVariante;
@@ -52,7 +53,11 @@ beforeEach(function () {
     app(VincularProductoDropi::class)->aProducto('SKU-899', $volante->id);
 });
 
-/** El importador le asigna el corte del día (AsignarCorteACarga), el que abre la vista. */
+/**
+ * Un pedido del corte del día ya impreso por Aracely: la Vista del Alistador
+ * trabaja el lote impreso (24-nov-2026), no el corte. Todos los del test van
+ * al mismo lote, en el orden en que se crean.
+ */
 function pedidoEnCorte(string $guia, array $items): DropiPedido
 {
     app(SincronizarPedidosDropi::class)->importarPedidos([new PedidoDropiDTO(
@@ -63,7 +68,20 @@ function pedidoEnCorte(string $guia, array $items): DropiPedido
         items: array_map(fn ($i) => new ItemDropiDTO($i[0], $i[1], 30000, 'x', 'x'), $items),
         creadoAt: CarbonImmutable::now(),
     )]);
-    return DropiPedido::where('guia', $guia)->firstOrFail();
+    return alLoteImpreso(DropiPedido::where('guia', $guia)->firstOrFail());
+}
+
+/** El pedido, en el lote impreso del test (uno solo para todos). */
+function alLoteImpreso(DropiPedido $p): DropiPedido
+{
+    $lote = DropiLoteImpresion::firstOrCreate(['estado' => DropiLoteImpresion::LISTO], ['pedidos' => [], 'total' => 0, 'partes' => []]);
+    $lote->update(['pedidos' => [...$lote->pedidos, $p->id], 'total' => $lote->total + 1]);
+    DropiPedido::whereKey($p->id)->update([
+        'guia_impresa_at' => now(), 'lote_impresion_id' => $lote->id,
+        'orden_empaque' => (int) DropiPedido::max('orden_empaque') + 1,
+    ]);
+
+    return $p->fresh();
 }
 
 function recoleccionPorSku(): array
@@ -89,7 +107,7 @@ it('el chulito queda guardado con quién y cuándo, lo ve otra tablet y se puede
         ->assertSeeText('Aracely · 08:15')->assertSeeText('1 de 1 referencias recogidas');
 
     $marca = DropiRecoleccionMarca::sole();
-    expect($marca->corte_id)->toBe(DropiPedido::sole()->corte_id)->and($marca->cantidad)->toBe(3)->and($marca->marcado_por)->toBe($this->aracely->id);
+    expect($marca->lote_impresion_id)->toBe(DropiPedido::sole()->lote_impresion_id)->and($marca->cantidad)->toBe(3)->and($marca->marcado_por)->toBe($this->aracely->id);
 
     // Otra persona, en otra tablet, la ve marcada; tocarla otra vez la desmarca.
     $this->actingAs($this->luli);
@@ -117,7 +135,7 @@ it('sin acceso a la vista del alistador no se marca nada', function () {
 
     expect(VistaAlistador::canAccess())->toBeFalse();
     $pagina = new VistaAlistador();
-    $pagina->corteId = $p->corte_id;
+    $pagina->loteId = $p->lote_impresion_id;
     $pagina->marcarRecogido('SKU-899');
     expect(DropiRecoleccionMarca::count())->toBe(0);
 });
@@ -189,15 +207,32 @@ it('la recolección sale en el orden del recorrido, con la ubicación y la zona 
         ->and($r[2])->ubicacion_sugerida->toBe('—')->zona->toBeNull();
 });
 
-it('la cola de empaque también va en el orden de la ruta', function () {
+it('la cola de empaque va en el orden de la pila de stickers, como la Estación de Empaque (24-nov-2026)', function () {
     bodegaConRuta();
-    $this->travelTo(now()->subMinutes(5));
-    $lejos = pedidoEnCorte('G-1', [['DV-555', 1]]);
-    $this->travelBack();
-    $cerca = pedidoEnCorte('G-2', [['SKU-899', 1]]);
+    pedidoEnCorte('G-1', [['DV-555', 1]]);
+    pedidoEnCorte('G-2', [['SKU-899', 1]]);
     $this->actingAs($this->aracely);
 
-    expect(Livewire::test(VistaAlistador::class)->instance()->empaque->pluck('guia')->all())->toBe(['G-2', 'G-1']);
+    expect(Livewire::test(VistaAlistador::class)->instance()->empaque->pluck('guia')->all())->toBe(['G-1', 'G-2']);
+});
+
+it('sin guías impresas la vista no deja empezar y dice qué falta; con dos lotes se trabajan por separado', function () {
+    $this->actingAs($this->aracely);
+    Livewire::test(VistaAlistador::class)->assertSeeText('Todavía no hay guías impresas')->assertSet('loteId', null);
+
+    $a = pedidoEnCorte('G-1', [['SKU-899', 3]]);
+    $otro = DropiLoteImpresion::create(['estado' => DropiLoteImpresion::LISTO, 'pedidos' => [], 'total' => 1, 'partes' => []]);
+    $b = pedidoEnCorte('G-2', [['DV-555', 2]]);
+    DropiPedido::whereKey($b->id)->update(['lote_impresion_id' => $otro->id]);
+
+    $vista = Livewire::test(VistaAlistador::class)->assertSet('loteId', $a->lote_impresion_id);
+    expect(array_column($vista->instance()->recoleccion, 'sku'))->toBe(['SKU-899']);
+    $vista->call('marcarRecogido', 'SKU-899');
+
+    // El otro lote tiene su propia suma y sus propias marcas.
+    $vista->call('escogerLote', $otro->id);
+    expect(array_column($vista->instance()->recoleccion, 'sku'))->toBe(['DV-555'])
+        ->and(collect($vista->instance()->recoleccion)->firstWhere('sku', 'DV-555')['marcada'])->toBeFalse();
 });
 
 it('el PDF de la recolección lo baja el alistador, con casillas y la ruta por zonas', function () {
@@ -210,7 +245,7 @@ it('el PDF de la recolección lo baja el alistador, con casillas y la ruta por z
         ->assertOk()->assertHeader('Content-Type', 'application/pdf');
 
     $html = view('dropi.pdf.recoleccion', [
-        'corte' => $p->corte, 'filas' => app(\App\Modules\Dropi\Support\RecoleccionDelCorte::class)->conMarcas($p->corte_id),
+        'corte' => $p->corte, 'filas' => app(\App\Modules\Dropi\Support\RecoleccionDelCorte::class)->conMarcasDeLote($p->loteImpresion),
         'unidades' => 5, 'generado' => now(),
     ])->render();
     expect($html)->toContain('Zona '.ZonaDeLaBodega::deRack('1'))->toContain('Zona '.ZonaDeLaBodega::deRack('7'))->toContain('R1-A-1')->toContain('R7-A-1')
@@ -305,7 +340,7 @@ it('la recolección, el PDF y el empaque muestran la variación de Dropi cuando 
         ],
         creadoAt: CarbonImmutable::now(),
     )]);
-    $p = DropiPedido::where('guia', 'G-VAR')->firstOrFail();
+    $p = alLoteImpreso(DropiPedido::where('guia', 'G-VAR')->firstOrFail());
     $this->actingAs($this->aracely);
 
     $r = recoleccionPorSku();

@@ -66,6 +66,43 @@ class DropiPedido extends Model implements AuditableContract
         return $impresa ? $query->where($marca) : $query->whereNot($marca);
     }
 
+    /**
+     * Los estados que se pueden despachar (pedir guía, empacar). Lo «pendiente
+     * por inventario» también, mientras el inventario del ERP se termina de
+     * cargar (la señora Lahida, 24-nov-2026: «que podamos hacer todo»): la
+     * mercancía está en la bodega aunque el ERP aún no la tenga. Con la regla
+     * `dropi.exigir_stock_erp` prendida, se saltan hasta que haya stock.
+     *
+     * @return list<\App\Modules\Dropi\Enums\EstadoPedidoDropi>
+     */
+    public static function estadosDespachables(): array
+    {
+        $e = [\App\Modules\Dropi\Enums\EstadoPedidoDropi::Pending, \App\Modules\Dropi\Enums\EstadoPedidoDropi::Alistando];
+
+        return setting('dropi.exigir_stock_erp', false) ? $e : [...$e, \App\Modules\Dropi\Enums\EstadoPedidoDropi::PendienteInventario];
+    }
+
+    public function listoParaDespachar(): bool
+    {
+        return in_array($this->estado, self::estadosDespachables(), true);
+    }
+
+    public function sinStockErp(): bool
+    {
+        return $this->estado === \App\Modules\Dropi\Enums\EstadoPedidoDropi::PendienteInventario;
+    }
+
+    /**
+     * ¿Se abrió en empaque viniendo de «pendiente por inventario»? Al abrirlo
+     * pasa a «Alistando» y el estado ya no lo dice; la bitácora sí.
+     */
+    public function abiertoSinStockErp(): bool
+    {
+        return \Illuminate\Support\Facades\DB::table('dropi_estados_bitacora')
+            ->where('pedido_id', $this->id)->where('estado_hasta', \App\Modules\Dropi\Enums\EstadoPedidoDropi::Alistando->value)
+            ->latest('id')->value('estado_desde') === \App\Modules\Dropi\Enums\EstadoPedidoDropi::PendienteInventario->value;
+    }
+
     public function tieneGuiaImpresa(): bool
     {
         return $this->guia_impresa_at !== null || (bool) $this->huella?->guia_descargada;
@@ -84,6 +121,12 @@ class DropiPedido extends Model implements AuditableContract
         return $this->sticker_path
             ? rtrim((string) config('dropi.web.stickers_url'), '/') . '/' . ltrim($this->sticker_path, '/')
             : null;
+    }
+
+    /** El lote de «Imprimir guías» del que salió su sticker. */
+    public function loteImpresion(): BelongsTo
+    {
+        return $this->belongsTo(DropiLoteImpresion::class, 'lote_impresion_id');
     }
 
     public function corte(): BelongsTo

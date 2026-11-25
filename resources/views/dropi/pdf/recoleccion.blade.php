@@ -59,6 +59,7 @@
                         <td>
                             <strong>{{ $f['producto'] }}</strong>
                             @if($f['referencia'] !== '—')<br><span class="sku">Ref. {{ $f['referencia'] }}</span>@endif
+                            @if(! ($f['vinculado'] ?? true))<br><span class="sku">sin vincular al ERP</span>@endif
                         </td>
                         <td>{{ $f['variante'] ?: '—' }}</td>
                         <td class="sku">{{ $f['sku'] }}</td>

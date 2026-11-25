@@ -742,6 +742,20 @@ describe('lo recibido en el ERP llega a Dropi (24-nov-2026)', function () {
             ->and(\App\Modules\Dropi\Models\DropiVinculoProducto::where('sku_dropi', 'DV-' . $vars['Azul'])->value('variante_id'))->toBe($azul->id);
     });
 
+    it('un segundo clic en «Crear en Dropi» reabre la carga abierta en vez de armar otra (dos serían dos productos en Dropi)', function () {
+        $p = vdProducto('VD-DOS', 'Tambor');
+        vdRecibir([[$p, null, 4]]);
+        $servicio = app(\App\Modules\Dropi\Services\ProductosSinDropi::class);
+
+        $primera = $servicio->cargaCrear($p, auth()->id());
+        expect($servicio->cargaCrear($p, auth()->id())->id)->toBe($primera->id)
+            ->and(\App\Modules\Dropi\Models\DropiCargaProducto::whereHas('operaciones', fn ($q) => $q->where('tipo', Op::CREAR))->count())->toBe(1);
+
+        // Ya terminada, sí se puede armar otra (por ejemplo, si falló en Dropi y se reintenta).
+        $primera->forceFill(['estado' => \App\Modules\Dropi\Models\DropiCargaProducto::TERMINADO])->save();
+        expect($servicio->cargaCrear($p, auth()->id())->id)->not->toBe($primera->id);
+    });
+
     it('al recibir, lo apto se SUMA al stock de Dropi y queda la carga como constancia; lo que Dropi no conoce queda omitido', function () {
         $guitarra = vdProducto('VD-GUI', 'Guitarra', ['ROSADO', 'AZUL']);
         $guitarra->forceFill(['dropi_sku' => '200'])->save();
