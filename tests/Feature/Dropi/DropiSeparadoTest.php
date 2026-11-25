@@ -5,7 +5,8 @@
  * internamente es otra — juntos pero no revueltos».
  *
  *  · Dropi crea y ve sus propios clientes y proveedores; un NIT que ya tenía
- *    el ERP se comparte, no se duplica, y el ERP no ve los que son sólo de Dropi.
+ *    el ERP se comparte, no se duplica. Lo que Dropi crea nace también en el
+ *    ERP (señora Lahida, 25-nov-2026); lo que es sólo del ERP no sale en Dropi.
  *  · Las compras de Dropi se cargan en masa desde Excel, como Dropi.
  *  · La mercancía de Great Baby pasa a Dropi como traslado (no compra): sale de
  *    la bodega del ERP, entra a la de Dropi al mismo costo y cada libro cuadra
@@ -47,11 +48,11 @@ beforeEach(function () {
 
 // ───────────────────────── terceros ─────────────────────────
 
-it('Dropi crea su proveedor sólo en Dropi, y un NIT del ERP se comparte sin duplicarse', function () {
+it('Dropi crea su proveedor también en el ERP, y un NIT del ERP se comparte sin duplicarse', function () {
     $nuevo = RegistrarTerceroDropi::run(['nombre' => 'Textiles Uno', 'tipo_documento' => 'NIT', 'numero_documento' => '900111001', 'es_proveedor' => true]);
     expect($nuevo['ya_existia'])->toBeFalse()
         ->and($nuevo['contacto']->en_dropi)->toBeTrue()
-        ->and($nuevo['contacto']->en_erp)->toBeFalse();
+        ->and($nuevo['contacto']->en_erp)->toBeTrue();
 
     $erp = Contacto::create(['tipo_documento' => 'NIT', 'numero_documento' => '900111002', 'nombre_completo' => 'Del ERP', 'es_cliente' => true, 'activo' => true]);
     $compartido = RegistrarTerceroDropi::run(['nombre' => 'Otro nombre', 'tipo_documento' => 'NIT', 'numero_documento' => '900111002', 'es_proveedor' => true]);
@@ -63,16 +64,28 @@ it('Dropi crea su proveedor sólo en Dropi, y un NIT del ERP se comparte sin dup
         ->toBe(['en_erp' => true, 'en_dropi' => true, 'es_cliente' => true, 'es_proveedor' => true, 'nombre_completo' => 'Del ERP']);
 });
 
-it('el ERP no ve los terceros que son sólo de Dropi; la carga de Dropi sí', function () {
-    RegistrarTerceroDropi::run(['nombre' => 'Solo Dropi SAS', 'tipo_documento' => 'NIT', 'numero_documento' => '900222001', 'es_proveedor' => true]);
+it('el ERP ve los terceros que crea Dropi (antes no aparecían); Dropi no ve los que son sólo del ERP', function () {
+    RegistrarTerceroDropi::run(['nombre' => 'De Dropi SAS', 'tipo_documento' => 'NIT', 'numero_documento' => '900222001', 'es_proveedor' => true]);
     Contacto::create(['tipo_documento' => 'NIT', 'numero_documento' => '900222002', 'nombre_completo' => 'Solo ERP SAS', 'es_proveedor' => true, 'activo' => true]);
     $this->actingAs(App\Models\User::factory()->create()->assignRole(Spatie\Permission\Models\Role::findOrCreate('Aracely')));
 
     $erp = collect($this->getJson('/app/api/contactos/buscar?q=SAS')->json())->pluck('nombre');
     $dropi = collect($this->getJson('/app/api/contactos/buscar?q=SAS&lado=dropi')->json())->pluck('nombre');
 
-    expect($erp->implode('|'))->toContain('Solo ERP')->not->toContain('Solo Dropi')
-        ->and($dropi->implode('|'))->toContain('Solo Dropi')->not->toContain('Solo ERP');
+    expect($erp->implode('|'))->toContain('Solo ERP')->toContain('De Dropi')
+        ->and($dropi->implode('|'))->toContain('De Dropi')->not->toContain('Solo ERP');
+});
+
+it('los terceros que quedaron sólo en Dropi (23 al 25-nov) pasan también al ERP', function () {
+    $quedado = Contacto::create(['tipo_documento' => 'NIT', 'numero_documento' => '900333001', 'nombre_completo' => 'CLICKGO',
+        'es_proveedor' => true, 'activo' => true, 'en_dropi' => true, 'en_erp' => false]);
+    $soloErp = Contacto::create(['tipo_documento' => 'NIT', 'numero_documento' => '900333002', 'nombre_completo' => 'Del ERP',
+        'es_proveedor' => true, 'activo' => true, 'en_dropi' => false, 'en_erp' => true]);
+
+    (require database_path('migrations/2026_11_25_140000_terceros_dropi_tambien_en_erp.php'))->up();
+
+    expect($quedado->fresh()->only(['en_erp', 'en_dropi']))->toBe(['en_erp' => true, 'en_dropi' => true])
+        ->and($soloErp->fresh()->only(['en_erp', 'en_dropi']))->toBe(['en_erp' => true, 'en_dropi' => false]);
 });
 
 // ───────────────────────── compras desde Excel ─────────────────────────
@@ -114,7 +127,7 @@ it('importa compras de Dropi desde Excel: una orden por referencia, como Dropi y
         ->and($oc->items)->toHaveCount(2)
         ->and((float) $oc->items->firstWhere('cantidad', 4)->precio_unit)->toBe(2500.0)
         ->and($oc->proveedor->en_dropi)->toBeTrue()
-        ->and($oc->proveedor->en_erp)->toBeFalse();
+        ->and($oc->proveedor->en_erp)->toBeTrue();
 });
 
 it('importa por color: una fila por color, y al recibir cada color nace como variante con su stock aparte', function () {
@@ -389,7 +402,7 @@ it('«Crear en Dropi» abre la carga con el producto del ERP, y uno ya conectado
 
 // ───────────────────────── terceros desde Excel ─────────────────────────
 
-it('importa clientes y proveedores de Dropi desde Excel: nuevos sólo en Dropi, los del ERP compartidos, la fila mala se informa', function () {
+it('importa clientes y proveedores de Dropi desde Excel: nuevos también en el ERP, los del ERP compartidos, la fila mala se informa', function () {
     Contacto::create(['tipo_documento' => 'NIT', 'numero_documento' => '900555002', 'nombre_completo' => 'Ya del ERP', 'es_cliente' => true, 'activo' => true]);
     $ruta = tempnam(sys_get_temp_dir(), 'ter').'.xlsx';
     $w = new Writer();
@@ -407,7 +420,7 @@ it('importa clientes y proveedores de Dropi desde Excel: nuevos sólo en Dropi, 
         ->and(collect($r['errores'])->implode('|'))->toContain('Fila 4')->toContain('correo-malo');
 
     $nuevo = Contacto::where('numero_documento', '9005550011')->sole();
-    expect($nuevo->only(['en_dropi', 'en_erp', 'es_proveedor', 'ciudad']))->toBe(['en_dropi' => true, 'en_erp' => false, 'es_proveedor' => true, 'ciudad' => 'Cali'])
+    expect($nuevo->only(['en_dropi', 'en_erp', 'es_proveedor', 'ciudad']))->toBe(['en_dropi' => true, 'en_erp' => true, 'es_proveedor' => true, 'ciudad' => 'Cali'])
         ->and(Contacto::where('numero_documento', '900555002')->sole()->only(['en_erp', 'en_dropi', 'nombre_completo']))
         ->toBe(['en_erp' => true, 'en_dropi' => true, 'nombre_completo' => 'Ya del ERP'])
         ->and(Contacto::where('numero_documento', '1020304050')->sole()->only(['tipo_documento', 'es_cliente', 'email']))

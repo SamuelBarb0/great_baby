@@ -12,7 +12,8 @@ use Lorisleiva\Actions\Concerns\AsAction;
  * Dropi es la misma empresa ante la DIAN pero internamente va aparte, así que
  * maneja sus propios terceros. Una ficha por número de documento:
  *
- *  · si el documento no existe, nace SÓLO en Dropi (no aparece en el ERP);
+ *  · si el documento no existe, nace en Dropi y también en el ERP (25-nov-2026;
+ *    del 23 al 25-nov nacía sólo en Dropi y el ERP no lo veía);
  *  · si ya existe (lo tenía el ERP), se comparte la ficha: queda también en
  *    Dropi con el rol pedido, sin duplicarla ni cambiarle los datos al ERP.
  */
@@ -61,7 +62,9 @@ class RegistrarTerceroDropi
             'ciudad' => $datos['ciudad'] ?? null,
             'es_cliente' => $cliente,
             'es_proveedor' => $proveedor,
-            'en_erp' => false,
+            // También en el ERP (señora Lahida, 25-nov-2026: «la idea también es crearlo
+            //   en el ERP»): antes nacía sólo en Dropi y el ERP no lo veía.
+            'en_erp' => true,
             'en_dropi' => true,
             'activo' => true,
         ]);

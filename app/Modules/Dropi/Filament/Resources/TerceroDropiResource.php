@@ -27,7 +27,8 @@ use Illuminate\Database\Eloquent\Model;
  *
  * Dropi es la misma empresa ante la DIAN pero internamente va aparte: crea y
  * ve SUS terceros. La ficha es una por documento (RegistrarTerceroDropi): si
- * el NIT ya lo tenía el ERP, se comparte; si no, nace sólo en Dropi.
+ * el NIT ya lo tenía el ERP, se comparte; si no, nace en Dropi y también en el
+ * ERP (25-nov-2026).
  *
  * No se borra nada desde acá: «Quitar de Dropi» sólo lo saca de esta lista
  * (la ficha puede tener compras, facturas o estar en el ERP).
@@ -72,10 +73,14 @@ class TerceroDropiResource extends Resource
         return false;
     }
 
-    /** Una ficha compartida con el ERP la cuida el ERP. */
+    /**
+     * La ficha es una sola para Dropi y el ERP (25-nov-2026): lo que se corrige
+     * aquí se ve en los dos. Antes la compartida sólo la editaba el ERP, pero
+     * ahora todas son compartidas y Dropi se quedaba sin poder editar las suyas.
+     */
     public static function canEdit(Model $record): bool
     {
-        return static::canViewAny() && ! $record->en_erp;
+        return static::canViewAny();
     }
 
     public static function getEloquentQuery(): Builder
@@ -110,9 +115,6 @@ class TerceroDropiResource extends Resource
                     ->formatStateUsing(fn ($state, Contacto $record) => trim(($record->tipo_documento ?? '').' '.$state)),
                 IconColumn::make('es_proveedor')->label('Proveedor')->boolean(),
                 IconColumn::make('es_cliente')->label('Cliente')->boolean(),
-                TextColumn::make('en_erp')->label('También en el ERP')
-                    ->formatStateUsing(fn ($state) => $state ? 'Sí (ficha compartida)' : 'No')
-                    ->badge()->color(fn ($state) => $state ? 'gray' : 'success'),
                 TextColumn::make('telefono')->label('Teléfono')->toggleable(),
                 TextColumn::make('ciudad')->label('Ciudad')->toggleable(),
             ])
@@ -122,10 +124,10 @@ class TerceroDropiResource extends Resource
                 TernaryFilter::make('es_cliente')->label('Clientes'),
             ])
             ->recordActions([
-                EditAction::make()->visible(fn (Contacto $record) => ! $record->en_erp),
+                EditAction::make(),
                 Action::make('quitar')->label('Quitar de Dropi')->icon('heroicon-o-minus-circle')->color('danger')
                     ->requiresConfirmation()
-                    ->modalDescription('Deja de aparecer en Dropi. No se borra: sus compras y facturas siguen intactas.')
+                    ->modalDescription('Deja de aparecer en Dropi; en el ERP sigue. No se borra: sus compras y facturas siguen intactas.')
                     ->visible(fn (Contacto $record) => (bool) $record->en_erp)
                     ->action(fn (Contacto $record) => $record->update(['en_dropi' => false])),
             ])
