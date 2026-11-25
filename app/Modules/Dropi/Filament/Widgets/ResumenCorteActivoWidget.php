@@ -57,13 +57,13 @@ class ResumenCorteActivoWidget extends StatsOverviewWidget
                 ->description('Esperan devolución compatible · clic para ver')
                 ->color($corte->pedidos_pendientes_inv > 0 ? 'danger' : 'success')
                 ->icon('heroicon-o-exclamation-triangle')
-                ->url(DropiPedidoResource::getUrl('index', ['filters' => ['estado' => ['value' => 'pendiente_inventario']]])),
+                ->url(\App\Modules\Dropi\Filament\Resources\DropiPedidoResource\Pages\ListDropiPedidos::urlEtapa(\App\Modules\Dropi\Enums\EstadoPedidoDropi::PendienteInventario)),
 
             Stat::make('Por conciliar (histórico)', (string) $porConciliar)
                 ->description('Acumulado · ignora el filtro de periodo')
                 ->color('warning')
                 ->icon('heroicon-o-banknotes')
-                ->url(DropiPedidoResource::getUrl('index', ['filters' => ['estado' => ['value' => 'despachado']]])),
+                ->url(\App\Modules\Dropi\Filament\Resources\DropiPedidoResource\Pages\ListDropiPedidos::urlEtapa(\App\Modules\Dropi\Enums\EstadoPedidoDropi::Despachado)),
 
             Stat::make('Pedidos totales', (string) $pedidosAcumulados)
                 ->description('En toda la historia · clic para ver')

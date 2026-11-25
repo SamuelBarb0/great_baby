@@ -55,16 +55,16 @@ class ReportesDropi extends Page
                 'titulo' => '⚙️ Operativos',
                 'reportes' => [
                     ['nombre' => 'Corte del día', 'desc' => 'Pedidos del corte activo con estado y transportadora', 'url' => DropiPedidoResource::getUrl('index'), 'icon' => 'heroicon-o-clock'],
-                    ['nombre' => 'Pendientes por inventario', 'desc' => 'Guías esperando devolución compatible', 'url' => DropiPedidoResource::getUrl('index', ['filters' => ['estado' => ['value' => 'pendiente_inventario']]]), 'icon' => 'heroicon-o-exclamation-triangle'],
-                    ['nombre' => 'Despachados sin entregar', 'desc' => 'Seguimiento transportadora', 'url' => DropiPedidoResource::getUrl('index', ['filters' => ['estado' => ['value' => 'despachado']]]), 'icon' => 'heroicon-o-truck'],
+                    ['nombre' => 'Pendientes por inventario', 'desc' => 'Guías esperando devolución compatible', 'url' => \App\Modules\Dropi\Filament\Resources\DropiPedidoResource\Pages\ListDropiPedidos::urlEtapa(\App\Modules\Dropi\Enums\EstadoPedidoDropi::PendienteInventario), 'icon' => 'heroicon-o-exclamation-triangle'],
+                    ['nombre' => 'Despachados sin entregar', 'desc' => 'Seguimiento transportadora', 'url' => \App\Modules\Dropi\Filament\Resources\DropiPedidoResource\Pages\ListDropiPedidos::urlEtapa(\App\Modules\Dropi\Enums\EstadoPedidoDropi::Despachado), 'icon' => 'heroicon-o-truck'],
                     ['nombre' => 'Devoluciones', 'desc' => 'Todas con destino de inventario', 'url' => DropiDevolucionResource::getUrl('index'), 'icon' => 'heroicon-o-arrow-uturn-left'],
                 ],
             ],
             'financieros' => [
                 'titulo' => '💰 Financieros · ' . $labelPer,
                 'reportes' => [
-                    ['nombre' => 'Ventas del periodo', 'desc' => '$' . number_format($ventas, 0, ',', '.') . ' · pedidos pagados', 'url' => DropiPedidoResource::getUrl('index', ['filters' => ['estado' => ['value' => 'pagado']]]), 'icon' => 'heroicon-o-arrow-trending-up'],
-                    ['nombre' => 'Devoluciones en pesos', 'desc' => '$' . number_format($devoluciones, 0, ',', '.'), 'url' => DropiPedidoResource::getUrl('index', ['filters' => ['estado' => ['value' => 'devuelto']]]), 'icon' => 'heroicon-o-currency-dollar'],
+                    ['nombre' => 'Ventas del periodo', 'desc' => '$' . number_format($ventas, 0, ',', '.') . ' · pedidos pagados', 'url' => \App\Modules\Dropi\Filament\Resources\DropiPedidoResource\Pages\ListDropiPedidos::urlEtapa(\App\Modules\Dropi\Enums\EstadoPedidoDropi::Pagado), 'icon' => 'heroicon-o-arrow-trending-up'],
+                    ['nombre' => 'Devoluciones en pesos', 'desc' => '$' . number_format($devoluciones, 0, ',', '.'), 'url' => \App\Modules\Dropi\Filament\Resources\DropiPedidoResource\Pages\ListDropiPedidos::urlEtapa(\App\Modules\Dropi\Enums\EstadoPedidoDropi::Devuelto), 'icon' => 'heroicon-o-currency-dollar'],
                     ['nombre' => 'Conciliación wallet', 'desc' => 'Movimientos ↔ pedidos', 'url' => DropiWalletMovimientoResource::getUrl('index'), 'icon' => 'heroicon-o-wallet'],
                     ['nombre' => 'Retiros a banco', 'desc' => '$' . number_format($retiros, 0, ',', '.') . ' en el periodo', 'url' => DropiWalletMovimientoResource::getUrl('index', ['filters' => ['tipo' => ['value' => 'retiro_banco']]]), 'icon' => 'heroicon-o-banknotes'],
                     ['nombre' => 'Sanciones detectadas', 'desc' => '$' . number_format($sanciones, 0, ',', '.') . ' · descontadas por Dropi', 'url' => DiscrepanciasWallet::getUrl(), 'icon' => 'heroicon-o-shield-exclamation'],

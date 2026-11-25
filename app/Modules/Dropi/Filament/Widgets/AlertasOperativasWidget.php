@@ -71,19 +71,19 @@ class AlertasOperativasWidget extends StatsOverviewWidget
                 ->description('Alerta a las ' . $cfg['aviso_previo_horas'] . 'h · límite 72h')
                 ->color($porVencer > 0 ? 'danger' : 'success')
                 ->icon('heroicon-o-clock')
-                ->url(DropiPedidoResource::getUrl('index', ['filters' => ['estado' => ['value' => 'pending']]])),
+                ->url(\App\Modules\Dropi\Filament\Resources\DropiPedidoResource\Pages\ListDropiPedidos::urlEtapa(\App\Modules\Dropi\Enums\EstadoPedidoDropi::Pending)),
 
             Stat::make('Entregas críticas ≥ ' . $cfg['entrega_critica_dias'] . 'd', (string) $entregasTardias)
                 ->description('Revisar seguimiento con transportadora')
                 ->color($entregasTardias > 0 ? 'warning' : 'success')
                 ->icon('heroicon-o-map-pin')
-                ->url(DropiPedidoResource::getUrl('index', ['filters' => ['estado' => ['value' => 'despachado']]])),
+                ->url(\App\Modules\Dropi\Filament\Resources\DropiPedidoResource\Pages\ListDropiPedidos::urlEtapa(\App\Modules\Dropi\Enums\EstadoPedidoDropi::Despachado)),
 
             Stat::make('Contactar transportadora ≥ ' . $cfg['entrega_contactar_dias'] . 'd', (string) $entregasContactar)
                 ->description('Requiere gestión directa')
                 ->color($entregasContactar > 0 ? 'danger' : 'success')
                 ->icon('heroicon-o-phone')
-                ->url(DropiPedidoResource::getUrl('index', ['filters' => ['estado' => ['value' => 'despachado']]])),
+                ->url(\App\Modules\Dropi\Filament\Resources\DropiPedidoResource\Pages\ListDropiPedidos::urlEtapa(\App\Modules\Dropi\Enums\EstadoPedidoDropi::Despachado)),
 
             Stat::make('Wallet · último retiro', $ultimoRetiro ? "hace {$diasSinRetiro} d" : '—')
                 ->description($etiquetaRetiro)

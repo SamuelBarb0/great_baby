@@ -3,7 +3,9 @@
 namespace App\Modules\Dropi\Jobs;
 
 use App\Modules\Dropi\Actions\GenerarGuiaDropi;
+use App\Modules\Dropi\Models\DropiLoteImpresion;
 use App\Modules\Dropi\Models\DropiPedido;
+use App\Modules\Dropi\Services\ImprimirGuiasDropi;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -23,6 +25,9 @@ use Illuminate\Support\Facades\Log;
  * Sólo pide guía a lo que en Dropi sigue PENDIENTE: una guía es real (la
  * transportadora la registra), y la de un pedido ya generado o cancelado
  * habría que anularla a mano.
+ *
+ * Con «Generar corte» (25-nov-2026) cada guía es de un reporte: la última en
+ * terminar, bien o mal, arranca el reporte (ImprimirGuiasDropi::iniciar).
  */
 class GenerarGuiasEnBloqueJob implements ShouldQueue
 {
@@ -32,17 +37,17 @@ class GenerarGuiasEnBloqueJob implements ShouldQueue
 
     public int $timeout = 50;
 
-    public function __construct(public int $pedidoId, public ?int $userId) {}
+    public function __construct(public int $pedidoId, public ?int $userId, public ?int $loteId = null) {}
 
     /** Encola una guía por pedido y reinicia el avance de este usuario. */
-    public static function lanzar(array $pedidoIds, ?int $userId): int
+    public static function lanzar(array $pedidoIds, ?int $userId, ?int $loteId = null): int
     {
         $ids = array_values(array_unique(array_map('intval', $pedidoIds)));
         Cache::put(self::claveAvance($userId), [
             'total' => count($ids), 'hechas' => 0, 'saltadas' => 0, 'errores' => [], 'desde' => now()->toIso8601String(),
         ], now()->addHours(12));
         foreach ($ids as $id) {
-            self::dispatch($id, $userId);
+            self::dispatch($id, $userId, $loteId);
         }
 
         return count($ids);
@@ -61,6 +66,21 @@ class GenerarGuiasEnBloqueJob implements ShouldQueue
 
     public function handle(GenerarGuiaDropi $generar): void
     {
+        try {
+            $this->generar($generar);
+        } finally {
+            $this->contarEnReporte();
+        }
+    }
+
+    /** Se cayó (tiempo agotado): igual cuenta, o el reporte esperaría para siempre. */
+    public function failed(\Throwable $e): void
+    {
+        $this->contarEnReporte();
+    }
+
+    private function generar(GenerarGuiaDropi $generar): void
+    {
         $p = DropiPedido::with('huella')->find($this->pedidoId);
 
         if (! $p || ! $p->dropi_orden_id || $p->tieneGuiaReal() || $p->huella?->estatus_dropi !== 'PENDIENTE' || ! $p->listoParaDespachar()) {
@@ -76,6 +96,28 @@ class GenerarGuiasEnBloqueJob implements ShouldQueue
             Log::warning('dropi.guias_en_bloque.fallo', ['pedido_id' => $p->id, 'msg' => $e->getMessage()]);
             $error = "Orden {$p->dropi_orden_id}: " . mb_substr($e->getMessage(), 0, 160);
             $this->anotar(fn (array $a) => ['errores' => [...$a['errores'], $error]] + $a);
+        }
+    }
+
+    /** Una guía menos por esperar; con la última, el reporte arranca. */
+    private function contarEnReporte(): void
+    {
+        // Cada pedido cuenta una vez, aunque pase por el finally y por failed().
+        if (! $this->loteId || ! Cache::add("dropi:lote-impresion:{$this->loteId}:contado:{$this->pedidoId}", 1, now()->addDay())) {
+            return;
+        }
+        $arrancar = Cache::lock("dropi:lote-impresion:{$this->loteId}", 30)->block(20, function () {
+            $l = DropiLoteImpresion::find($this->loteId);
+            if (! $l || $l->estado !== DropiLoteImpresion::GENERANDO_GUIAS) {
+                return false;
+            }
+            $quedan = max(0, $l->guias_pendientes - 1);
+            $l->update(['guias_pendientes' => $quedan]);
+
+            return $quedan === 0;
+        });
+        if ($arrancar) {
+            app(ImprimirGuiasDropi::class)->iniciar(DropiLoteImpresion::findOrFail($this->loteId));
         }
     }
 

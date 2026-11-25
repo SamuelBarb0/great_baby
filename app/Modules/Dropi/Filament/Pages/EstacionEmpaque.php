@@ -72,7 +72,7 @@ class EstacionEmpaque extends Page
     /**
      * En turno, los pedidos llegan solos (24-nov-2026: «que los que empacan
      * vayan teniendo un flujo de pedidos»): al confirmar se abre el siguiente y,
-     * con la cola vacía, la pantalla mira cada 10 s si Aracely imprimió otro
+     * con la cola vacía, la pantalla mira cada 3 s si Aracely imprimió otro
      * lote. Se entra con un clic y no al abrir la página, para que quien sólo
      * mira la estación no se quede con un pedido bloqueado.
      */

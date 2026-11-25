@@ -1,7 +1,8 @@
 <x-filament-panels::page>
     @php
-        $lote = $this->lote;
-        $lotes = $this->lotes;
+        $corte = $this->corte;
+        $cortes = $this->cortes;
+        $reportes = $corte ? $this->reportes : collect();
         $cifras = $this->cifras;
         $recoleccion = $this->recoleccion;
         $empaque = $this->empaque;
@@ -9,19 +10,19 @@
         $progreso = $cifras['total'] > 0 ? round(($cifras['empacados'] / $cifras['total']) * 100) : 0;
     @endphp
 
-    {{-- El lote impreso que se trabaja: la misma hoja que la encargada tiene en la mano (24-nov-2026). --}}
+    {{-- El corte que generó Aracely: la misma hoja que la encargada tiene en la mano (25-nov-2026). --}}
     <x-filament::section>
-        @if($lote)
+        @if($corte)
             <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:1rem;">
                 <div>
-                    <div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.1em;color:#9ca3af;">Lote impreso</div>
-                    <div style="font-size:1.75rem;font-weight:700;margin-top:.25rem;">{{ $lote->titulo() }}</div>
-                    @if($lotes->count() > 1)
+                    <div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.1em;color:#9ca3af;">Corte</div>
+                    <div style="font-size:1.75rem;font-weight:700;margin-top:.25rem;">{{ $corte->etiqueta() }}</div>
+                    @if($cortes->count() > 1)
                         <div style="display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.5rem;">
-                            @foreach($lotes as $l)
-                                <button type="button" wire:click="escogerLote({{ $l->id }})"
-                                        style="padding:.3rem .7rem;border-radius:9999px;font-size:.8rem;font-weight:600;cursor:pointer;border:1px solid {{ $l->id === $lote->id ? '#f59e0b' : 'rgba(156,163,175,.4)' }};background:{{ $l->id === $lote->id ? 'rgba(245,158,11,.15)' : 'transparent' }};">
-                                    Lote {{ $l->id }} · {{ $l->created_at->timezone('America/Bogota')->format('g:i a') }}
+                            @foreach($cortes as $c)
+                                <button type="button" wire:click="escogerCorte({{ $c->id }})"
+                                        style="padding:.3rem .7rem;border-radius:9999px;font-size:.8rem;font-weight:600;cursor:pointer;border:1px solid {{ $c->id === $corte->id ? '#f59e0b' : 'rgba(156,163,175,.4)' }};background:{{ $c->id === $corte->id ? 'rgba(245,158,11,.15)' : 'transparent' }};">
+                                    {{ $c->etiqueta() }}
                                 </button>
                             @endforeach
                         </div>
@@ -44,7 +45,7 @@
             </div>
             <div style="margin-top:1rem;">
                 <div style="display:flex;justify-content:space-between;font-size:.75rem;color:#9ca3af;margin-bottom:.25rem;">
-                    <span>Progreso del lote</span>
+                    <span>Progreso del corte</span>
                     <span style="font-weight:700;">{{ $progreso }}%</span>
                 </div>
                 <div style="height:.5rem;border-radius:9999px;background:rgba(156,163,175,.2);overflow:hidden;">
@@ -56,7 +57,7 @@
             <div style="text-align:center;padding:2.5rem 1rem;">
                 <div style="font-size:2.5rem;">🖨</div>
                 <div style="font-size:1.25rem;font-weight:700;margin-top:.5rem;">Todavía no hay guías impresas</div>
-                <div style="color:#9ca3af;margin-top:.5rem;">Aracely: en Pedidos Dropi selecciona los pedidos → <strong>Generar guías</strong> → <strong>Imprimir guías</strong>. Cuando el lote esté impreso, aparece aquí.</div>
+                <div style="color:#9ca3af;margin-top:.5rem;">Aracely: en Pedidos Dropi selecciona los pedidos y dale <strong>Generar corte</strong>. Cuando salga el reporte, el corte aparece aquí.</div>
             </div>
         @endif
     </x-filament::section>
@@ -79,7 +80,7 @@
         .alistador-hecha > div:last-child { opacity: .55; }
     </style>
 
-    @if($lote)
+    @if($corte)
     {{-- Selector de modo con tabs --}}
     <x-filament::tabs style="margin-top:1.5rem;">
         <x-filament::tabs.item :active="$modo === 'recoleccion'" wire:click="cambiarModo('recoleccion')" icon="heroicon-o-clipboard-document-list">
@@ -95,17 +96,21 @@
         <x-filament::section class="alistador-seccion" style="margin-top:1rem;">
             <x-slot name="heading">Modo Recolección</x-slot>
             <x-slot name="description">Ve el total de unidades por referencia, en el orden del recorrido de la bodega, para pasar una sola vez. Toca cada referencia cuando la recojas: queda marcada para todos. Cuando termines, cambia a Empaque.</x-slot>
-            {{-- La hoja del lote: la lista de alistamiento abre la parte 1. --}}
-            @if($lote->partes)
+            {{-- Los reportes del corte: la hoja de alistamiento abre cada PDF. --}}
+            @if($reportes->contains(fn ($r) => ! empty($r->partes)))
                 <x-slot name="afterHeader">
-                    <x-filament::button tag="a" :href="route('dropi.guias.parte', [$lote, 1])" target="_blank" icon="heroicon-o-printer" color="gray">
-                        Hoja del lote
-                    </x-filament::button>
+                    <div style="display:flex;flex-wrap:wrap;gap:.4rem;">
+                        @foreach($reportes->filter(fn ($r) => ! empty($r->partes)) as $r)
+                            <x-filament::button tag="a" :href="route('dropi.guias.parte', [$r, 1])" target="_blank" icon="heroicon-o-printer" color="gray">
+                                Reporte {{ $r->created_at->timezone('America/Bogota')->format('g:i a') }}
+                            </x-filament::button>
+                        @endforeach
+                    </div>
                 </x-slot>
             @endif
 
             @if(count($recoleccion) === 0)
-                <div style="text-align:center;padding:2rem;color:#9ca3af;">Todo lo de este lote ya se empacó.</div>
+                <div style="text-align:center;padding:2rem;color:#9ca3af;">Todo lo de este corte ya se empacó.</div>
             @else
                 @php
                     $recogidas = collect($recoleccion)->where('marcada', true)->count();

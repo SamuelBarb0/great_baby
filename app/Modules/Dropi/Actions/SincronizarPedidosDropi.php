@@ -208,8 +208,6 @@ class SincronizarPedidosDropi
         $clienteNombre = trim((string) ($dto->clienteNombre ?? ''));
         if ($clienteNombre === '') $clienteNombre = 'SIN NOMBRE';
 
-        $corte = AsignarCorteACarga::run($dto->creadoAt);
-
         // Driver web · los pedidos sin despachar entran con guía provisional
         //   (SIN-GUIA-<orden>), así que se buscan también por orden de Dropi y la
         //   guía real reemplaza a la provisional cuando Dropi la asigna.
@@ -250,8 +248,14 @@ class SincronizarPedidosDropi
             ? ($estadoDesdeDropi ?? $existente->estado)
             : ($estadoDesdeDropi ?? $this->resolverEstado->porSku($itemsPlano));
 
+        // El corte nace cuando Aracely genera (25-nov-2026): lo que llega por
+        //   despachar entra «sin corte». Lo que el ERP ve por primera vez ya
+        //   despachado, entregado o cancelado (se manejó del todo en Dropi) entra
+        //   al corte de su hora, como antes, para que se facture al cerrarlo.
+        $porDespachar = in_array($estadoInicial, [EstadoPedidoDropi::Pending, EstadoPedidoDropi::PendienteInventario], true);
+
         $data = [
-            'corte_id' => $corte->id,
+            'corte_id' => $porDespachar ? null : AsignarCorteACarga::run($dto->creadoAt)->id,
             'dropi_orden_id' => $dto->dropiOrdenId,
             // 8.2 · el plazo de 72 h de Dropi corre desde que nació el pedido
             // allá, no desde que el ERP lo trajo.

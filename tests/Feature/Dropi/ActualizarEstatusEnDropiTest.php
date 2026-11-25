@@ -66,6 +66,19 @@ it('genera la guía en Dropi, deja auditoría y trae la guía al ERP', function 
     expect((bool) $audit->exito)->toBeTrue()
         ->and($audit->estatus_antes)->toBe('PENDIENTE')
         ->and($audit->estatus_pedido)->toBe('GUIA_GENERADA');
+
+    // En «Pedidos Dropi» pasa de una vez a «Guía generada», sin esperar al sync
+    //   (25-nov-2026); la huella vacía hace que la siguiente vuelta lo traiga completo.
+    $huella = fn () => DB::table('dropi_web_huellas')->where('dropi_orden_id', 90719548)->first();
+    expect($huella()->estatus_dropi)->toBe('GUIA_GENERADA')->and($huella()->huella)->toBe('');
+
+    Http::swap(new \Illuminate\Http\Client\Factory);
+    Http::fake([
+        'bff.test/orders/myorders/v2/*' => Http::response(['is_succesfull' => true, 'data' => ['objects' => $conGuia]]),
+        'bff.test/*' => Http::response(['is_succesfull' => true, 'data' => ['objects' => [$conGuia]]]),
+    ]);
+    app(SincronizarDropiWeb::class)->handle('recientes');
+    expect($huella()->estatus_dropi)->toBe('GUIA_GENERADA')->and($huella()->huella)->not->toBe('');
 });
 
 it('muestra el motivo de Dropi cuando rechaza el cambio y lo deja auditado', function () {

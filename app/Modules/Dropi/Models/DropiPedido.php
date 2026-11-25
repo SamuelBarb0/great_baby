@@ -82,6 +82,19 @@ class DropiPedido extends Model implements AuditableContract
         return setting('dropi.exigir_stock_erp', false) ? $e : [...$e, \App\Modules\Dropi\Enums\EstadoPedidoDropi::PendienteInventario];
     }
 
+    /**
+     * Lo que ya salió de la bodega (o va saliendo): si está sin corte, no entra
+     * a las remisiones ni a las facturas del cierre (25-nov-2026).
+     *
+     * @return list<\App\Modules\Dropi\Enums\EstadoPedidoDropi>
+     */
+    public static function estadosYaDespachados(): array
+    {
+        $e = \App\Modules\Dropi\Enums\EstadoPedidoDropi::class;
+
+        return [$e::Empacado, $e::Despachado, $e::Entregado, $e::Pagado, $e::DevolucionEnCamino, $e::Devuelto];
+    }
+
     public function listoParaDespachar(): bool
     {
         return in_array($this->estado, self::estadosDespachables(), true);

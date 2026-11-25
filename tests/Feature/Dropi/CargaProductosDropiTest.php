@@ -704,6 +704,44 @@ describe('lo recibido en el ERP llega a Dropi (24-nov-2026)', function () {
             ->and($this->dropi->stock(100))->toBe(20);
     });
 
+    it('«Igualar con Dropi» de una compra arma una sola carga con sus vinculados, y otro clic la reabre (25-nov-2026)', function () {
+        $vinculado = vdProducto('VD-IGU', 'Pato de hule');
+        $sinDropi = vdProducto('VD-NUE', 'Tambor');
+        vdRecibir([[$vinculado, null, 20], [$sinDropi, null, 5]]);
+        $servicio = app(\App\Modules\Dropi\Services\ProductosSinDropi::class);
+        $servicio->asociar($vinculado, 100, auth()->id());
+
+        // Como el SA383: lo recibido antes del envío automático no está en Dropi.
+        $carga = $servicio->cargaIgualarVarios([$vinculado->fresh(), $sinDropi->fresh()], 'Igualar con Dropi OC-PRUEBA', auth()->id());
+        $op = $carga->operaciones()->sole();
+        expect($carga->estado)->toBe(Carga::BORRADOR)
+            ->and($op->ref_excel)->toBe('VD-IGU')
+            ->and((int) $op->cantidad_excel)->toBe(20)
+            ->and($this->dropi->stock(100))->toBe(432); // nada sube hasta ejecutarla
+
+        expect($servicio->cargaIgualarVarios([$vinculado->fresh()], 'Igualar con Dropi OC-PRUEBA', auth()->id())->id)->toBe($carga->id)
+            ->and($servicio->cargaIgualarVarios([$sinDropi->fresh()], 'Igualar con Dropi OC-OTRA', auth()->id()))->toBeNull();
+
+        app(EjecutarOperacionDropi::class)->handle($op);
+        expect($this->dropi->stock(100))->toBe(20);
+    });
+
+    it('«Igualar con Dropi» está en «Vincular con el ERP»: un modal con los vinculados y lleva a la carga', function () {
+        $p = vdProducto('VD-MOD', 'Pato de hule');
+        vdRecibir([[$p, null, 20]]);
+        app(\App\Modules\Dropi\Services\ProductosSinDropi::class)->asociar($p, 100, auth()->id());
+        \Filament\Facades\Filament::setCurrentPanel('admin');
+
+        \Livewire\Livewire::test(\App\Modules\Dropi\Filament\Pages\ProductosDeDropi::class)
+            ->callAction('igualarDropi', data: ['productos' => [$p->id]])
+            ->assertHasNoActionErrors()
+            ->assertRedirect();
+
+        $carga = Carga::where('concepto', 'Igualar con Dropi: VD-MOD')->sole();
+        expect($carga->estado)->toBe(Carga::BORRADOR)
+            ->and($carga->operaciones()->sole()->ref_excel)->toBe('VD-MOD');
+    });
+
     it('«Asociar» no vincula nada si a la ficha le falta un color de Dropi', function () {
         $p = vdProducto('VD-GUI', 'Guitarra', ['ROSADO']);
 

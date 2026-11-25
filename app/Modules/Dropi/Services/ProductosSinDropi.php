@@ -221,14 +221,38 @@ class ProductosSinDropi
     public function cargaIgualar(Producto $p, ?int $userId): Carga
     {
         abort_unless((bool) $p->dropi_sku, 422, "«{$p->nombre}» no está vinculado con Dropi.");
-        $s = self::stockErp($p);
-        $producto = $this->dropi->producto((int) $p->dropi_sku);
-        $fila = ['fila' => 1, 'ref' => $p->referencia, 'nombre' => $p->nombre, 'cantidad' => $s['total'], 'variaciones' => self::textoColores($s['por_color'])];
 
-        return $this->nuevaCarga("Igualar al ERP {$p->referencia}", $userId, [
-            'fila' => 1, 'ref_excel' => $p->referencia, 'nombre_excel' => $p->nombre,
-            'variaciones_excel' => $fila['variaciones'], 'cantidad_excel' => $s['total'],
-        ] + $this->planificador->planFila($fila, $producto, (int) config('dropi.web.bodega_id'), 'vinculado desde el ERP'));
+        return $this->cargaIgualarVarios(collect([$p]), "Igualar al ERP {$p->referencia}", $userId);
+    }
+
+    /**
+     * «Igualar con Dropi» de varios productos en UNA carga (25-nov-2026): lo
+     * recibido antes de que existiera el envío automático (el SA383 y su
+     * DIDA-004) o cualquier diferencia que aparezca. Una fila por producto
+     * vinculado, con lo que hay en Dropi y lo que quedaría (el stock vendible
+     * del ERP); nada se manda hasta confirmar la carga. Si ya hay una carga
+     * abierta con ese concepto, se reabre: dos serían dos cambios de stock.
+     *
+     * @param  iterable<Producto>  $productos
+     */
+    public function cargaIgualarVarios(iterable $productos, string $concepto, ?int $userId): ?Carga
+    {
+        $abierta = Carga::whereIn('estado', [Carga::BORRADOR, Carga::PROCESANDO])->where('concepto', mb_substr($concepto, 0, 120))->latest('id')->first();
+        if ($abierta) {
+            return $abierta;
+        }
+
+        $ops = [];
+        foreach (collect($productos)->filter(fn (Producto $p) => (bool) $p->dropi_sku)->unique('id')->values() as $i => $p) {
+            $s = self::stockErp($p);
+            $fila = ['fila' => $i + 1, 'ref' => $p->referencia, 'nombre' => $p->nombre, 'cantidad' => $s['total'], 'variaciones' => self::textoColores($s['por_color'])];
+            $ops[] = [
+                'fila' => $i + 1, 'ref_excel' => $p->referencia, 'nombre_excel' => $p->nombre,
+                'variaciones_excel' => $fila['variaciones'], 'cantidad_excel' => $s['total'],
+            ] + $this->planificador->planFila($fila, $this->dropi->producto((int) $p->dropi_sku), (int) config('dropi.web.bodega_id'), 'vinculado desde el ERP');
+        }
+
+        return $ops ? $this->nuevaCarga($concepto, $userId, ...$ops) : null;
     }
 
     /** «5 ROJO - 3 AZUL», el formato de colores de las cargas. */
@@ -244,9 +268,9 @@ class ProductosSinDropi
         }
     }
 
-    private function nuevaCarga(string $concepto, ?int $userId, array $op): Carga
+    private function nuevaCarga(string $concepto, ?int $userId, array ...$ops): Carga
     {
-        return DB::transaction(function () use ($concepto, $userId, $op) {
+        return DB::transaction(function () use ($concepto, $userId, $ops) {
             $carga = Carga::create([
                 'numero' => Carga::siguienteNumero(),
                 'origen' => 'individual',
@@ -257,7 +281,9 @@ class ProductosSinDropi
                 'estado' => Carga::BORRADOR,
                 'user_id' => $userId,
             ]);
-            $carga->operaciones()->create($op + ['candidato' => null]);
+            foreach ($ops as $op) {
+                $carga->operaciones()->create($op + ['candidato' => null]);
+            }
 
             return $carga;
         });

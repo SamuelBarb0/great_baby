@@ -8,12 +8,16 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
- * Un «Imprimir guías» de Aracely (24-nov-2026): los pedidos en el orden de la
- * pila de stickers, el avance de la descarga y las partes del PDF. Lo arma
- * ImprimirGuiasDropi en segundo plano; la Vista del Alistador lo recoge.
+ * El reporte de un corte (25-nov-2026): lo que Aracely seleccionó con
+ * «Generar corte», en el orden de la pila de stickers; espera a que terminen
+ * sus guías, baja los stickers y arma el PDF (hoja de alistamiento + stickers).
+ * Lo arma ImprimirGuiasDropi en segundo plano. Si en la misma franja genera
+ * otra vez, el corte suma un segundo reporte con sólo lo nuevo.
  */
 class DropiLoteImpresion extends Model
 {
+    public const GENERANDO_GUIAS = 'generando_guias';
+
     public const DESCARGANDO = 'descargando';
 
     public const ARMANDO = 'armando';
@@ -32,7 +36,13 @@ class DropiLoteImpresion extends Model
         'partes' => 'array',
         'total' => 'integer',
         'descargados' => 'integer',
+        'guias_pendientes' => 'integer',
     ];
+
+    public function corte(): BelongsTo
+    {
+        return $this->belongsTo(DropiCorte::class, 'corte_id');
+    }
 
     public function usuario(): BelongsTo
     {
@@ -44,10 +54,13 @@ class DropiLoteImpresion extends Model
         return $this->hasMany(DropiPedido::class, 'lote_impresion_id');
     }
 
-    /** «Lote 7 · 24/11 9:05 am · 40 guías», como sale en el PDF y en la Vista del Alistador. */
+    /** «Corte 1 · 25/11 · reporte de las 9:05 am · 40 guías», como sale en el PDF y en pantalla. */
     public function titulo(): string
     {
-        return "Lote {$this->id} · " . $this->created_at->timezone('America/Bogota')->format('d/m g:i a') . " · {$this->total} guía(s)";
+        $hora = $this->created_at->timezone('America/Bogota');
+        $corte = $this->corte ? "Corte {$this->corte->numero} · " . $this->corte->fecha->format('d/m') : "Lote {$this->id} · " . $hora->format('d/m');
+
+        return "{$corte} · reporte de las " . $hora->format('g:i a') . " · {$this->total} guía(s)";
     }
 
     /** Dónde se guarda lo del lote (stickers sueltos mientras se arma, y las partes). */

@@ -57,13 +57,13 @@ class ColaDeEmpaque
     }
 
     /**
-     * Los primeros de un lote impreso, en el orden de la pila (Vista del Alistador).
+     * Los primeros de un corte, en el orden de la pila (Vista del Alistador).
      *
      * @return Collection<int, DropiPedido>  con items
      */
-    public function delLote(int $loteId, ?int $operarioId = null, int $limite = 20): Collection
+    public function delCorte(int $corteId, ?int $operarioId = null, int $limite = 20): Collection
     {
-        return $this->base($operarioId)->where('lote_impresion_id', $loteId)
+        return $this->base($operarioId)->where('corte_id', $corteId)
             ->orderBy('orden_empaque')->orderBy('id')->limit($limite)
             ->with(self::CON_ITEMS)->get();
     }

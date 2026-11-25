@@ -69,13 +69,13 @@ class MetricasFinancierasWidget extends StatsOverviewWidget
                 ->description('Precio proveedor · pedidos pagados')
                 ->color('success')
                 ->icon('heroicon-o-arrow-trending-up')
-                ->url(DropiPedidoResource::getUrl('index', ['filters' => ['estado' => ['value' => 'pagado']]])),
+                ->url(\App\Modules\Dropi\Filament\Resources\DropiPedidoResource\Pages\ListDropiPedidos::urlEtapa(\App\Modules\Dropi\Enums\EstadoPedidoDropi::Pagado)),
 
             Stat::make('Devoluciones ' . $labelPeriodo, $fmt($devoluciones))
                 ->description($pctDevoluciones . '% de las ventas del periodo')
                 ->color($pctDevoluciones > 10 ? 'danger' : ($pctDevoluciones > 5 ? 'warning' : 'success'))
                 ->icon('heroicon-o-arrow-uturn-left')
-                ->url(DropiPedidoResource::getUrl('index', ['filters' => ['estado' => ['value' => 'devuelto']]])),
+                ->url(\App\Modules\Dropi\Filament\Resources\DropiPedidoResource\Pages\ListDropiPedidos::urlEtapa(\App\Modules\Dropi\Enums\EstadoPedidoDropi::Devuelto)),
 
             Stat::make('Retirado a banco', $fmt($retirado))
                 ->description($labelPeriodo . ' · reportado por la wallet')

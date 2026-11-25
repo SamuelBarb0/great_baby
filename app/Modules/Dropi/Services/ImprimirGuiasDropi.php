@@ -21,17 +21,19 @@ use setasign\Fpdi\Fpdi;
  * 24-nov-2026): hoy Aracely las imprime desde Dropi, las corta y las separa
  * por producto a mano.
  *
- * Cada «Imprimir guías» es un LOTE: primero la lista de alistamiento y después
- * un sticker por pedido, en el orden en que se empaca (el producto con más
- * pedidos primero, y dentro el más viejo). Son 300 a 800 paquetes, así que se
- * arma en segundo plano: los stickers se bajan de a 15 por trabajo (el worker
- * de producción corre 55 s) y el PDF sale en partes de 200, que la impresora
- * aguanta. Al terminar, los pedidos quedan «impresos», con su posición en la
- * pila y su lote: eso es lo que llega a empaque.
+ * Es el REPORTE de un corte («Generar corte», 25-nov-2026): primero la lista de
+ * alistamiento y después un sticker por pedido, en el orden en que se empaca
+ * (el producto con más pedidos primero, y dentro el más viejo). Son 300 a 800
+ * paquetes, así que se arma en segundo plano: los stickers se bajan de a 15
+ * por trabajo (el worker de producción corre 55 s) y sale UN solo PDF («que
+ * haga un montón y ya»; 800 stickers se arman en ~1 s y pesan ~50 MB). Al
+ * terminar, los pedidos quedan «impresos», con su posición en la pila y su
+ * reporte: eso es lo que llega a empaque.
  */
 class ImprimirGuiasDropi
 {
-    public const POR_PARTE = 200;
+    /** Un solo PDF por reporte; sólo un reporte de más de esto se partiría. */
+    public const POR_PARTE = 2000;
 
     public const POR_TRABAJO = 15;
 
@@ -59,24 +61,50 @@ class ImprimirGuiasDropi
      */
     public function lanzar(array $pedidoIds, ?int $userId): ?DropiLoteImpresion
     {
-        $pedidos = self::ordenar(DropiPedido::query()->whereIn('id', $pedidoIds)->with('items')->get()
-            ->filter(fn (DropiPedido $p) => $p->tieneGuiaReal()));
-        if ($pedidos->isEmpty()) {
+        if (! DropiPedido::query()->whereIn('id', $pedidoIds)->get()->contains(fn (DropiPedido $p) => $p->tieneGuiaReal())) {
             return null;
         }
 
         $lote = DropiLoteImpresion::create([
             'user_id' => $userId,
-            'pedidos' => $pedidos->pluck('id')->all(),
-            'total' => $pedidos->count(),
+            'pedidos' => array_values(array_map('intval', $pedidoIds)),
+            'total' => count($pedidoIds),
             'estado' => DropiLoteImpresion::DESCARGANDO,
         ]);
+        $this->iniciar($lote);
 
+        return $lote->fresh();
+    }
+
+    /**
+     * Arranca el reporte con lo que ya tiene guía, en el orden de la pila. Lo
+     * que se quedó sin guía (Dropi la rechazó) va a la página «sin sticker» y
+     * se puede volver a generar en otro corte. «Generar corte» lo llama cuando
+     * terminan sus guías.
+     */
+    public function iniciar(DropiLoteImpresion $lote): void
+    {
+        $pedidos = DropiPedido::query()->whereIn('id', $lote->pedidos)->with('items')->get();
+        $conGuia = self::ordenar($pedidos->filter(fn (DropiPedido $p) => $p->tieneGuiaReal()));
+        $sinGuia = $pedidos->reject(fn (DropiPedido $p) => $p->tieneGuiaReal())
+            ->map(fn (DropiPedido $p) => (string) ($p->dropi_orden_id ?: $p->guia))->values()->all();
+
+        $lote->update([
+            'pedidos' => $conGuia->pluck('id')->all(),
+            'total' => $conGuia->count(),
+            'descargados' => 0,
+            'sin_sticker' => $sinGuia ?: null,
+            'estado' => $conGuia->isEmpty() ? DropiLoteImpresion::ARMANDO : DropiLoteImpresion::DESCARGANDO,
+        ]);
+
+        if ($conGuia->isEmpty()) {
+            ArmarParteLoteJob::dispatch($lote->id, 1);
+
+            return;
+        }
         foreach (array_chunk($lote->pedidos, self::POR_TRABAJO) as $ids) {
             DescargarStickersLoteJob::dispatch($lote->id, $ids);
         }
-
-        return $lote;
     }
 
     /**

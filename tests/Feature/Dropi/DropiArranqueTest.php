@@ -58,31 +58,19 @@ it('sólo deja en las colas lo que en Dropi sigue PENDIENTE', function () {
         ->and(json_decode($bitacora->payload, true))->toMatchArray(['motivo' => 'arranque_erp', 'estatus_dropi' => 'GUIA_GENERADA']);
 });
 
-it('la lista de recolección del corte sólo trae lo que sigue PENDIENTE', function () {
-    $nuevo = ($this->pedido)('401', EstadoPedidoDropi::Pending, 'PENDIENTE');
-    $conGuia = ($this->pedido)('402', EstadoPedidoDropi::Pending, 'GUIA_GENERADA');
-    $nuevo->items()->create(['sku_dropi' => 'SKU-NUEVO', 'cantidad' => 2, 'precio_proveedor_unit' => 1000]);
-    $conGuia->items()->create(['sku_dropi' => 'SKU-VIEJO', 'cantidad' => 5, 'precio_proveedor_unit' => 1000]);
-
-    $this->artisan('dropi:arranque', ['--ejecutar' => true])->assertSuccessful();
-
-    $totales = app(\App\Modules\Dropi\Support\RecoleccionDelCorte::class)->totales($nuevo->corte_id);
-
-    expect(array_keys($totales))->toBe(['SKU-NUEVO'])
-        ->and($totales['SKU-NUEVO']['total_unidades'])->toBe(2);
-});
-
-it('junta en el corte actual los PENDIENTE que estaban en cortes viejos sin cerrar', function () {
+it('lo que sigue PENDIENTE en Dropi queda sin corte, esperando el primer «Generar corte» (25-nov-2026)', function () {
     $viejo = \App\Modules\Dropi\Models\DropiCorte::create(['fecha' => now()->subDays(10)->toDateString(), 'numero' => 1, 'estado' => \App\Modules\Dropi\Enums\EstadoCorte::Abierto]);
     $p = ($this->pedido)('501', EstadoPedidoDropi::Pending, 'PENDIENTE');
     $p->forceFill(['corte_id' => $viejo->id])->save();
-    $actual = AsignarCorteACarga::run(CarbonImmutable::now());
+    \App\Modules\Dropi\Listeners\RecalcularContadoresCorte::recontar($viejo->id);
+    $conGuia = ($this->pedido)('502', EstadoPedidoDropi::Pending, 'GUIA_GENERADA');
 
     $this->artisan('dropi:arranque', ['--ejecutar' => true])->assertSuccessful();
 
-    expect($p->fresh()->corte_id)->toBe($actual->id)
-        ->and($actual->fresh()->pedidos_totales)->toBe(1)
-        ->and($viejo->fresh()->pedidos_totales)->toBe(0);
+    expect($p->fresh()->corte_id)->toBeNull()
+        ->and($p->fresh()->estado)->toBe(EstadoPedidoDropi::Pending)
+        ->and($viejo->fresh()->pedidos_totales)->toBe(0)
+        ->and($conGuia->fresh()->estado)->toBe(EstadoPedidoDropi::GestionadoEnDropi);
 });
 
 it('sin --ejecutar no cambia nada', function () {

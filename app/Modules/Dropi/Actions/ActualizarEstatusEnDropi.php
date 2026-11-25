@@ -74,11 +74,19 @@ class ActualizarEstatusEnDropi
 
         DB::table('dropi_web_acciones')->insert($auditoria + ['exito' => true, 'respuesta' => json_encode($resultado, JSON_UNESCAPED_UNICODE)]);
 
+        // El estado nuevo se ve de una vez en «Pedidos Dropi» (25-nov-2026): antes se
+        //   borraba y el pedido salía de «Pendiente» sin llegar a «Guía generada»
+        //   hasta la siguiente vuelta del sync. La huella vacía hace que esa vuelta
+        //   lo traiga completo igual.
+        DB::table('dropi_web_huellas')->updateOrInsert(
+            ['dropi_orden_id' => (int) $pedido->dropi_orden_id],
+            ['estatus_dropi' => $estatus, 'huella' => ''],
+        );
+
         // Traer el pedido ya cambiado (guía nueva, estado) sin esperar al sync.
         //   Si esto falla, el cambio en Dropi ya quedó hecho: el sync lo recoge.
         try {
             $this->sync->importarPedidos([$this->mapper->desdeDetalle($this->client->pedidoDetalle((int) $pedido->dropi_orden_id))]);
-            DB::table('dropi_web_huellas')->where('dropi_orden_id', $pedido->dropi_orden_id)->delete();
         } catch (\Throwable $e) {
             \Illuminate\Support\Facades\Log::warning('dropi.web.resync_tras_accion', ['orden' => $pedido->dropi_orden_id, 'msg' => $e->getMessage()]);
         }

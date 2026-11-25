@@ -165,6 +165,49 @@ class ProductosDeDropi extends Page
                         ->body("{$r['items']} líneas de pedido ya tienen producto · {$r['pedidos_liberados']} pedidos salieron de «pendiente por inventario».");
                     ($r['errores'] ? $n->warning()->body('No se pudieron: ' . implode(' | ', array_slice($r['errores'], 0, 5))) : $n->success())->send();
                 }),
+            // «Igualar con Dropi» (25-nov-2026): lo recibido antes del envío
+            //   automático (el SA383 y su DIDA-004) o cualquier diferencia. Arma
+            //   una carga en borrador con el antes y el después; se confirma ahí.
+            Action::make('igualarDropi')
+                ->label('Igualar con Dropi')
+                ->icon('heroicon-o-arrows-right-left')
+                ->color('warning')
+                ->visible(fn () => $this->puedeEditar)
+                ->modalHeading('Igualar el stock de Dropi con el del ERP')
+                ->modalDescription('Escoge los productos ya vinculados. Se arma una carga con lo que hay en Dropi y lo que quedaría (el stock vendible del ERP); nada se manda hasta que la confirmes.')
+                ->modalSubmitActionLabel('Armar la carga')
+                ->schema([
+                    Select::make('productos')
+                        ->label('Productos vinculados con Dropi')
+                        ->placeholder('Busca por referencia o nombre')
+                        ->multiple()
+                        ->searchable()
+                        ->required()
+                        ->getSearchResultsUsing(fn (string $search) => Producto::query()->whereNotNull('dropi_sku')
+                            ->where(fn ($q) => $q->where('referencia', 'like', "%{$search}%")->orWhere('nombre', 'like', "%{$search}%"))
+                            ->orderBy('referencia')->limit(25)->get()
+                            ->mapWithKeys(fn (Producto $p) => [$p->id => self::etiquetaIgualar($p)])->all())
+                        ->getOptionLabelsUsing(fn (array $values) => Producto::whereIn('id', $values)->get()
+                            ->mapWithKeys(fn (Producto $p) => [$p->id => self::etiquetaIgualar($p)])->all()),
+                ])
+                ->action(function (array $data) {
+                    $this->exigirEdicion();
+                    $productos = Producto::whereIn('id', $data['productos'] ?? [])->whereNotNull('dropi_sku')->orderBy('referencia')->get();
+                    $concepto = 'Igualar con Dropi: ' . $productos->pluck('referencia')->take(4)->implode(', ') . ($productos->count() > 4 ? ' y ' . ($productos->count() - 4) . ' más' : '');
+                    try {
+                        $carga = app(ProductosSinDropi::class)->cargaIgualarVarios($productos, $concepto, auth()->id());
+                    } catch (\Throwable $e) {
+                        Notification::make()->title('No se armó la carga')->body($e->getMessage())->danger()->send();
+
+                        return;
+                    }
+                    if (! $carga) {
+                        Notification::make()->title('Ninguno de los escogidos está vinculado con Dropi')->warning()->send();
+
+                        return;
+                    }
+                    $this->redirect(route('app.dropi.carga-productos.show', $carga));
+                }),
             // Masivo (23-nov-2026): todos los «No están en el ERP» de una vez.
             Action::make('crearNuevos')
                 ->label(fn () => 'Crear en el ERP ' . count(app(CrearProductosNuevosDropi::class)->porCrear(true)))
@@ -318,6 +361,16 @@ class ProductosDeDropi extends Page
             ->take(25)
             ->mapWithKeys(fn ($p) => [(string) $p['id'] => self::etiquetaDe($p)])
             ->all();
+    }
+
+    /** «DIDA-004 · Tablero… · ERP 168 · Dropi 167» (Dropi, de la última lectura del catálogo). */
+    private static function etiquetaIgualar(Producto $p): string
+    {
+        $erp = ProductosSinDropi::stockErp($p)['total'];
+        $dropi = collect(app(CatalogoDropi::class)->foto()['productos'] ?? [])->firstWhere('id', (int) $p->dropi_sku);
+
+        return "{$p->referencia} · " . mb_strimwidth((string) $p->nombre, 0, 40, '…') . " · ERP {$erp}"
+            . ($dropi ? ' · Dropi ' . array_sum(array_column($dropi['llaves'], 'stock')) : '');
     }
 
     private static function etiquetaFoto(int $id): ?string

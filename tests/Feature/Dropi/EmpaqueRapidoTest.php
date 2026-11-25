@@ -105,7 +105,9 @@ it('sólo se empaca lo que Aracely imprimió: lo del ERP en el orden de la pila,
         ->and($cola->sinImprimir())->toBe(1);
 
     // Un corte cerrado no deja tocar sus pedidos: abrirlo tumbaba la estación (prueba del 24-nov-2026).
-    \App\Modules\Dropi\Models\DropiCorte::whereKey($enDropi->corte_id)->update(['estado' => \App\Modules\Dropi\Enums\EstadoCorte::Cerrado->value]);
+    $corte = \App\Modules\Dropi\Actions\AsignarCorteACarga::run(CarbonImmutable::now());
+    $enDropi->forceFill(['corte_id' => $corte->id])->save();
+    \App\Modules\Dropi\Models\DropiCorte::whereKey($corte->id)->update(['estado' => \App\Modules\Dropi\Enums\EstadoCorte::Cerrado->value]);
     expect($cola->pedidos()->pluck('id')->all())->not->toContain($enDropi->id);
 });
 

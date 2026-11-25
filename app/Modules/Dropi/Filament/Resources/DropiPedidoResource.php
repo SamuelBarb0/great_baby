@@ -5,6 +5,7 @@ namespace App\Modules\Dropi\Filament\Resources;
 use App\Modules\Dropi\Enums\EstadoPedidoDropi;
 use App\Modules\Dropi\Filament\Resources\DropiPedidoResource\Pages;
 use App\Modules\Dropi\Models\DropiPedido;
+use App\Modules\Dropi\Support\EstadoEnDropi;
 use BackedEnum;
 use Filament\Actions\EditAction;
 use Filament\Actions\ViewAction;
@@ -17,7 +18,6 @@ use Filament\Resources\Resource;
 use App\Support\FilamentPolicy\HeredaAutorizacion;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
-use Filament\Tables\Columns\BadgeColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\Filter;
 use Filament\Tables\Filters\SelectFilter;
@@ -206,12 +206,11 @@ class DropiPedidoResource extends Resource
                 TextColumn::make('cliente_nombre')->label('Cliente')->searchable()->limit(25),
                 TextColumn::make('cliente_ciudad')->label('Ciudad')->searchable()->toggleable(),
                 TextColumn::make('transportadora')->badge()->color('gray')->toggleable(),
-                BadgeColumn::make('estado')
-                    ->formatStateUsing(fn ($state) => $state instanceof EstadoPedidoDropi ? $state->label() : $state)
-                    ->color(fn ($state) => $state instanceof EstadoPedidoDropi ? $state->color() : 'gray'),
-                // Como en Dropi (24-nov-2026): Aracely arma el corte con el estatus de allá.
-                TextColumn::make('huella.estatus_dropi')->label('En Dropi')->badge()
-                    ->color(fn ($state) => match ($state) { 'PENDIENTE' => 'warning', 'GUIA_GENERADA' => 'info', default => 'gray' })
+                // Sólo el estado de Dropi, como en la plataforma (25-nov-2026): el del
+                //   ERP sigue por dentro (empaque, corte, contabilidad) pero no se muestra.
+                TextColumn::make('huella.estatus_dropi')->label('Estado')->badge()
+                    ->formatStateUsing(fn ($state) => EstadoEnDropi::etiqueta($state))
+                    ->color(fn ($state) => EstadoEnDropi::color($state))
                     ->placeholder('—'),
                 \Filament\Tables\Columns\IconColumn::make('impresa')->label('Impresa')
                     ->state(fn (DropiPedido $record) => $record->tieneGuiaImpresa())
@@ -223,18 +222,18 @@ class DropiPedidoResource extends Resource
                 TextColumn::make('pagado_at')->label('Pagado')->dateTime('Y-m-d H:i')->toggleable(isToggledHiddenByDefault: true)->sortable(),
             ])
             ->defaultSort('created_at', 'desc')
-            // Tabla en vivo: el sync con Dropi trae pedidos cada 15 s; la tabla se
-            //   refresca al mismo ritmo sin recargar la página (conserva filtros,
-            //   búsqueda y paginación). Livewire pausa el sondeo si la pestaña no se ve.
-            ->poll('15s')
+            // Tabla en vivo, cada 5 s sin recargar la página (conserva filtros,
+            //   búsqueda y paginación): sólo lee la base del ERP, no a Dropi, y lo
+            //   que el ERP cambia en Dropi se ve de una vez (25-nov-2026). Livewire
+            //   pausa el sondeo si la pestaña no se ve.
+            ->poll('5s')
             ->modifyQueryUsing(fn (Builder $query) => $query->with('huella'))
             ->filters([
-                SelectFilter::make('estado')
-                    ->options(collect(EstadoPedidoDropi::cases())->mapWithKeys(fn ($e) => [$e->value => $e->label()])),
                 // Los filtros con que Aracely arma el corte en Dropi (reunión del 24-nov-2026).
-                SelectFilter::make('estatus_dropi')->label('Estado en Dropi')->multiple()
+                SelectFilter::make('estatus_dropi')->label('Estado')->multiple()
                     ->options(fn () => \App\Modules\Dropi\Models\DropiWebHuella::query()->whereNotNull('estatus_dropi')->where('estatus_dropi', '!=', '')
-                        ->distinct()->orderBy('estatus_dropi')->pluck('estatus_dropi', 'estatus_dropi')->toArray())
+                        ->distinct()->orderBy('estatus_dropi')->pluck('estatus_dropi')
+                        ->mapWithKeys(fn ($e) => [$e => EstadoEnDropi::etiqueta($e)])->toArray())
                     ->query(fn (Builder $query, array $data) => $query->when($data['values'] ?? [],
                         fn ($q, $v) => $q->whereHas('huella', fn ($h) => $h->whereIn('estatus_dropi', $v)))),
                 SelectFilter::make('impresa')->label('Guía impresa')
@@ -281,6 +280,11 @@ class DropiPedidoResource extends Resource
                         return $chips;
                     }),
             ])
+            // Los filtros a la vista, arriba de la tabla, y se aplican al instante
+            //   (25-nov-2026: «que estén más a la vista y no en el botón»).
+            ->filtersLayout(\Filament\Tables\Enums\FiltersLayout::AboveContent)
+            ->filtersFormColumns(4)
+            ->deferFilters(false)
             ->recordActions([
                 ViewAction::make(),
                 EditAction::make(),
@@ -297,68 +301,43 @@ class DropiPedidoResource extends Resource
                     ->visible(fn (DropiPedido $record) => filled($record->dropi_orden_id) && self::puedeCambiarEnDropi()),
             ])
             ->toolbarActions([
-                // El corte desde el ERP (reunión con la señora Lahida, 24-nov-2026):
-                //   filtrar PENDIENTE en Dropi → «Generar guías» → «Imprimir guías».
-                \Filament\Actions\BulkAction::make('generarGuias')
-                    ->label('Generar guías')
-                    ->icon('heroicon-o-truck')
+                // «Generar corte» (25-nov-2026): Aracely filtra, revisa a mano lo pendiente
+                //   y lo que ya tiene guía sin imprimir, selecciona y le da un solo botón.
+                //   La hora de ese momento dice si es el Corte 1 o el 2; se piden las guías
+                //   que faltan y al terminar sale el reporte (hoja + stickers).
+                \Filament\Actions\BulkAction::make('generarCorte')
+                    ->label('Generar corte')
+                    ->icon('heroicon-o-scissors')
                     ->color('warning')
                     ->visible(fn () => self::puedeCambiarEnDropi())
                     ->requiresConfirmation()
-                    ->modalHeading('Generar las guías en Dropi')
+                    ->modalHeading(fn () => 'Generar el ' . self::corteDeAhora())
                     ->modalDescription(function (\Illuminate\Support\Collection $records) {
-                        $records->loadMissing('huella');
-                        $van = $records->filter(fn (DropiPedido $p) => self::pideGuia($p))->count();
-                        // Sin stock en el ERP: se avisa y se genera igual, o se salta si
-                        //   la regla «Exigir stock del ERP» está prendida (24-nov-2026).
-                        $sinStock = $records->filter(fn (DropiPedido $p) => $p->sinStockErp() && self::pideGuia($p))->count();
-                        $exige = (bool) setting('dropi.exigir_stock_erp', false);
-                        $sinStockSalta = $exige ? $records->filter(fn (DropiPedido $p) => $p->sinStockErp())->count() : 0;
-                        $saltan = $records->count() - $van - $sinStockSalta;
+                        $records->loadMissing(['huella', 'corte']);
+                        $g = \App\Modules\Dropi\Actions\GenerarCorteDropi::clasificar($records);
+                        $sinStock = $g['a_guia']->concat($g['con_guia'])->filter(fn (DropiPedido $p) => $p->sinStockErp())->count();
 
-                        return "Se pedirán {$van} guía(s) REALES en Dropi: la transportadora las registra y la de un pedido que al final no sale hay que anularla."
-                            . ($sinStock ? " Ojo: {$sinStock} de ellas no tiene(n) stock en el ERP (pendiente por inventario); se generan igual y en empaque salen marcadas «sin stock en el ERP»." : '')
-                            . ($sinStockSalta ? " {$sinStockSalta} no tiene(n) stock en el ERP y se salta(n): la regla «Exigir stock del ERP» está prendida." : '')
-                            . ($saltan > 0 ? " {$saltan} de lo escogido no está PENDIENTE en Dropi o ya tiene guía y se salta." : '')
-                            . ' Se generan en segundo plano; el avance sale arriba de la tabla.';
+                        return 'Entran ' . ($g['a_guia']->count() + $g['con_guia']->count()) . " pedido(s) al " . self::corteDeAhora() . "."
+                            . ($g['a_guia']->count() ? " Se pedirán {$g['a_guia']->count()} guía(s) REALES en Dropi: la transportadora las registra y la de un pedido que al final no sale hay que anularla." : '')
+                            . ($g['con_guia']->count() ? " {$g['con_guia']->count()} ya tienen guía de Dropi y sólo entran." : '')
+                            . ($sinStock ? " Ojo: {$sinStock} no tiene(n) stock en el ERP (pendiente por inventario); entran igual y en empaque salen marcados." : '')
+                            . ($g['saltados']->count() ? " {$g['saltados']->count()} se saltan: ya están en un corte, su corte está cerrado o en Dropi ya no están pendientes." : '')
+                            . ' Cuando terminen las guías sale el reporte arriba de la tabla: la hoja de alistamiento y los stickers.';
                     })
-                    ->modalSubmitActionLabel('Generar guías')
+                    ->modalSubmitActionLabel('Generar corte')
                     ->action(function (\Illuminate\Support\Collection $records) {
                         self::exigirCambiarEnDropi();
-                        $records->loadMissing('huella');
-                        $ids = $records->filter(fn (DropiPedido $p) => self::pideGuia($p))->pluck('id')->all();
-                        if (! $ids) {
-                            \Filament\Notifications\Notification::make()->title('Nada que generar')
-                                ->body('Ninguno de los escogidos está PENDIENTE en Dropi sin guía' . (setting('dropi.exigir_stock_erp', false) ? ' y con stock en el ERP.' : '.'))->warning()->send();
+                        $r = \App\Modules\Dropi\Actions\GenerarCorteDropi::run($records->pluck('id')->all(), auth()->id());
+                        if (! $r['corte']) {
+                            \Filament\Notifications\Notification::make()->title('No entró ningún pedido al corte')
+                                ->body('Ya están en un corte, su corte está cerrado o en Dropi ya no están pendientes.')->warning()->send();
 
                             return;
                         }
-                        \App\Modules\Dropi\Jobs\GenerarGuiasEnBloqueJob::lanzar($ids, auth()->id());
-                        \Filament\Notifications\Notification::make()->title('Generando ' . count($ids) . ' guía(s)')
-                            ->body('Van en segundo plano. Cuando terminen, filtra «Guía impresa: No impresas» y dale «Imprimir guías».')->success()->send();
-                    })
-                    ->deselectRecordsAfterCompletion(),
-                \Filament\Actions\BulkAction::make('imprimirGuias')
-                    ->label('Imprimir guías')
-                    ->icon('heroicon-o-printer')
-                    ->color('success')
-                    ->visible(fn () => self::puedeCambiarEnDropi())
-                    // Son 300 a 800 paquetes: el PDF se arma en segundo plano y sale
-                    //   en partes de 200; los enlaces aparecen arriba de la tabla.
-                    ->action(function (\Illuminate\Support\Collection $records) {
-                        self::exigirCambiarEnDropi();
-                        $lote = app(\App\Modules\Dropi\Services\ImprimirGuiasDropi::class)->lanzar($records->pluck('id')->all(), auth()->id());
-                        if (! $lote) {
-                            \Filament\Notifications\Notification::make()->title('Ninguno tiene guía todavía')
-                                ->body('Primero «Generar guías».')->warning()->send();
-
-                            return;
-                        }
-                        $sin = $records->count() - $lote->total;
-                        \Filament\Notifications\Notification::make()->title("Armando el lote {$lote->id}: {$lote->total} guía(s)")
-                            ->body('Primero la lista de alistamiento y después los stickers, en el orden de empaque, en partes de '
-                                . \App\Modules\Dropi\Services\ImprimirGuiasDropi::POR_PARTE . '. Los enlaces salen arriba de la tabla cuando estén listos; al terminar quedan «impresas» y pasan a empaque.'
-                                . ($sin ? " {$sin} sin guía todavía no van." : ''))->success()->send();
+                        \Filament\Notifications\Notification::make()->title("{$r['corte']->etiqueta()}: " . ($r['a_guia'] + $r['con_guia']) . ' pedido(s)')
+                            ->body(($r['a_guia'] ? "Generando {$r['a_guia']} guía(s) en segundo plano. " : '')
+                                . 'El reporte sale arriba de la tabla cuando esté listo; desde ahí lo trabajan la Vista del Alistador y la Estación de Empaque.')
+                            ->success()->send();
                     })
                     ->deselectRecordsAfterCompletion(),
                 \Filament\Actions\BulkActionGroup::make([
@@ -383,11 +362,23 @@ class DropiPedidoResource extends Resource
         return \App\Auth\Permisos::puede(auth()->user(), 'dropi_cambiar_en_dropi');
     }
 
-    /** ¿«Generar guías» le pide guía a este pedido? Sólo PENDIENTE en Dropi y sin guía. */
-    protected static function pideGuia(DropiPedido $p): bool
+    /**
+     * El corte que saldría si Aracely genera ahora, sin crearlo: la franja de la
+     * hora (antes de las 2 p. m. el 1, después el 2) o, si esa ya se cerró, el
+     * abierto del día o el siguiente número (como AsignarCorteACarga).
+     */
+    public static function corteDeAhora(): string
     {
-        return filled($p->dropi_orden_id) && ! $p->tieneGuiaReal() && $p->huella?->estatus_dropi === 'PENDIENTE'
-            && $p->listoParaDespachar();
+        $ahora = now('America/Bogota');
+        $numero = $ahora->hour < 14 ? 1 : 2;
+        $natural = \App\Modules\Dropi\Models\DropiCorte::whereDate('fecha', $ahora->toDateString())->where('numero', $numero)->first();
+        if ($natural && \App\Modules\Dropi\Enums\EstadoCorte::de($natural->estado) === \App\Modules\Dropi\Enums\EstadoCorte::Cerrado) {
+            $numero = \App\Modules\Dropi\Models\DropiCorte::whereDate('fecha', $ahora->toDateString())
+                ->where('estado', \App\Modules\Dropi\Enums\EstadoCorte::Abierto->value)->orderBy('numero')->value('numero')
+                ?? (int) \App\Modules\Dropi\Models\DropiCorte::whereDate('fecha', $ahora->toDateString())->max('numero') + 1;
+        }
+
+        return "Corte {$numero} de hoy (" . $ahora->format('d/m') . ')';
     }
 
     protected static function exigirCambiarEnDropi(): void

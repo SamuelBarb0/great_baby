@@ -58,7 +58,7 @@ beforeEach(function () {
     Filament::setCurrentPanel('admin');
 });
 
-it('ninguna tarjeta de Reportes queda en «#» ni repite destino, y las filtradas usan `filters`', function () {
+it('ninguna tarjeta de Reportes queda en «#» ni repite destino, y las filtradas por etapa del ERP usan `etapa`', function () {
     $this->actingAs($this->aracely);
     $reportes = collect((new ReportesDropi())->getBloques())->flatMap(fn ($b) => $b['reportes']);
 
@@ -68,7 +68,7 @@ it('ninguna tarjeta de Reportes queda en «#» ni repite destino, y las filtrada
         ->and($urls['Cambios financieros'])->toBe(CambiosFinancierosDropi::getUrl())
         ->and($urls['Comparativo periodo'])->toBe(ComparativoPeriodoDropi::getUrl())
         ->and($urls['Comparativo periodo'])->not->toBe($urls['Dashboard consolidado'])
-        ->and(urldecode($urls['Pendientes por inventario']))->toContain('filters[estado][value]=pendiente_inventario')
+        ->and(urldecode($urls['Pendientes por inventario']))->toContain('etapa=pendiente_inventario')
         ->and($urls->filter(fn ($u) => str_contains(urldecode($u), 'tableFilters')))->toBeEmpty();
 
     // Y cada destino abre (200) para quien ve Reportes.

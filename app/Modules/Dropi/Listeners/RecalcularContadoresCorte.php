@@ -19,8 +19,14 @@ class RecalcularContadoresCorte
 {
     public function handle(PedidoDropiTransicionado $e): void
     {
-        $corteId = $e->pedido->corte_id;
-        if (! $corteId) return;
+        if ($e->pedido->corte_id) {
+            self::recontar((int) $e->pedido->corte_id);
+        }
+    }
+
+    /** Los contadores de un corte; también al meterle o sacarle pedidos («Generar corte», 25-nov-2026). */
+    public static function recontar(int $corteId): void
+    {
 
         // H6 datos · si el corte está cerrado, NO tocamos los contadores — el
         // snapshot_json + hash SHA-256 del manifiesto es la fuente de verdad

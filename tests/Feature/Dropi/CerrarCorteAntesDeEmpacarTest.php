@@ -54,8 +54,11 @@ function ccPedido(string $guia, ?CarbonImmutable $creado = null): DropiPedido
         items: [new ItemDropiDTO('CC-SKU-899', 1, 30000, 'x', 'x')],
         creadoAt: $creado ?? CarbonImmutable::parse('2026-11-24 09:00'),
     )]);
+    // Llega sin corte (25-nov-2026): entra al de la hora en que Aracely lo genera.
+    $p = DropiPedido::where('guia', $guia)->firstOrFail();
+    $p->forceFill(['corte_id' => \App\Modules\Dropi\Actions\AsignarCorteACarga::run($creado ?? CarbonImmutable::parse('2026-11-24 09:00'))->id])->save();
 
-    return DropiPedido::where('guia', $guia)->firstOrFail();
+    return $p->fresh();
 }
 
 it('«Cerrar corte» deja de recibir pedidos: el nuevo cae en otro corte y lo del cerrado se sigue empacando en la estación', function () {

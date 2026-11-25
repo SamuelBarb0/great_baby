@@ -158,8 +158,8 @@ it('«Imprimir guías» arma un lote en segundo plano (lista + stickers), marca 
     $lote = app(ImprimirGuiasDropi::class)->lanzar([$a->id, $b->id, $sinPublicar->id, $sinGuia->id], null)->fresh();
 
     expect($lote->estado)->toBe(DropiLoteImpresion::LISTO)
-        ->and($lote->total)->toBe(3) // el que no tiene guía no entra
-        ->and($lote->sin_sticker)->toBe(['503'])
+        ->and($lote->total)->toBe(3) // los que tienen guía; el 504 no entra a la pila
+        ->and($lote->sin_sticker)->toBe(['504', '503']) // el 504 no tenía guía; el 503, sticker
         ->and($lote->partes)->toHaveCount(1)
         // 1 página de lista + 2 stickers + 1 de «sin sticker».
         ->and(cdePaginas(Storage::disk('local')->get($lote->partes[0])))->toBe(4)
@@ -168,7 +168,7 @@ it('«Imprimir guías» arma un lote en segundo plano (lista + stickers), marca 
         ->and($sinPublicar->fresh()->guia_impresa_at)->toBeNull();
 });
 
-it('un lote masivo sale en partes de 200 y la pila sigue de una parte a la otra', function () {
+it('un reporte masivo sale en un solo PDF, en el orden de la pila («que haga un montón y ya»)', function () {
     Storage::fake('local');
     Http::fake(['stickers.test/*' => Http::response(cdeStickerPdf('x'))]);
     $ids = [];
@@ -179,9 +179,8 @@ it('un lote masivo sale en partes de 200 y la pila sigue de una parte a la otra'
     $lote = app(ImprimirGuiasDropi::class)->lanzar($ids, null)->fresh();
 
     expect($lote->estado)->toBe(DropiLoteImpresion::LISTO)
-        ->and($lote->partes)->toHaveCount(2)
-        ->and(cdePaginas(Storage::disk('local')->get($lote->partes[0])))->toBe(1 + 200) // la lista abre la primera
-        ->and(cdePaginas(Storage::disk('local')->get($lote->partes[1])))->toBe(5)
+        ->and($lote->partes)->toHaveCount(1)
+        ->and(cdePaginas(Storage::disk('local')->get($lote->partes[0])))->toBe(1 + 205) // la hoja abre el PDF
         ->and(DropiPedido::whereIn('id', $ids)->orderBy('orden_empaque')->pluck('id')->all())->toBe($lote->pedidos);
 });
 
@@ -193,4 +192,115 @@ it('las partes del lote sólo las baja quien cambia pedidos en Dropi', function 
 
     $this->actingAs(\App\Models\User::factory()->create());
     $this->get(route('dropi.guias.parte', [$lote, 1]))->assertForbidden();
+});
+
+/*
+ * «Generar corte» (25-nov-2026): el corte nace cuando Aracely genera; la hora
+ * de ese momento dice si es el Corte 1 o el 2, y de ahí sale el reporte.
+ */
+
+/** GenerarGuiaDropi falso: Dropi asigna la guía y su sticker. */
+function cdeGuiasDeDropi(): void
+{
+    test()->mock(GenerarGuiaDropi::class)->shouldReceive('handle')->andReturnUsing(function (DropiPedido $p) {
+        $p->forceFill(['guia' => "G-{$p->dropi_orden_id}", 'sticker_path' => "g/{$p->dropi_orden_id}.pdf"])->save();
+
+        return [];
+    });
+    Http::fake(['stickers.test/*' => Http::response(cdeStickerPdf('x'))]);
+}
+
+it('«Generar corte» numera el corte por la hora en que Aracely lo genera, pide las guías y saca el reporte', function () {
+    Storage::fake('local');
+    cdeGuiasDeDropi();
+    $sinCorte = ['corte_id' => null];
+    $pendiente = cdePedido('801', 'PENDIENTE', cambios: $sinCorte);
+    $yaConGuia = cdePedido('802', 'GUIA_GENERADA', cambios: $sinCorte + ['guia' => 'G-802', 'sticker_path' => 'g/802.pdf']);
+    $cancelado = cdePedido('803', 'CANCELADO', cambios: $sinCorte);
+
+    $r = \App\Modules\Dropi\Actions\GenerarCorteDropi::run([$pendiente->id, $yaConGuia->id, $cancelado->id], null, CarbonImmutable::parse('2026-11-25 09:00'));
+
+    $reporte = $r['reporte']->fresh();
+    expect($r['corte']->numero)->toBe(1)
+        ->and($r['corte']->fecha->toDateString())->toBe('2026-11-25')
+        ->and($r['a_guia'])->toBe(1)->and($r['con_guia'])->toBe(1)->and($r['saltados'])->toBe(1)
+        ->and($pendiente->fresh()->corte_id)->toBe($r['corte']->id)
+        ->and($yaConGuia->fresh()->corte_id)->toBe($r['corte']->id)
+        ->and($cancelado->fresh()->corte_id)->toBeNull()
+        // Terminaron las guías → salió el reporte en un solo PDF: hoja + 2 stickers.
+        ->and($reporte->estado)->toBe(DropiLoteImpresion::LISTO)
+        ->and($reporte->partes)->toHaveCount(1)
+        ->and(cdePaginas(Storage::disk('local')->get($reporte->partes[0])))->toBe(3)
+        ->and($pendiente->fresh()->guia_impresa_at)->not->toBeNull()
+        ->and($pendiente->fresh()->lote_impresion_id)->toBe($reporte->id);
+});
+
+it('otra vez en la misma franja suma al mismo corte con su propio reporte; después de las 2 p. m. es el Corte 2', function () {
+    Storage::fake('local');
+    cdeGuiasDeDropi();
+    $a = cdePedido('811', 'PENDIENTE', cambios: ['corte_id' => null]);
+    $b = cdePedido('812', 'PENDIENTE', cambios: ['corte_id' => null]);
+    $c = cdePedido('813', 'PENDIENTE', cambios: ['corte_id' => null]);
+
+    $nueve = \App\Modules\Dropi\Actions\GenerarCorteDropi::run([$a->id], null, CarbonImmutable::parse('2026-11-25 09:00'));
+    $once = \App\Modules\Dropi\Actions\GenerarCorteDropi::run([$b->id, $a->id], null, CarbonImmutable::parse('2026-11-25 11:00'));
+    $tres = \App\Modules\Dropi\Actions\GenerarCorteDropi::run([$c->id], null, CarbonImmutable::parse('2026-11-25 15:00'));
+
+    expect($once['corte']->id)->toBe($nueve['corte']->id)
+        ->and($once['reporte']->id)->not->toBe($nueve['reporte']->id)
+        ->and($once['saltados'])->toBe(1) // el de las 9 ya estaba en un reporte
+        ->and($once['reporte']->fresh()->pedidos)->toBe([$b->id])
+        ->and($tres['corte']->numero)->toBe(2);
+});
+
+it('si Dropi rechaza una guía, el reporte sale igual con lo demás y el rechazado queda «sin guía»', function () {
+    Storage::fake('local');
+    Http::fake(['stickers.test/*' => Http::response(cdeStickerPdf('x'))]);
+    $bien = cdePedido('821', 'PENDIENTE', cambios: ['corte_id' => null]);
+    $mal = cdePedido('822', 'PENDIENTE', cambios: ['corte_id' => null]);
+    $this->mock(GenerarGuiaDropi::class)->shouldReceive('handle')->andReturnUsing(function (DropiPedido $p) {
+        throw_if($p->dropi_orden_id === '822', new \RuntimeException('La dirección no tiene cobertura'));
+        $p->forceFill(['guia' => 'G-821', 'sticker_path' => 'g/821.pdf'])->save();
+
+        return [];
+    });
+
+    $r = \App\Modules\Dropi\Actions\GenerarCorteDropi::run([$bien->id, $mal->id], null, CarbonImmutable::parse('2026-11-25 09:00'));
+
+    $reporte = $r['reporte']->fresh();
+    expect($reporte->estado)->toBe(DropiLoteImpresion::LISTO)
+        ->and($reporte->pedidos)->toBe([$bien->id])
+        ->and($reporte->sin_sticker)->toBe(['822'])
+        ->and($mal->fresh()->lote_impresion_id)->toBeNull(); // se puede volver a generar
+});
+
+it('el pedido que llega por despachar nace sin corte; el que ya llega despachado entra al corte de su hora', function () {
+    $dto = fn (string $orden, string $estado) => new \App\Modules\Dropi\DTOs\PedidoDropiDTO(
+        guia: "G-{$orden}", dropiOrdenId: $orden, transportadora: 'X', tienda: 'T', vendedorNombre: 'V',
+        vendedorIdentificacion: null, clienteNombre: 'Ana', clienteDoc: null, clienteTelefono: null,
+        clienteDireccion: null, clienteCiudad: null, clienteDepto: null, estadoDropi: $estado,
+        montoEsperadoProveedor: 30000, montoClienteFinal: null, gananciaVendedor: null, fleteTransportadora: null,
+        items: [new \App\Modules\Dropi\DTOs\ItemDropiDTO('TP', 1, 30000, 'x', null)],
+        creadoAt: CarbonImmutable::parse('2026-11-25 08:00'),
+    );
+    app(\App\Modules\Dropi\Actions\SincronizarPedidosDropi::class)->importarPedidos([$dto('901', 'PENDIENTE'), $dto('902', 'ENTREGADO')]);
+
+    expect(DropiPedido::where('dropi_orden_id', '901')->value('corte_id'))->toBeNull()
+        ->and(DropiPedido::where('dropi_orden_id', '902')->value('corte_id'))->not->toBeNull();
+});
+
+it('lo empacado o despachado sin corte sale como alerta en Cortes y entra al corte abierto con un clic', function () {
+    $this->seed(\Database\Seeders\PermisosSeeder::class);
+    $aracely = \App\Models\User::factory()->create();
+    $aracely->assignRole(\Spatie\Permission\Models\Role::firstOrCreate(['name' => 'Aracely', 'guard_name' => 'web']));
+    $p = cdePedido('831', 'DESPACHADA', cambios: ['corte_id' => null]);
+    DB::table('dropi_pedidos')->where('id', $p->id)->update(['estado' => \App\Modules\Dropi\Enums\EstadoPedidoDropi::Despachado->value]);
+    $this->actingAs($aracely);
+    \Filament\Facades\Filament::setCurrentPanel('admin');
+
+    \Livewire\Livewire::test(\App\Modules\Dropi\Filament\Resources\DropiCorteResource\Pages\ListDropiCortes::class)
+        ->assertSee('1 pedido(s) empacados o despachados sin corte')
+        ->callAction('meterSinCorte');
+
+    expect($p->fresh()->corte_id)->not->toBeNull();
 });

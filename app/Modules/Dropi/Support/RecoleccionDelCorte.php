@@ -4,7 +4,7 @@ namespace App\Modules\Dropi\Support;
 
 use App\Modules\Dropi\Enums\CategoriaUbicacion;
 use App\Modules\Dropi\Enums\EstadoPedidoDropi;
-use App\Modules\Dropi\Models\DropiLoteImpresion;
+use App\Modules\Dropi\Models\DropiCorte;
 use App\Modules\Dropi\Models\DropiPedido;
 use App\Modules\Dropi\Models\DropiPedidoItem;
 use App\Modules\Dropi\Models\DropiRecoleccionMarca;
@@ -136,35 +136,37 @@ class RecoleccionDelCorte
     }
 
     /**
-     * Lo mismo para un lote de «Imprimir guías»: la hoja que la encargada tiene
-     * en la mano (24-nov-2026). Las marcas de «recogido» son de ese lote.
+     * Lo impreso de un corte: la hoja del reporte que la encargada tiene en la
+     * mano (25-nov-2026). Lo que entró al corte pero se quedó sin guía o sin
+     * sticker no está en la hoja, y tampoco aquí.
      *
      * @return list<array<string, mixed>>
      */
-    public function conMarcasDeLote(DropiLoteImpresion $lote): array
+    public function conMarcasImpresos(int $corteId): array
     {
         $grupos = $this->totalesDe(DropiPedido::query()
-            ->where('lote_impresion_id', $lote->id)
+            ->where('corte_id', $corteId)
+            ->whereNotNull('lote_impresion_id')
             ->whereNotIn('estado', self::ESTADOS_FUERA)
             ->with(['items.variante.producto', 'items.producto'])
             ->get());
 
-        return $this->marcar($grupos, DropiRecoleccionMarca::query()->where('lote_impresion_id', $lote->id));
+        return $this->marcar($grupos, DropiRecoleccionMarca::query()->where('corte_id', $corteId));
     }
 
     /**
-     * Los lotes impresos que todavía tienen algo por empacar, el más viejo
-     * primero: lo que la Vista del Alistador ofrece. Sin ninguno, no hay nada
-     * que recoger hasta que Aracely genere e imprima las guías.
+     * Los cortes generados que todavía tienen algo impreso por empacar, el más
+     * viejo primero: lo que la Vista del Alistador ofrece. Sin ninguno, no hay
+     * nada que recoger hasta que Aracely genere un corte.
      *
-     * @return \Illuminate\Database\Eloquent\Collection<int, DropiLoteImpresion>
+     * @return \Illuminate\Database\Eloquent\Collection<int, DropiCorte>
      */
-    public function lotesAbiertos(): \Illuminate\Database\Eloquent\Collection
+    public function cortesEnTrabajo(): \Illuminate\Database\Eloquent\Collection
     {
-        return DropiLoteImpresion::query()
-            ->where('estado', DropiLoteImpresion::LISTO)
-            ->whereHas('pedidosImpresos', fn ($q) => $q->whereIn('estado', DropiPedido::estadosDespachables()))
-            ->oldest('id')
+        return DropiCorte::query()
+            ->where('estado', '!=', \App\Modules\Dropi\Enums\EstadoCorte::Cerrado->value)
+            ->whereHas('pedidos', fn ($q) => $q->whereNotNull('lote_impresion_id')->whereIn('estado', DropiPedido::estadosDespachables()))
+            ->orderBy('fecha')->orderBy('numero')
             ->get();
     }
 

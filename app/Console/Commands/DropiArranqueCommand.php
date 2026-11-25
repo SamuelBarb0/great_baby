@@ -2,13 +2,10 @@
 
 namespace App\Console\Commands;
 
-use App\Modules\Dropi\Actions\AsignarCorteACarga;
 use App\Modules\Dropi\Enums\EstadoCorte;
 use App\Modules\Dropi\Enums\EstadoPedidoDropi;
-use App\Modules\Dropi\Events\PedidoDropiTransicionado;
 use App\Modules\Dropi\Listeners\RecalcularContadoresCorte;
 use App\Modules\Dropi\Models\DropiPedido;
-use Carbon\CarbonImmutable;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 
@@ -59,17 +56,16 @@ class DropiArranqueCommand extends Command
         $this->info("Pasan a «Gestionado en Dropi»: {$ids->count()}");
 
         // Los que se quedan estaban regados en cortes viejos que nunca se
-        // cerraron, y la lista de recolección sólo mira el corte en trabajo:
-        // se juntan en el corte que está recibiendo pedidos ahora.
-        $destino = AsignarCorteACarga::run(CarbonImmutable::now());
+        // cerraron. Desde el 25-nov-2026 el corte nace cuando Aracely genera:
+        // quedan «sin corte», esperando a que ella los seleccione.
         $aMover = (clone $base)
             ->where('h.estatus_dropi', 'PENDIENTE')
             ->leftJoin('dropi_cortes as c', 'c.id', '=', 'p.corte_id')
-            ->where(fn ($q) => $q->whereNull('p.corte_id')->orWhere('p.corte_id', '!=', $destino->id))
+            ->whereNotNull('p.corte_id')
             ->where(fn ($q) => $q->whereNull('c.estado')->orWhere('c.estado', '!=', EstadoCorte::Cerrado->value))
             ->pluck('p.id');
 
-        $this->info("Se juntan en el corte {$destino->etiqueta()}: {$aMover->count()}");
+        $this->info("Quedan sin corte, para el primer «Generar corte»: {$aMover->count()}");
 
         if (! $this->option('ejecutar')) {
             $this->warn('Modo prueba: no se cambió nada. Usa --ejecutar para aplicarlo.');
@@ -95,16 +91,14 @@ class DropiArranqueCommand extends Command
 
         $this->info("Hechos: {$hechos}");
 
-        // Mover de corte no es un cambio de estado: se recalculan a mano los
-        // contadores de los cortes que pierden y del que gana pedidos.
-        $cortesTocados = DropiPedido::whereIn('id', $aMover)->distinct()->pluck('corte_id')->filter()->push($destino->id)->unique();
-        DropiPedido::whereIn('id', $aMover)->update(['corte_id' => $destino->id]);
+        // Sacar de un corte no es un cambio de estado: se recalculan a mano los
+        // contadores de los cortes que pierden pedidos.
+        $cortesTocados = DropiPedido::whereIn('id', $aMover)->distinct()->pluck('corte_id')->filter()->unique();
+        DropiPedido::whereIn('id', $aMover)->update(['corte_id' => null]);
         foreach ($cortesTocados as $corteId) {
-            $muestra = DropiPedido::where('corte_id', $corteId)->first() ?? new DropiPedido(['corte_id' => $corteId]);
-            $muestra->corte_id = $corteId;
-            app(RecalcularContadoresCorte::class)->handle(new PedidoDropiTransicionado($muestra, null, EstadoPedidoDropi::Pending, 'sistema'));
+            RecalcularContadoresCorte::recontar((int) $corteId);
         }
-        $this->info("Movidos al corte {$destino->etiqueta()}: {$aMover->count()}");
+        $this->info("Sin corte, esperando a Aracely: {$aMover->count()}");
         foreach ($errores as $e) {
             $this->error($e);
         }

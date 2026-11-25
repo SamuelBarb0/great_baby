@@ -35,6 +35,12 @@ class AsignarCorteACarga
         } catch (\Illuminate\Database\UniqueConstraintViolationException) {
             $corte = DropiCorte::whereDate('fecha', $fecha)->where('numero', $numero)->firstOrFail();
         }
+        // `estado` está protegido: el corte recién creado lo toma del default de
+        //   la base («abierto») pero el objeto quedaba sin él, y abajo se leía
+        //   como cerrado → el Corte 2 nunca se usaba con el 1 abierto (25-nov-2026).
+        if ($corte->wasRecentlyCreated) {
+            $corte->refresh();
+        }
 
         // 2) F7 · Si el corte natural está cerrado:
         //    - Re-audit H4 func · buscar PRIMERO cualquier otro corte abierto del día

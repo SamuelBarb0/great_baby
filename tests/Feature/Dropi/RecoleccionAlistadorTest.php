@@ -71,13 +71,17 @@ function pedidoEnCorte(string $guia, array $items): DropiPedido
     return alLoteImpreso(DropiPedido::where('guia', $guia)->firstOrFail());
 }
 
-/** El pedido, en el lote impreso del test (uno solo para todos). */
+/**
+ * El pedido, en el corte que Aracely generó y en su reporte ya impreso (uno
+ * solo para todo el test): la Vista del Alistador trabaja ese corte (25-nov-2026).
+ */
 function alLoteImpreso(DropiPedido $p): DropiPedido
 {
-    $lote = DropiLoteImpresion::firstOrCreate(['estado' => DropiLoteImpresion::LISTO], ['pedidos' => [], 'total' => 0, 'partes' => []]);
+    $corte = \App\Modules\Dropi\Actions\AsignarCorteACarga::run(CarbonImmutable::now());
+    $lote = DropiLoteImpresion::firstOrCreate(['estado' => DropiLoteImpresion::LISTO, 'corte_id' => $corte->id], ['pedidos' => [], 'total' => 0, 'partes' => []]);
     $lote->update(['pedidos' => [...$lote->pedidos, $p->id], 'total' => $lote->total + 1]);
     DropiPedido::whereKey($p->id)->update([
-        'guia_impresa_at' => now(), 'lote_impresion_id' => $lote->id,
+        'corte_id' => $corte->id, 'guia_impresa_at' => now(), 'lote_impresion_id' => $lote->id,
         'orden_empaque' => (int) DropiPedido::max('orden_empaque') + 1,
     ]);
 
@@ -107,7 +111,7 @@ it('el chulito queda guardado con quién y cuándo, lo ve otra tablet y se puede
         ->assertSeeText('Aracely · 08:15')->assertSeeText('1 de 1 referencias recogidas');
 
     $marca = DropiRecoleccionMarca::sole();
-    expect($marca->lote_impresion_id)->toBe(DropiPedido::sole()->lote_impresion_id)->and($marca->cantidad)->toBe(3)->and($marca->marcado_por)->toBe($this->aracely->id);
+    expect($marca->corte_id)->toBe(DropiPedido::sole()->corte_id)->and($marca->cantidad)->toBe(3)->and($marca->marcado_por)->toBe($this->aracely->id);
 
     // Otra persona, en otra tablet, la ve marcada; tocarla otra vez la desmarca.
     $this->actingAs($this->luli);
@@ -135,26 +139,35 @@ it('sin acceso a la vista del alistador no se marca nada', function () {
 
     expect(VistaAlistador::canAccess())->toBeFalse();
     $pagina = new VistaAlistador();
-    $pagina->loteId = $p->lote_impresion_id;
+    $pagina->corteId = $p->corte_id;
     $pagina->marcarRecogido('SKU-899');
     expect(DropiRecoleccionMarca::count())->toBe(0);
 });
 
-it('la lista de pedidos se separa en pestañas por etapa, con «Todos» por defecto', function () {
-    $nuevo = pedidoEnCorte('G-1', [['SKU-899', 1]]);
-    $alistando = pedidoEnCorte('G-2', [['SKU-899', 1]]);
-    $alistando->transicionar(EstadoPedidoDropi::Alistando, 'manual', $this->aracely->id);
+it('la lista se separa en pestañas por el estado de Dropi, legible y sin el del ERP (25-nov-2026)', function () {
+    $enDropi = function (string $guia, int $orden, string $estatus) {
+        $p = pedidoEnCorte($guia, [['SKU-899', 1]]);
+        $p->forceFill(['dropi_orden_id' => (string) $orden])->save();
+        \Illuminate\Support\Facades\DB::table('dropi_web_huellas')->insert(['dropi_orden_id' => $orden, 'huella' => 'x', 'estatus_dropi' => $estatus]);
+
+        return $p;
+    };
+    $pendiente = $enDropi('G-1', 81001, 'PENDIENTE');
+    $conGuia = $enDropi('G-2', 81002, 'GUIA_GENERADA');
+    $enCamino = $enDropi('G-3', 81003, 'EN BODEGA DESTINO');
     $this->actingAs($this->aracely);
 
     $lista = Livewire::test(ListDropiPedidos::class);
     expect($lista->get('activeTab'))->toBe('todos');
-    $lista->assertCanSeeTableRecords([$nuevo, $alistando]);
+    $lista->assertCanSeeTableRecords([$pendiente, $conGuia, $enCamino])
+        ->assertSeeText('Guía generada')->assertSeeText('En bodega destino')->assertDontSeeText('GUIA_GENERADA');
 
-    $lista->set('activeTab', 'nuevos')->assertCanSeeTableRecords([$nuevo])->assertCanNotSeeTableRecords([$alistando]);
-    $lista->set('activeTab', 'por_empacar')->assertCanSeeTableRecords([$alistando])->assertCanNotSeeTableRecords([$nuevo]);
+    $lista->set('activeTab', 'pendiente')->assertCanSeeTableRecords([$pendiente])->assertCanNotSeeTableRecords([$conGuia, $enCamino]);
+    $lista->set('activeTab', 'en_transito')->assertCanSeeTableRecords([$enCamino])->assertCanNotSeeTableRecords([$pendiente]);
 
     $tabs = $lista->instance()->getTabs();
-    expect($tabs['nuevos']->getBadge())->toEqual(1)->and($tabs['por_empacar']->getBadge())->toEqual(1)->and($tabs['empacados']->getBadge())->toEqual(0);
+    expect($tabs['pendiente']->getBadge())->toEqual(1)->and($tabs['guia_generada']->getBadge())->toEqual(1)
+        ->and($tabs['en_transito']->getBadge())->toEqual(1)->and($tabs['cancelado']->getBadge())->toBeNull();
 });
 
 it('el catálogo se ve dentro del panel Dropi, sólo para quien tiene el permiso de productos', function () {
@@ -216,21 +229,22 @@ it('la cola de empaque va en el orden de la pila de stickers, como la Estación 
     expect(Livewire::test(VistaAlistador::class)->instance()->empaque->pluck('guia')->all())->toBe(['G-1', 'G-2']);
 });
 
-it('sin guías impresas la vista no deja empezar y dice qué falta; con dos lotes se trabajan por separado', function () {
+it('sin un corte generado la vista no deja empezar y dice qué falta; con dos cortes se trabajan por separado', function () {
     $this->actingAs($this->aracely);
-    Livewire::test(VistaAlistador::class)->assertSeeText('Todavía no hay guías impresas')->assertSet('loteId', null);
+    Livewire::test(VistaAlistador::class)->assertSeeText('Todavía no hay guías impresas')->assertSet('corteId', null);
 
     $a = pedidoEnCorte('G-1', [['SKU-899', 3]]);
-    $otro = DropiLoteImpresion::create(['estado' => DropiLoteImpresion::LISTO, 'pedidos' => [], 'total' => 1, 'partes' => []]);
+    // El Corte 2 del día, generado por la tarde.
+    $tarde = \App\Modules\Dropi\Actions\AsignarCorteACarga::run(CarbonImmutable::now()->setTime(15, 0));
     $b = pedidoEnCorte('G-2', [['DV-555', 2]]);
-    DropiPedido::whereKey($b->id)->update(['lote_impresion_id' => $otro->id]);
+    DropiPedido::whereKey($b->id)->update(['corte_id' => $tarde->id]);
 
-    $vista = Livewire::test(VistaAlistador::class)->assertSet('loteId', $a->lote_impresion_id);
+    $vista = Livewire::test(VistaAlistador::class)->assertSet('corteId', $a->corte_id);
     expect(array_column($vista->instance()->recoleccion, 'sku'))->toBe(['SKU-899']);
     $vista->call('marcarRecogido', 'SKU-899');
 
-    // El otro lote tiene su propia suma y sus propias marcas.
-    $vista->call('escogerLote', $otro->id);
+    // El otro corte tiene su propia suma y sus propias marcas.
+    $vista->call('escogerCorte', $tarde->id);
     expect(array_column($vista->instance()->recoleccion, 'sku'))->toBe(['DV-555'])
         ->and(collect($vista->instance()->recoleccion)->firstWhere('sku', 'DV-555')['marcada'])->toBeFalse();
 });
@@ -245,7 +259,7 @@ it('el PDF de la recolección lo baja el alistador, con casillas y la ruta por z
         ->assertOk()->assertHeader('Content-Type', 'application/pdf');
 
     $html = view('dropi.pdf.recoleccion', [
-        'corte' => $p->corte, 'filas' => app(\App\Modules\Dropi\Support\RecoleccionDelCorte::class)->conMarcasDeLote($p->loteImpresion),
+        'corte' => $p->corte, 'filas' => app(\App\Modules\Dropi\Support\RecoleccionDelCorte::class)->conMarcasImpresos($p->corte_id),
         'unidades' => 5, 'generado' => now(),
     ])->render();
     expect($html)->toContain('Zona '.ZonaDeLaBodega::deRack('1'))->toContain('Zona '.ZonaDeLaBodega::deRack('7'))->toContain('R1-A-1')->toContain('R7-A-1')

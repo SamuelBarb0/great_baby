@@ -198,9 +198,9 @@
         </div>
     @else
         {{-- Lo que Aracely imprimió, en fila con la pila de stickers (ColaDeEmpaque,
-             24-nov-2026). En turno, la pantalla mira cada 10 s y abre el siguiente sola. --}}
+             24-nov-2026). En turno, la pantalla mira cada 3 s y abre el siguiente sola. --}}
         @php $info = $this->colaInfo; @endphp
-        <div @if($enTurno) wire:poll.10s="esperarPedido" @endif
+        <div @if($enTurno) wire:poll.3s="esperarPedido" @endif
              style="margin-top:1rem;padding:2.5rem;text-align:center;background:rgba(255,255,255,.03);border:2px dashed rgba(156,163,175,.3);border-radius:1rem;">
             <div style="font-size:3rem;">📦</div>
             @if($enTurno)
