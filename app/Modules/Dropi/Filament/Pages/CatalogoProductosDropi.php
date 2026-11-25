@@ -72,6 +72,8 @@ class CatalogoProductosDropi extends Page implements HasTable
             ])
             // Producto creado en el ERP → también en Dropi, y quedan conectados.
             ->recordActions([
+                // Escoger cuáles etiquetas y cuántas de cada una (reunión con la señora Lahida, 24-nov-2026).
+                \App\Modules\Dropi\Filament\Support\ImprimirEtiquetasAccion::make()->label('Etiquetas'),
                 \Filament\Actions\Action::make('crearEnDropi')->label('Crear en Dropi')->icon('heroicon-o-arrow-up-tray')
                     ->visible(fn (Producto $record) => ! $record->dropi_sku && Permisos::puede(auth()->user(), 'dropi_productos'))
                     ->requiresConfirmation()

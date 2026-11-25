@@ -72,7 +72,15 @@
                                 </a>
                             </div>
                             {{-- La etiqueta lleva el código del ERP vinculado: es lo que reconoce la pistola de empaque. --}}
-                            @if($p['vinculo'] !== 'no')
+                            @php $erpId = $p['vinculo'] !== 'no' ? \App\Modules\Dropi\Filament\Pages\MisProductosDropi::productoErp($p) : null; @endphp
+                            @if($erpId)
+                                {{-- Escoger cuáles y cuántas, como en la ficha de /app (25-nov-2026). --}}
+                                <button type="button" wire:click="mountAction('imprimirEtiquetas', { producto: {{ $erpId }} })"
+                                        title="Escoge cuáles etiquetas y cuántas de cada una"
+                                        style="font-size:.78rem;font-weight:600;color:#2563eb;border:1px solid #3b82f6;border-radius:.5rem;padding:.2rem .6rem;text-align:center;background:none;cursor:pointer;">
+                                    🏷️ Etiquetas con código de barras
+                                </button>
+                            @elseif($p['vinculo'] !== 'no')
                                 <a href="{{ route('catalogo.etiquetas.dropi', $p['id']) }}" target="_blank" rel="noopener"
                                    title="PDF con QR y código de barras de cada variación vinculada al ERP"
                                    style="font-size:.78rem;font-weight:600;color:#2563eb;border:1px solid #3b82f6;border-radius:.5rem;padding:.2rem .6rem;text-align:center;text-decoration:none;">

@@ -78,20 +78,54 @@ class EtiquetasMasivasController extends Controller
     {
         abort_unless(auth()->check(), 401);
 
-        $p = Producto::with(['variantes' => fn ($q) => $q->orderBy('codigo_barras')])->findOrFail($producto);
+        return response()->json(self::opcionesDe(Producto::findOrFail($producto), $catalogo));
+    }
 
-        return response()->json([
+    /**
+     * Las opciones del selector de un producto. Las usan la ficha de /app y la
+     * acción «Imprimir etiquetas» del panel Dropi (25-nov-2026).
+     *
+     * @return array{producto: array{id:int, referencia:string, nombre:string}, variantes: list<array{id:int, nombre:string, codigo:string}>, colores: list<string>}
+     */
+    public static function opcionesDe(Producto $p, CatalogoDropi $catalogo): array
+    {
+        $p->load(['variantes' => fn ($q) => $q->orderBy('codigo_barras')]);
+
+        return [
             'producto' => ['id' => $p->id, 'referencia' => $p->referencia, 'nombre' => $p->nombre],
             'variantes' => $p->variantes->filter(fn (ProductoVariante $v) => filled($v->codigo_barras))
                 ->map(fn (ProductoVariante $v) => [
                     'id' => $v->id,
                     'nombre' => self::deVariante($v->setRelation('producto', $p))['detalle'] ?: 'Variante',
                     'codigo' => $v->codigo_barras,
-                ])->values(),
+                ])->values()->all(),
             // Los colores de Dropi sólo cuentan en un agrupado: con variantes, cada
             //   color ya es una variante con su propio código.
             'colores' => $p->variantes->isEmpty() ? self::coloresDeDropi($p, self::nombresDeDropi($catalogo)) : [],
-        ]);
+        ];
+    }
+
+    /**
+     * La dirección del PDF con lo escogido, la misma que arma el selector de la
+     * ficha (SelectorEtiquetas.vue): `cant` lleva cuántas de cada una
+     * ('original', 'v:ID', 'c:COLOR').
+     *
+     * @param  list<int>  $variantes
+     * @param  list<string>  $colores
+     * @param  array<string, int>  $cant
+     */
+    public static function urlSeleccion(int $productoId, bool $original, array $variantes, array $colores, int $copias, array $cant): string
+    {
+        $q = ['productos' => [$productoId], 'seleccion' => 1];
+        if ($original) {
+            $q['original'] = 1;
+        }
+        $q['variantes'] = array_values($variantes);
+        $q['colores'] = array_values($colores);
+        $q['copias'] = $copias;
+        $q['cant'] = $cant;
+
+        return route('catalogo.etiquetas.lote') . '?' . http_build_query(array_filter($q, fn ($v) => $v !== []));
     }
 
     /**

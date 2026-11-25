@@ -54,6 +54,18 @@ beforeEach(function () {
     }
 });
 
+/** La dirección del PDF que deja el aviso «🖨 Abrir etiquetas» de la acción del panel. */
+function etiquetasDelAviso(): string
+{
+    // Como Notification::assertNotified: lo que recibe el componente de avisos.
+    $avisos = new \Filament\Notifications\Livewire\Notifications;
+    $avisos->mount();
+    $url = $avisos->notifications->last()?->toArray()['actions'][0]['url'] ?? null;
+    expect($url)->not->toBeNull();
+
+    return $url;
+}
+
 it('«Mis productos en Dropi» saca una etiqueta por color del agrupado, todas con su referencia', function () {
     $this->actingAs($this->aracely)->get(route('catalogo.etiquetas.dropi', 7))->assertOk();
 
@@ -159,6 +171,50 @@ describe('el selector de etiquetas (bodega, 23-nov-2026)', function () {
         $this->actingAs($this->aracely)->get(route('catalogo.etiquetas.lote', [
             'productos' => [$this->body->id], 'seleccion' => 1,
         ]))->assertStatus(422);
+    });
+
+    it('en el panel Dropi, «Mis productos en Dropi» abre el selector del producto vinculado: 3 rojos y 1 azul (25-nov-2026)', function () {
+        \Filament\Facades\Filament::setCurrentPanel('admin');
+        $this->actingAs($this->aracely);
+
+        // La tarjeta sabe con qué producto del ERP está vinculado el de Dropi.
+        $tarjeta = collect(app(CatalogoDropi::class)->misProductos()['productos'])->firstWhere('id', 7);
+        expect(\App\Modules\Dropi\Filament\Pages\MisProductosDropi::productoErp($tarjeta))->toBe($this->tetero->id);
+
+        // Colores en orden: Azul (0), Rojo (1), Verde (2).
+        \Livewire\Livewire::test(\App\Modules\Dropi\Filament\Pages\MisProductosDropi::class)
+            ->mountAction('imprimirEtiquetas', ['producto' => $this->tetero->id])
+            ->fillForm(['color_0' => true, 'cant_c_0' => 1, 'color_1' => true, 'cant_c_1' => 3, 'color_2' => false])
+            ->callMountedAction()
+            ->assertHasNoActionErrors();
+
+        $this->get(etiquetasDelAviso())->assertOk()->assertHeader('content-type', 'application/pdf');
+        expect(array_count_values(array_column($this->vistas['catalogo.pdf.etiquetas-dropi'], 'color')))->toBe(['Azul' => 1, 'Rojo' => 3]);
+    });
+
+    it('en el panel Dropi, «Catálogo de productos» imprime las variantes marcadas con su cantidad', function () {
+        \Filament\Facades\Filament::setCurrentPanel('admin');
+        $this->actingAs($this->aracely);
+
+        \Livewire\Livewire::test(\App\Modules\Dropi\Filament\Pages\CatalogoProductosDropi::class)
+            ->callAction(\Filament\Actions\Testing\TestAction::make('imprimirEtiquetas')->table($this->body), data: [
+                'copias' => 1, "var_{$this->azul->id}" => true, "cant_v_{$this->azul->id}" => 3,
+                "var_{$this->rosa->id}" => true, "cant_v_{$this->rosa->id}" => 1,
+            ])
+            ->assertHasNoActionErrors();
+
+        $this->get(etiquetasDelAviso())->assertOk();
+        expect(array_count_values(array_column($this->vistas['catalogo.pdf.etiquetas-dropi'], 'codigo')))
+            ->toBe(['BODY-1-AZU' => 3, 'BODY-1-ROS' => 1]);
+    });
+
+    it('en el panel Dropi, sin nada marcado no prepara nada', function () {
+        \Filament\Facades\Filament::setCurrentPanel('admin');
+        $this->actingAs($this->aracely);
+
+        \Livewire\Livewire::test(\App\Modules\Dropi\Filament\Pages\CatalogoProductosDropi::class)
+            ->callAction(\Filament\Actions\Testing\TestAction::make('imprimirEtiquetas')->table($this->body), data: ["var_{$this->azul->id}" => false, "var_{$this->rosa->id}" => false])
+            ->assertNotified('Escoge al menos una etiqueta para imprimir.');
     });
 
     it('la etiqueta no dice $0 cuando el producto no tiene precio', function () {

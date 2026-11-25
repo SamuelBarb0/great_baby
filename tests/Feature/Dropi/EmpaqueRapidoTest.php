@@ -146,6 +146,34 @@ it('«Siguiente pedido» abre el siguiente libre, y otro empacador recibe el que
         ->and(EmpaqueRegistro::where('pedido_id', $b->id)->value('operario_id'))->toBe($this->otro->id);
 });
 
+it('con dos empacadores al tiempo nadie recibe ni toca el pedido que tiene el otro (25-nov-2026)', function () {
+    $x = erPedido('ER-50', 'ER-VOL', '2026-11-24 09:00');
+    $y = erPedido('ER-51', 'ER-VOL', '2026-11-24 09:05');
+    $z = erPedido('ER-52', 'ER-VOL', '2026-11-24 09:10');
+
+    $this->actingAs($this->empacador);
+    $estacionA = Livewire::test(EstacionEmpaque::class)->call('siguientePedido')->assertSet('pedidoActivoId', $x->id);
+
+    // B escanea la guía del pedido de A: se rechaza y no lo abre.
+    $this->actingAs($this->otro);
+    $estacionB = Livewire::test(EstacionEmpaque::class)->set('codigo', 'ER-50')->call('escanear')->assertSet('pedidoActivoId', null);
+    expect($estacionB->get('ultimoResultado')['mensaje'])->toContain('otro operario');
+
+    // B escanea el producto: le abre el libre que sigue, no el de A, y a A no le marca nada.
+    $estacionB->set('codigo', 'ER-VOL')->call('escanear')->assertSet('pedidoActivoId', $y->id);
+    expect((int) $x->items()->first()->cantidad_pickeada)->toBe(0)
+        ->and((int) $y->items()->first()->cantidad_pickeada)->toBe(1)
+        ->and(collect($estacionB->instance()->proximosPedidos())->pluck('id')->all())->toBe([$z->id]);
+
+    // La «Cola de corte» de A tampoco muestra el que tiene B.
+    $this->actingAs($this->empacador);
+    expect(collect($estacionA->instance()->proximosPedidos())->pluck('id')->all())->toBe([$z->id]);
+
+    // A termina y le llega el que queda libre.
+    $estacionA->set('codigo', 'ER-VOL')->call('escanear')->call('confirmarYSiguiente')->assertSet('pedidoActivoId', $z->id);
+    expect(EmpaqueRegistro::where('pedido_id', $y->id)->where('estado', 'en_curso')->value('operario_id'))->toBe($this->otro->id);
+});
+
 it('escanear un producto sin pedido abierto abre el pedido que lo lleva y lo marca', function () {
     erPedido('ER-30', 'ER-VOL', '2026-11-24 08:00');
     $tapete = erPedido('ER-31', 'ER-TAP', '2026-11-24 09:00');

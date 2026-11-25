@@ -260,24 +260,42 @@
         </div>
     @endif
 
-    {{-- Cola sugerida (próximos pedidos por empacar) --}}
-    @php $cola = $this->proximosPedidos(6); @endphp
-    @if(!empty($cola))
-        <div style="margin-top:1rem;padding:1rem 1.25rem;background:#111827;border:1px solid rgba(59,130,246,.35);border-radius:1rem;">
-            <div style="font-size:.75rem;color:#3b82f6;text-transform:uppercase;letter-spacing:2px;font-weight:700;margin-bottom:.6rem;">
-                🎯 Cola sugerida ({{ count($cola) }})
+    {{-- Cola de corte: lo que Aracely genera e imprime va apareciendo aquí, en el
+         orden de los stickers (25-nov-2026). Es una isla de Livewire: se refresca
+         sola cada 5 s sin tocar el pedido activo ni la casilla del escáner; con
+         `always` también se refresca cuando la estación entera se actualiza. --}}
+    @island(name: 'cola-de-corte', always: true)
+        @php
+            $cola = $this->proximosPedidos(6);
+            $porEmpacar = app(\App\Modules\Dropi\Support\ColaDeEmpaque::class)->contar((int) auth()->id())
+                - ($this->pedidoActivoId ? 1 : 0);
+            $cortes = collect($cola)->pluck('corte')->filter()->unique()->values();
+        @endphp
+        <div wire:poll.5s style="margin-top:1rem;padding:1rem 1.25rem;background:#111827;border:1px solid rgba(59,130,246,.35);border-radius:1rem;">
+            <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:.5rem;margin-bottom:.6rem;">
+                <div style="font-size:.75rem;color:#3b82f6;text-transform:uppercase;letter-spacing:2px;font-weight:700;">
+                    📦 Cola de corte @if($cortes->isNotEmpty())· {{ $cortes->join(' / ') }}@endif
+                </div>
+                <div style="font-size:.8rem;color:#9ca3af;">{{ max(0, $porEmpacar) }} por empacar</div>
             </div>
-            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(min(220px,100%),1fr));gap:.5rem;">
-                @foreach($cola as $q)
-                    <div style="padding:.6rem .75rem;background:#1e293b;border-left:3px solid #3b82f6;border-radius:.4rem;">
-                        <div style="font-family:ui-monospace,monospace;font-weight:700;color:#93c5fd;font-size:.85rem;">{{ $q['guia'] }}</div>
-                        <div style="font-size:.8rem;color:#e5e7eb;">{{ \Illuminate\Support\Str::limit($q['cliente'], 22) }}</div>
-                        <div style="font-size:.7rem;color:#9ca3af;">{{ $q['ciudad'] }} · {{ $q['items'] }} {{ $q['items'] === 1 ? 'ítem' : 'ítems' }}</div>
-                    </div>
-                @endforeach
-            </div>
+            @if(empty($cola))
+                <div style="font-size:.85rem;color:#9ca3af;">Todavía no hay pedidos del corte: aparecen aquí apenas Aracely genere el corte.</div>
+            @else
+                <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(min(220px,100%),1fr));gap:.5rem;">
+                    @foreach($cola as $q)
+                        <div wire:key="cola-{{ $q['id'] }}" style="padding:.6rem .75rem;background:#1e293b;border-left:3px solid #3b82f6;border-radius:.4rem;">
+                            <div style="font-family:ui-monospace,monospace;font-weight:700;color:#93c5fd;font-size:.85rem;">{{ $q['guia'] }}</div>
+                            <div style="font-size:.8rem;color:#e5e7eb;">{{ \Illuminate\Support\Str::limit($q['cliente'], 22) }}</div>
+                            <div style="font-size:.7rem;color:#9ca3af;">{{ $q['ciudad'] }} · {{ $q['items'] }} {{ $q['items'] === 1 ? 'ítem' : 'ítems' }}@if($cortes->count() > 1 && $q['corte']) · {{ $q['corte'] }}@endif</div>
+                        </div>
+                    @endforeach
+                </div>
+                @if($porEmpacar > count($cola))
+                    <div style="font-size:.75rem;color:#6b7280;margin-top:.5rem;">y {{ $porEmpacar - count($cola) }} más detrás.</div>
+                @endif
+            @endif
         </div>
-    @endif
+    @endisland
 
     {{-- Modal cámara (nativo, sin dependencias) + fallback file --}}
     <div id="modal-camara" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9998;align-items:center;justify-content:center;padding:1rem;">

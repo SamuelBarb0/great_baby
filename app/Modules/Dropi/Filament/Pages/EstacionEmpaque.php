@@ -357,12 +357,14 @@ class EstacionEmpaque extends Page
         return app(ColaDeEmpaque::class)->pedidos((int) auth()->id(), $limit + 1)
             ->reject(fn ($p) => $p->id === $this->pedidoActivoId)
             ->take($limit)
+            ->load('corte:id,numero,fecha')
             ->map(fn ($p) => [
                 'id' => $p->id,
                 'guia' => (string) $p->guia,
                 'cliente' => (string) $p->cliente_nombre,
                 'ciudad' => (string) $p->cliente_ciudad,
                 'items' => $p->items->count(),
+                'corte' => $p->corte ? 'Corte ' . $p->corte->numero . ' · ' . $p->corte->fecha->format('d/m') : null,
             ])
             ->toArray();
     }

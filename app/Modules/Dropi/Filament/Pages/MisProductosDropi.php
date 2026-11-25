@@ -85,6 +85,24 @@ class MisProductosDropi extends Page
         return 'https://app.dropi.co/dashboard/products/edit?id=' . $id;
     }
 
+    /** El selector de etiquetas, para el producto del ERP con que está vinculado (`producto`). */
+    public function imprimirEtiquetasAction(): Action
+    {
+        return \App\Modules\Dropi\Filament\Support\ImprimirEtiquetasAccion::make();
+    }
+
+    /**
+     * El producto del ERP con que está vinculado uno de Dropi, si es uno solo.
+     * Si sus variaciones apuntan a varios, el botón imprime como antes: una
+     * etiqueta por variación vinculada.
+     */
+    public static function productoErp(array $p): ?int
+    {
+        $ids = array_values(array_unique(array_filter(array_column($p['variaciones'], 'producto_erp'))));
+
+        return count($ids) === 1 ? (int) $ids[0] : null;
+    }
+
     public static function canAccess(): bool
     {
         // Antes era `esAracely()`: un rol de Dropi creado en Roles no podía

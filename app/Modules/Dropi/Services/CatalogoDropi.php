@@ -370,6 +370,8 @@ class CatalogoDropi
                     'erp' => $v ? ($v->variante_id
                         ? trim(($v->variante?->producto?->referencia ?? '') . ' · ' . ($v->variante?->codigo_barras ?? ''))
                         : ($v->producto?->referencia ?? '') . ' · ' . ($v->producto?->nombre ?? '')) : null,
+                    // Para el selector de etiquetas de «Mis productos en Dropi».
+                    'producto_erp' => $v ? ($v->variante?->producto_id ?? $v->producto_id) : null,
                 ];
             }, $p['llaves']);
 

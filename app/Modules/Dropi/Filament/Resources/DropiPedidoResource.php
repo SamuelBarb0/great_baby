@@ -192,11 +192,25 @@ class DropiPedidoResource extends Resource
         ]);
     }
 
+    /** Fecha en que el pedido entró a Dropi; los viejos sin ella, por la del ERP. */
+    private static function porFecha(Builder $query, string $direction): Builder
+    {
+        $dir = $direction === 'asc' ? 'asc' : 'desc';
+
+        return $query->orderByRaw("COALESCE(dropi_creado_at, created_at) {$dir}")->orderBy('id', $dir);
+    }
+
     public static function table(Table $table): Table
     {
         return $table
             ->columns([
                 TextColumn::make('guia')->label('Guía')->searchable()->weight('bold')->copyable(),
+                // Cuándo entró el pedido a Dropi. Antes se leía en «Corte», pero el
+                //   corte ahora nace cuando Aracely genera (25-nov-2026): sin él no se veía.
+                TextColumn::make('dropi_creado_at')->label('Fecha')
+                    ->state(fn (DropiPedido $record) => $record->dropi_creado_at ?? $record->created_at)
+                    ->dateTime('Y-m-d H:i')->toggleable()
+                    ->sortable(query: fn (Builder $query, string $direction) => self::porFecha($query, $direction)),
                 TextColumn::make('corte.fecha')->label('Corte')
                     ->formatStateUsing(fn ($state, $record) => $record->corte
                         ? 'C' . $record->corte->numero . ' · ' . $record->corte->fecha->format('m-d')
@@ -221,12 +235,19 @@ class DropiPedidoResource extends Resource
                 TextColumn::make('despachado_at')->label('Despachado')->dateTime('Y-m-d H:i')->toggleable(isToggledHiddenByDefault: true)->sortable(),
                 TextColumn::make('pagado_at')->label('Pagado')->dateTime('Y-m-d H:i')->toggleable(isToggledHiddenByDefault: true)->sortable(),
             ])
-            ->defaultSort('created_at', 'desc')
+            // Por la fecha de Dropi, no por cuándo lo guardó el ERP: la sincronización
+            //   trae a veces pedidos de ayer o de hace horas, y por created_at salían
+            //   arriba revueltos con los nuevos (prod, 25-nov-2026).
+            ->defaultSort(fn (Builder $query) => self::porFecha($query, 'desc'))
+            // Aracely revisa cientos de pedidos de una vez (reunión del 24-nov-2026).
+            ->paginated([10, 25, 50, 100, 250, 500])
             // Tabla en vivo, cada 5 s sin recargar la página (conserva filtros,
             //   búsqueda y paginación): sólo lee la base del ERP, no a Dropi, y lo
             //   que el ERP cambia en Dropi se ve de una vez (25-nov-2026). Livewire
             //   pausa el sondeo si la pestaña no se ve.
-            ->poll('5s')
+            //   Con más de 100 filas, cada 30 s: 500 filas pesan ~15 MB y tardan
+            //   varios segundos en pintarse, y cada 5 s se apilaban (25-nov-2026).
+            ->poll(fn ($livewire) => (int) $livewire->getTableRecordsPerPage() > 100 ? '30s' : '5s')
             ->modifyQueryUsing(fn (Builder $query) => $query->with('huella'))
             ->filters([
                 // Los filtros con que Aracely arma el corte en Dropi (reunión del 24-nov-2026).
