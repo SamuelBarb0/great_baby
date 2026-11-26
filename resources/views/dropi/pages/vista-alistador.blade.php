@@ -96,18 +96,21 @@
         <x-filament::section class="alistador-seccion" style="margin-top:1rem;">
             <x-slot name="heading">Modo Recolección</x-slot>
             <x-slot name="description">Ve el total de unidades por referencia, en el orden del recorrido de la bodega, para pasar una sola vez. Toca cada referencia cuando la recojas: queda marcada para todos. Cuando termines, cambia a Empaque.</x-slot>
-            {{-- Los reportes del corte: la hoja de alistamiento abre cada PDF. --}}
-            @if($reportes->contains(fn ($r) => ! empty($r->partes)))
-                <x-slot name="afterHeader">
-                    <div style="display:flex;flex-wrap:wrap;gap:.4rem;">
-                        @foreach($reportes->filter(fn ($r) => ! empty($r->partes)) as $r)
-                            <x-filament::button tag="a" :href="route('dropi.guias.parte', [$r, 1])" target="_blank" icon="heroicon-o-printer" color="gray">
-                                Reporte {{ $r->created_at->timezone('America/Bogota')->format('g:i a') }}
-                            </x-filament::button>
-                        @endforeach
-                    </div>
-                </x-slot>
-            @endif
+            {{-- Sólo la hoja, sin stickers: en el puesto del alistador la impresora es
+                 de etiquetas y el reporte trae los stickers detrás (25-nov-2026). Y los
+                 reportes del corte: la hoja de alistamiento abre cada PDF. --}}
+            <x-slot name="afterHeader">
+                <div style="display:flex;flex-wrap:wrap;gap:.4rem;">
+                    <x-filament::button tag="a" :href="route('dropi.recoleccion.pdf', $corte)" target="_blank" icon="heroicon-o-clipboard-document-list">
+                        Solo alistamiento
+                    </x-filament::button>
+                    @foreach($reportes->filter(fn ($r) => ! empty($r->partes)) as $r)
+                        <x-filament::button tag="a" :href="route('dropi.guias.parte', [$r, 1])" target="_blank" icon="heroicon-o-printer" color="gray">
+                            Reporte {{ $r->created_at->timezone('America/Bogota')->format('g:i a') }}
+                        </x-filament::button>
+                    @endforeach
+                </div>
+            </x-slot>
 
             @if(count($recoleccion) === 0)
                 <div style="text-align:center;padding:2rem;color:#9ca3af;">Todo lo de este corte ya se empacó.</div>

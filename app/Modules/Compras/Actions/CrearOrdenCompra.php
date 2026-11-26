@@ -18,7 +18,10 @@ class CrearOrdenCompra
      *              tasa_cambio?:float, fecha_esperada?:string|null, observaciones?:string|null,
      *              items:array<int,array{producto_id?:int|null,variante_id?:int|null,
      *                    descripcion:string,cantidad:float,precio_unit:float,
-     *                    descuento_pct?:float,iva_pct?:float}>} $data
+     *                    descuento_pct?:float,iva_pct?:float}>, lleva_iva?:bool} $data
+     *
+     * `lleva_iva` en false (compra sin IVA, reunión 25-nov) deja todas las
+     * líneas en 0 %, diga lo que diga cada una.
      */
     public function handle(array $data): OrdenCompra
     {
@@ -62,7 +65,7 @@ class CrearOrdenCompra
                     'cantidad' => $it['cantidad'],
                     'precio_unit' => $it['precio_unit'],
                     'descuento_pct' => $it['descuento_pct'] ?? 0,
-                    'iva_pct' => $it['iva_pct'] ?? 19,
+                    'iva_pct' => ($data['lleva_iva'] ?? true) ? ($it['iva_pct'] ?? 19) : 0,
                     'cajas' => $it['cajas'] ?? null,
                     'unidades_por_caja' => $it['unidades_por_caja'] ?? null,
                     'caja_largo_cm' => $it['caja_largo_cm'] ?? null,

@@ -42,7 +42,8 @@ const lineaNueva = () => ({
     producto_id: null, variante_id: null,
     descripcion: '', cantidad: 1, precio_unit: 0,
     // En importación el IVA se paga en aduana: va en la pre-liquidación, no en la OC.
-    iva_pct: form?.tipo === 'importacion' ? 0 : 19, descuento_pct: 0,
+    // Una compra marcada sin IVA también arranca cada línea nueva en 0 %.
+    iva_pct: form?.tipo === 'importacion' || form?.lleva_iva === false ? 0 : 19, descuento_pct: 0,
     cajas: null, unidades_por_caja: null, cbm_caja: null, empresa_destino_id: null, tipo_linea: 'producto', color_nombre: '',
 });
 
@@ -55,6 +56,7 @@ const form = reactive({
     fecha_esperada: '',
     observaciones: '',
     modelo_compra: 'trading',
+    lleva_iva: true,
     parametros_preliquidacion: { ...props.parametrosIniciales },
     items: [],
 });
@@ -71,6 +73,11 @@ watch(() => form.tipo, (tipo) => {
     if (tipo !== 'importacion') return;
     if (form.moneda === 'COP') form.moneda = 'CNY';
     form.items.forEach(i => { if (!i.cajas) i.iva_pct = 0; });
+});
+// Compra sin IVA (25-nov): una vez para toda la orden, no línea por línea.
+const sinIva = computed(() => !esImportacion.value && !form.lleva_iva);
+watch(() => form.lleva_iva, (lleva) => {
+    form.items.forEach(i => { i.iva_pct = lleva ? 19 : 0; });
 });
 watch(() => form.moneda, (moneda) => {
     if (form.tipo === 'importacion' && props.tasasIniciales[moneda]) form.tasa_cambio = props.tasasIniciales[moneda];
@@ -283,6 +290,8 @@ const guardar = () => {
     procesando.value = true;
     const payload = { ...form };
     if (!esImportacion.value) delete payload.parametros_preliquidacion;
+    // La importación trae su IVA aparte (aduana): el interruptor no la toca.
+    if (esImportacion.value) payload.lleva_iva = true;
     router.post('/app/compras/oc', payload, {
         onError: () => { procesando.value = false; },
         onSuccess: () => { procesando.value = false; },
@@ -389,6 +398,13 @@ const guardar = () => {
                     <div>
                         <label class="text-xs font-semibold">Fecha esperada</label>
                         <input type="date" v-model="form.fecha_esperada" class="input w-full"/>
+                    </div>
+                    <div v-if="!esImportacion">
+                        <label class="text-xs font-semibold">¿Lleva IVA?</label>
+                        <label class="flex items-center gap-2 mt-2 text-sm cursor-pointer">
+                            <input type="checkbox" v-model="form.lleva_iva" class="h-4 w-4"/>
+                            {{ form.lleva_iva ? 'Sí — cada línea con su IVA (19 % de entrada)' : 'No — todas las líneas en 0 %' }}
+                        </label>
                     </div>
                 </div>
                 <div>
@@ -528,7 +544,7 @@ const guardar = () => {
                                 <td class="p-1"><input type="number" step="0.001" v-model.number="it.cantidad" :readonly="esImportacion && it.cajas > 0 && it.unidades_por_caja > 0" class="input w-20 text-right text-sm"/></td>
                                 <td class="p-1"><input type="number" step="0.01" v-model.number="it.precio_unit" class="input w-28 text-right text-sm"/></td>
                                 <td class="p-1"><input type="number" step="0.01" v-model.number="it.descuento_pct" class="input w-16 text-right text-sm"/></td>
-                                <td class="p-1"><input type="number" step="0.01" v-model.number="it.iva_pct" class="input w-16 text-right text-sm"/></td>
+                                <td class="p-1"><input type="number" step="0.01" v-model.number="it.iva_pct" :readonly="sinIva" :class="['input w-16 text-right text-sm', sinIva ? 'opacity-60' : '']"/></td>
                                 <td class="p-1 text-right font-bold">{{ money(it.cantidad * it.precio_unit * (1 - (it.descuento_pct || 0) / 100) * (1 + (it.iva_pct || 0) / 100)) }}</td>
                                 <td class="p-1"><button v-if="form.items.length > 1" @click="rmItem(i)" class="text-red-600"><Trash2 class="h-4 w-4"/></button></td>
                             </tr>

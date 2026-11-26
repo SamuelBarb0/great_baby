@@ -30,7 +30,11 @@ class SecurityHeaders
         $contentType = $response->headers->get('Content-Type', '');
         $esPdf = str_contains($contentType, 'application/pdf');
 
-        $response->headers->set('X-Frame-Options', 'DENY');
+        // DENY salvo que la respuesta pida SAMEORIGIN: sólo el sticker de la guía,
+        //   que la estación de empaque muestra e imprime en un iframe del propio
+        //   ERP (StickerPedidoController, 25-nov-2026). Ningún otro sitio lo enmarca.
+        $mismoOrigen = $response->headers->get('X-Frame-Options') === 'SAMEORIGIN';
+        $response->headers->set('X-Frame-Options', $mismoOrigen ? 'SAMEORIGIN' : 'DENY');
         $response->headers->set('X-Content-Type-Options', 'nosniff');
         $response->headers->set('Referrer-Policy', 'same-origin');
         $response->headers->set('Permissions-Policy', 'camera=(self), microphone=(), geolocation=(self), payment=()');

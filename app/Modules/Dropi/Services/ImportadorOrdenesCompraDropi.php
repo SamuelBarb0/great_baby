@@ -211,6 +211,7 @@ class ImportadorOrdenesCompraDropi
                 'fecha_esperada' => $orden['fecha_esperada'] ?? null,
                 'observaciones' => $orden['observaciones'] ?? null,
                 'linea_negocio' => LineaNegocio::Dropi,
+                'lleva_iva' => (bool) ($orden['lleva_iva'] ?? true),
                 'items' => $items,
             ]);
         });

@@ -153,6 +153,27 @@
                 </div>
             </div>
 
+            {{-- La guía a la vista desde que se abre el pedido, y al escanear lo último
+                 se imprime sola (señora Lahida, 25-nov-2026: «aparezca la guía y ya»).
+                 Viene del ERP (StickerPedidoController) para poder mandarla a imprimir. --}}
+            @if($p->stickerUrl())
+                @php $stickerErp = route('dropi.pedido.sticker', $p); @endphp
+                <div wire:key="sticker-{{ $p->id }}" style="margin-top:1rem;display:flex;flex-wrap:wrap;gap:1rem;align-items:flex-start;">
+                    <iframe src="{{ $stickerErp }}#toolbar=0&navpanes=0&view=FitH" title="Sticker de la guía {{ $p->guia }}"
+                            style="width:min(420px,100%);height:340px;border:2px solid #fbbf24;border-radius:.5rem;background:#fff;"></iframe>
+                    <div style="flex:1;min-width:200px;">
+                        <div style="font-size:1rem;font-weight:700;color:#fbbf24;">🏷 Guía {{ $p->guia }}</div>
+                        <div style="font-size:.85rem;color:#9ca3af;margin-top:.25rem;">
+                            Se imprime sola al escanear lo último del pedido{{ setting('empaque.foto_obligatoria', true) ? '' : ', y el empaque se confirma solo' }}.
+                        </div>
+                        <button type="button" onclick="window.gbImprimirSticker(@js($stickerErp))"
+                                style="margin-top:.6rem;padding:.6rem 1.1rem;background:#059669;color:white;border:0;border-radius:.5rem;font-weight:700;font-size:.9rem;cursor:pointer;">
+                            🖨 Imprimir guía
+                        </button>
+                    </div>
+                </div>
+            @endif
+
             <div style="margin-top:1rem;">
                 @php $total = $p->items->count(); $pickados = $p->items->whereNotNull('pickeado_at')->count(); @endphp
                 <div style="display:flex;justify-content:space-between;font-size:.85rem;color:#9ca3af;margin-bottom:.35rem;">
@@ -244,10 +265,10 @@
                         <div style="font-size:.75rem;color:#9ca3af;">{{ $s['transportadora'] }} · {{ $s['ciudad'] }} · {{ $s['hora'] }}</div>
                     </div>
                     @if($s['sticker_url'])
-                        <a href="{{ $s['sticker_url'] }}" target="_blank" rel="noopener"
-                           style="padding:.45rem .9rem;background:#059669;color:white;border-radius:.5rem;font-weight:700;font-size:.85rem;text-decoration:none;">
+                        <button type="button" onclick="window.gbImprimirSticker(@js(route('dropi.pedido.sticker', $s['pedido_id'])))"
+                                style="padding:.45rem .9rem;background:#059669;color:white;border:0;border-radius:.5rem;font-weight:700;font-size:.85rem;cursor:pointer;">
                             🖨 Imprimir sticker
-                        </a>
+                        </button>
                     @else
                         <button type="button" wire:click="pedirGuia({{ $s['pedido_id'] }})" wire:loading.attr="disabled" wire:target="pedirGuia"
                                 style="padding:.45rem .9rem;background:#d97706;color:white;border:0;border-radius:.5rem;font-weight:700;font-size:.85rem;cursor:pointer;">
@@ -361,8 +382,43 @@
         </div>
     @endif
 
+    {{-- Desde aquí se imprime el sticker: fuera de lo que Livewire repinta, para que
+         abrir el siguiente pedido no corte la impresión. No va con display:none
+         porque así Chrome no carga el PDF. --}}
+    <div wire:ignore>
+        <iframe id="gb-print-frame" title="Impresión del sticker" tabindex="-1" aria-hidden="true"
+                style="position:fixed;right:0;bottom:0;width:2px;height:2px;border:0;opacity:0;pointer-events:none;"></iframe>
+    </div>
+
     {{-- Sonidos + voz + flash + auto-focus --}}
     <script>
+        // Imprime el sticker de una guía sin abrir pestañas. Con Chrome abierto con
+        //   --kiosk-printing va directo a la impresora; si no, sale el cuadro de
+        //   imprimir y basta un Enter. Si el navegador no lo deja, se abre el PDF.
+        window.gbImprimirSticker = function (url) {
+            const f = document.getElementById('gb-print-frame');
+            const imprimir = () => {
+                try { f.contentWindow.focus(); f.contentWindow.print(); }
+                catch (e) { window.open(url, '_blank'); }
+            };
+            if (f.dataset.url === url && f.dataset.listo === '1') { imprimir(); return; }
+            f.dataset.url = url;
+            f.dataset.listo = '0';
+            f.onload = () => { f.dataset.listo = '1'; setTimeout(imprimir, 300); };
+            f.src = url;
+        };
+
+        // Lo último escaneado: confirma (si la foto no es obligatoria) e imprime.
+        //   Primero sale la confirmación, para que el cuadro de imprimir no la frene.
+        window.addEventListener('empaque-completo', (e) => {
+            const d = (e.detail && (e.detail.sticker !== undefined || e.detail.confirmar !== undefined)) ? e.detail : (e.detail?.[0] || {});
+            if (d.confirmar) {
+                const c = window.Livewire.all().find(x => (x.name || '').includes('EstacionEmpaque'));
+                if (c) window.gbUbicacion().then(g => c.$wire.confirmarYSiguiente(g));
+            }
+            if (d.sticker) window.gbImprimirSticker(d.sticker);
+        });
+
         // Ubicación del equipo para la trazabilidad. Nunca rechaza: si se niega
         // el permiso o no hay GPS, manda el motivo y el servidor decide.
         window.gbUbicacion = window.gbUbicacion || function (timeoutMs = 8000) {

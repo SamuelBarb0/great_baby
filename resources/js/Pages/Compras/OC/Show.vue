@@ -25,6 +25,7 @@ const props = defineProps({
     contenedores_abiertos: { type: Array, default: () => [] },
     lineas_etiqueta: { type: Array, default: () => [] },
     puede_etiqueta: { type: Boolean, default: false },
+    puede_armar: { type: Boolean, default: false },
 });
 
 const modalAnular = ref(false);
@@ -73,6 +74,15 @@ const confirmarAprobar = () => {
     router.post(`/app/compras/oc/${props.orden.id}/aprobar`, {}, {
         preserveScroll: true,
         onSuccess: () => { modalAprobar.value = false; },
+        onFinish: () => procesando.value = false,
+    });
+};
+// Con o sin IVA para toda la orden, mientras sea borrador (25-nov).
+const cambiarIva = () => {
+    if (procesando.value) return;
+    procesando.value = true;
+    router.post(`/app/compras/oc/${props.orden.id}/iva`, { lleva_iva: !props.orden.lleva_iva }, {
+        preserveScroll: true,
         onFinish: () => procesando.value = false,
     });
 };
@@ -204,6 +214,10 @@ const reenviarRecepcion = (rec) => {
                 <div class="flex items-center gap-2 border-t border-surface-200 dark:border-surface-800 pt-3 flex-wrap">
                     <button v-if="!paso && puede_aprobar && (orden.estado === 'borrador' || orden.estado === 'enviada')" @click="abrirAprobar" :disabled="procesando" class="btn-primary">
                         <CheckCircle class="h-4 w-4"/> Aprobar
+                    </button>
+                    <button v-if="puede_armar && orden.estado === 'borrador' && orden.tipo !== 'importacion'" @click="cambiarIva" :disabled="procesando" class="btn-ghost border border-surface-300 dark:border-surface-700"
+                        :title="orden.lleva_iva ? 'Todas las líneas quedan en 0 % de IVA' : 'Las líneas en 0 % pasan a 19 % de IVA'">
+                        {{ orden.lleva_iva ? 'Quitar IVA' : 'Poner IVA (19 %)' }}
                     </button>
                     <Link v-if="['aprobada','parcial'].includes(orden.estado) && (!paso || contenedor)" :href="`/app/compras/recepcion/nueva?oc=${orden.id}`" class="btn-primary bg-emerald-600 hover:bg-emerald-700">
                         <Truck class="h-4 w-4"/> Recibir mercancía

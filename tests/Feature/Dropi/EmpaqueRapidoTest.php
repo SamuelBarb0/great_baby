@@ -225,3 +225,80 @@ it('lo impreso sin stock en el ERP también llega a empaque, marcado; con «Exig
     expect(app(ColaDeEmpaque::class)->pedidos()->pluck('id')->all())->not->toContain($q->id)
         ->and(\App\Modules\Dropi\Actions\ProcesarEscaneoEmpaque::run(codigo: 'ER-71', pedidoActivoId: null, operarioId: $this->otro->id)['tipo'])->toBe('error');
 });
+
+it('al escanear lo último sale el sticker desde el ERP y, sin foto obligatoria, se confirma solo (la señora Lahida, 25-nov-2026)', function () {
+    $p = erPedido('ER-60', 'ER-VOL', '2026-11-24 09:00');
+    DropiPedido::whereKey($p->id)->update(['sticker_path' => 'colombia/guias/er-60.pdf']);
+
+    $this->actingAs($this->empacador);
+    Livewire::test(EstacionEmpaque::class)
+        ->set('codigo', 'ER-VOL')->call('escanear')
+        ->assertSet('pedidoActivoId', $p->id)
+        ->assertDispatched('empaque-completo', sticker: route('dropi.pedido.sticker', $p), confirmar: true);
+
+    // Con foto obligatoria sale el sticker, pero se espera la foto para confirmar.
+    Reglas::set('empaque.foto_obligatoria', '1');
+    $q = erPedido('ER-61', 'ER-TAP', '2026-11-24 09:10');
+    $this->actingAs($this->otro);
+    Livewire::test(EstacionEmpaque::class)
+        ->set('codigo', 'ER-TAP')->call('escanear')
+        ->assertDispatched('empaque-completo', sticker: null, confirmar: false);
+    expect($q->fresh()->estado)->toBe(EstadoPedidoDropi::Alistando);
+});
+
+it('mientras falte algo del pedido no se imprime ni se confirma', function () {
+    app(SincronizarPedidosDropi::class)->importarPedidos([new PedidoDropiDTO(
+        guia: 'ER-70', dropiOrdenId: 'O-ER-70', transportadora: 'X', tienda: 'T', vendedorNombre: 'Vendedora',
+        vendedorIdentificacion: null, clienteNombre: 'Ana', clienteDoc: null, clienteTelefono: null,
+        clienteDireccion: null, clienteCiudad: 'CALI', clienteDepto: null, estadoDropi: 'sin_estado',
+        montoEsperadoProveedor: 60000, montoClienteFinal: null, gananciaVendedor: null, fleteTransportadora: null,
+        items: [new ItemDropiDTO('SKU-ER-VOL', 1, 30000, 'x', 'x'), new ItemDropiDTO('SKU-ER-TAP', 1, 30000, 'x', 'x')],
+        creadoAt: CarbonImmutable::parse('2026-11-24 09:00'),
+    )]);
+    $p = DropiPedido::where('guia', 'ER-70')->firstOrFail();
+    $p->estado = EstadoPedidoDropi::Pending;
+    $p->save();
+    DropiPedido::whereKey($p->id)->update(['guia_impresa_at' => now(), 'sticker_path' => 'colombia/guias/er-70.pdf']);
+
+    $this->actingAs($this->empacador);
+    $lw = Livewire::test(EstacionEmpaque::class)
+        ->set('codigo', 'ER-VOL')->call('escanear')
+        ->assertSet('pedidoActivoId', $p->id)
+        ->assertNotDispatched('empaque-completo');
+
+    $lw->set('codigo', 'ER-TAP')->call('escanear')
+        ->assertDispatched('empaque-completo', confirmar: true);
+});
+
+it('el sticker de la guía se sirve desde el ERP, se baja una sola vez y sólo para quien empaca', function () {
+    \Illuminate\Support\Facades\Storage::fake('local');
+    Http::fake(['*' => Http::response('%PDF-1.4 sticker', 200)]);
+    $p = erPedido('ER-80', 'ER-VOL', '2026-11-24 09:00');
+    $sin = erPedido('ER-81', 'ER-TAP', '2026-11-24 09:05');
+    DropiPedido::whereKey($p->id)->update(['sticker_path' => 'colombia/guias/er-80.pdf']);
+
+    $this->actingAs($this->empacador);
+    $this->get(route('dropi.pedido.sticker', $p))->assertOk()
+        ->assertHeader('Content-Type', 'application/pdf')
+        // La estación lo enmarca; el resto del ERP sigue sin dejarse enmarcar.
+        ->assertHeader('X-Frame-Options', 'SAMEORIGIN');
+    $this->get(route('dropi.pedido.sticker', $p))->assertOk();
+    Http::assertSentCount(1);
+    Http::assertSent(fn ($req) => str_ends_with($req->url(), '/colombia/guias/er-80.pdf'));
+
+    $this->get(route('dropi.pedido.sticker', $sin))->assertNotFound()->assertHeader('X-Frame-Options', 'DENY');
+
+    $this->actingAs(User::factory()->create());
+    $this->get(route('dropi.pedido.sticker', $p))->assertForbidden();
+});
+
+it('si Dropi todavía no publica el sticker no se guarda nada y se puede reintentar', function () {
+    \Illuminate\Support\Facades\Storage::fake('local');
+    Http::fake(['*' => Http::sequence()->push('<Error>NoSuchKey</Error>', 403)->push('%PDF-1.4 ya', 200)]);
+    $p = erPedido('ER-90', 'ER-VOL', '2026-11-24 09:00');
+    DropiPedido::whereKey($p->id)->update(['sticker_path' => 'colombia/guias/er-90.pdf']);
+
+    $this->actingAs($this->empacador);
+    $this->get(route('dropi.pedido.sticker', $p))->assertNotFound();
+    $this->get(route('dropi.pedido.sticker', $p))->assertOk();
+});

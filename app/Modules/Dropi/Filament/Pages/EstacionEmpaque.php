@@ -131,6 +131,29 @@ class EstacionEmpaque extends Page
         $this->codigo = '';
 
         $this->dispatch('empaque-scan', sonido: $resultado['sonido'], mensaje: $resultado['mensaje']);
+
+        if ($resultado['tipo'] === 'variante_marcada') {
+            $this->alCompletar();
+        }
+    }
+
+    /**
+     * Con lo último escaneado sale el sticker y, sin foto obligatoria, se
+     * confirma solo (señora Lahida, 25-nov-2026: «uno solo escanea y ahí
+     * imprime la guía»; son cientos de paquetes). Lo hace el navegador:
+     * imprime desde el ERP y confirma con la ubicación del equipo, como el botón.
+     */
+    private function alCompletar(): void
+    {
+        $pedido = $this->pedidoActivoId ? DropiPedido::with('items')->find($this->pedidoActivoId) : null;
+        if (! $pedido || $pedido->items->isEmpty() || $pedido->items->contains(fn ($it) => $it->pickeado_at === null)) {
+            return;
+        }
+
+        $this->dispatch('empaque-completo',
+            sticker: $pedido->stickerUrl() ? route('dropi.pedido.sticker', $pedido) : null,
+            confirmar: ! (bool) setting('empaque.foto_obligatoria', true),
+        );
     }
 
     public function confirmarYSiguiente(?array $gps = null): void

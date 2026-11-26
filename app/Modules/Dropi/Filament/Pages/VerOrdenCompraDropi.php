@@ -4,6 +4,7 @@ namespace App\Modules\Dropi\Filament\Pages;
 
 use App\Modules\Compras\Actions\AnularOrdenCompra;
 use App\Modules\Compras\Actions\AprobarOrdenCompra;
+use App\Modules\Compras\Actions\CambiarIvaOrdenCompra;
 use App\Modules\Compras\Actions\DuplicarOrdenCompra;
 use App\Modules\Compras\Enums\EstadoOrdenCompra;
 use App\Modules\Compras\Models\OrdenCompra;
@@ -93,6 +94,28 @@ class VerOrdenCompraDropi extends Page
                         return;
                     }
                     Notification::make()->title("OC {$orden->numero} aprobada")->success()->send();
+                }),
+
+            // Con o sin IVA, mientras la orden sea borrador (25-nov).
+            Action::make('iva')
+                ->label(fn () => CambiarIvaOrdenCompra::llevaIva($o()) ? 'Quitar IVA' : 'Poner IVA (19 %)')
+                ->icon('heroicon-o-receipt-percent')->color('gray')
+                ->visible(fn () => ComprasDropi::puedeArmar($u)
+                    && $o()->estado === EstadoOrdenCompra::Borrador && $o()->tipo !== 'importacion')
+                ->requiresConfirmation()
+                ->modalDescription(fn () => CambiarIvaOrdenCompra::llevaIva($o())
+                    ? 'Todas las líneas quedan en 0 % de IVA y el total se recalcula.'
+                    : 'Las líneas en 0 % pasan a 19 % de IVA y el total se recalcula.')
+                ->action(function () use ($o) {
+                    $orden = $o();
+                    try {
+                        $orden = CambiarIvaOrdenCompra::run($orden, ! CambiarIvaOrdenCompra::llevaIva($orden));
+                    } catch (\InvalidArgumentException $e) {
+                        Notification::make()->title('No se cambió el IVA')->body($e->getMessage())->danger()->send();
+
+                        return;
+                    }
+                    Notification::make()->title((float) $orden->iva > 0 ? "OC {$orden->numero} con IVA" : "OC {$orden->numero} sin IVA")->success()->send();
                 }),
 
             Action::make('duplicar')->label('Duplicar')->icon('heroicon-o-document-duplicate')->color('gray')

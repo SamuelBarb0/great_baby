@@ -230,6 +230,9 @@ it('la cola de empaque va en el orden de la pila de stickers, como la Estación 
 });
 
 it('sin un corte generado la vista no deja empezar y dice qué falta; con dos cortes se trabajan por separado', function () {
+    // De mañana: el Corte 2 de abajo es de las 3 pm, y corrido después de esa hora
+    //   el primero también caía en él (el test dependía del reloj).
+    $this->travelTo(CarbonImmutable::today()->setTime(9, 0));
     $this->actingAs($this->aracely);
     Livewire::test(VistaAlistador::class)->assertSeeText('Todavía no hay guías impresas')->assertSet('corteId', null);
 
@@ -373,4 +376,13 @@ it('la recolección, el PDF y el empaque muestran la variación de Dropi cuando 
     $items = $p->items()->get()->keyBy('sku_dropi');
     expect($items['DV-2427001']->nombreVariante())->toBe('ROJO')
         ->and((new \App\Modules\Dropi\Models\DropiPedidoItem(['variacion' => null]))->nombreVariante())->toBe('');
+});
+
+it('el alistador imprime sólo la hoja de alistamiento, sin los stickers del reporte (la impresora de su puesto es de etiquetas, 25-nov-2026)', function () {
+    $p = pedidoEnCorte('G-1', [['SKU-899', 2]]);
+    $this->actingAs($this->aracely);
+
+    Livewire::test(VistaAlistador::class)
+        ->assertSeeText('Solo alistamiento')
+        ->assertSeeHtml(e(route('dropi.recoleccion.pdf', $p->corte_id)));
 });

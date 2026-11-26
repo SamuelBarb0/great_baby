@@ -18,6 +18,7 @@ use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
+use Filament\Forms\Components\Toggle;
 use Filament\Forms\Concerns\InteractsWithForms;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Forms\Contracts\HasForms;
@@ -140,6 +141,7 @@ class NuevaOrdenCompraDropi extends Page implements HasForms
             'tasa_cambio' => 1,
             'modelo_compra' => 'trading',
             'bodega_id' => ComprasDropi::bodegaPorDefecto(),
+            'lleva_iva' => true,
             'items' => [['cantidad' => 1, 'descuento_pct' => 0, 'iva_pct' => 19]],
         ]);
     }
@@ -162,6 +164,8 @@ class NuevaOrdenCompraDropi extends Page implements HasForms
             'bodega_id' => $orden['bodega_id'],
             'fecha_esperada' => $orden['fecha_esperada'],
             'observaciones' => $orden['observaciones'],
+            // Un Excel con todo en 0 % llega como compra sin IVA.
+            'lleva_iva' => collect($orden['items'])->contains(fn (array $it) => (float) $it['iva_pct'] > 0),
             'items' => collect($orden['items'])->map(fn (array $it) => [
                 'producto_id' => $it['producto_id'],
                 'variante_id' => $it['variante_id'],
@@ -179,6 +183,12 @@ class NuevaOrdenCompraDropi extends Page implements HasForms
         ]);
 
         return true;
+    }
+
+    /** Desde una línea: ¿la orden nacional se marcó sin IVA? (la importación lo trae aparte) */
+    private static function sinIva(Get $get): bool
+    {
+        return $get('../../tipo') !== 'importacion' && $get('../../lleva_iva') === false;
     }
 
     /** ¿Ese producto tiene variantes? (el selector sólo aparece si sí) */
@@ -232,6 +242,7 @@ class NuevaOrdenCompraDropi extends Page implements HasForms
                                 $set('tasa_cambio', self::ultimaTasa('CNY'));
                             }
                             $set('items', collect($get('items') ?? [])->map(fn ($i) => [...$i, 'iva_pct' => 0])->all());
+                            $set('lleva_iva', false);
                         } else {
                             $set('moneda', 'COP');
                             $set('tasa_cambio', 1);
@@ -250,6 +261,13 @@ class NuevaOrdenCompraDropi extends Page implements HasForms
                 Select::make('modelo_compra')->label('Modelo de compra')
                     ->options(['trading' => 'Trading', 'fabrica' => 'Fábrica'])
                     ->visible(fn (Get $get) => $get('tipo') === 'importacion'),
+                // Compra sin IVA (25-nov): una vez para toda la orden, no línea por línea.
+                Toggle::make('lleva_iva')->label('¿Lleva IVA?')->inline(false)
+                    ->helperText(fn (Get $get) => $get('lleva_iva') ? 'Cada línea con su IVA (19 % de entrada).' : 'Todas las líneas van en 0 %.')
+                    ->visible(fn (Get $get) => $get('tipo') !== 'importacion')
+                    ->live()
+                    ->afterStateUpdated(fn ($state, Get $get, Set $set) => $set('items', collect($get('items') ?? [])
+                        ->map(fn ($i) => [...$i, 'iva_pct' => $state ? 19 : 0])->all())),
                 Textarea::make('observaciones')->maxLength(1000)->columnSpanFull(),
             ])->columns(3),
 
@@ -306,7 +324,9 @@ class NuevaOrdenCompraDropi extends Page implements HasForms
                             ->numeric()->required()->minValue(0)
                             ->prefix(fn (Get $get) => $get('../../tipo') === 'importacion' ? null : '$'),
                         TextInput::make('descuento_pct')->label('Desc.')->numeric()->default(0)->minValue(0)->maxValue(100)->suffix('%'),
-                        TextInput::make('iva_pct')->label('IVA')->numeric()->default(19)->minValue(0)->maxValue(100)->suffix('%'),
+                        TextInput::make('iva_pct')->label('IVA')->numeric()->minValue(0)->maxValue(100)->suffix('%')
+                            ->default(fn (Get $get) => self::sinIva($get) ? 0 : 19)
+                            ->readOnly(fn (Get $get) => self::sinIva($get)),
                         // Las medidas de la caja reparten el flete por volumen o peso al liquidar.
                         TextInput::make('cajas')->numeric()->integer()->minValue(1)
                             ->visible(fn (Get $get) => $get('../../tipo') === 'importacion'),
@@ -337,6 +357,7 @@ class NuevaOrdenCompraDropi extends Page implements HasForms
         }
 
         $esImportacion = ($datos['tipo'] ?? 'nacional') === 'importacion';
+        $llevaIva = $esImportacion || (bool) ($datos['lleva_iva'] ?? true);
 
         $orden = CrearOrdenCompra::run([
             'proveedor_id' => (int) $datos['proveedor_id'],
@@ -348,6 +369,7 @@ class NuevaOrdenCompraDropi extends Page implements HasForms
             'fecha_esperada' => $datos['fecha_esperada'] ?? null,
             'observaciones' => $datos['observaciones'] ?? null,
             'linea_negocio' => LineaNegocio::Dropi,
+            'lleva_iva' => $llevaIva,
             'items' => collect($datos['items'])->map(fn (array $it) => [
                 'producto_id' => (int) $it['producto_id'],
                 'variante_id' => ! empty($it['variante_id']) ? (int) $it['variante_id'] : null,
@@ -385,6 +407,7 @@ class NuevaOrdenCompraDropi extends Page implements HasForms
                 'bodega_id' => $datos['bodega_id'],
                 'fecha_esperada' => $datos['fecha_esperada'] ?? null,
                 'observaciones' => $datos['observaciones'] ?? null,
+                'lleva_iva' => (bool) ($datos['lleva_iva'] ?? true),
                 'items' => collect($datos['items'])->map(fn (array $it) => [
                     'producto_id' => (int) $it['producto_id'],
                     'variante_id' => ! empty($it['variante_id']) ? (int) $it['variante_id'] : null,

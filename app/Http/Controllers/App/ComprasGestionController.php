@@ -133,6 +133,8 @@ class ComprasGestionController extends Controller implements HasMiddleware
                 || ($r->user()?->esAracely() ?? false))
                 && ! \App\Modules\Compras\Actions\AprobarOrdenCompra::laCreoQuienAprueba($o, $r->user()),
             'puede_excel' => \App\Auth\Permisos::puede($r->user(), 'compras_oc') || \App\Auth\Permisos::puede($r->user(), 'compras_pagos_exterior'),
+            // «Quitar IVA / Poner IVA» del borrador: quien arma la orden.
+            'puede_armar' => (bool) $r->user()?->puedeArmarOrdenes(),
             'etiquetas' => $o->esImportacion()
                 ? app(\App\Modules\Compras\Services\EtiquetasDeOrden::class)->resumen($o->loadMissing('items.producto.media'))
                 : null,
@@ -156,6 +158,7 @@ class ComprasGestionController extends Controller implements HasMiddleware
                 'fecha_esperada' => $o->fecha_esperada?->toDateString(),
                 'subtotal' => (float) $o->subtotal,
                 'iva' => (float) $o->iva,
+                'lleva_iva' => \App\Modules\Compras\Actions\CambiarIvaOrdenCompra::llevaIva($o),
                 'total' => (float) $o->total,
                 'descuento' => (float) $o->descuento,
                 'observaciones' => $o->observaciones,
@@ -409,6 +412,8 @@ class ComprasGestionController extends Controller implements HasMiddleware
             'items.*.precio_unit' => ['required', 'numeric', 'min:0'],
             'items.*.iva_pct' => ['nullable', 'numeric'],
             'items.*.descuento_pct' => ['nullable', 'numeric'],
+            // Compra sin IVA: todas las líneas en 0 % (CrearOrdenCompra).
+            'lleva_iva' => ['nullable', 'boolean'],
             // Se validaban como enteros sueltos: un id inventado pasaba y
             // dejaba la línea apuntando a un producto que no existe.
             'items.*.producto_id' => ['nullable', 'integer', 'exists:productos,id'],
@@ -458,6 +463,23 @@ class ComprasGestionController extends Controller implements HasMiddleware
         $o = OrdenCompra::findOrFail($orden);
         AprobarOrdenCompra::run($o);
         return back()->with('success', "OC {$o->numero} aprobada.");
+    }
+
+    /** Con o sin IVA para toda la orden, mientras sea borrador (25-nov). */
+    public function ocIva(Request $r, int $orden): RedirectResponse
+    {
+        abort_unless($r->user()?->puedeArmarOrdenes(), 403,
+            'Las ordenes de compra las arma Compras, bodega o contabilidad.');
+
+        $data = $r->validate(['lleva_iva' => ['required', 'boolean']]);
+        $o = OrdenCompra::findOrFail($orden);
+        try {
+            $o = \App\Modules\Compras\Actions\CambiarIvaOrdenCompra::run($o, (bool) $data['lleva_iva']);
+        } catch (\InvalidArgumentException $e) {
+            return back()->with('error', $e->getMessage());
+        }
+
+        return back()->with('success', $data['lleva_iva'] ? "OC {$o->numero} con IVA." : "OC {$o->numero} sin IVA.");
     }
 
     /**

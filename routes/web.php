@@ -187,6 +187,7 @@ Route::middleware(['web', 'auth'])->prefix('app')->group(function () {
     Route::post('/compras/calculadora', [\App\Http\Controllers\App\ComprasGestionController::class, 'calcular'])->middleware('throttle:120,1')->name('app.compras.calcular');
     Route::get('/compras/oc/{orden}', [\App\Http\Controllers\App\ComprasGestionController::class, 'ocShow'])->name('app.compras.oc.show');
     Route::post('/compras/oc/{orden}/aprobar', [\App\Http\Controllers\App\ComprasGestionController::class, 'ocAprobar'])->middleware('throttle:60,1')->name('app.compras.oc.aprobar');
+    Route::post('/compras/oc/{orden}/iva', [\App\Http\Controllers\App\ComprasGestionController::class, 'ocIva'])->middleware('throttle:60,1')->name('app.compras.oc.iva');
     Route::post('/compras/oc/{orden}/anular', [\App\Http\Controllers\App\ComprasGestionController::class, 'ocAnular'])->middleware('throttle:20,1')->name('app.compras.oc.anular');
     // Sprint 3 · A.1 · duplicar OC + reenviar recepción a SIIGO.
     Route::post('/compras/oc/{orden}/duplicar', [\App\Http\Controllers\App\ComprasGestionController::class, 'ocDuplicar'])->middleware('throttle:20,1')->name('app.compras.oc.duplicar');
@@ -1113,6 +1114,12 @@ Route::middleware(['web', 'auth'])->group(function () {
         ->whereNumber('parte')
         ->middleware('throttle:30,1')
         ->name('dropi.guias.parte');
+
+    // El sticker de la guía de un pedido desde el ERP, para imprimirlo en la
+    //   estación de empaque sin abrir pestañas (25-nov-2026).
+    Route::get('/dropi/pedido/{pedido}/sticker', \App\Http\Controllers\Dropi\StickerPedidoController::class)
+        ->middleware('throttle:120,1')
+        ->name('dropi.pedido.sticker');
 
     // PDF / Excel de un manifiesto de Dropi guardado en el ERP (24-nov-2026).
     Route::get('/dropi/manifiestos/{manifiesto}/{tipo}', \App\Http\Controllers\Dropi\ManifiestoDropiArchivoController::class)
