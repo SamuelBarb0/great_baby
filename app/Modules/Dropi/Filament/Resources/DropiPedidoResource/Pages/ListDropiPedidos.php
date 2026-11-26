@@ -87,10 +87,32 @@ class ListDropiPedidos extends ListRecords
                 default => collect($l->partes ?? [])->keys()->map(fn ($i) => '<a href="' . e(route('dropi.guias.parte', [$l, $i + 1])) . '" target="_blank" rel="noopener" style="text-decoration:underline;font-weight:600">🖨 ' . (count($l->partes ?? []) > 1 ? 'Parte ' . ($i + 1) : 'Reporte') . '</a>')->implode(' · ')
                     . ($l->sin_sticker ? e(' · ' . count($l->sin_sticker) . ' sin sticker') : ''),
             };
+            // Qué pasó con cada guía (26-nov-2026), con el detalle a un clic.
+            if ($conteo = $l->conteoResultados()) {
+                $linea .= '<br><span style="font-size:.9em">'
+                    . collect($conteo)->map(fn ($n, $tipo) => e(\App\Modules\Dropi\Models\DropiLoteImpresion::RESULTADOS[$tipo]['icono'] . ' ' . $n . ' ' . mb_strtolower(\App\Modules\Dropi\Models\DropiLoteImpresion::RESULTADOS[$tipo]['titulo'])))->implode(' · ')
+                    . ' · <a href="#" wire:click.prevent="mountAction(\'resultadosGuias\', { lote: ' . $l->id . ' })" style="text-decoration:underline;font-weight:600">Ver detalle</a></span>';
+            }
             $lineas[] = $linea;
         }
 
         return $lineas ? new \Illuminate\Support\HtmlString(implode('<br>', $lineas)) : null;
+    }
+
+    /**
+     * «Ver detalle» de un reporte (26-nov-2026): cada pedido que no salió con
+     * guía nueva, por qué y qué hacer. Se abre desde la línea del reporte.
+     */
+    public function resultadosGuiasAction(): Action
+    {
+        return Action::make('resultadosGuias')
+            ->modalHeading(fn (array $arguments) => \App\Modules\Dropi\Models\DropiLoteImpresion::with('corte')->find($arguments['lote'] ?? 0)?->titulo() ?? 'Reporte')
+            ->modalContent(fn (array $arguments) => view('dropi.pages.partials.resultados-guias', [
+                'lote' => \App\Modules\Dropi\Models\DropiLoteImpresion::find($arguments['lote'] ?? 0),
+            ]))
+            ->modalWidth('4xl')
+            ->modalSubmitAction(false)
+            ->modalCancelActionLabel('Cerrar');
     }
 
     protected function getHeaderActions(): array

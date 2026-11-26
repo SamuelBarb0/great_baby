@@ -24,11 +24,14 @@ class RecoleccionPdfController extends Controller
     {
         abort_unless(VistaAlistador::canAccess(), 403);
 
-        $filas = app(RecoleccionDelCorte::class)->conMarcas($corte->id);
+        // Por cantidad, o por el recorrido si el alistador lo escogió (26-nov-2026).
+        $orden = RecoleccionDelCorte::ordenValido(request()->query('orden'));
+        $filas = app(RecoleccionDelCorte::class)->conMarcas($corte->id, $orden);
 
         return Pdf::loadView('dropi.pdf.recoleccion', [
             'corte' => $corte,
             'filas' => $filas,
+            'orden' => $orden,
             'unidades' => array_sum(array_column($filas, 'total_unidades')),
             'generado' => now(),
         ])

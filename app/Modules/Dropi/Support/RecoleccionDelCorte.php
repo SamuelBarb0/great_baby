@@ -44,17 +44,32 @@ class RecoleccionDelCorte
     ];
 
     /**
-     * Totales por SKU de Dropi, ya en el orden del recorrido.
+     * El orden de la hoja (la señora Lahida, 26-nov-2026): «que sea de mayor
+     * cantidad a menor», con los colores de un mismo estilo seguidos («si hay
+     * varios carritos de varios colores, que los ponga ahí enseguidita»). El
+     * recorrido de la bodega sigue a un clic: «o uno también puede elegir».
+     */
+    public const POR_CANTIDAD = 'cantidad';
+
+    public const POR_RUTA = 'ruta';
+
+    public static function ordenValido(?string $orden): string
+    {
+        return $orden === self::POR_RUTA ? self::POR_RUTA : self::POR_CANTIDAD;
+    }
+
+    /**
+     * Totales por SKU de Dropi, ya en el orden pedido.
      *
      * @return array<string, array<string, mixed>> por SKU de Dropi
      */
-    public function totales(int $corteId): array
+    public function totales(int $corteId, string $orden = self::POR_CANTIDAD): array
     {
         return $this->totalesDe(DropiPedido::query()
             ->where('corte_id', $corteId)
             ->whereNotIn('estado', self::ESTADOS_FUERA)
             ->with(['items.variante.producto', 'items.producto'])
-            ->get());
+            ->get(), $orden);
     }
 
     /**
@@ -64,7 +79,7 @@ class RecoleccionDelCorte
      * @param  Collection<int, DropiPedido>  $pedidos  con items.variante.producto e items.producto
      * @return array<string, array<string, mixed>>
      */
-    public function totalesDe(Collection $pedidos): array
+    public function totalesDe(Collection $pedidos, string $orden = self::POR_CANTIDAD): array
     {
         $items = $pedidos->flatMap->items;
         $ubicaciones = $this->ubicacionesDe($items);
@@ -84,7 +99,11 @@ class RecoleccionDelCorte
                 'producto' => $producto?->nombre ?? ($it->producto_nombre ?: 'SKU sin match'),
                 'vinculado' => $producto !== null,
                 'referencia' => $producto?->referencia ?? '—',
+                // Lo que se lee en pantalla y en la hoja: la nuestra; sin vínculo, la de Dropi.
+                'ref_erp' => $it->referenciaErp(),
                 'variante' => $it->nombreVariante(),
+                // El estilo: los colores de un mismo producto del ERP van seguidos.
+                'estilo' => $producto ? 'p' . $producto->id : 's' . $key,
                 'total_unidades' => 0,
                 'ubicacion_sugerida' => $u['codigo'] ?? '—',
                 'zona' => $u['zona'] ?? null,
@@ -93,7 +112,19 @@ class RecoleccionDelCorte
             $grupos[$key]['total_unidades'] += (int) $it->cantidad;
         }
 
-        uasort($grupos, fn ($a, $b) => [$a['orden'], $a['producto'], $a['sku']] <=> [$b['orden'], $b['producto'], $b['sku']]);
+        if ($orden === self::POR_RUTA) {
+            uasort($grupos, fn ($a, $b) => [$a['orden'], $a['producto'], $a['sku']] <=> [$b['orden'], $b['producto'], $b['sku']]);
+
+            return $grupos;
+        }
+
+        // De mayor a menor cantidad, por estilo y, dentro, por color.
+        $porEstilo = [];
+        foreach ($grupos as $g) {
+            $porEstilo[$g['estilo']] = ($porEstilo[$g['estilo']] ?? 0) + $g['total_unidades'];
+        }
+        uasort($grupos, fn ($a, $b) => [-$porEstilo[$a['estilo']], $a['producto'], $a['estilo'], -$a['total_unidades'], $a['variante'], $a['sku']]
+            <=> [-$porEstilo[$b['estilo']], $b['producto'], $b['estilo'], -$b['total_unidades'], $b['variante'], $b['sku']]);
 
         return $grupos;
     }
@@ -103,9 +134,9 @@ class RecoleccionDelCorte
      *
      * @return list<array<string, mixed>>
      */
-    public function conMarcas(int $corteId): array
+    public function conMarcas(int $corteId, string $orden = self::POR_CANTIDAD): array
     {
-        return $this->marcar($this->totales($corteId), DropiRecoleccionMarca::query()->where('corte_id', $corteId));
+        return $this->marcar($this->totales($corteId, $orden), DropiRecoleccionMarca::query()->where('corte_id', $corteId));
     }
 
     /**
@@ -142,14 +173,14 @@ class RecoleccionDelCorte
      *
      * @return list<array<string, mixed>>
      */
-    public function conMarcasImpresos(int $corteId): array
+    public function conMarcasImpresos(int $corteId, string $orden = self::POR_CANTIDAD): array
     {
         $grupos = $this->totalesDe(DropiPedido::query()
             ->where('corte_id', $corteId)
             ->whereNotNull('lote_impresion_id')
             ->whereNotIn('estado', self::ESTADOS_FUERA)
             ->with(['items.variante.producto', 'items.producto'])
-            ->get());
+            ->get(), $orden);
 
         return $this->marcar($grupos, DropiRecoleccionMarca::query()->where('corte_id', $corteId));
     }

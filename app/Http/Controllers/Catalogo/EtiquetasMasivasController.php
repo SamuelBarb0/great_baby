@@ -27,11 +27,28 @@ class EtiquetasMasivasController extends Controller
      */
     private const ROLLO_DROPI = ['ancho' => 100, 'alto' => 25, 'columnas' => 3, 'etiqueta' => 32.49, 'separacion' => 0];
 
-    /** Alto máximo (mm) del código de barras: lo que dejan libre los 25 mm tras dos renglones de nombre. */
-    private const BARRAS_ALTO_MAX = 14;
+    /**
+     * Lo que se imprime de verdad en el adhesivo de la SAT (26-nov-2026): la
+     * columna de 32,49 × 25 trae ~3 mm de blanco entre etiquetas, así que el
+     * adhesivo mide ~29 × 22. Todo va dentro de 26 × 20, con margen por si la
+     * impresora corre un poco el papel.
+     */
+    private const AREA_DROPI = ['ancho' => 26, 'alto' => 20];
 
-    /** Lo mismo, cuando la etiqueta lleva además el renglón del color (producto agrupado). */
-    private const BARRAS_ALTO_CON_COLOR = 11;
+    /**
+     * Ancho de un módulo del código (mm): un punto de la térmica de 203 ppp.
+     * Dibujadas así, las barras salen sólidas; la imagen reducida salía punteada
+     * y la pistola de empaque no la leía (video del 26-nov-2026).
+     */
+    private const MODULO_MM = 0.125;
+
+    /** Blanco a cada lado de las barras, en módulos: sin él el lector no sabe dónde empieza. */
+    private const SILENCIO_MODULOS = 10;
+
+    /** Alto de las barras (mm) dentro del área, sin y con el renglón del color. */
+    private const BARRAS_ALTO_DROPI = 8.5;
+
+    private const BARRAS_ALTO_DROPI_CON_COLOR = 5;
 
     public function pdf(Request $request, CatalogoDropi $catalogo): Response
     {
@@ -317,13 +334,13 @@ class EtiquetasMasivasController extends Controller
             if ($qrOpts) {
                 $e['qr'] = (new QRCode($qrOpts))->render($e['codigo']);
             }
+            if ($soloBarras) {
+                $e['barras_dibujo'] = self::barrasDibujadas($e['codigo'], filled($e['color'] ?? null));
+
+                continue;
+            }
             $png = Code128::png($e['codigo']);
             $e['barras'] = 'data:image/png;base64,' . base64_encode($png);
-            if ($soloBarras) {
-                // Con el renglón del color, las barras bajan de alto para caber en los 25 mm.
-                $altoMax = filled($e['color'] ?? null) ? self::BARRAS_ALTO_CON_COLOR : self::BARRAS_ALTO_MAX;
-                [$e['barras_ancho'], $e['barras_alto']] = self::encajarBarras($png, $altoMax);
-            }
         }
         unset($e);
 
@@ -331,7 +348,7 @@ class EtiquetasMasivasController extends Controller
             // Cada página es una fila completa del rollo de la SAT TT460 (mm → pt).
             $mm = 72 / 25.4;
 
-            return Pdf::loadView('catalogo.pdf.etiquetas-dropi', ['etiquetas' => $etiquetas, 'rollo' => self::ROLLO_DROPI])
+            return Pdf::loadView('catalogo.pdf.etiquetas-dropi', ['etiquetas' => $etiquetas, 'rollo' => self::ROLLO_DROPI, 'area' => self::AREA_DROPI])
                 ->setPaper([0, 0, self::ROLLO_DROPI['ancho'] * $mm, self::ROLLO_DROPI['alto'] * $mm], 'portrait')
                 ->stream($archivo . '-' . now()->format('Ymd-His') . '.pdf');
         }
@@ -342,24 +359,24 @@ class EtiquetasMasivasController extends Controller
     }
 
     /**
-     * Medidas (mm) del código de barras dentro de la etiqueta de Dropi, sin
-     * deformarlo: tan ancho como la etiqueta, salvo que así quede más alto que
-     * el espacio que deja el nombre. Un código corto («899») estirado a lo ancho
-     * salía de 13 mm de alto y, con el nombre encima, la fila no cabía en los
-     * 25 mm y DomPDF la partía en páginas en blanco.
+     * Las barras de la etiqueta de Dropi como tramos en mm, para dibujarlas con
+     * rectángulos: cada módulo es un punto de la impresora. Un código tan largo
+     * que no quepa en el área se angosta lo justo (los módulos dejan de caer en
+     * la cuadrícula de puntos, pero siguen siendo sólidos).
      *
-     * @return array{0: float, 1: float}
+     * @return array{tramos: list<array{0: bool, 1: float}>, silencio: float, ancho: float, alto: float}
      */
-    private static function encajarBarras(string $png, float $altoMax = self::BARRAS_ALTO_MAX): array
+    public static function barrasDibujadas(string $codigo, bool $conColor): array
     {
-        [$px, $py] = getimagesizefromstring($png);
-        $ancho = self::ROLLO_DROPI['etiqueta'] - 2;
-        $alto = $ancho * $py / $px;
-        if ($alto > $altoMax) {
-            $ancho *= $altoMax / $alto;
-            $alto = $altoMax;
-        }
+        $tramos = Code128::tramos($codigo);
+        $modulos = array_sum(array_column($tramos, 1)) + 2 * self::SILENCIO_MODULOS;
+        $modulo = min(self::MODULO_MM, self::AREA_DROPI['ancho'] / $modulos);
 
-        return [round($ancho, 2), round($alto, 2)];
+        return [
+            'tramos' => array_map(fn ($t) => [$t[0], round($t[1] * $modulo, 4)], $tramos),
+            'silencio' => round(self::SILENCIO_MODULOS * $modulo, 4),
+            'ancho' => round($modulos * $modulo, 4),
+            'alto' => $conColor ? self::BARRAS_ALTO_DROPI_CON_COLOR : self::BARRAS_ALTO_DROPI,
+        ];
     }
 }

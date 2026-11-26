@@ -48,6 +48,9 @@ class VistaAlistador extends Page
 
     public string $modo = 'recoleccion'; // recoleccion | empaque
 
+    /** Por cantidad (lo de más unidades primero) o por el recorrido de la bodega (26-nov-2026). */
+    public string $ordenRecoleccion = RecoleccionDelCorte::POR_CANTIDAD;
+
     public ?int $corteId = null;
 
     // §24 · Solo Alistador/Aracely acceden. SAC ve pedidos pero no esta vista operativa.
@@ -112,7 +115,13 @@ class VistaAlistador extends Page
      */
     public function getRecoleccionProperty(): array
     {
-        return $this->corteId ? app(RecoleccionDelCorte::class)->conMarcasImpresos($this->corteId) : [];
+        return $this->corteId ? app(RecoleccionDelCorte::class)->conMarcasImpresos($this->corteId, $this->ordenRecoleccion) : [];
+    }
+
+    /** «Por cantidad» o «Por recorrido»: el alistador escoge (la señora Lahida, 26-nov-2026). */
+    public function ordenarRecoleccion(string $orden): void
+    {
+        $this->ordenRecoleccion = RecoleccionDelCorte::ordenValido($orden);
     }
 
     /**

@@ -72,8 +72,8 @@ it('«Mis productos en Dropi» saca una etiqueta por color del agrupado, todas c
     $etiquetas = $this->vistas['catalogo.pdf.etiquetas-dropi'];
     expect(array_column($etiquetas, 'codigo'))->toBe(['202510-5', '202510-5', '202510-5'])
         ->and(collect($etiquetas)->pluck('color')->sort()->values()->all())->toBe(['Azul', 'Rojo', 'Verde'])
-        // El renglón del color le quita alto a las barras para caber en los 25 mm.
-        ->and(max(array_column($etiquetas, 'barras_alto')))->toBeLessThanOrEqual(11.0);
+        // El renglón del color le quita alto a las barras para caber en el adhesivo.
+        ->and(max(array_column(array_column($etiquetas, 'barras_dibujo'), 'alto')))->toBeLessThan(8.5);
 });
 
 it('el catálogo ya no dice «Sin variantes» para un agrupado: imprime una por color', function () {
@@ -101,9 +101,10 @@ it('un agrupado sin colores en Dropi sale con una sola etiqueta, y las variantes
 
 it('la etiqueta de Dropi escribe el color solo cuando lo trae (agrupado)', function () {
     $rollo = ['ancho' => 100, 'alto' => 25, 'columnas' => 3, 'etiqueta' => 32.49, 'separacion' => 0];
-    $html = view('catalogo.pdf.etiquetas-dropi', ['rollo' => $rollo, 'etiquetas' => [
-        ['codigo' => '202510-5', 'barras' => 'data:image/png;base64,AAA', 'nombre' => 'LAVA TETERO', 'color' => 'Rojo'],
-        ['codigo' => 'BODY-1-AZU', 'barras' => 'data:image/png;base64,AAA', 'nombre' => 'Body'],
+    $barras = fn (string $c, bool $color) => \App\Http\Controllers\Catalogo\EtiquetasMasivasController::barrasDibujadas($c, $color);
+    $html = view('catalogo.pdf.etiquetas-dropi', ['rollo' => $rollo, 'area' => ['ancho' => 26, 'alto' => 20], 'etiquetas' => [
+        ['codigo' => '202510-5', 'barras_dibujo' => $barras('202510-5', true), 'nombre' => 'LAVA TETERO', 'color' => 'Rojo'],
+        ['codigo' => 'BODY-1-AZU', 'barras_dibujo' => $barras('BODY-1-AZU', false), 'nombre' => 'Body'],
     ]])->render();
 
     expect(substr_count($html, 'class="color"'))->toBe(1)->and($html)->toContain('>Rojo</div>');

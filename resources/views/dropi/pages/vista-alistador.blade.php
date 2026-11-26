@@ -101,7 +101,7 @@
                  reportes del corte: la hoja de alistamiento abre cada PDF. --}}
             <x-slot name="afterHeader">
                 <div style="display:flex;flex-wrap:wrap;gap:.4rem;">
-                    <x-filament::button tag="a" :href="route('dropi.recoleccion.pdf', $corte)" target="_blank" icon="heroicon-o-clipboard-document-list">
+                    <x-filament::button tag="a" :href="route('dropi.recoleccion.pdf', [$corte, 'orden' => $this->ordenRecoleccion])" target="_blank" icon="heroicon-o-clipboard-document-list">
                         Solo alistamiento
                     </x-filament::button>
                     @foreach($reportes->filter(fn ($r) => ! empty($r->partes)) as $r)
@@ -119,6 +119,13 @@
                     $recogidas = collect($recoleccion)->where('marcada', true)->count();
                     $pctRecogido = round($recogidas / count($recoleccion) * 100);
                 @endphp
+                {{-- El orden de la lista: por cantidad (de serie) o por el recorrido (26-nov-2026). --}}
+                <div style="display:flex;gap:.5rem;align-items:center;margin-bottom:.75rem;font-size:.85rem;">
+                    <span style="color:#9ca3af;">Ordenar:</span>
+                    @foreach([\App\Modules\Dropi\Support\RecoleccionDelCorte::POR_CANTIDAD => 'Por cantidad', \App\Modules\Dropi\Support\RecoleccionDelCorte::POR_RUTA => 'Por recorrido'] as $valor => $texto)
+                        <x-filament::button size="sm" :color="$ordenRecoleccion === $valor ? 'primary' : 'gray'" wire:click="ordenarRecoleccion('{{ $valor }}')">{{ $texto }}</x-filament::button>
+                    @endforeach
+                </div>
                 {{-- Progreso del «chulito»: cuántas referencias ya se sacaron de la bodega. --}}
                 <div style="margin-bottom:1rem;">
                     <div style="display:flex;justify-content:space-between;font-size:.85rem;margin-bottom:.25rem;">
@@ -135,7 +142,7 @@
                         <thead>
                             <tr style="border-bottom:1px solid rgba(156,163,175,.2);">
                                 <th style="width:9.5rem;text-align:center;padding:.75rem;font-size:.7rem;text-transform:uppercase;color:#9ca3af;">Recogido</th>
-                                <th style="text-align:left;padding:.75rem;font-size:.7rem;text-transform:uppercase;color:#9ca3af;">SKU</th>
+                                <th style="text-align:left;padding:.75rem;font-size:.7rem;text-transform:uppercase;color:#9ca3af;">Referencia</th>
                                 <th style="text-align:left;padding:.75rem;font-size:.7rem;text-transform:uppercase;color:#9ca3af;">Producto</th>
                                 <th style="text-align:left;padding:.75rem;font-size:.7rem;text-transform:uppercase;color:#9ca3af;">Variante</th>
                                 <th style="text-align:left;padding:.75rem;font-size:.7rem;text-transform:uppercase;color:#9ca3af;">Ubicación</th>
@@ -148,7 +155,7 @@
                                 <tr wire:key="rec-{{ $g['sku'] }}" wire:click="marcarRecogido(@js($g['sku']))"
                                     class="{{ $g['marcada'] ? 'alistador-hecha' : '' }}" style="border-bottom:1px solid rgba(156,163,175,.1);cursor:pointer;{{ $g['marcada'] ? 'background:rgba(34,197,94,.08);' : '' }}">
                                     <td class="alistador-chulito" style="padding:.75rem;text-align:center;">@include('dropi.pages.partials.chulito-recoleccion', ['g' => $g])</td>
-                                    <td style="padding:.75rem;font-family:ui-monospace,monospace;font-size:.8rem;">{{ $g['sku'] }}</td>
+                                    <td style="padding:.75rem;font-family:ui-monospace,monospace;font-size:.8rem;">@include('dropi.pages.partials.referencia-erp', ['g' => $g])</td>
                                     <td style="padding:.75rem;font-weight:600;">{{ $g['producto'] }}</td>
                                     <td style="padding:.75rem;font-size:.85rem;color:#9ca3af;">{{ $g['variante'] ?: '—' }}</td>
                                     <td style="padding:.75rem;">
@@ -174,7 +181,7 @@
                                 <div style="flex:1;min-width:0;">
                                     <div style="font-weight:700;font-size:1rem;">{{ $g['producto'] }}</div>
                                     <div style="font-size:.8rem;color:#9ca3af;margin-top:.25rem;">{{ $g['variante'] ?: '—' }}</div>
-                                    <div style="font-family:ui-monospace,monospace;font-size:.7rem;color:#6b7280;margin-top:.25rem;word-break:break-all;">{{ $g['sku'] }}</div>
+                                    <div style="font-family:ui-monospace,monospace;font-size:.7rem;color:#6b7280;margin-top:.25rem;word-break:break-all;">@include('dropi.pages.partials.referencia-erp', ['g' => $g])</div>
                                     @if($g['marcada'])
                                         <div style="font-size:.75rem;color:#16a34a;font-weight:600;margin-top:.35rem;">✓ {{ $g['marcada_por'] ?? '—' }} · {{ $g['marcada_at'] }}</div>
                                     @elseif($g['faltan'] > 0)
@@ -227,12 +234,12 @@
                                     <div style="margin-top:.5rem;">
                                         @foreach($pedido->items as $it)
                                             @php
-                                                // El nombre es lo que reconoce quien empaca; el SKU de Dropi queda de apoyo.
+                                                // El nombre y nuestra referencia son lo que reconoce quien empaca; el SKU de Dropi queda de apoyo.
                                                 $prodItem = $it->variante?->producto ?? $it->producto;
                                                 $varItem = $it->nombreVariante();
                                             @endphp
                                             <span title="{{ $it->sku_dropi }}" style="display:inline-block;font-size:.75rem;padding:.25rem .5rem;background:rgba(156,163,175,.15);border-radius:.25rem;margin-right:.25rem;margin-bottom:.25rem;">
-                                                <strong>{{ $it->cantidad }}×</strong> {{ $prodItem?->nombre ?? $it->sku_dropi }}@if($varItem !== '') <span style="color:#9ca3af;">· {{ $varItem }}</span>@endif
+                                                <strong>{{ $it->cantidad }}×</strong> {{ $prodItem?->nombre ?? $it->sku_dropi }}@if($varItem !== '') <span style="color:#9ca3af;">· {{ $varItem }}</span>@endif@if($refItem = $it->referenciaErp()) <span style="color:#9ca3af;font-family:ui-monospace,monospace;">· {{ $refItem }}</span>@endif
                                                 @if($ubic = $ubicacionesEmpaque[$it->id] ?? null)<span style="color:#9ca3af;white-space:nowrap;"> · 📍 <span style="font-family:ui-monospace,monospace;">{{ $ubic }}</span></span>@endif
                                             </span>
                                         @endforeach

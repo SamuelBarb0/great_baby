@@ -102,22 +102,38 @@ it('el PDF lleva el código del ERP: el de la variante o la referencia del agreg
 
 it('las etiquetas de Dropi llevan el nombre y el código de barras; las del catálogo siguen completas', function () {
     $rollo = ['ancho' => 100, 'alto' => 25, 'columnas' => 3, 'etiqueta' => 32.49, 'separacion' => 0];
-    $dropi = view('catalogo.pdf.etiquetas-dropi', ['rollo' => $rollo, 'etiquetas' => [['codigo' => '899', 'barras' => 'data:image/png;base64,AAA', 'nombre' => 'Carro lanzador', 'detalle' => 'Azul', 'precio' => 12000]]])->render();
-    // Como la plantilla de BarTender: nombre arriba (en mayúsculas por CSS) y barras; sin QR, variación ni precio.
-    expect($dropi)->toContain('alt="899"')->toContain('Carro lanzador')->toContain('width: 32.49mm')->toContain('margin-left: 1.265mm')
-        ->toContain('width: 30.49mm; height: 12mm;')->not->toContain('class="separacion"')
+    $area = ['ancho' => 26, 'alto' => 20];
+    $barras = fn (string $c) => \App\Http\Controllers\Catalogo\EtiquetasMasivasController::barrasDibujadas($c, false);
+    $dropi = view('catalogo.pdf.etiquetas-dropi', ['rollo' => $rollo, 'area' => $area, 'etiquetas' => [['codigo' => '899', 'barras_dibujo' => $barras('899'), 'nombre' => 'Carro lanzador', 'detalle' => 'Azul', 'precio' => 12000]]])->render();
+    // Como la plantilla de BarTender: nombre arriba (en mayúsculas por CSS), barras y el código; sin QR, variación ni precio.
+    expect($dropi)->toContain('>899<')->toContain('Carro lanzador')->toContain('width: 32.49mm')->toContain('margin-left: 1.265mm')
+        // Todo dentro del adhesivo, y las barras dibujadas (no una imagen que la térmica punteaba).
+        ->toContain('width: 26mm')->not->toContain('<img')->not->toContain('class="separacion"')
         ->not->toContain('QR')->not->toContain('Azul')->not->toContain('12.000');
 
     // Un nombre muy largo se corta para no empujar las barras fuera de la etiqueta; sin nombre, solo barras.
-    $largo = view('catalogo.pdf.etiquetas-dropi', ['rollo' => $rollo, 'etiquetas' => [
-        ['codigo' => '900', 'barras' => 'data:image/png;base64,AAA', 'nombre' => str_repeat('Gimnasio musical ', 5)],
-        ['codigo' => '901', 'barras' => 'data:image/png;base64,AAA', 'nombre' => null],
+    $largo = view('catalogo.pdf.etiquetas-dropi', ['rollo' => $rollo, 'area' => $area, 'etiquetas' => [
+        ['codigo' => '900', 'barras_dibujo' => $barras('900'), 'nombre' => str_repeat('Gimnasio musical ', 5)],
+        ['codigo' => '901', 'barras_dibujo' => $barras('901'), 'nombre' => null],
     ]])->render();
-    expect($largo)->toContain('Gimnasio musical Gimnasio musica...')->not->toContain(str_repeat('Gimnasio musical ', 2))
+    expect($largo)->toContain('Gimnasio musical Gimnasio musi...')->not->toContain(str_repeat('Gimnasio musical ', 2))
         ->and(substr_count($largo, 'class="nombre"'))->toBe(1);
 
     $catalogo = view('catalogo.pdf.etiquetas-lote', ['etiquetas' => [['codigo' => '899', 'barras' => 'data:image/png;base64,AAA', 'qr' => 'data:image/png;base64,BBB', 'nombre' => 'VOLANTE', 'detalle' => 'Azul', 'precio' => 12000]]])->render();
     expect($catalogo)->toContain('alt="QR"')->toContain('VOLANTE')->toContain('12.000');
+});
+
+it('las barras van en la cuadrícula de la térmica: un módulo = un punto de 0,125 mm, con blanco a los lados', function () {
+    $b = \App\Http\Controllers\Catalogo\EtiquetasMasivasController::barrasDibujadas('AND2505-917', false);
+    $modulos = count(\App\Support\Code128::modulos('AND2505-917'));
+
+    expect(array_sum(array_column($b['tramos'], 1)))->toEqualWithDelta($modulos * 0.125, 0.0001)
+        ->and(collect($b['tramos'])->every(fn ($t) => fmod($t[1] / 0.125, 1) < 0.0001))->toBeTrue()
+        ->and($b['silencio'])->toBe(1.25)
+        ->and($b['ancho'])->toBeLessThanOrEqual(26.0);
+
+    // Uno larguísimo se angosta lo justo para caber en el adhesivo.
+    expect(\App\Http\Controllers\Catalogo\EtiquetasMasivasController::barrasDibujadas(str_repeat('AB', 20), false)['ancho'])->toEqualWithDelta(26.0, 0.001);
 });
 
 it('sin vínculo no hay etiqueta, y sin permiso no se imprime', function () {

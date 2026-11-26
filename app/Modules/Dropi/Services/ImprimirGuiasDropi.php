@@ -38,20 +38,38 @@ class ImprimirGuiasDropi
     public const POR_TRABAJO = 15;
 
     /**
-     * El orden de empaque: por el producto con más pedidos y, dentro, el más viejo.
+     * El orden de empaque (la pila de stickers): el estilo con más unidades
+     * primero, sus colores seguidos (el de más unidades antes) y, dentro de
+     * cada color, el pedido más viejo. Sin vínculo al ERP, cada SKU de Dropi es
+     * su propio estilo.
      *
      * @param  Collection<int, DropiPedido>  $pedidos  con items
      * @return Collection<int, DropiPedido>
      */
     public static function ordenar(Collection $pedidos): Collection
     {
-        $principal = fn (DropiPedido $p) => (string) ($p->items->sortBy('id')->first()?->sku_dropi ?? '');
-        $cuantos = $pedidos->countBy($principal);
+        if ($pedidos instanceof \Illuminate\Database\Eloquent\Collection) {
+            $pedidos->loadMissing(['items.variante.producto', 'items.producto']);
+        }
+        $item = fn (DropiPedido $p) => $p->items->sortBy('id')->first();
+        // El color: la variante del ERP o, sin vínculo, el SKU de Dropi.
+        $color = fn (DropiPedido $p) => (string) ($item($p)?->variante_id ? 'v' . $item($p)->variante_id : 's' . ($item($p)?->sku_dropi ?? ''));
+        // El estilo (la señora Lahida, 26-nov-2026): los colores del mismo producto
+        //   del ERP van seguidos, «para no perder el consecutivo del mismo estilo».
+        $estilo = function (DropiPedido $p) use ($item, $color) {
+            $producto = $item($p)?->variante?->producto ?? $item($p)?->producto;
+
+            return $producto ? 'p' . $producto->id : $color($p);
+        };
+        $unidades = fn (DropiPedido $p) => (int) ($item($p)?->cantidad ?? 0);
+        // «Empezar por lo que hay más cantidad»: el estilo con más unidades y, dentro, el color con más.
+        $porEstilo = $pedidos->groupBy($estilo)->map(fn ($g) => $g->sum($unidades));
+        $porColor = $pedidos->groupBy($color)->map(fn ($g) => $g->sum($unidades));
         // Más viejo = cuándo se hizo en Dropi, no cuándo lo trajo el sync.
         $cuando = fn (DropiPedido $p) => ($p->dropi_creado_at ?? $p->created_at)?->getTimestamp() ?? 0;
+        $llave = fn (DropiPedido $p) => [-$porEstilo[$estilo($p)], $estilo($p), -$porColor[$color($p)], $color($p), $cuando($p), $p->id];
 
-        return $pedidos->sort(fn ($a, $b) => [-$cuantos[$principal($a)], $principal($a), $cuando($a), $a->id]
-            <=> [-$cuantos[$principal($b)], $principal($b), $cuando($b), $b->id])->values();
+        return $pedidos->sort(fn ($a, $b) => $llave($a) <=> $llave($b))->values();
     }
 
     /**

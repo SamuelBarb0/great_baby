@@ -61,6 +61,11 @@ class GenerarCorteDropi
                 'pedidos' => $entran->pluck('id')->all(),
                 'total' => $entran->count(),
                 'guias_pendientes' => $grupos['a_guia']->count(),
+                // Los que ya traían guía entran tal cual; los demás los anota cada guía.
+                'resultados' => $grupos['con_guia']->map(fn (DropiPedido $p) => [
+                    'pedido_id' => $p->id, 'orden' => (string) $p->dropi_orden_id, 'cliente' => (string) $p->cliente_nombre,
+                    'tipo' => 'ya_tenia', 'detalle' => null, 'guia' => $p->guia,
+                ])->values()->all() ?: null,
                 'estado' => $grupos['a_guia']->isEmpty() ? DropiLoteImpresion::DESCARGANDO : DropiLoteImpresion::GENERANDO_GUIAS,
             ]);
         });

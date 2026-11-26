@@ -21,7 +21,11 @@ class ArmarParteLoteJob implements ShouldQueue
 
     public int $timeout = 50;
 
-    public function __construct(public int $loteId, public int $parte) {}
+    public function __construct(public int $loteId, public int $parte)
+    {
+        // En la cola de las guías: el reporte del corte no espera detrás de SIIGO.
+        $this->onQueue(GenerarGuiasEnBloqueJob::COLA);
+    }
 
     public function handle(ImprimirGuiasDropi $imprimir): void
     {

@@ -24,7 +24,8 @@
 <body>
     <h1>Recolección · {{ $titulo ?? $corte->etiqueta() }}</h1>
     <div class="sub">
-        {{ count($filas) }} referencias · {{ $unidades }} unidades · en el orden del recorrido de la bodega ·
+        @php $porRuta = ($orden ?? \App\Modules\Dropi\Support\RecoleccionDelCorte::POR_CANTIDAD) === \App\Modules\Dropi\Support\RecoleccionDelCorte::POR_RUTA; @endphp
+        {{ count($filas) }} referencias · {{ $unidades }} unidades · {{ $porRuta ? 'en el orden del recorrido de la bodega' : 'de mayor a menor cantidad, con los colores de cada estilo seguidos' }} ·
         generado {{ $generado->format('d/m/Y H:i') }}
     </div>
 
@@ -38,7 +39,7 @@
                     <th style="width: 70px;">Ubicación</th>
                     <th>Producto</th>
                     <th>Variante</th>
-                    <th>SKU</th>
+                    <th>Referencia</th>
                     <th style="width: 40px; text-align: right;">Und.</th>
                 </tr>
             </thead>
@@ -46,7 +47,8 @@
                 @php
                     $zonaActual = false;
                     // Sin ninguna posición repartida en zonas, el encabezado no dice nada.
-                    $hayZonas = collect($filas)->whereNotNull('zona')->isNotEmpty();
+                    // Las zonas sólo agrupan en el orden del recorrido; por cantidad van mezcladas.
+                    $hayZonas = $porRuta && collect($filas)->whereNotNull('zona')->isNotEmpty();
                 @endphp
                 @foreach($filas as $f)
                     @if($hayZonas && $f['zona'] !== $zonaActual)
@@ -58,11 +60,10 @@
                         <td class="ubic">{{ $f['ubicacion_sugerida'] }}</td>
                         <td>
                             <strong>{{ $f['producto'] }}</strong>
-                            @if($f['referencia'] !== '—')<br><span class="sku">Ref. {{ $f['referencia'] }}</span>@endif
                             @if(! ($f['vinculado'] ?? true))<br><span class="sku">sin vincular al ERP</span>@endif
                         </td>
                         <td>{{ $f['variante'] ?: '—' }}</td>
-                        <td class="sku">{{ $f['sku'] }}</td>
+                        <td class="sku">{{ $f['ref_erp'] ?? $f['sku'] }}</td>
                         <td class="und">
                             {{ $f['total_unidades'] }}
                             @if($f['faltan'] > 0)<br><span style="font-size: 8px; font-weight: normal;">faltan {{ $f['faltan'] }}</span>@endif

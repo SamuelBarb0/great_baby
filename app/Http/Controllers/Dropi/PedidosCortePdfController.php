@@ -52,7 +52,8 @@ class PedidosCortePdfController extends Controller
             'pedido' => $p,
             'productos' => $p->items->map(fn (DropiPedidoItem $i) => [
                 'nombre' => self::nombreProducto($i),
-                'sku' => $i->sku_dropi,
+                // Nuestra referencia; sin vínculo, la de Dropi (26-nov-2026).
+                'sku' => $i->referenciaErp() ?? $i->sku_dropi,
                 'cantidad' => (int) $i->cantidad,
             ])->all(),
         ])->all();

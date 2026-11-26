@@ -64,6 +64,28 @@ class Code128
     }
 
     /**
+     * Las barras y espacios seguidos, en módulos: [[true, 2], [false, 1], …].
+     * Para dibujarlas como rectángulos en la etiqueta térmica (26-nov-2026): la
+     * imagen reducida se imprimía punteada y la pistola de empaque no la leía.
+     *
+     * @return list<array{0: bool, 1: int}>
+     */
+    public static function tramos(string $texto): array
+    {
+        $tramos = [];
+        foreach (self::modulos(self::codificable($texto)) as $barra) {
+            $ultimo = array_key_last($tramos);
+            if ($ultimo !== null && $tramos[$ultimo][0] === $barra) {
+                $tramos[$ultimo][1]++;
+            } else {
+                $tramos[] = [$barra, 1];
+            }
+        }
+
+        return $tramos;
+    }
+
+    /**
      * Lo que de verdad va en las barras: Code 128 B no tiene tildes ni eñes, así
      * que «LEÓ» se codifica «LEO». El lector lee «LEO» y la búsqueda por
      * codigo_barras igual encuentra la variante (la columna es utf8mb4_unicode_ci).

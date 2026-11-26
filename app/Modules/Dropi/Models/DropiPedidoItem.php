@@ -72,6 +72,18 @@ class DropiPedidoItem extends Model implements AuditableContract
         return $erp !== '' ? $erp : trim((string) $this->variacion);
     }
 
+    /**
+     * Nuestra referencia (26-nov-2026: bodega no reconoce «DV-922933», reconoce
+     * «2504-17»): el código de la variante del ERP o, si el ítem es de un
+     * producto sin variantes, la referencia del producto. Null sin vínculo.
+     */
+    public function referenciaErp(): ?string
+    {
+        $producto = $this->variante?->producto ?? $this->producto;
+
+        return ($this->variante?->codigo_barras ?: $producto?->referencia) ?: null;
+    }
+
     public function ubicacionAsignada(): BelongsTo
     {
         return $this->belongsTo(InventarioUbicacion::class, 'ubicacion_asignada_id');

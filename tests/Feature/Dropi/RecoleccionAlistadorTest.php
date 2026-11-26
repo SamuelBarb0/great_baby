@@ -262,8 +262,9 @@ it('el PDF de la recolección lo baja el alistador, con casillas y la ruta por z
         ->assertOk()->assertHeader('Content-Type', 'application/pdf');
 
     $html = view('dropi.pdf.recoleccion', [
-        'corte' => $p->corte, 'filas' => app(\App\Modules\Dropi\Support\RecoleccionDelCorte::class)->conMarcasImpresos($p->corte_id),
-        'unidades' => 5, 'generado' => now(),
+        // Por recorrido (lo escoge el alistador): con las zonas de la bodega.
+        'corte' => $p->corte, 'filas' => app(\App\Modules\Dropi\Support\RecoleccionDelCorte::class)->conMarcasImpresos($p->corte_id, 'ruta'),
+        'unidades' => 5, 'generado' => now(), 'orden' => 'ruta',
     ])->render();
     expect($html)->toContain('Zona '.ZonaDeLaBodega::deRack('1'))->toContain('Zona '.ZonaDeLaBodega::deRack('7'))->toContain('R1-A-1')->toContain('R7-A-1')
         ->and(strpos($html, 'Volante'))->toBeLessThan(strpos($html, 'Coche'))
@@ -385,4 +386,45 @@ it('el alistador imprime sólo la hoja de alistamiento, sin los stickers del rep
     Livewire::test(VistaAlistador::class)
         ->assertSeeText('Solo alistamiento')
         ->assertSeeHtml(e(route('dropi.recoleccion.pdf', $p->corte_id)));
+});
+
+it('el alistador, la hoja y el PDF del corte muestran nuestra referencia, no la de Dropi (26-nov-2026)', function () {
+    $p = pedidoEnCorte('G-1', [['DV-555', 1], ['SKU-899', 2], ['DV-SIN-VINCULO', 1]]);
+    $this->actingAs($this->aracely);
+
+    $r = recoleccionPorSku();
+    // La variante va con su código; el agregado, con la referencia del producto.
+    expect($r['DV-555']['ref_erp'])->toBe('7700000000999')
+        ->and($r['SKU-899']['ref_erp'])->toBe('899')
+        ->and($r['DV-SIN-VINCULO']['ref_erp'])->toBeNull();
+
+    Livewire::test(VistaAlistador::class)
+        ->assertSeeText('Referencia')
+        ->assertSeeText('7700000000999')
+        ->assertSeeText('sin vincular al ERP');
+
+    $hoja = app(\App\Modules\Dropi\Support\RecoleccionDelCorte::class)->totalesDe(collect([$p->fresh()->load(['items.variante.producto', 'items.producto'])]));
+    $html = view('dropi.pdf.recoleccion', ['filas' => array_values(array_map(fn ($f) => $f + ['marcada' => false, 'faltan' => 0], $hoja)), 'corte' => $p->corte, 'unidades' => 4, 'generado' => now(), 'lote' => null])->render();
+    expect($html)->toContain('>899<')->not->toContain('>SKU-899<');
+});
+
+it('la recolección va de mayor a menor cantidad con los colores de un estilo seguidos, o por recorrido si se escoge (26-nov-2026)', function () {
+    $coche = Producto::where('referencia', 'COCHE-01')->first();
+    $rojo = ProductoVariante::create(['producto_id' => $coche->id, 'color_codigo' => 'ROJ', 'color_nombre' => 'Rojo', 'codigo_barras' => '7700000000888']);
+    VincularProductoDropi::run('DV-556', $rojo->id);
+    // Volante 3; coche 1 azul + 2 rojos = 3 también, pero el empate lo decide el nombre: Coche antes que Volante.
+    pedidoEnCorte('G-1', [['SKU-899', 3], ['DV-555', 1], ['DV-556', 2]]);
+    pedidoEnCorte('G-2', [['SKU-899', 2]]);
+    $this->actingAs($this->aracely);
+
+    $porCantidad = collect(Livewire::test(VistaAlistador::class)->instance()->recoleccion)->pluck('sku')->all();
+    // Volante (5) primero; el coche después, rojo (2) antes que azul (1), seguidos.
+    expect($porCantidad)->toBe(['SKU-899', 'DV-556', 'DV-555']);
+
+    $c = Livewire::test(VistaAlistador::class)->call('ordenarRecoleccion', 'ruta')->assertSet('ordenRecoleccion', 'ruta');
+    expect($c->instance()->recoleccion)->toHaveCount(3);
+
+    // El PDF sigue el orden escogido.
+    $corte = DropiPedido::where('guia', 'G-1')->first()->corte_id;
+    $this->get(route('dropi.recoleccion.pdf', [$corte, 'orden' => 'ruta']))->assertOk();
 });

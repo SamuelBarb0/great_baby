@@ -23,7 +23,11 @@ class DescargarStickersLoteJob implements ShouldQueue
     public int $timeout = 50;
 
     /** @param  list<int>  $pedidoIds */
-    public function __construct(public int $loteId, public array $pedidoIds) {}
+    public function __construct(public int $loteId, public array $pedidoIds)
+    {
+        // En la cola de las guías: el reporte del corte no espera detrás de SIIGO.
+        $this->onQueue(GenerarGuiasEnBloqueJob::COLA);
+    }
 
     public function handle(ImprimirGuiasDropi $imprimir): void
     {

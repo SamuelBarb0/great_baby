@@ -50,7 +50,8 @@
                                     $varIt = trim(($it->variante?->color_nombre ?? '') . ' ' . ($it->variante?->talla ?? ''));
                                 @endphp
                                 <div style="font-weight:600;">{{ $prodIt?->nombre ?? $it->sku_dropi }}@if($varIt !== '') <span style="font-weight:400;color:#9ca3af;">· {{ $varIt }}</span>@endif</div>
-                                <div style="font-family:ui-monospace,monospace;font-size:.75rem;color:#9ca3af;">{{ $it->sku_dropi }}</div>
+                                {{-- Nuestra referencia primero; la de Dropi, para buscarlo allá. --}}
+                                <div style="font-family:ui-monospace,monospace;font-size:.75rem;color:#9ca3af;">{{ $it->referenciaErp() ?? 'sin vincular al ERP' }} · <span style="font-size:.7rem;">Dropi: {{ $it->sku_dropi }}</span></div>
                                 <div style="font-size:.85rem;color:#9ca3af;">${{ number_format((float) $it->precio_proveedor_unit, 0, ',', '.') }} c/u</div>
                             </div>
                             <div style="font-weight:700;">${{ number_format($it->subtotal(), 0, ',', '.') }}</div>

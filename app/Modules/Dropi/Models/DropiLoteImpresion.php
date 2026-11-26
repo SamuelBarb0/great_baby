@@ -33,6 +33,7 @@ class DropiLoteImpresion extends Model
     protected $casts = [
         'pedidos' => 'array',
         'sin_sticker' => 'array',
+        'resultados' => 'array',
         'partes' => 'array',
         'total' => 'integer',
         'descargados' => 'integer',
@@ -61,6 +62,32 @@ class DropiLoteImpresion extends Model
         $corte = $this->corte ? "Corte {$this->corte->numero} · " . $this->corte->fecha->format('d/m') : "Lote {$this->id} · " . $hora->format('d/m');
 
         return "{$corte} · reporte de las " . $hora->format('g:i a') . " · {$this->total} guía(s)";
+    }
+
+    /**
+     * Qué pasó con la guía de cada pedido (26-nov-2026), por tipo: el ícono, lo
+     * que se le dice a Aracely y qué tiene que hacer. Lo arma GenerarGuiasEnBloqueJob.
+     */
+    public const RESULTADOS = [
+        'generada' => ['icono' => '✅', 'titulo' => 'Guía generada', 'hacer' => null],
+        'ya_tenia' => ['icono' => '↪', 'titulo' => 'Ya tenía guía en Dropi', 'hacer' => 'Nada: se usó la que ya tenía, no se generó otra.'],
+        'cancelado' => ['icono' => '🚫', 'titulo' => 'Cancelado o rechazado en Dropi', 'hacer' => 'No se despacha. Ya quedó cancelado en el ERP.'],
+        'reemplazado' => ['icono' => '🔁', 'titulo' => 'Dropi ya no tiene esta orden (la reemplazó por otra)', 'hacer' => 'No despachar esta: la que vale es la nueva. Ya quedó cancelada en el ERP.'],
+        'sin_cobertura' => ['icono' => '🚚', 'titulo' => 'La transportadora no llega a esa dirección', 'hacer' => 'Cambiar la transportadora o la dirección en Dropi, o cancelar el pedido. Después, incluirlo en el próximo corte.'],
+        'en_otro_estado' => ['icono' => '⏸', 'titulo' => 'En Dropi no está pendiente', 'hacer' => 'Revisar el pedido en Dropi. Ya quedó actualizado en el ERP.'],
+        'sin_inventario' => ['icono' => '📦', 'titulo' => 'No está listo para despachar en el ERP', 'hacer' => 'Revisar el inventario del pedido; cuando esté, incluirlo en el próximo corte.'],
+        'error' => ['icono' => '⚠', 'titulo' => 'Dropi respondió con un error', 'hacer' => 'Incluirlo en el próximo corte para reintentar; si se repite, revisarlo en Dropi.'],
+    ];
+
+    /** Cuántos pedidos de cada tipo, en el orden de RESULTADOS. @return array<string, int> */
+    public function conteoResultados(): array
+    {
+        $porTipo = collect($this->resultados ?? [])->countBy('tipo');
+
+        return collect(array_keys(self::RESULTADOS))
+            ->mapWithKeys(fn ($t) => [$t => (int) ($porTipo[$t] ?? 0)])
+            ->filter()
+            ->all();
     }
 
     /** Dónde se guarda lo del lote (stickers sueltos mientras se arma, y las partes). */

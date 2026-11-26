@@ -38,6 +38,18 @@ function cdePedido(string $orden, ?string $enDropi, string $sku = 'TP', array $c
     return $p;
 }
 
+/**
+ * Lo que Dropi responde HOY por cada orden (26-nov-2026: el job ya no confía en
+ * la huella): el estatus que dice la huella del pedido, o PENDIENTE.
+ */
+function cdeDropiDice(): void
+{
+    test()->partialMock(\App\Modules\Dropi\Clients\DropiWebClient::class, fn ($m) => $m->shouldReceive('pedidoDetalle')->andReturnUsing(fn (int $id) => [
+        'id' => $id, 'name' => 'Ana', 'surname' => '', 'orderdetails' => [],
+        'status' => DB::table('dropi_web_huellas')->where('dropi_orden_id', $id)->value('estatus_dropi') ?? 'PENDIENTE',
+    ]));
+}
+
 /** Un PDF de una página, como el sticker que publica Dropi. */
 function cdeStickerPdf(string $texto): string
 {
@@ -59,12 +71,14 @@ it('«Generar guías» sólo le pide guía a lo que en Dropi sigue PENDIENTE y d
     $yaGenerada = cdePedido('102', 'GUIA_GENERADA');
     $conGuia = cdePedido('103', 'PENDIENTE', cambios: ['guia' => '240099990001']);
 
+    cdeDropiDice();
     $generar = $this->mock(GenerarGuiaDropi::class);
-    $generar->shouldReceive('handle')->once()->withArgs(fn (DropiPedido $p) => $p->id === $pendiente->id)->andReturn([]);
+    // Al pendiente le pide guía; al que ya la tiene, sólo su sticker (entra al reporte).
+    $generar->shouldReceive('handle')->twice()->withArgs(fn (DropiPedido $p) => in_array($p->id, [$pendiente->id, $conGuia->id], true))->andReturn([]);
 
     GenerarGuiasEnBloqueJob::lanzar([$pendiente->id, $yaGenerada->id, $conGuia->id], 7);
 
-    expect(GenerarGuiasEnBloqueJob::avance(7))->toMatchArray(['total' => 3, 'hechas' => 1, 'saltadas' => 2, 'errores' => []]);
+    expect(GenerarGuiasEnBloqueJob::avance(7))->toMatchArray(['total' => 3, 'hechas' => 2, 'saltadas' => 1, 'errores' => []]);
 });
 
 it('sin stock en el ERP también se genera la guía mientras no se exija; con la regla prendida se salta (la señora Lahida, 46:50)', function () {
@@ -73,6 +87,7 @@ it('sin stock en el ERP también se genera la guía mientras no se exija; con la
     DB::table('dropi_pedidos')->where('id', $sinStock->id)->update(['estado' => \App\Modules\Dropi\Enums\EstadoPedidoDropi::PendienteInventario->value]);
 
     // Mientras se carga el inventario del ERP: «que podamos hacer todo».
+    cdeDropiDice();
     $generar = $this->mock(GenerarGuiaDropi::class);
     $generar->shouldReceive('handle')->twice()->andReturn([]);
     GenerarGuiasEnBloqueJob::lanzar([$conStock->id, $sinStock->id], 8);
@@ -90,6 +105,7 @@ it('si Dropi rechaza una guía, las demás siguen y el error queda en el avance'
     $malo = cdePedido('201', 'PENDIENTE');
     $bueno = cdePedido('202', 'PENDIENTE');
 
+    cdeDropiDice();
     $generar = $this->mock(GenerarGuiaDropi::class);
     $generar->shouldReceive('handle')->andReturnUsing(function (DropiPedido $p) use ($malo) {
         if ($p->id === $malo->id) {
@@ -141,6 +157,29 @@ it('ordena las guías para empacar: el producto con más pedidos primero, y dent
     $orden = ImprimirGuiasDropi::ordenar(DropiPedido::with('items')->get())->pluck('id')->all();
 
     expect($orden)->toBe([$cel2->id, $cel1->id, $tapete->id]);
+});
+
+it('la pila va de mayor a menor cantidad y los colores de un estilo quedan seguidos (la señora Lahida, 26-nov-2026)', function () {
+    $carrito = \App\Modules\Dropi\Models\Producto::create(['referencia' => 'CAR-1', 'nombre' => 'Carrito', 'desglose_stock' => true]);
+    $rojo = \App\Modules\Dropi\Models\ProductoVariante::create(['producto_id' => $carrito->id, 'color_codigo' => 'ROJ', 'color_nombre' => 'Rojo', 'codigo_barras' => 'CAR-1-ROJ']);
+    $azul = \App\Modules\Dropi\Models\ProductoVariante::create(['producto_id' => $carrito->id, 'color_codigo' => 'AZU', 'color_nombre' => 'Azul', 'codigo_barras' => 'CAR-1-AZU']);
+    $deColor = function (string $orden, int $varianteId, int $cantidad = 1) {
+        $p = cdePedido($orden, 'GUIA_GENERADA', "SKU-{$varianteId}");
+        $p->items()->update(['variante_id' => $varianteId, 'cantidad' => $cantidad]);
+
+        return $p;
+    };
+    // El tapete suma 3 unidades en un pedido; el carrito, 4 entre rojos y azules.
+    $tapete = cdePedido('411', 'GUIA_GENERADA', 'TAPETE');
+    $tapete->items()->update(['cantidad' => 3]);
+    $azul1 = $deColor('412', $azul->id);
+    $rojo1 = $deColor('413', $rojo->id);
+    $rojo2 = $deColor('414', $rojo->id, 2);
+
+    $orden = ImprimirGuiasDropi::ordenar(DropiPedido::with('items')->get())->pluck('id')->all();
+
+    // Carrito (4) antes que tapete (3); dentro, el rojo (3) antes que el azul (1), seguidos.
+    expect($orden)->toBe([$rojo1->id, $rojo2->id, $azul1->id, $tapete->id]);
 });
 
 it('«Imprimir guías» arma un lote en segundo plano (lista + stickers), marca impresas y avisa lo que no tiene sticker', function () {
@@ -202,6 +241,7 @@ it('las partes del lote sólo las baja quien cambia pedidos en Dropi', function 
 /** GenerarGuiaDropi falso: Dropi asigna la guía y su sticker. */
 function cdeGuiasDeDropi(): void
 {
+    cdeDropiDice();
     test()->mock(GenerarGuiaDropi::class)->shouldReceive('handle')->andReturnUsing(function (DropiPedido $p) {
         $p->forceFill(['guia' => "G-{$p->dropi_orden_id}", 'sticker_path' => "g/{$p->dropi_orden_id}.pdf"])->save();
 
@@ -258,6 +298,7 @@ it('si Dropi rechaza una guía, el reporte sale igual con lo demás y el rechaza
     Http::fake(['stickers.test/*' => Http::response(cdeStickerPdf('x'))]);
     $bien = cdePedido('821', 'PENDIENTE', cambios: ['corte_id' => null]);
     $mal = cdePedido('822', 'PENDIENTE', cambios: ['corte_id' => null]);
+    cdeDropiDice();
     $this->mock(GenerarGuiaDropi::class)->shouldReceive('handle')->andReturnUsing(function (DropiPedido $p) {
         throw_if($p->dropi_orden_id === '822', new \RuntimeException('La dirección no tiene cobertura'));
         $p->forceFill(['guia' => 'G-821', 'sticker_path' => 'g/821.pdf'])->save();

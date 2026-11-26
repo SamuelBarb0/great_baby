@@ -28,6 +28,17 @@ Schedule::command('queue:work --queue=siigo,default --stop-when-empty --max-time
     ->withoutOverlapping(2)
     ->runInBackground();
 
+/*
+ * Las guías y el reporte del corte, en su propio worker (26-nov-2026): el de
+ * arriba se caía cada minuto con un trabajo de SIIGO de 255 intentos y las
+ * guías de las 9:19 no arrancaron en 8 minutos. Cada guía puede tardar hasta
+ * 80 s esperando a Dropi; el candado de 3 min cubre la que quede corriendo.
+ */
+Schedule::command('queue:work --queue=guias,default --stop-when-empty --max-time=55 --tries=1')
+    ->everyMinute()
+    ->withoutOverlapping(3)
+    ->runInBackground();
+
 // §6 diseño Dropi — libera locks vencidos del alistador cada 2 min.
 Schedule::command('dropi:liberar-locks')->everyTwoMinutes()->withoutOverlapping();
 
