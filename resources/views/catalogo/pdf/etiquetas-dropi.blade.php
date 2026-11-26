@@ -35,7 +35,7 @@
         {{-- Cada barra es un rectángulo en su posición exacta (DomPDF descuadra una tabla anidada de 60 celdas). --}}
         .barras { position: relative; margin: 0 auto; }
         .barras div { position: absolute; top: 0; background: #000; }
-        .codigo { font-family: DejaVu Sans Mono, monospace; font-size: 6pt; line-height: 1; margin-top: 0.4mm; }
+        .codigo { font-family: DejaVu Sans Mono, monospace; font-size: 7pt; line-height: 1; margin-top: 0.4mm; }
     </style>
 </head><body>
     @foreach(array_chunk($etiquetas, $rollo['columnas']) as $fila)
@@ -47,8 +47,20 @@
                         @isset($fila[$i])
                             @php $b = $fila[$i]['barras_dibujo']; @endphp
                             <div class="area">
-                                {{-- Dos renglones como máximo: un nombre largo no debe empujar las barras fuera de la etiqueta. --}}
-                                @if(filled($fila[$i]['nombre'] ?? null))<div class="nombre">{{ \Illuminate\Support\Str::limit($fila[$i]['nombre'], 30) }}</div>@endif
+                                {{-- Renglones de ~16 letras: dos, o uno si va el color; más empujaban el código fuera del adhesivo. --}}
+                                @if(filled($fila[$i]['nombre'] ?? null))
+                                    @php
+                                        $caben = filled($fila[$i]['color'] ?? null) ? 1 : 2;
+                                        $renglones = explode("
+", wordwrap(trim($fila[$i]['nombre']), 16, "
+", true));
+                                        if (count($renglones) > $caben) {
+                                            $ultimo = implode(' ', array_slice($renglones, $caben - 1));
+                                            $renglones = [...array_slice($renglones, 0, $caben - 1), mb_strimwidth($ultimo, 0, 16, '...')];
+                                        }
+                                    @endphp
+                                    <div class="nombre">{!! implode('<br>', array_map('e', $renglones)) !!}</div>
+                                @endif
                                 @if(filled($fila[$i]['color'] ?? null))<div class="color">{{ \Illuminate\Support\Str::limit($fila[$i]['color'], 18) }}</div>@endif
                                 <div class="barras" style="width: {{ $b['ancho'] }}mm; height: {{ $b['alto'] }}mm;">
                                     @php $x = $b['silencio']; @endphp
@@ -57,7 +69,7 @@
                                         @php $x += $ancho; @endphp
                                     @endforeach
                                 </div>
-                                <div class="codigo">{{ \App\Support\Code128::codificable($fila[$i]['codigo']) }}</div>
+                                <div class="codigo">{{ \App\Support\Code128::codificable($fila[$i]['impreso'] ?? $fila[$i]['codigo']) }}</div>
                             </div>
                         @endisset
                     </td>

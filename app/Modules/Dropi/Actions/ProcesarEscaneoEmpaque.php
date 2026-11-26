@@ -5,7 +5,9 @@ namespace App\Modules\Dropi\Actions;
 use App\Modules\Dropi\Enums\EstadoPedidoDropi;
 use App\Modules\Dropi\Models\DropiPedido;
 use App\Modules\Dropi\Models\EmpaqueRegistro;
+use App\Modules\Dropi\Models\Producto;
 use App\Modules\Dropi\Models\ProductoVariante;
+use App\Support\CodigoCortoEtiqueta;
 use Illuminate\Support\Facades\DB;
 use Lorisleiva\Actions\Concerns\AsAction;
 
@@ -16,6 +18,35 @@ use Lorisleiva\Actions\Concerns\AsAction;
 class ProcesarEscaneoEmpaque
 {
     use AsAction;
+
+    /**
+     * La variante o el producto agregado de un código escaneado (ya en
+     * mayúsculas): el código de barras de la variante; si no, la REFERENCIA del
+     * agregado (C-F2 R2: no tienen barcode propio, el operador escanea/tipea la
+     * ref); si no, el código corto de la etiqueta cuyo código real no cabía en
+     * el adhesivo (CodigoCortoEtiqueta), con las mismas reglas.
+     *
+     * @return array{0: ?ProductoVariante, 1: ?Producto}
+     */
+    public static function productoDelCodigo(string $codigo, bool $soloActivos = true): array
+    {
+        $agregado = fn () => Producto::query()
+            ->where('desglose_stock', false)
+            ->when($soloActivos, fn ($q) => $q->where('activo', true));
+
+        $variante = ProductoVariante::where('codigo_barras', $codigo)->first();
+        $producto = $variante ? null : $agregado()->where('referencia', $codigo)->first();
+
+        if (! $variante && ! $producto && ($corto = CodigoCortoEtiqueta::leer($codigo))) {
+            if ($corto['tipo'] === 'variante') {
+                $variante = ProductoVariante::find($corto['id']);
+            } else {
+                $producto = $agregado()->whereKey($corto['id'])->first();
+            }
+        }
+
+        return [$variante, $producto];
+    }
 
     /**
      * @return array{
@@ -131,20 +162,8 @@ class ProcesarEscaneoEmpaque
                 ];
             }
 
-            // 2. ¿Es un código de variante? (necesita pedido activo)
-            $variante = ProductoVariante::where('codigo_barras', $codigo)->first();
-
-            // C-F2 R2 · Si no coincide con variante, intentar como REFERENCIA de
-            //   producto agregado. Los productos agregados no tienen barcode
-            //   propio en producto_variantes; el operador escanea/tipea la ref.
-            $productoAgregado = null;
-            if (! $variante) {
-                $productoAgregado = \App\Modules\Dropi\Models\Producto::query()
-                    ->where('desglose_stock', false)
-                    ->where('activo', true)
-                    ->where('referencia', $codigo)
-                    ->first();
-            }
+            // 2. ¿Es un código de variante o de producto agregado? (necesita pedido activo)
+            [$variante, $productoAgregado] = self::productoDelCodigo($codigo);
 
             if (! $variante && ! $productoAgregado) {
                 return [

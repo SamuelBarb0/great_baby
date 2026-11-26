@@ -88,6 +88,22 @@ it('Code 128 calcula el control como dice la norma y arranca y termina bien', fu
     expect(substr(Code128::png('AB-0085'), 1, 3))->toBe('PNG');
 });
 
+it('Code 128 manda las tiradas largas de dígitos en el juego C, de a dos (26-nov-2026)', function () {
+    // «5907B»: inicio C, 59, 07, cambio a B, «B». 105 + 59·1 + 7·2 + 100·3 + 34·4 = 614; 614 mod 103 = 99.
+    expect(Code128::simbolos('5907B'))->toBe([105, 59, 7, 100, 34, 99, 106]);
+
+    // Tirada impar al inicio: el primer dígito va en B y el resto en C.
+    // 104 + 17·1 + 99·2 + 23·3 + 45·4 = 568; 568 mod 103 = 53.
+    expect(Code128::simbolos('12345'))->toBe([104, 17, 99, 23, 45, 53, 106]);
+
+    // En medio, desde 6 dígitos (ida y vuelta cuesta dos símbolos); menos, sigue en B.
+    expect(Code128::simbolos('AB123456C'))->toBe([104, 33, 34, 99, 12, 34, 56, 100, 35, (104 + 33 + 34 * 2 + 99 * 3 + 12 * 4 + 34 * 5 + 56 * 6 + 100 * 7 + 35 * 8) % 103, 106])
+        ->and(Code128::simbolos('AB12345C'))->toBe([104, 33, 34, 17, 18, 19, 20, 21, 35, (104 + 33 + 34 * 2 + 17 * 3 + 18 * 4 + 19 * 5 + 20 * 6 + 21 * 7 + 35 * 8) % 103, 106]);
+
+    // Y sale más angosto: 5 caracteres en B son 90 módulos; con C, 79.
+    expect(count(Code128::modulos('5907B')))->toBe(79);
+});
+
 it('Code 128 rechaza lo que no sabe codificar', function () {
     Code128::simbolos('niño');
 })->throws(InvalidArgumentException::class);

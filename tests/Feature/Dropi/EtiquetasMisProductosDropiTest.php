@@ -81,9 +81,11 @@ it('el PDF lleva el código del ERP: el de la variante o la referencia del agreg
     $this->actingAs($this->aracely);
 
     $vistas = [];
+    $impresos = [];
     $conQr = [];
-    \Illuminate\Support\Facades\View::composer('catalogo.pdf.etiquetas-dropi', function ($v) use (&$vistas, &$conQr) {
+    \Illuminate\Support\Facades\View::composer('catalogo.pdf.etiquetas-dropi', function ($v) use (&$vistas, &$impresos, &$conQr) {
         $vistas[] = array_column($v->getData()['etiquetas'], 'codigo');
+        $impresos[] = array_column($v->getData()['etiquetas'], 'impreso');
         $conQr[] = collect($v->getData()['etiquetas'])->contains(fn ($e) => isset($e['qr']));
     });
 
@@ -98,6 +100,10 @@ it('el PDF lleva el código del ERP: el de la variante o la referencia del agreg
         ->and($vistas[1])->toBe(['899'])
         // Las de Dropi llevan el nombre y el código de barras: ni QR se genera.
         ->and($conQr)->toBe([false, false]);
+
+    // En las barras: el de la variante (23 letras) no cabe en el adhesivo y va su
+    // código corto, que la estación de empaque también reconoce; «899» sí cabe.
+    expect($impresos)->toBe([['GBV' . $this->variante->id], ['899']]);
 });
 
 it('las etiquetas de Dropi llevan el nombre y el código de barras; las del catálogo siguen completas', function () {
@@ -116,7 +122,7 @@ it('las etiquetas de Dropi llevan el nombre y el código de barras; las del cat�
         ['codigo' => '900', 'barras_dibujo' => $barras('900'), 'nombre' => str_repeat('Gimnasio musical ', 5)],
         ['codigo' => '901', 'barras_dibujo' => $barras('901'), 'nombre' => null],
     ]])->render();
-    expect($largo)->toContain('Gimnasio musical Gimnasio musi...')->not->toContain(str_repeat('Gimnasio musical ', 2))
+    expect($largo)->toContain('Gimnasio musical<br>Gimnasio musi...')->not->toContain(str_repeat('Gimnasio musical ', 2))
         ->and(substr_count($largo, 'class="nombre"'))->toBe(1);
 
     $catalogo = view('catalogo.pdf.etiquetas-lote', ['etiquetas' => [['codigo' => '899', 'barras' => 'data:image/png;base64,AAA', 'qr' => 'data:image/png;base64,BBB', 'nombre' => 'VOLANTE', 'detalle' => 'Azul', 'precio' => 12000]]])->render();
@@ -134,6 +140,23 @@ it('las barras van en la cuadrícula de la térmica: un módulo = un punto de 0,
 
     // Uno larguísimo se angosta lo justo para caber en el adhesivo.
     expect(\App\Http\Controllers\Catalogo\EtiquetasMasivasController::barrasDibujadas(str_repeat('AB', 20), false)['ancho'])->toEqualWithDelta(26.0, 0.001);
+});
+
+it('las barras usan el ancho que les cabe: rayas de 2 puntos si caben; si ni con 1 cabe, va el código corto (26-nov-2026)', function () {
+    $C = \App\Http\Controllers\Catalogo\EtiquetasMasivasController::class;
+
+    // «5907B» (la abeja del video): con el juego C caben rayas de 2 puntos (0,25 mm).
+    $abeja = $C::barrasDibujadas('5907B', false);
+    expect(min(array_column($abeja['tramos'], 1)))->toBe(0.25)
+        ->and($abeja['ancho'])->toBe(24.75)
+        ->and($abeja['silencio'])->toBe(2.5)
+        ->and($abeja['alto'])->toBe(10);
+
+    // Hasta 13 letras caben con 1 punto; los de la mitad de las variantes (16 a 24) no.
+    expect($C::cabe('7701234567890'))->toBeTrue()
+        ->and($C::cabe('ABCDEFGHIJKLM'))->toBeTrue()
+        ->and($C::cabe('AND2507-94/800-05ELF-18M'))->toBeFalse()
+        ->and($C::barrasDibujadas('GBV123', true)['alto'])->toBe(7);
 });
 
 it('sin vínculo no hay etiqueta, y sin permiso no se imprime', function () {

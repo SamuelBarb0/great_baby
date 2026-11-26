@@ -255,8 +255,7 @@ class EstacionEmpaque extends Page
     private function abrirPorProducto(string $codigo): ?array
     {
         $codigo = strtoupper(trim($codigo)); // como ProcesarEscaneoEmpaque
-        $variante =\App\Modules\Dropi\Models\ProductoVariante::where('codigo_barras', $codigo)->first();
-        $producto = $variante ? null : \App\Modules\Dropi\Models\Producto::where('desglose_stock', false)->where('referencia', $codigo)->first();
+        [$variante, $producto] = ProcesarEscaneoEmpaque::productoDelCodigo($codigo, soloActivos: false);
         $pedido = app(ColaDeEmpaque::class)->siguienteCon((int) auth()->id(), $variante?->id, $producto?->id);
         if (! $pedido) {
             return null;

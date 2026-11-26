@@ -188,6 +188,26 @@ it('escanear un producto sin pedido abierto abre el pedido que lo lleva y lo mar
         ->and((int) $tapete->items()->first()->cantidad_pickeada)->toBe(1);
 });
 
+it('el código corto de la etiqueta (GBP/GBV) abre el pedido y marca el producto, como su código real (26-nov-2026)', function () {
+    $tapete = erPedido('ER-35', 'ER-TAP', '2026-11-24 09:00');
+    $producto = Producto::where('referencia', 'ER-TAP')->firstOrFail();
+
+    $this->actingAs($this->empacador);
+    Livewire::test(EstacionEmpaque::class)
+        ->set('codigo', 'gbp' . $producto->id)
+        ->call('escanear')
+        ->assertSet('pedidoActivoId', $tapete->id);
+
+    expect((int) $tapete->items()->first()->cantidad_pickeada)->toBe(1);
+
+    // El de una variante también, y uno que no existe no se confunde con nada.
+    $body = Producto::create(['referencia' => 'ER-BODY', 'nombre' => 'Body', 'desglose_stock' => true, 'activo' => true]);
+    $azul = \App\Modules\Dropi\Models\ProductoVariante::create(['producto_id' => $body->id, 'color_nombre' => 'Azul', 'codigo_barras' => 'AND2507-94/800-05ELF-18M']);
+    expect(\App\Modules\Dropi\Actions\ProcesarEscaneoEmpaque::productoDelCodigo('GBV' . $azul->id)[0]?->id)->toBe($azul->id)
+        ->and(\App\Modules\Dropi\Actions\ProcesarEscaneoEmpaque::productoDelCodigo('GBV999999'))->toBe([null, null])
+        ->and(\App\Modules\Dropi\Actions\ProcesarEscaneoEmpaque::productoDelCodigo('GBP' . $body->id))->toBe([null, null]);
+});
+
 it('al confirmar se abre solo el siguiente de la cola', function () {
     $a = erPedido('ER-40', 'ER-VOL', '2026-11-24 09:00');
     $b = erPedido('ER-41', 'ER-VOL', '2026-11-24 09:05');

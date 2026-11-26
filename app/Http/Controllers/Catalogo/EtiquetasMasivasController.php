@@ -9,6 +9,7 @@ use App\Modules\Dropi\Models\Producto;
 use App\Modules\Dropi\Models\ProductoVariante;
 use App\Modules\Dropi\Services\CatalogoDropi;
 use App\Support\Code128;
+use App\Support\CodigoCortoEtiqueta;
 use Barryvdh\DomPDF\Facade\Pdf;
 use chillerlan\QRCode\QRCode;
 use chillerlan\QRCode\QROptions;
@@ -36,19 +37,26 @@ class EtiquetasMasivasController extends Controller
     private const AREA_DROPI = ['ancho' => 26, 'alto' => 20];
 
     /**
-     * Ancho de un módulo del código (mm): un punto de la térmica de 203 ppp.
-     * Dibujadas así, las barras salen sólidas; la imagen reducida salía punteada
-     * y la pistola de empaque no la leía (video del 26-nov-2026).
+     * Un punto de la térmica de 203 ppp (mm). Cada módulo del código mide un
+     * número entero de puntos para que las barras salgan sólidas: la imagen
+     * reducida salía punteada y la pistola no la leía (video del 26-nov-2026).
      */
-    private const MODULO_MM = 0.125;
+    private const PUNTO_MM = 0.125;
+
+    /**
+     * Hasta cuántos puntos por módulo. Con uno ya leían, pero se veían
+     * diminutas (video de las 5:45 pm del 26-nov-2026): el código usa el ancho
+     * que le quepa.
+     */
+    private const PUNTOS_MAX = 3;
 
     /** Blanco a cada lado de las barras, en módulos: sin él el lector no sabe dónde empieza. */
     private const SILENCIO_MODULOS = 10;
 
     /** Alto de las barras (mm) dentro del área, sin y con el renglón del color. */
-    private const BARRAS_ALTO_DROPI = 8.5;
+    private const BARRAS_ALTO_DROPI = 10;
 
-    private const BARRAS_ALTO_DROPI_CON_COLOR = 5;
+    private const BARRAS_ALTO_DROPI_CON_COLOR = 7;
 
     public function pdf(Request $request, CatalogoDropi $catalogo): Response
     {
@@ -255,6 +263,7 @@ class EtiquetasMasivasController extends Controller
             ]))),
             'precio' => (float) ($v->producto?->precio_proveedor ?? 0),
             'codigo' => $v->codigo_barras,
+            'corto' => CodigoCortoEtiqueta::deVariante($v->id),
         ];
     }
 
@@ -273,6 +282,7 @@ class EtiquetasMasivasController extends Controller
             'color' => $variacion,
             'precio' => (float) ($p->precio_proveedor ?? 0),
             'codigo' => $p->referencia,
+            'corto' => CodigoCortoEtiqueta::deProducto($p->id),
         ];
     }
 
@@ -335,7 +345,9 @@ class EtiquetasMasivasController extends Controller
                 $e['qr'] = (new QRCode($qrOpts))->render($e['codigo']);
             }
             if ($soloBarras) {
-                $e['barras_dibujo'] = self::barrasDibujadas($e['codigo'], filled($e['color'] ?? null));
+                // Lo que va en las barras: el código del ERP, o el corto si aquel no cabe en el adhesivo.
+                $e['impreso'] = self::cabe($e['codigo']) || blank($e['corto'] ?? null) ? $e['codigo'] : $e['corto'];
+                $e['barras_dibujo'] = self::barrasDibujadas($e['impreso'], filled($e['color'] ?? null));
 
                 continue;
             }
@@ -358,19 +370,32 @@ class EtiquetasMasivasController extends Controller
             ->stream($archivo . '-' . now()->format('Ymd-His') . '.pdf');
     }
 
+    /** Módulos del código con su blanco a los lados. */
+    private static function modulosConSilencio(string $codigo): int
+    {
+        return array_sum(array_column(Code128::tramos($codigo), 1)) + 2 * self::SILENCIO_MODULOS;
+    }
+
+    /** ¿Cabe el código en el adhesivo con rayas de al menos un punto? */
+    public static function cabe(string $codigo): bool
+    {
+        return self::modulosConSilencio($codigo) * self::PUNTO_MM <= self::AREA_DROPI['ancho'];
+    }
+
     /**
      * Las barras de la etiqueta de Dropi como tramos en mm, para dibujarlas con
-     * rectángulos: cada módulo es un punto de la impresora. Un código tan largo
-     * que no quepa en el área se angosta lo justo (los módulos dejan de caer en
-     * la cuadrícula de puntos, pero siguen siendo sólidos).
+     * rectángulos: cada módulo mide los puntos enteros de la impresora que
+     * quepan (de 1 a 3). Un código que no cabe ni con uno se angosta lo justo
+     * (deja de caer en la cuadrícula); por eso la etiqueta usa el código corto.
      *
      * @return array{tramos: list<array{0: bool, 1: float}>, silencio: float, ancho: float, alto: float}
      */
     public static function barrasDibujadas(string $codigo, bool $conColor): array
     {
         $tramos = Code128::tramos($codigo);
-        $modulos = array_sum(array_column($tramos, 1)) + 2 * self::SILENCIO_MODULOS;
-        $modulo = min(self::MODULO_MM, self::AREA_DROPI['ancho'] / $modulos);
+        $modulos = self::modulosConSilencio($codigo);
+        $puntos = (int) min(self::PUNTOS_MAX, floor(self::AREA_DROPI['ancho'] / ($modulos * self::PUNTO_MM)));
+        $modulo = $puntos >= 1 ? $puntos * self::PUNTO_MM : self::AREA_DROPI['ancho'] / $modulos;
 
         return [
             'tramos' => array_map(fn ($t) => [$t[0], round($t[1] * $modulo, 4)], $tramos),

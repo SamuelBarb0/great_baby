@@ -28,21 +28,67 @@ class Code128
 
     private const INICIO_B = 104;
 
+    private const INICIO_C = 105;
+
+    /** Cambio de juego dentro del código: desde B a C, y desde C a B. */
+    private const A_C = 99;
+
+    private const A_B = 100;
+
     private const FIN = 106;
 
-    /** @return list<int> símbolos: inicio, datos, control y fin */
+    /**
+     * Símbolos: inicio, datos, control y fin. Las tiradas largas de dígitos van
+     * en el juego C, de a dos por símbolo (26-nov-2026: el código quedaba tan
+     * ancho que en el adhesivo de 29 mm solo cabía con rayas de un punto). El
+     * lector devuelve el mismo texto: el juego es cosa de las barras.
+     *
+     * @return list<int>
+     */
     public static function simbolos(string $texto): array
     {
         if ($texto === '' || preg_match('/[^\x20-\x7E]/', $texto)) {
             throw new InvalidArgumentException("El código «{$texto}» tiene caracteres que Code 128 B no admite.");
         }
 
-        $simbolos = [self::INICIO_B];
-        $control = self::INICIO_B;
-        foreach (str_split($texto) as $i => $c) {
-            $valor = ord($c) - 32;
-            $simbolos[] = $valor;
-            $control += $valor * ($i + 1);
+        $simbolos = [];
+        $juego = null;
+        $enB = function (string $c) use (&$simbolos, &$juego): void {
+            if ($juego !== 'B') {
+                $simbolos[] = $juego === null ? self::INICIO_B : self::A_B;
+                $juego = 'B';
+            }
+            $simbolos[] = ord($c) - 32;
+        };
+
+        $largo = strlen($texto);
+        $i = 0;
+        while ($i < $largo) {
+            $digitos = strspn($texto, '0123456789', $i);
+            // Cambiar de juego cuesta un símbolo: al inicio o al final del código
+            // compensa desde 4 dígitos; en medio (ida y vuelta), desde 6.
+            $minimo = ($i === 0 || $i + $digitos === $largo) ? 4 : 6;
+            if ($digitos < $minimo) {
+                $enB($texto[$i++]);
+
+                continue;
+            }
+            if ($digitos % 2 === 1) {
+                $enB($texto[$i++]);
+                $digitos--;
+            }
+            if ($juego !== 'C') {
+                $simbolos[] = $juego === null ? self::INICIO_C : self::A_C;
+                $juego = 'C';
+            }
+            for ($fin = $i + $digitos; $i < $fin; $i += 2) {
+                $simbolos[] = (int) substr($texto, $i, 2);
+            }
+        }
+
+        $control = $simbolos[0];
+        foreach (array_slice($simbolos, 1) as $posicion => $valor) {
+            $control += $valor * ($posicion + 1);
         }
         $simbolos[] = $control % 103;
         $simbolos[] = self::FIN;
