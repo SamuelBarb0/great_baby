@@ -229,7 +229,7 @@ it('la cola de empaque va en el orden de la pila de stickers, como la Estación 
     expect(Livewire::test(VistaAlistador::class)->instance()->empaque->pluck('guia')->all())->toBe(['G-1', 'G-2']);
 });
 
-it('sin un corte generado la vista no deja empezar y dice qué falta; con dos cortes se trabajan por separado', function () {
+it('sin un corte generado la vista no deja empezar; con un corte nuevo, el alistador sólo ve ese (26-nov-2026)', function () {
     // De mañana: el Corte 2 de abajo es de las 3 pm, y corrido después de esa hora
     //   el primero también caía en él (el test dependía del reloj).
     $this->travelTo(CarbonImmutable::today()->setTime(9, 0));
@@ -237,19 +237,20 @@ it('sin un corte generado la vista no deja empezar y dice qué falta; con dos co
     Livewire::test(VistaAlistador::class)->assertSeeText('Todavía no hay guías impresas')->assertSet('corteId', null);
 
     $a = pedidoEnCorte('G-1', [['SKU-899', 3]]);
-    // El Corte 2 del día, generado por la tarde.
-    $tarde = \App\Modules\Dropi\Actions\AsignarCorteACarga::run(CarbonImmutable::now()->setTime(15, 0));
-    $b = pedidoEnCorte('G-2', [['DV-555', 2]]);
-    DropiPedido::whereKey($b->id)->update(['corte_id' => $tarde->id]);
-
     $vista = Livewire::test(VistaAlistador::class)->assertSet('corteId', $a->corte_id);
     expect(array_column($vista->instance()->recoleccion, 'sku'))->toBe(['SKU-899']);
-    $vista->call('marcarRecogido', 'SKU-899');
 
-    // El otro corte tiene su propia suma y sus propias marcas.
-    $vista->call('escogerCorte', $tarde->id);
-    expect(array_column($vista->instance()->recoleccion, 'sku'))->toBe(['DV-555'])
-        ->and(collect($vista->instance()->recoleccion)->firstWhere('sku', 'DV-555')['marcada'])->toBeFalse();
+    // Aracely genera el Corte 2 por la tarde: aunque el 1 tenga pendientes, el alistador ve sólo el nuevo.
+    $tarde = \App\Modules\Dropi\Actions\AsignarCorteACarga::run(CarbonImmutable::now()->setTime(15, 0));
+    $lote = DropiLoteImpresion::create(['corte_id' => $tarde->id, 'pedidos' => [], 'total' => 0, 'estado' => DropiLoteImpresion::GENERANDO_GUIAS]);
+    $b = pedidoEnCorte('G-2', [['DV-555', 2]]);
+    DropiPedido::whereKey($b->id)->update(['corte_id' => $tarde->id, 'lote_impresion_id' => $lote->id]);
+
+    $vista = Livewire::test(VistaAlistador::class)->assertSet('corteId', $tarde->id);
+    expect($vista->instance()->cortes->pluck('id')->all())->toBe([$tarde->id])
+        ->and(array_column($vista->instance()->recoleccion, 'sku'))->toBe(['DV-555']);
+    // Al otro corte no se puede saltar.
+    $vista->call('escogerCorte', $a->corte_id)->assertSet('corteId', $tarde->id);
 });
 
 it('el PDF de la recolección lo baja el alistador, con casillas y la ruta por zonas', function () {

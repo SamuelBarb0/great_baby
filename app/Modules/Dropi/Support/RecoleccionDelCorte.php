@@ -186,19 +186,23 @@ class RecoleccionDelCorte
     }
 
     /**
-     * Los cortes generados que todavía tienen algo impreso por empacar, el más
-     * viejo primero: lo que la Vista del Alistador ofrece. Sin ninguno, no hay
-     * nada que recoger hasta que Aracely genere un corte.
+     * El corte que la Vista del Alistador trabaja: el del último reporte que
+     * generó Aracely, mientras no esté finalizado, aunque todavía esté
+     * generando sus guías. Uno solo (la señora Lahida, 26-nov-2026): los
+     * cortes anteriores se apilaban en el alistador. Sin reporte, no hay nada
+     * que recoger hasta que Aracely genere un corte.
      *
      * @return \Illuminate\Database\Eloquent\Collection<int, DropiCorte>
      */
     public function cortesEnTrabajo(): \Illuminate\Database\Eloquent\Collection
     {
-        return DropiCorte::query()
-            ->where('estado', '!=', \App\Modules\Dropi\Enums\EstadoCorte::Cerrado->value)
-            ->whereHas('pedidos', fn ($q) => $q->whereNotNull('lote_impresion_id')->whereIn('estado', DropiPedido::estadosDespachables()))
-            ->orderBy('fecha')->orderBy('numero')
-            ->get();
+        $ultimo = \App\Modules\Dropi\Models\DropiLoteImpresion::query()
+            ->whereNotNull('corte_id')
+            ->whereHas('corte', fn ($q) => $q->where('estado', '!=', \App\Modules\Dropi\Enums\EstadoCorte::Cerrado->value))
+            ->latest('id')
+            ->first();
+
+        return DropiCorte::query()->whereKey($ultimo?->corte_id ?? 0)->get();
     }
 
     /**
