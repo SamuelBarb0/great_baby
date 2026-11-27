@@ -197,7 +197,7 @@ class RecoleccionDelCorte
     {
         $pedidos = DropiPedido::query()->where('corte_id', $corteId)->whereNotNull('lote_impresion_id')
             ->whereIn('estado', [EstadoPedidoDropi::Empacado, EstadoPedidoDropi::Despachado, EstadoPedidoDropi::Entregado, EstadoPedidoDropi::Pagado])
-            ->with(['items.variante.producto', 'items.producto'])->get();
+            ->with(['items.variante.producto', 'items.producto', 'items.vinculo'])->get();
         $registros = \App\Modules\Dropi\Models\EmpaqueRegistro::query()->whereIn('pedido_id', $pedidos->pluck('id'))->where('estado', 'completado')
             ->with('operario:id,name')->orderByDesc('fin_at')->get()->unique('pedido_id')->keyBy('pedido_id');
 

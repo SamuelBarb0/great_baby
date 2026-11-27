@@ -6,10 +6,15 @@
     @endphp
 
     <style>
-        @media (max-width: 900px) {
-            .estacion-panel-top { grid-template-columns: 1fr !important; }
-            /* Las dos métricas lado a lado: apiladas empujaban el pedido activo fuera de la pantalla. */
-            .estacion-metricas { grid-template-rows: none !important; grid-template-columns: 1fr 1fr; }
+        /* Dos columnas: el trabajo y, a la derecha, el panel del corte (27-nov-2026). */
+        .estacion-layout { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 1rem; align-items: start; }
+        .estacion-lateral { position: sticky; top: 1rem; max-height: calc(100vh - 2rem); overflow-y: auto; }
+        @media (max-width: 1535px) { .estacion-layout { grid-template-columns: minmax(0, 1fr) 360px; } }
+        /* Con el menú de Filament al lado, por debajo de 1280 px la columna del
+           pedido quedaba apretada: una columna y el panel debajo. */
+        @media (max-width: 1279px) {
+            .estacion-layout { grid-template-columns: 1fr; }
+            .estacion-lateral { position: static; max-height: none; }
         }
         /* Celular: el campo del escáner se lee completo (a 1.5rem se cortaba el texto guía). */
         @media (max-width: 480px) {
@@ -17,8 +22,12 @@
             .estacion-camara-texto { display: none; }
         }
     </style>
-    {{-- Panel superior: escáner + métricas en vivo --}}
-    <div class="estacion-panel-top" style="display:grid;grid-template-columns:1.4fr 1fr;gap:1rem;">
+    {{-- Dos columnas (27-nov-2026: «organizar mejor este UI»): a la izquierda el
+         trabajo —escáner y pedido abierto—, a la derecha el panel con pestañas. --}}
+    <div class="estacion-layout">
+    <div class="estacion-trabajo" style="min-width:0;">
+    {{-- Panel superior: escáner --}}
+    <div class="estacion-panel-top">
 
         {{-- Escáner --}}
         <div data-scanner-panel style="padding:1.5rem;background:linear-gradient(135deg,#111827,#1f2937);border:2px solid rgba(180,83,9,.4);border-radius:1rem;box-shadow:0 8px 32px rgba(180,83,9,.15);">
@@ -81,27 +90,20 @@
                 <div style="margin-top:.75rem;padding:.75rem 1rem;border-radius:.5rem;font-weight:600;
                     background:{{ $ultimoResultado['sonido']==='ok' ? 'rgba(16,185,129,.15)' : ($ultimoResultado['sonido']==='warn' ? 'rgba(245,158,11,.15)' : 'rgba(239,68,68,.15)') }};
                     color:{{ $ultimoResultado['sonido']==='ok' ? '#10b981' : ($ultimoResultado['sonido']==='warn' ? '#f59e0b' : '#ef4444') }};
-                    border-left:3px solid currentColor;">
-                    {{ $ultimoResultado['mensaje'] }}
+                    border-left:3px solid currentColor;display:flex;flex-wrap:wrap;align-items:center;gap:.5rem 1rem;">
+                    <span style="flex:1;min-width:12rem;">{{ $ultimoResultado['mensaje'] }}</span>
+                    {{-- Guía ya empacada (27-nov-2026): su guía a la mano para reimprimirla. --}}
+                    @if(! empty($ultimoResultado['reimprimir']))
+                        <button type="button" tabindex="-1" onmousedown="event.preventDefault()"
+                                onclick="window.gbImprimirSticker(@js($ultimoResultado['reimprimir']))"
+                                style="min-height:44px;padding:.45rem 1rem;background:#15803d;color:#fff;border:0;border-radius:.5rem;font-weight:700;font-size:.95rem;cursor:pointer;">
+                            🖨 Reimprimir guía
+                        </button>
+                    @endif
                 </div>
             @endif
         </div>
 
-        {{-- Métricas del día --}}
-        <div class="estacion-metricas" style="display:grid;grid-template-rows:1fr 1fr;gap:.75rem;">
-            <div style="padding:1rem 1.25rem;background:rgba(16,185,129,.1);border-left:4px solid #10b981;border-radius:.75rem;">
-                <div style="font-size:.7rem;color:#9ca3af;text-transform:uppercase;">Empacados hoy</div>
-                <div style="font-size:2.5rem;font-weight:800;color:#10b981;line-height:1;">{{ $m['mis_empaques_hoy'] }}</div>
-                <div style="font-size:.75rem;color:#9ca3af;">Promedio: {{ $m['promedio_display'] }}</div>
-            </div>
-            <div style="padding:1rem 1.25rem;background:rgba(59,130,246,.1);border-left:4px solid #3b82f6;border-radius:.75rem;">
-                <div style="font-size:.7rem;color:#9ca3af;text-transform:uppercase;">Mejor tiempo hoy</div>
-                <div style="font-size:2rem;font-weight:800;color:#3b82f6;line-height:1.1;">
-                    @if($m['mejor_tiempo_seg']>0){{ gmdate('i:s', $m['mejor_tiempo_seg']) }}@else—@endif
-                </div>
-                <div style="font-size:.75rem;color:#9ca3af;">min:seg</div>
-            </div>
-        </div>
     </div>
 
     {{-- Pedido activo --}}
@@ -253,16 +255,40 @@
             </div>
         </div>
     @endif
+    </div>{{-- /estacion-trabajo --}}
 
+    {{-- Panel lateral: el corte (con su búsqueda), mis stickers y el equipo. Las
+         pestañas no se quedan con el foco: la pistola sigue escribiendo en el escáner. --}}
+    @php $stickers = $this->misStickers(); @endphp
+    <aside class="estacion-lateral"
+           x-data="{ tab: (() => { try { return localStorage.getItem('gb.estacion.tab') || 'corte' } catch (e) { return 'corte' } })() }"
+           x-effect="try { localStorage.setItem('gb.estacion.tab', tab) } catch (e) {}">
+        <div role="tablist" aria-label="Panel de la estación" style="display:grid;grid-template-columns:repeat(3,1fr);gap:.35rem;margin-bottom:.75rem;padding:.35rem;background:#0f172a;border-radius:.8rem;">
+            @foreach(['corte' => '📦 Corte', 'stickers' => '🏷 Stickers · ' . count($stickers), 'equipo' => '🏆 Equipo'] as $clave => $texto)
+                <button type="button" role="tab" tabindex="-1"
+                        onmousedown="event.preventDefault()"
+                        x-on:click="tab = '{{ $clave }}'"
+                        :aria-selected="tab === '{{ $clave }}'"
+                        :style="tab === '{{ $clave }}'
+                            ? 'background:#1f2937;color:#f1f5f9;border-color:#f59e0b;'
+                            : 'background:transparent;color:#cbd5e1;border-color:rgba(156,163,175,.3);'"
+                        style="min-height:48px;padding:.5rem .4rem;border:1px solid;border-radius:.6rem;font-weight:700;font-size:.85rem;white-space:nowrap;cursor:pointer;">
+                    {{ $texto }}
+                </button>
+            @endforeach
+        </div>
+
+        <div x-show="tab === 'corte'" role="tabpanel">
     {{-- El avance del corte en vivo (27-nov-2026): su propio componente, para que
          refrescarlo no toque el campo de la pistola. --}}
     @livewire(\App\Livewire\AvanceCorteEmpaque::class)
+        </div>
 
+        <div x-show="tab === 'stickers'" x-cloak role="tabpanel">
     {{-- Lo empacado hoy por este operario, con su guía de Dropi: el sticker se
          imprime desde aquí aunque la página se haya recargado (24-nov-2026). --}}
-    @php $stickers = $this->misStickers(); @endphp
     @if(!empty($stickers))
-        <div style="margin-top:1rem;padding:1rem 1.25rem;background:#111827;border:1px solid rgba(16,185,129,.35);border-radius:1rem;">
+        <div style="padding:1rem 1.25rem;background:#111827;border:1px solid rgba(16,185,129,.35);border-radius:1rem;">
             <div style="font-size:.75rem;color:#10b981;text-transform:uppercase;letter-spacing:2px;font-weight:700;margin-bottom:.6rem;">
                 🏷 Mis stickers de hoy ({{ count($stickers) }})
             </div>
@@ -289,44 +315,62 @@
                 </div>
             @endforeach
         </div>
-    @endif
-
-    {{-- Cola de corte: lo que Aracely genera e imprime va apareciendo aquí, en el
-         orden de los stickers (25-nov-2026). Es una isla de Livewire: se refresca
-         sola cada 5 s sin tocar el pedido activo ni la casilla del escáner; con
-         `always` también se refresca cuando la estación entera se actualiza. --}}
-    @island(name: 'cola-de-corte', always: true)
-        @php
-            $cola = $this->proximosPedidos(6);
-            $porEmpacar = app(\App\Modules\Dropi\Support\ColaDeEmpaque::class)->contar((int) auth()->id())
-                - ($this->pedidoActivoId ? 1 : 0);
-            $cortes = collect($cola)->pluck('corte')->filter()->unique()->values();
-        @endphp
-        <div wire:poll.5s style="margin-top:1rem;padding:1rem 1.25rem;background:#111827;border:1px solid rgba(59,130,246,.35);border-radius:1rem;">
-            <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:.5rem;margin-bottom:.6rem;">
-                <div style="font-size:.75rem;color:#3b82f6;text-transform:uppercase;letter-spacing:2px;font-weight:700;">
-                    📦 Cola de corte @if($cortes->isNotEmpty())· {{ $cortes->join(' / ') }}@endif
-                </div>
-                <div style="font-size:.8rem;color:#9ca3af;">{{ max(0, $porEmpacar) }} por empacar</div>
-            </div>
-            @if(empty($cola))
-                <div style="font-size:.85rem;color:#9ca3af;">Todavía no hay pedidos del corte: aparecen aquí apenas Aracely genere el corte.</div>
-            @else
-                <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(min(220px,100%),1fr));gap:.5rem;">
-                    @foreach($cola as $q)
-                        <div wire:key="cola-{{ $q['id'] }}" style="padding:.6rem .75rem;background:#1e293b;border-left:3px solid #3b82f6;border-radius:.4rem;">
-                            <div style="font-family:ui-monospace,monospace;font-weight:700;color:#93c5fd;font-size:.85rem;">{{ $q['guia'] }}</div>
-                            <div style="font-size:.8rem;color:#e5e7eb;">{{ \Illuminate\Support\Str::limit($q['cliente'], 22) }}</div>
-                            <div style="font-size:.7rem;color:#9ca3af;">{{ $q['ciudad'] }} · {{ $q['items'] }} {{ $q['items'] === 1 ? 'ítem' : 'ítems' }}@if($cortes->count() > 1 && $q['corte']) · {{ $q['corte'] }}@endif</div>
-                        </div>
-                    @endforeach
-                </div>
-                @if($porEmpacar > count($cola))
-                    <div style="font-size:.75rem;color:#6b7280;margin-top:.5rem;">y {{ $porEmpacar - count($cola) }} más detrás.</div>
-                @endif
-            @endif
+    @else
+        <div style="padding:1.25rem;border-radius:1rem;background:#111827;color:#cbd5e1;font-size:.95rem;">
+            Mis stickers de hoy (0) · lo que empaques hoy aparece aquí para volver a imprimir su guía.
         </div>
-    @endisland
+    @endif
+        </div>
+
+        <div x-show="tab === 'equipo'" x-cloak role="tabpanel">
+        {{-- Métricas del día --}}
+        <div class="estacion-metricas" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+            <div style="padding:1rem 1.25rem;background:rgba(16,185,129,.1);border-left:4px solid #10b981;border-radius:.75rem;">
+                <div style="font-size:.7rem;color:#9ca3af;text-transform:uppercase;">Empacados hoy</div>
+                <div style="font-size:2.5rem;font-weight:800;color:#10b981;line-height:1;">{{ $m['mis_empaques_hoy'] }}</div>
+                <div style="font-size:.75rem;color:#9ca3af;">Promedio: {{ $m['promedio_display'] }}</div>
+            </div>
+            <div style="padding:1rem 1.25rem;background:rgba(59,130,246,.1);border-left:4px solid #3b82f6;border-radius:.75rem;">
+                <div style="font-size:.7rem;color:#9ca3af;text-transform:uppercase;">Mejor tiempo hoy</div>
+                <div style="font-size:2rem;font-weight:800;color:#3b82f6;line-height:1.1;">
+                    @if($m['mejor_tiempo_seg']>0){{ gmdate('i:s', $m['mejor_tiempo_seg']) }}@else—@endif
+                </div>
+                <div style="font-size:.75rem;color:#9ca3af;">min:seg</div>
+            </div>
+        </div>
+    {{-- Ranking del día --}}
+    @if(!empty($r))
+        <div style="margin-top:.75rem;padding:1rem 1.25rem;background:rgba(255,255,255,.03);border-radius:1rem;">
+            <div style="font-size:.75rem;color:#f59e0b;text-transform:uppercase;letter-spacing:2px;font-weight:700;margin-bottom:.75rem;">🏆 Ranking del día</div>
+            <table style="width:100%;font-size:.9rem;">
+                <thead>
+                    <tr style="text-align:left;color:#9ca3af;font-size:.7rem;text-transform:uppercase;border-bottom:1px solid rgba(156,163,175,.2);">
+                        <th style="padding:.5rem 0;width:30px;">#</th>
+                        <th>Operario</th>
+                        <th style="text-align:right;">Empacados</th>
+                        <th style="text-align:right;">Promedio</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach($r as $i => $row)
+                    <tr style="border-bottom:1px solid rgba(156,163,175,.1);">
+                        <td style="padding:.5rem 0;font-weight:700;color:{{ $i===0 ? '#f59e0b' : '#9ca3af' }};">
+                            @if($i===0)🥇@elseif($i===1)🥈@elseif($i===2)🥉@else{{ $i+1 }}@endif
+                        </td>
+                        <td style="font-weight:{{ $row['nombre']===auth()->user()->name ? '700' : '400' }};color:{{ $row['nombre']===auth()->user()->name ? '#f59e0b' : '#e5e7eb' }};">
+                            {{ $row['nombre'] }}@if($row['nombre']===auth()->user()->name) <span style="font-size:.7rem;color:#9ca3af;">(tú)</span>@endif
+                        </td>
+                        <td style="text-align:right;font-weight:600;">{{ $row['total'] }}</td>
+                        <td style="text-align:right;color:#9ca3af;">{{ $row['prom']>0 ? gmdate('i:s', $row['prom']) : '—' }}</td>
+                    </tr>
+                    @endforeach
+                </tbody>
+            </table>
+        </div>
+    @endif
+        </div>
+    </aside>
+    </div>{{-- /estacion-layout --}}
 
     {{-- Modal cámara (nativo, sin dependencias) + fallback file --}}
     <div id="modal-camara" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9998;align-items:center;justify-content:center;padding:1rem;">
@@ -361,36 +405,6 @@
         </div>
     </div>
 
-    {{-- Ranking del día --}}
-    @if(!empty($r))
-        <div style="margin-top:1rem;padding:1.25rem 1.5rem;background:rgba(255,255,255,.03);border-radius:1rem;">
-            <div style="font-size:.75rem;color:#f59e0b;text-transform:uppercase;letter-spacing:2px;font-weight:700;margin-bottom:.75rem;">🏆 Ranking del día</div>
-            <table style="width:100%;font-size:.9rem;">
-                <thead>
-                    <tr style="text-align:left;color:#9ca3af;font-size:.7rem;text-transform:uppercase;border-bottom:1px solid rgba(156,163,175,.2);">
-                        <th style="padding:.5rem 0;width:30px;">#</th>
-                        <th>Operario</th>
-                        <th style="text-align:right;">Empacados</th>
-                        <th style="text-align:right;">Promedio</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @foreach($r as $i => $row)
-                    <tr style="border-bottom:1px solid rgba(156,163,175,.1);">
-                        <td style="padding:.5rem 0;font-weight:700;color:{{ $i===0 ? '#f59e0b' : '#9ca3af' }};">
-                            @if($i===0)🥇@elseif($i===1)🥈@elseif($i===2)🥉@else{{ $i+1 }}@endif
-                        </td>
-                        <td style="font-weight:{{ $row['nombre']===auth()->user()->name ? '700' : '400' }};color:{{ $row['nombre']===auth()->user()->name ? '#f59e0b' : '#e5e7eb' }};">
-                            {{ $row['nombre'] }}@if($row['nombre']===auth()->user()->name) <span style="font-size:.7rem;color:#9ca3af;">(tú)</span>@endif
-                        </td>
-                        <td style="text-align:right;font-weight:600;">{{ $row['total'] }}</td>
-                        <td style="text-align:right;color:#9ca3af;">{{ $row['prom']>0 ? gmdate('i:s', $row['prom']) : '—' }}</td>
-                    </tr>
-                    @endforeach
-                </tbody>
-            </table>
-        </div>
-    @endif
 
     {{-- Desde aquí se imprime el sticker: fuera de lo que Livewire repinta, para que
          abrir el siguiente pedido no corte la impresión. No va con display:none
@@ -575,6 +589,8 @@
         setInterval(() => {
             const inp = document.querySelector('input[wire\\:model="codigo"]');
             if (inp && document.activeElement !== inp
+                // La búsqueda del panel del corte se queda con el foco mientras se escribe.
+                && !document.activeElement?.closest('[data-gb-propio-foco]')
                 && !document.querySelector('.fi-modal-window')
                 && document.getElementById('modal-camara')?.style.display !== 'flex'
                 && !(window.gbCamaraCodigos && window.gbCamaraCodigos.abierta())) {

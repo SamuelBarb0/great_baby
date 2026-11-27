@@ -1,55 +1,88 @@
-{{-- Avance del corte en la estación de empaque (AvanceCorteEmpaque): se refresca solo. --}}
-<div wire:poll.5s style="margin-top:1rem;display:grid;gap:1rem;">
+{{-- Avance del corte en la estación de empaque (AvanceCorteEmpaque): se refresca solo,
+     con su búsqueda por guía, orden o cliente (27-nov-2026). --}}
+@php
+    $tonos = [
+        'listo' => ['bg' => 'rgba(22,163,74,.16)', 'fg' => '#86efac'],
+        'trabajo' => ['bg' => 'rgba(2,132,199,.18)', 'fg' => '#7dd3fc'],
+        'pendiente' => ['bg' => 'rgba(100,116,139,.22)', 'fg' => '#e2e8f0'],
+        'atencion' => ['bg' => 'rgba(217,119,6,.18)', 'fg' => '#fcd34d'],
+        'neutro' => ['bg' => 'rgba(100,116,139,.15)', 'fg' => '#cbd5e1'],
+    ];
+@endphp
+<div wire:poll.5s style="display:grid;gap:.75rem;">
+    {{-- La búsqueda: no le devuelve el foco a la pistola mientras se escribe aquí. --}}
+    <div data-gb-propio-foco style="position:relative;">
+        <label for="buscar-pedido-corte" style="position:absolute;left:-9999px;">Buscar pedido</label>
+        <input id="buscar-pedido-corte" type="search" wire:model.live.debounce.300ms="buscar"
+               autocomplete="off" placeholder="🔎 Buscar guía, orden o cliente…"
+               x-on:keydown.escape="$wire.set('buscar', ''); document.getElementById('scan-input')?.focus()"
+               style="width:100%;min-height:48px;padding:.6rem .9rem;font-size:1.05rem;background:#0f172a;color:#f1f5f9;border:1px solid rgba(148,163,184,.45);border-radius:.6rem;outline:none;">
+    </div>
+
+    @if($resultados !== null)
+        <div role="status" aria-live="polite" style="padding:.6rem;border-radius:.75rem;background:#111827;border:1px solid rgba(148,163,184,.3);display:grid;gap:.4rem;">
+            @forelse($resultados as $r)
+                <div style="padding:.55rem .65rem;border-radius:.5rem;background:{{ $tonos[$r['tono']]['bg'] }};">
+                    <div style="display:flex;justify-content:space-between;gap:.5rem;align-items:baseline;flex-wrap:wrap;">
+                        <span style="font-family:ui-monospace,monospace;font-weight:700;color:#f1f5f9;font-size:1rem;">{{ $r['guia'] }}</span>
+                        <span style="font-weight:800;font-size:.9rem;color:{{ $tonos[$r['tono']]['fg'] }};text-transform:uppercase;letter-spacing:.03em;">{{ $r['estado'] }}</span>
+                    </div>
+                    <div style="font-size:.9rem;color:#cbd5e1;">{{ $r['cliente'] }} · orden {{ $r['orden'] }}</div>
+                    @if($r['detalle'] !== '')
+                        <div style="font-size:.85rem;color:{{ $tonos[$r['tono']]['fg'] }};">{{ $r['detalle'] }}</div>
+                    @endif
+                </div>
+            @empty
+                <div style="font-size:.95rem;color:#cbd5e1;padding:.25rem;">Ningún pedido con «{{ $buscar }}».</div>
+            @endforelse
+        </div>
+    @endif
+
     @foreach($cortes as $c)
-        <div style="padding:1rem 1.25rem;background:#111827;border:1px solid rgba(156,163,175,.25);border-radius:1rem;">
-            <div style="display:flex;justify-content:space-between;align-items:baseline;gap:.75rem;flex-wrap:wrap;">
-                <div style="font-weight:800;color:#e5e7eb;">{{ $c['etiqueta'] }}</div>
-                <div style="font-size:.95rem;color:#d1d5db;">
-                    <strong style="color:#4ade80;">{{ $c['empacados']->count() }}</strong> de {{ $c['total'] }} empacados
-                    · <strong style="color:#f87171;">{{ $c['faltan']->count() }}</strong> por empacar
+        <div style="padding:1rem;background:#111827;border:1px solid rgba(148,163,184,.25);border-radius:1rem;">
+            <div style="display:flex;justify-content:space-between;align-items:baseline;gap:.5rem;flex-wrap:wrap;">
+                <div style="font-weight:800;color:#f1f5f9;">{{ $c['etiqueta'] }}</div>
+                <div style="font-size:.95rem;color:#cbd5e1;font-variant-numeric:tabular-nums;">
+                    <strong style="color:#86efac;">{{ $c['empacados_total'] }}</strong> de {{ $c['total'] }} empacados
                 </div>
             </div>
-            <div style="height:.6rem;border-radius:9999px;background:rgba(156,163,175,.2);overflow:hidden;margin:.6rem 0 .9rem;">
-                <div style="height:100%;width:{{ $c['pct'] }}%;background:linear-gradient(90deg,#10b981,#059669);transition:width .5s;"></div>
+            <div style="height:.6rem;border-radius:9999px;background:rgba(148,163,184,.2);overflow:hidden;margin:.6rem 0 .9rem;">
+                <div style="height:100%;width:{{ $c['pct'] }}%;background:#16a34a;transition:width .5s;"></div>
             </div>
 
-            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(18rem,1fr));gap:1rem;">
-                {{-- Arriba lo que falta, en el orden de la pila. --}}
-                <div>
-                    <div style="font-size:.75rem;color:#f87171;text-transform:uppercase;letter-spacing:1px;font-weight:700;margin-bottom:.4rem;">⏳ Por empacar · {{ $c['faltan']->count() }}</div>
-                    <div style="display:grid;gap:.3rem;max-height:18rem;overflow-y:auto;">
-                        @forelse($c['faltan'] as $f)
-                            <div style="font-size:.82rem;padding:.4rem .6rem;border-radius:.4rem;background:rgba(248,113,113,.08);color:#e5e7eb;">
-                                <span style="font-family:ui-monospace,monospace;font-weight:700;">{{ $f['guia'] }}</span>
-                                <span style="color:#9ca3af;"> · {{ $f['productos'] }}</span>
-                                @if($f['empacando'])<span style="color:#fbbf24;"> · 📦 {{ $f['empacando'] }}</span>@endif
-                            </div>
-                        @empty
-                            <div style="font-size:.85rem;color:#4ade80;">¡Nada por empacar en este corte!</div>
-                        @endforelse
+            {{-- Arriba lo que falta, en el orden de la pila. --}}
+            <div style="font-size:.8rem;color:#e2e8f0;text-transform:uppercase;letter-spacing:.05em;font-weight:700;margin-bottom:.35rem;">⏳ Por empacar · {{ $c['faltan_total'] }}</div>
+            <div style="display:grid;gap:.3rem;max-height:16rem;overflow-y:auto;margin-bottom:.9rem;">
+                @forelse($c['faltan'] as $f)
+                    <div style="font-size:.9rem;padding:.45rem .6rem;border-radius:.4rem;background:rgba(100,116,139,.16);color:#f1f5f9;">
+                        <span style="font-family:ui-monospace,monospace;font-weight:700;">{{ $f['guia'] }}</span>
+                        <span style="color:#cbd5e1;"> · {{ $f['productos'] }}</span>
+                        @if($f['empacando'])<span style="color:#7dd3fc;font-weight:600;"> · 📦 {{ $f['empacando'] }}</span>@endif
                     </div>
-                </div>
-                {{-- Lo empacado baja aquí, lo último arriba. --}}
-                <div>
-                    <div style="font-size:.75rem;color:#4ade80;text-transform:uppercase;letter-spacing:1px;font-weight:700;margin-bottom:.4rem;">✅ Empacados · {{ $c['empacados']->count() }}</div>
-                    <div style="display:grid;gap:.3rem;max-height:18rem;overflow-y:auto;">
-                        @forelse($c['empacados']->take(\App\Livewire\AvanceCorteEmpaque::EMPACADOS_VISIBLES) as $e)
-                            <div style="font-size:.82rem;padding:.4rem .6rem;border-radius:.4rem;background:rgba(74,222,128,.07);color:#9ca3af;">
-                                <span style="color:#4ade80;">✔</span>
-                                <span style="font-family:ui-monospace,monospace;color:#d1d5db;">{{ $e['guia'] }}</span>
-                                · {{ $e['productos'] }}
-                                @if($e['hora'])<span> · {{ $e['hora'] }}</span>@endif
-                                @if($e['operario'])<span> · {{ $e['operario'] }}</span>@endif
-                                @if($e['a_mano'] > 0)<span style="color:#fbbf24;"> · ✋ {{ $e['a_mano'] }} sin escanear</span>@endif
-                            </div>
-                        @empty
-                            <div style="font-size:.85rem;color:#9ca3af;">Todavía nada.</div>
-                        @endforelse
-                        @if($c['empacados']->count() > \App\Livewire\AvanceCorteEmpaque::EMPACADOS_VISIBLES)
-                            <div style="font-size:.75rem;color:#6b7280;">y {{ $c['empacados']->count() - \App\Livewire\AvanceCorteEmpaque::EMPACADOS_VISIBLES }} más</div>
-                        @endif
+                @empty
+                    <div style="font-size:.95rem;color:#86efac;">{{ $buscar !== '' ? 'Nada pendiente con esa búsqueda.' : '¡Nada por empacar en este corte!' }}</div>
+                @endforelse
+            </div>
+
+            {{-- Lo empacado baja aquí, lo último arriba. --}}
+            <div style="font-size:.8rem;color:#86efac;text-transform:uppercase;letter-spacing:.05em;font-weight:700;margin-bottom:.35rem;">✅ Empacados · {{ $c['empacados_total'] }}</div>
+            <div style="display:grid;gap:.3rem;max-height:16rem;overflow-y:auto;">
+                @php $visibles = $buscar !== '' ? $c['empacados'] : $c['empacados']->take(\App\Livewire\AvanceCorteEmpaque::EMPACADOS_VISIBLES); @endphp
+                @forelse($visibles as $e)
+                    <div style="font-size:.9rem;padding:.45rem .6rem;border-radius:.4rem;background:rgba(22,163,74,.1);color:#cbd5e1;">
+                        <span style="color:#86efac;">✔</span>
+                        <span style="font-family:ui-monospace,monospace;color:#f1f5f9;">{{ $e['guia'] }}</span>
+                        · {{ $e['productos'] }}
+                        @if($e['hora'])<span> · {{ $e['hora'] }}</span>@endif
+                        @if($e['operario'])<span> · {{ $e['operario'] }}</span>@endif
+                        @if($e['a_mano'] > 0)<span style="color:#fcd34d;"> · ✋ {{ $e['a_mano'] }} sin escanear</span>@endif
                     </div>
-                </div>
+                @empty
+                    <div style="font-size:.95rem;color:#cbd5e1;">{{ $buscar !== '' ? 'Nada empacado con esa búsqueda.' : 'Todavía nada.' }}</div>
+                @endforelse
+                @if($buscar === '' && $c['empacados_total'] > \App\Livewire\AvanceCorteEmpaque::EMPACADOS_VISIBLES)
+                    <div style="font-size:.85rem;color:#cbd5e1;">y {{ $c['empacados_total'] - \App\Livewire\AvanceCorteEmpaque::EMPACADOS_VISIBLES }} más · búscalos arriba</div>
+                @endif
             </div>
         </div>
     @endforeach

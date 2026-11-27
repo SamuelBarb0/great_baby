@@ -20,6 +20,9 @@ class EstacionEmpaque extends Page
 {
     protected string $view = 'dropi.pages.estacion-empaque';
 
+    /** A lo ancho (27-nov-2026): el trabajo a la izquierda y el panel del corte a la derecha. */
+    protected \Filament\Support\Enums\Width|string|null $maxContentWidth = \Filament\Support\Enums\Width::Full;
+
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-qr-code';
 
     protected static ?string $navigationLabel = '📦 Estación de Empaque';

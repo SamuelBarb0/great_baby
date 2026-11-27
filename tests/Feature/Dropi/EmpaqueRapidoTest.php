@@ -533,3 +533,48 @@ it('la estación muestra el avance del corte en vivo: lo que falta arriba y lo e
         ->assertSeeInOrder(['Por empacar · 1', 'ER-AV2', 'Empacados · 1', 'ER-AV1'])
         ->assertSee($this->empacador->name);
 });
+
+it('la estación va en dos columnas: el trabajo y el panel con Corte, Mis stickers y Equipo; sin la cola repetida (27-nov-2026)', function () {
+    $this->actingAs($this->empacador);
+    Livewire::test(EstacionEmpaque::class)
+        ->assertSeeHtml('class="estacion-layout"')
+        ->assertSeeHtml('class="estacion-lateral"')
+        ->assertSee(['📦 Corte', '🏷 Stickers · 0', '🏆 Equipo', 'Mis stickers de hoy (0)', 'Empacados hoy', '🔎 Buscar guía, orden o cliente'])
+        ->assertDontSee('Cola de corte');
+});
+
+it('la búsqueda del corte dice si un pedido está empacado, por empacar o empacándose, y en qué puesto (27-nov-2026)', function () {
+    $listo = erPedido('ER-SB1', 'ER-VOL', '2026-11-24 08:00');
+    $falta1 = erPedido('ER-SB2', 'ER-TAP', '2026-11-24 08:10');
+    $falta2 = erPedido('ER-SB3', 'ER-TAP', '2026-11-24 08:20');
+    $lote = \App\Modules\Dropi\Models\DropiLoteImpresion::value('id');
+    DropiPedido::whereIn('id', [$listo->id, $falta1->id, $falta2->id])->update(['lote_impresion_id' => $lote]);
+    foreach ([$falta1, $falta2] as $i => $p) {
+        DropiPedido::whereKey($p->id)->update(['orden_empaque' => 500 + $i]);
+    }
+
+    $this->actingAs($this->empacador);
+    Livewire::test(EstacionEmpaque::class)
+        ->set('codigo', 'ER-SB1')->call('escanear')->set('codigo', 'ER-VOL')->call('escanear')->call('confirmarYSiguiente');
+    // El que sigue (ER-SB2) quedó abierto por el empacador.
+
+    $panel = Livewire::test(\App\Livewire\AvanceCorteEmpaque::class);
+    $panel->set('buscar', 'ER-SB1')->assertSee(['✔ Empacado', $this->empacador->name]);
+    $panel->set('buscar', 'ER-SB2')->assertSee(['📦 Empacando', $this->empacador->name]);
+    $panel->set('buscar', 'ER-SB3')->assertSee(['⏳ Por empacar', '#2 en la fila']);
+    $panel->set('buscar', 'NO-EXISTE')->assertSee('Ningún pedido con «NO-EXISTE»');
+});
+
+it('escanear una guía ya empacada dice cuándo y quién, y deja reimprimir su guía (27-nov-2026)', function () {
+    $p = erPedido('ER-RE1', 'ER-VOL', '2026-11-24 08:00');
+    DropiPedido::whereKey($p->id)->update(['sticker_path' => 'colombia/guias/re1.pdf']);
+
+    $this->actingAs($this->empacador);
+    $estacion = Livewire::test(EstacionEmpaque::class)
+        ->set('codigo', 'ER-RE1')->call('escanear')->set('codigo', 'ER-VOL')->call('escanear')->call('confirmarYSiguiente')
+        ->set('codigo', 'ER-RE1')->call('escanear');
+
+    expect($estacion->get('ultimoResultado')['tipo'])->toBe('ya_empacado')
+        ->and($estacion->get('ultimoResultado')['mensaje'])->toContain('Ya está Empacado')->toContain('por ' . $this->empacador->name);
+    $estacion->assertSee('🖨 Reimprimir guía')->assertSet('pedidoActivoId', null);
+});

@@ -84,10 +84,19 @@ class ProcesarEscaneoEmpaque
                     EstadoPedidoDropi::Entregado,
                     EstadoPedidoDropi::Pagado,
                 ], true)) {
+                    // Escanear una guía ya empacada sirve de consulta (27-nov-2026): cuándo,
+                    //   quién, y su guía a la mano para reimprimir.
+                    $hecho = EmpaqueRegistro::where('pedido_id', $pedido->id)->where('estado', 'completado')
+                        ->with('operario:id,name')->latest('fin_at')->first();
+                    $cuando = $hecho?->fin_at ? ' ' . $hecho->fin_at->timezone('America/Bogota')->format('d/m g:i a') : '';
+                    $quien = $hecho?->operario ? ' por ' . $hecho->operario->name : '';
+
                     return [
-                        'tipo' => 'error',
-                        'mensaje' => "Pedido {$codigo} ya fue empacado/despachado.",
-                        'sonido' => 'error',
+                        'tipo' => 'ya_empacado',
+                        'mensaje' => "Ya está {$pedido->estado->label()}{$cuando}{$quien} · guía {$pedido->guia}.",
+                        'pedido_id' => $pedido->id,
+                        'reimprimir' => $pedido->stickerUrl() ? route('dropi.pedido.sticker', $pedido) : null,
+                        'sonido' => 'warn',
                     ];
                 }
 
