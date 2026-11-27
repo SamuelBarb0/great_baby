@@ -170,12 +170,15 @@ it('la estación sólo da los pedidos del corte puesto en el alistador: los de c
 
     $cola = app(ColaDeEmpaque::class);
     expect(app(\App\Modules\Dropi\Support\RecoleccionDelCorte::class)->cortesEnTrabajo()->first()?->id)->toBe($hoy->id)
-        ->and($cola->pedidos()->pluck('id')->all())->toBe([$deHoy1->id, $deHoy2->id])
+        // Qué pedidos, no en qué orden: con un pedido por producto, el empate de la pila depende de los ids.
+        ->and($cola->pedidos()->pluck('id')->sort()->values()->all())->toBe([$deHoy1->id, $deHoy2->id])
         ->and($cola->contar())->toBe(2)
         ->and($cola->siguienteCon($this->empacador->id, null, Producto::where('referencia', 'ER-VOL')->value('id'))?->id)->toBe($deHoy1->id);
 
+    // «Siguiente pedido» abre el primero de esa cola, nunca el del corte anterior.
+    $primero = $cola->pedidos()->first()->id;
     $this->actingAs($this->empacador);
-    Livewire::test(EstacionEmpaque::class)->call('siguientePedido')->assertSet('pedidoActivoId', $deHoy1->id)
+    Livewire::test(EstacionEmpaque::class)->call('siguientePedido')->assertSet('pedidoActivoId', $primero)
         ->call('siguientePedido'); // con uno abierto no toma otro
 
     expect(EmpaqueRegistro::where('pedido_id', $viejo->id)->exists())->toBeFalse();
