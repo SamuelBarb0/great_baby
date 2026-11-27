@@ -108,16 +108,19 @@ class ColaDeEmpaque
     }
 
     /**
-     * La cola de la estación: sólo el corte que está puesto en la Vista del
-     * Alistador (27-nov-2026: se colaban los cortes anteriores entre los de
-     * hoy). El mismo criterio que el alistador, para que nunca se desfasen;
-     * sin corte en trabajo, la cola está vacía.
+     * La cola de la estación: los cortes en trabajo del alistador, los dos
+     * últimos generados (27-nov-2026: se colaban los de días anteriores, y al
+     * generar el corte 2 desaparecía lo que le faltaba al 1). El mismo criterio
+     * que el alistador, para que nunca se desfasen; sin corte en trabajo, la
+     * cola está vacía.
      */
     private function deLaEstacion(?int $operarioId): Builder
     {
-        $corteId = app(RecoleccionDelCorte::class)->cortesEnTrabajo()->first()?->id;
+        $cortes = app(RecoleccionDelCorte::class)->cortesEnTrabajo()->pluck('id')->all();
 
-        return $this->base($operarioId)->where('corte_id', $corteId ?? 0);
+        // El orden de la pila (orden_empaque) ya pone primero el corte más viejo:
+        //   se imprimió antes.
+        return $this->base($operarioId)->whereIn('corte_id', $cortes ?: [0]);
     }
 
     /** Lo que se puede empacar: impreso, despachable, fuera de un corte cerrado y sin otro empacador encima. */

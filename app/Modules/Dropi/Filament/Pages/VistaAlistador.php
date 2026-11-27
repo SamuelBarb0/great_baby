@@ -62,8 +62,12 @@ class VistaAlistador extends Page
 
     public function mount(): void
     {
-        // El corte generado más viejo que todavía tiene algo por empacar.
-        $this->corteId = app(RecoleccionDelCorte::class)->cortesEnTrabajo()->first()?->id;
+        // El corte generado más viejo que todavía tiene algo por empacar; si los
+        //   dos están al día, el último.
+        $cortes = app(RecoleccionDelCorte::class)->cortesEnTrabajo();
+        $conPendientes = $cortes->first(fn ($c) => DropiPedido::query()->where('corte_id', $c->id)
+            ->whereIn('estado', DropiPedido::estadosDespachables())->guiaImpresa()->exists());
+        $this->corteId = ($conPendientes ?? $cortes->last())?->id;
     }
 
     public function escogerCorte(int $corteId): void

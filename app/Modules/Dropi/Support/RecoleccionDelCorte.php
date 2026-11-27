@@ -186,23 +186,31 @@ class RecoleccionDelCorte
     }
 
     /**
-     * El corte que la Vista del Alistador trabaja: el del último reporte que
-     * generó Aracely, mientras no esté finalizado, aunque todavía esté
-     * generando sus guías. Uno solo (la señora Lahida, 26-nov-2026): los
-     * cortes anteriores se apilaban en el alistador. Sin reporte, no hay nada
-     * que recoger hasta que Aracely genere un corte.
+     * Los cortes que trabajan la Vista del Alistador y la estación de empaque:
+     * los de los dos últimos reportes que generó Aracely, mientras no estén
+     * finalizados, el más viejo primero. Sin reporte, no hay nada que recoger
+     * hasta que Aracely genere un corte.
+     *
+     * Dos y no uno (27-nov-2026): al generar el corte 2 desaparecía lo que le
+     * faltaba al 1 y no había cómo terminarlo. Dos y no todos (la señora Lahida,
+     * 26-nov-2026): los cortes de días anteriores se apilaban en el alistador.
      *
      * @return \Illuminate\Database\Eloquent\Collection<int, DropiCorte>
      */
     public function cortesEnTrabajo(): \Illuminate\Database\Eloquent\Collection
     {
-        $ultimo = \App\Modules\Dropi\Models\DropiLoteImpresion::query()
+        $ultimos = \App\Modules\Dropi\Models\DropiLoteImpresion::query()
             ->whereNotNull('corte_id')
             ->whereHas('corte', fn ($q) => $q->where('estado', '!=', \App\Modules\Dropi\Enums\EstadoCorte::Cerrado->value))
-            ->latest('id')
-            ->first();
+            ->groupBy('corte_id')
+            ->selectRaw('corte_id, MAX(id) as ultimo')
+            ->orderByDesc('ultimo')
+            ->limit(2)
+            ->pluck('ultimo', 'corte_id');
 
-        return DropiCorte::query()->whereKey($ultimo?->corte_id ?? 0)->get();
+        // El más viejo primero: es el que hay que terminar.
+        return DropiCorte::query()->whereKey($ultimos->keys()->all() ?: [0])->get()
+            ->sortBy(fn (DropiCorte $c) => $ultimos[$c->id])->values();
     }
 
     /**
