@@ -354,6 +354,56 @@ it('mientras falte algo del pedido no se imprime ni se confirma', function () {
         ->assertDispatched('empaque-completo', confirmar: true);
 });
 
+it('«Confirmar empaque» da por empacado lo que falte, imprime la guía y abre el siguiente (27-nov-2026)', function () {
+    app(SincronizarPedidosDropi::class)->importarPedidos([new PedidoDropiDTO(
+        guia: 'ER-90', dropiOrdenId: 'O-ER-90', transportadora: 'X', tienda: 'T', vendedorNombre: 'Vendedora',
+        vendedorIdentificacion: null, clienteNombre: 'Ana', clienteDoc: null, clienteTelefono: null,
+        clienteDireccion: null, clienteCiudad: 'CALI', clienteDepto: null, estadoDropi: 'sin_estado',
+        montoEsperadoProveedor: 60000, montoClienteFinal: null, gananciaVendedor: null, fleteTransportadora: null,
+        items: [new ItemDropiDTO('SKU-ER-VOL', 1, 30000, 'x', 'x'), new ItemDropiDTO('SKU-ER-TAP', 2, 30000, 'x', 'x')],
+        creadoAt: CarbonImmutable::parse('2026-11-24 08:00'),
+    )]);
+    $p = DropiPedido::where('guia', 'ER-90')->firstOrFail();
+    $p->estado = EstadoPedidoDropi::Pending;
+    $p->save();
+    DropiPedido::whereKey($p->id)->update(['guia_impresa_at' => now(), 'sticker_path' => 'colombia/guias/er-90.pdf', 'corte_id' => $this->corteEnTrabajo->id]);
+    $siguiente = erPedido('ER-91', 'ER-VOL', '2026-11-24 09:00');
+
+    $this->actingAs($this->empacador);
+    Livewire::test(EstacionEmpaque::class)
+        ->set('codigo', 'ER-90')->call('escanear')->assertSet('pedidoActivoId', $p->id)
+        ->set('codigo', 'ER-VOL')->call('escanear')          // falta escanear los 2 tapetes
+        ->call('confirmarYSiguiente')
+        ->assertDispatched('empaque-imprimir', sticker: route('dropi.pedido.sticker', $p))
+        ->assertSet('pedidoActivoId', $siguiente->id);
+
+    $p->refresh()->load('items');
+    $registro = EmpaqueRegistro::where('pedido_id', $p->id)->where('estado', 'completado')->firstOrFail();
+    $bitacora = \Illuminate\Support\Facades\DB::table('dropi_estados_bitacora')->where('pedido_id', $p->id)
+        ->where('estado_hasta', EstadoPedidoDropi::Empacado->value)->value('payload');
+
+    expect($p->estado)->toBe(EstadoPedidoDropi::Empacado)
+        ->and($p->items->every(fn ($it) => (int) $it->cantidad_pickeada === (int) $it->cantidad && $it->pickeado_at))->toBeTrue()
+        // Rastro: 1 de 3 unidades escaneada, 2 confirmadas a mano.
+        ->and($registro->items_escaneados)->toBe(1)->and($registro->items_totales)->toBe(3)
+        ->and(json_decode($bitacora, true)['confirmado_a_mano'] ?? null)->toBe(2);
+});
+
+it('con todo escaneado, confirmar no vuelve a imprimir la guía (ya salió con el último escaneo)', function () {
+    $p = erPedido('ER-95', 'ER-VOL', '2026-11-24 09:00');
+    DropiPedido::whereKey($p->id)->update(['sticker_path' => 'colombia/guias/er-95.pdf']);
+
+    $this->actingAs($this->empacador);
+    Livewire::test(EstacionEmpaque::class)
+        ->set('codigo', 'ER-95')->call('escanear')
+        ->set('codigo', 'ER-VOL')->call('escanear')
+        ->call('confirmarYSiguiente')
+        ->assertNotDispatched('empaque-imprimir');
+
+    expect($p->fresh()->estado)->toBe(EstadoPedidoDropi::Empacado)
+        ->and(EmpaqueRegistro::where('pedido_id', $p->id)->value('items_escaneados'))->toBe(1);
+});
+
 it('el sticker de la guía se sirve desde el ERP, se baja una sola vez y sólo para quien empaca', function () {
     \Illuminate\Support\Facades\Storage::fake('local');
     Http::fake(['*' => Http::response('%PDF-1.4 sticker', 200)]);

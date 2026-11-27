@@ -419,6 +419,12 @@
             if (d.sticker) window.gbImprimirSticker(d.sticker);
         });
 
+        // «Confirmar empaque» sin el último escaneo: la guía sale al confirmar.
+        window.addEventListener('empaque-imprimir', (e) => {
+            const d = (e.detail && e.detail.sticker !== undefined) ? e.detail : (e.detail?.[0] || {});
+            if (d.sticker) window.gbImprimirSticker(d.sticker);
+        });
+
         // Ubicación del equipo para la trazabilidad. Nunca rechaza: si se niega
         // el permiso o no hay GPS, manda el motivo y el servidor decide.
         window.gbUbicacion = window.gbUbicacion || function (timeoutMs = 8000) {

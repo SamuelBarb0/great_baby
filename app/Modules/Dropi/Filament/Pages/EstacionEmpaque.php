@@ -181,7 +181,9 @@ class EstacionEmpaque extends Page
 
         try {
             $pedidoId = $this->pedidoActivoId;
-            $res = ConfirmarEmpaqueYSiguiente::run($pedidoId, auth()->id(), $gps);
+            // «Confirmar empaque» es «ya empaqué todo» (27-nov-2026): lo que falte
+            //   por escanear se da por empacado y queda contado en la bitácora.
+            $res = ConfirmarEmpaqueYSiguiente::run($pedidoId, auth()->id(), $gps, completarFaltantes: true);
             $this->pedidoActivoId = null;
             $this->ultimoResultado = null;
 
@@ -191,6 +193,12 @@ class EstacionEmpaque extends Page
             $guia = GenerarGuiaDropi::alEmpacar($pedidoId, auth()->id());
             $n = Notification::make()->title($res['msg'])->body(trim((string) ($guia['texto'] ?? '')) ?: null);
             ($guia['error'] ?? false) ? $n->warning()->persistent()->send() : $n->success()->send();
+
+            // Sin el último escaneo la guía no salió sola: sale ahora.
+            $empacado = DropiPedido::find($pedidoId);
+            if (($res['a_mano'] ?? 0) > 0 && $empacado?->stickerUrl()) {
+                $this->dispatch('empaque-imprimir', sticker: route('dropi.pedido.sticker', $empacado));
+            }
 
             // El siguiente de la cola se abre solo: escanear → confirmar → siguiente
             //   (24-nov-2026: «entre menos clics, mejor»; son 300 a 800 paquetes).

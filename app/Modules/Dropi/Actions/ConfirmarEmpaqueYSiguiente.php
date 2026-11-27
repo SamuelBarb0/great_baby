@@ -20,26 +20,30 @@ class ConfirmarEmpaqueYSiguiente
      * Bloquea si aún faltan unidades por pickear, si quien confirma no es quien
      * empezó el empaque, o si la bodega no tiene saldo (lo frena el descuento).
      *
-     * @return array{duracion_seg:int, items:int, msg:string}
+     * @param  bool  $completarFaltantes  «✅ Confirmar empaque» de la estación (27-nov-2026:
+     *                                    «es como si ya hubieras empacado todo»): lo que
+     *                                    falte por escanear se da por empacado, y queda
+     *                                    contado en el registro y la bitácora.
+     * @return array{duracion_seg:int, items:int, msg:string, a_mano:int}
      */
-    public function handle(int $pedidoId, int $operarioId, ?array $ubicacion = null): array
+    public function handle(int $pedidoId, int $operarioId, ?array $ubicacion = null, bool $completarFaltantes = false): array
     {
         // Ubicación del equipo (ver Trazabilidad): obligatoria sólo si la regla
         // `empaque.gps_obligatorio` está prendida.
         Trazabilidad::exigir($ubicacion);
 
-        return DB::transaction(function () use ($pedidoId, $operarioId, $ubicacion) {
+        return DB::transaction(function () use ($pedidoId, $operarioId, $ubicacion, $completarFaltantes) {
             $pedido = DropiPedido::with('items')->lockForUpdate()->findOrFail($pedidoId);
 
-            // Bloqueo: no confirmar si faltan unidades
+            // Bloqueo: no confirmar si faltan unidades (salvo que se pidan completar)
             $itemsPendientes = $pedido->items->filter(function ($it) {
                 $req = (int) ($it->cantidad ?? 1);
                 $ya = (int) ($it->cantidad_pickeada ?? 0);
                 return $ya < $req;
             });
+            $faltan = (int) $itemsPendientes->sum(fn ($it) => ((int) ($it->cantidad ?? 1)) - ((int) ($it->cantidad_pickeada ?? 0)));
 
-            if ($itemsPendientes->isNotEmpty()) {
-                $faltan = $itemsPendientes->sum(fn ($it) => ((int) ($it->cantidad ?? 1)) - ((int) ($it->cantidad_pickeada ?? 0)));
+            if ($faltan > 0 && ! $completarFaltantes) {
                 throw new InvalidArgumentException("Aún faltan {$faltan} unidad(es) por escanear.");
             }
 
@@ -59,13 +63,23 @@ class ConfirmarEmpaqueYSiguiente
             $fin = now();
             $duracion = (int) $registro->inicio_at->diffInSeconds($fin, absolute: true);
 
+            // Lo que faltaba se da por empacado, a nombre de quien confirma.
+            foreach ($itemsPendientes as $it) {
+                $it->forceFill([
+                    'cantidad_pickeada' => (int) ($it->cantidad ?? 1),
+                    'pickeado_at' => $it->pickeado_at ?? $fin,
+                    'pickeado_por' => $it->pickeado_por ?? $operarioId,
+                ])->save();
+            }
+
             $totalUnidades = (int) $pedido->items->sum(fn ($it) => (int) ($it->cantidad ?? 1));
 
             $registro->update([
                 'fin_at' => $fin,
                 'estado' => 'completado',
                 'duracion_segundos' => $duracion,
-                'items_escaneados' => $totalUnidades,
+                // Lo escaneado de verdad: el resto se confirmó a mano.
+                'items_escaneados' => $totalUnidades - $faltan,
                 'items_totales' => $totalUnidades,
             ]);
 
@@ -74,6 +88,7 @@ class ConfirmarEmpaqueYSiguiente
                 'manual',
                 $operarioId,
                 ['origen' => 'estacion_empaque', 'duracion_seg' => $duracion, 'items' => $totalUnidades]
+                    + ($faltan > 0 ? ['confirmado_a_mano' => $faltan] : [])
                     + Trazabilidad::payload($ubicacion),
             );
 
@@ -90,7 +105,9 @@ class ConfirmarEmpaqueYSiguiente
             return [
                 'duracion_seg' => $duracion,
                 'items' => $pedido->items->count(),
-                'msg' => "Pedido {$pedido->guia} empacado en " . gmdate('i:s', $duracion) . $aviso,
+                'msg' => "Pedido {$pedido->guia} empacado en " . gmdate('i:s', $duracion)
+                    . ($faltan > 0 ? " · {$faltan} unidad(es) confirmada(s) sin escanear" : '') . $aviso,
+                'a_mano' => $faltan,
             ];
         });
     }
