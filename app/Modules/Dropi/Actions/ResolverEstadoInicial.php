@@ -30,7 +30,8 @@ class ResolverEstadoInicial
             $disponible = $destino['variante_id']
                 ? $this->stockDisponible($destino['variante_id'])
                 : $this->stockDisponibleAgregado($destino['producto_id']);
-            if ($disponible < (int) $it['cantidad']) {
+            // Packs: «X 2 CAJAS» pide 2 del ERP por cada una de Dropi.
+            if ($disponible < (int) $it['cantidad'] * ($destino['unidades'] ?? 1)) {
                 return EstadoPedidoDropi::PendienteInventario;
             }
         }
@@ -55,7 +56,7 @@ class ResolverEstadoInicial
                 return false;
             }
             $llave = $destino['variante_id'] ? 'v:'.$destino['variante_id'] : 'p:'.$destino['producto_id'];
-            $pide[$llave] = ($pide[$llave] ?? 0) + (int) $it['cantidad'];
+            $pide[$llave] = ($pide[$llave] ?? 0) + (int) $it['cantidad'] * ($destino['unidades'] ?? 1);
         }
 
         foreach ($pide as $llave => $cantidad) {
@@ -86,7 +87,7 @@ class ResolverEstadoInicial
      * A qué apunta una llave de Dropi: una variante, o un producto AGREGADO
      * (sin variantes; su stock es un solo total por producto). NULL = sin vincular.
      *
-     * @return array{variante_id: ?int, producto_id: ?int}|null
+     * @return array{variante_id: ?int, producto_id: ?int, unidades: int}|null
      */
     public function destinoPara(?string $sku): ?array
     {
@@ -94,17 +95,18 @@ class ResolverEstadoInicial
             return null;
         }
 
-        $vinculo = DropiVinculoProducto::where('sku_dropi', $sku)->first(['variante_id', 'producto_id']);
+        $vinculo = DropiVinculoProducto::where('sku_dropi', $sku)->first(['variante_id', 'producto_id', 'unidades']);
         if ($vinculo && ($vinculo->variante_id || $vinculo->producto_id)) {
             return [
                 'variante_id' => $vinculo->variante_id ? (int) $vinculo->variante_id : null,
                 'producto_id' => $vinculo->variante_id ? null : (int) $vinculo->producto_id,
+                'unidades' => max(1, (int) ($vinculo->unidades ?? 1)),
             ];
         }
 
         $varianteId = ProductoVariante::where('codigo_barras', $sku)->value('id');
 
-        return $varianteId ? ['variante_id' => (int) $varianteId, 'producto_id' => null] : null;
+        return $varianteId ? ['variante_id' => (int) $varianteId, 'producto_id' => null, 'unidades' => 1] : null;
     }
 
     /**

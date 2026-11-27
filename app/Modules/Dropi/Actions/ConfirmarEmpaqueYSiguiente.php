@@ -37,11 +37,11 @@ class ConfirmarEmpaqueYSiguiente
 
             // Bloqueo: no confirmar si faltan unidades (salvo que se pidan completar)
             $itemsPendientes = $pedido->items->filter(function ($it) {
-                $req = (int) ($it->cantidad ?? 1);
+                $req = $it->unidadesErp();
                 $ya = (int) ($it->cantidad_pickeada ?? 0);
                 return $ya < $req;
             });
-            $faltan = (int) $itemsPendientes->sum(fn ($it) => ((int) ($it->cantidad ?? 1)) - ((int) ($it->cantidad_pickeada ?? 0)));
+            $faltan = (int) $itemsPendientes->sum(fn ($it) => $it->unidadesErp() - ((int) ($it->cantidad_pickeada ?? 0)));
 
             if ($faltan > 0 && ! $completarFaltantes) {
                 throw new InvalidArgumentException("Aún faltan {$faltan} unidad(es) por escanear.");
@@ -66,13 +66,13 @@ class ConfirmarEmpaqueYSiguiente
             // Lo que faltaba se da por empacado, a nombre de quien confirma.
             foreach ($itemsPendientes as $it) {
                 $it->forceFill([
-                    'cantidad_pickeada' => (int) ($it->cantidad ?? 1),
+                    'cantidad_pickeada' => $it->unidadesErp(),
                     'pickeado_at' => $it->pickeado_at ?? $fin,
                     'pickeado_por' => $it->pickeado_por ?? $operarioId,
                 ])->save();
             }
 
-            $totalUnidades = (int) $pedido->items->sum(fn ($it) => (int) ($it->cantidad ?? 1));
+            $totalUnidades = (int) $pedido->items->sum(fn ($it) => $it->unidadesErp());
 
             $registro->update([
                 'fin_at' => $fin,

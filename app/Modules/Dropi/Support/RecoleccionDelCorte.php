@@ -101,7 +101,7 @@ class RecoleccionDelCorte
                 'referencia' => $producto?->referencia ?? '—',
                 // Lo que se lee en pantalla y en la hoja: la nuestra; sin vínculo, la de Dropi.
                 'ref_erp' => $it->referenciaErp(),
-                'variante' => $it->nombreVariante(),
+                'variante' => $it->variacionConUnidades(),
                 // El estilo: los colores de un mismo producto del ERP van seguidos.
                 'estilo' => $producto ? 'p' . $producto->id : 's' . $key,
                 'total_unidades' => 0,
@@ -109,7 +109,7 @@ class RecoleccionDelCorte
                 'zona' => $u['zona'] ?? null,
                 'orden' => $u['orden'] ?? self::SIN_UBICAR,
             ];
-            $grupos[$key]['total_unidades'] += (int) $it->cantidad;
+            $grupos[$key]['total_unidades'] += $it->unidadesErp(); // packs: «X 2 CAJAS» son 2
         }
 
         if ($orden === self::POR_RUTA) {
@@ -220,7 +220,8 @@ class RecoleccionDelCorte
     /** «2× Tapete, 1× Volante»: lo que reconoce quien empaca. */
     public static function resumenProductos(DropiPedido $p): string
     {
-        return $p->items->map(fn ($it) => $it->cantidad . '× ' . (($it->variante?->producto ?? $it->producto)?->nombre ?? $it->sku_dropi))->implode(', ');
+        return $p->items->map(fn ($it) => $it->unidadesErp() . '× ' . (($it->variante?->producto ?? $it->producto)?->nombre ?? $it->sku_dropi)
+            . (($v = $it->nombreVariante()) !== '' ? " ({$v})" : ''))->implode(', ');
     }
 
     /** @return array<int, string> pedido => quién lo tiene abierto en la estación ahora */

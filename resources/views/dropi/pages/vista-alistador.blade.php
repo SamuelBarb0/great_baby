@@ -245,10 +245,10 @@
                                             @php
                                                 // El nombre y nuestra referencia son lo que reconoce quien empaca; el SKU de Dropi queda de apoyo.
                                                 $prodItem = $it->variante?->producto ?? $it->producto;
-                                                $varItem = $it->nombreVariante();
+                                                $varItem = $it->variacionConUnidades();
                                             @endphp
                                             <span title="{{ $it->sku_dropi }}" style="display:inline-block;font-size:.75rem;padding:.25rem .5rem;background:rgba(156,163,175,.15);border-radius:.25rem;margin-right:.25rem;margin-bottom:.25rem;">
-                                                <strong>{{ $it->cantidad }}×</strong> {{ $prodItem?->nombre ?? $it->sku_dropi }}@if($varItem !== '') <span style="color:#9ca3af;">· {{ $varItem }}</span>@endif@if($refItem = $it->referenciaErp()) <span style="color:#9ca3af;font-family:ui-monospace,monospace;">· {{ $refItem }}</span>@endif
+                                                <strong>{{ $it->unidadesErp() }}×</strong> {{ $prodItem?->nombre ?? $it->sku_dropi }}@if($varItem !== '') <span style="color:#9ca3af;">· {{ $varItem }}</span>@endif@if($refItem = $it->referenciaErp()) <span style="color:#9ca3af;font-family:ui-monospace,monospace;">· {{ $refItem }}</span>@endif
                                                 @if($ubic = $ubicacionesEmpaque[$it->id] ?? null)<span style="color:#9ca3af;white-space:nowrap;"> · 📍 <span style="font-family:ui-monospace,monospace;">{{ $ubic }}</span></span>@endif
                                             </span>
                                         @endforeach

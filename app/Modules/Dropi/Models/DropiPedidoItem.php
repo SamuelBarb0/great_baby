@@ -54,6 +54,40 @@ class DropiPedidoItem extends Model implements AuditableContract
         return $this->variante_id === null && $this->producto_id !== null;
     }
 
+    /** El vínculo de su llave de Dropi con el ERP (de ahí salen las unidades por pack). */
+    public function vinculo(): \Illuminate\Database\Eloquent\Relations\HasOne
+    {
+        return $this->hasOne(DropiVinculoProducto::class, 'sku_dropi', 'sku_dropi');
+    }
+
+    /**
+     * Unidades del ERP que trae cada una de Dropi (27-nov-2026): «X 2 CAJAS»
+     * vinculada a la caja suelta del ERP son 2. Sin vínculo, 1.
+     */
+    public function unidadesPorUnidad(): int
+    {
+        return max(1, (int) ($this->vinculo?->unidades ?? 1));
+    }
+
+    /**
+     * Lo que se recoge, se escanea y sale del inventario: la cantidad de Dropi
+     * por las unidades de cada pack. `cantidad` sigue siendo la de Dropi (la
+     * compara el sync y la usan la factura, las devoluciones y las garantías).
+     */
+    public function unidadesErp(): int
+    {
+        return (int) ($this->cantidad ?? 1) * $this->unidadesPorUnidad();
+    }
+
+    /** «X 2 CAJAS» y, si es un pack, cuántas unidades son: «X 2 CAJAS · 2 u.». */
+    public function variacionConUnidades(): string
+    {
+        $v = $this->nombreVariante();
+        $u = $this->unidadesPorUnidad();
+
+        return $u > 1 ? trim($v . ' · ' . $u . ' u. c/u') : $v;
+    }
+
     /**
      * Qué variante sacar del estante: la del ERP si el ítem apunta a una; si
      * no, la variación que mandó Dropi («ROJO», «SALMÓN / 20-21»).

@@ -67,6 +67,8 @@ class VincularProductoDropi
     {
         $items = DB::transaction(function () use ($sku, $varianteId, $productoId, $userId, $nombres) {
             $muestra = DropiPedidoItem::where('sku_dropi', $sku)->latest('id')->first();
+            $variacion = $muestra?->variacion ?? ($nombres['variacion'] ?? null);
+            $existente = DropiVinculoProducto::where('sku_dropi', $sku)->first();
 
             DropiVinculoProducto::updateOrCreate(
                 ['sku_dropi' => $sku],
@@ -76,7 +78,10 @@ class VincularProductoDropi
                     // con variante, el producto sale de la variante.
                     'producto_id' => $varianteId ? null : $productoId,
                     'producto_nombre' => $muestra?->producto_nombre ?? ($nombres['producto_nombre'] ?? null),
-                    'variacion' => $muestra?->variacion ?? ($nombres['variacion'] ?? null),
+                    'variacion' => $variacion,
+                    // Packs (27-nov-2026): «X 2 CAJAS» son 2 del ERP. Lo que ya
+                    //   tenía el vínculo se respeta (pudo corregirse a mano).
+                    'unidades' => $existente?->unidades ?? DropiVinculoProducto::detectarUnidades($variacion),
                     'vinculado_por' => $userId,
                 ],
             );

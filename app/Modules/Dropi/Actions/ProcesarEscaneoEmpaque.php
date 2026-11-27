@@ -92,7 +92,7 @@ class ProcesarEscaneoEmpaque
                 }
 
                 // Rechazar guía sin ítems (empaque fantasma).
-                $totalUnidades = (int) $pedido->items->sum(fn ($it) => (int) ($it->cantidad ?? 1));
+                $totalUnidades = (int) $pedido->items->sum(fn ($it) => $it->unidadesErp());
                 if ($totalUnidades === 0) {
                     return [
                         'tipo' => 'error',
@@ -203,7 +203,7 @@ class ProcesarEscaneoEmpaque
             $lineas = $variante
                 ? ($pedido?->items->where('variante_id', $variante->id) ?? collect())
                 : ($pedido?->items->filter(fn ($i) => $i->variante_id === null && $i->producto_id === $productoAgregado->id) ?? collect());
-            $item = $lineas->first(fn ($i) => (int) ($i->cantidad_pickeada ?? 0) < (int) ($i->cantidad ?? 1)) ?? $lineas->first();
+            $item = $lineas->first(fn ($i) => (int) ($i->cantidad_pickeada ?? 0) < $i->unidadesErp()) ?? $lineas->first();
             $etiquetaSujeto = $variante ? "La variante {$codigo}" : "El producto agregado {$productoAgregado->referencia}";
 
             if (! $item) {
@@ -217,7 +217,8 @@ class ProcesarEscaneoEmpaque
             // Recargar el item con lock para evitar race en el increment.
             $itemLocked = \App\Modules\Dropi\Models\DropiPedidoItem::where('id', $item->id)
                 ->lockForUpdate()->first();
-            $cantidadRequerida = (int) ($itemLocked->cantidad ?? 1);
+            // Packs (27-nov-2026): «X 2 CAJAS» se escanea 2 veces.
+            $cantidadRequerida = $itemLocked->unidadesErp();
             $cantidadYa = (int) ($itemLocked->cantidad_pickeada ?? 0);
 
             // C-F2 R2 · Etiqueta polimórfica según el sujeto detectado.

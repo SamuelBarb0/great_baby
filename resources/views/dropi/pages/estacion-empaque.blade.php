@@ -205,16 +205,16 @@
                                 {{-- Un ítem es de una variante o de un producto agregado (sin variantes):
                                      el agregado se escanea por su referencia (ProcesarEscaneoEmpaque). --}}
                                 <div style="font-weight:600;color:#e5e7eb;">{{ ($it->variante?->producto ?? $it->producto)?->nombre ?? $it->sku_dropi }}</div>
-                                @if(($varItem = $it->nombreVariante()) !== '')
+                                @if(($varItem = $it->variacionConUnidades()) !== '')
                                     <div style="font-size:1rem;font-weight:700;color:#fbbf24;">{{ $varItem }}</div>
                                 @endif
                                 <div style="font-family:monospace;font-size:.72rem;color:#cbd5e1;margin-top:.25rem;">{{ $it->variante?->codigo_barras ?? $it->producto?->referencia ?? '—' }}</div>
                             </div>
                             <div style="text-align:right;">
-                                <div style="font-size:1.25rem;font-weight:700;color:#f59e0b;">×{{ $it->cantidad ?? 1 }}</div>
+                                <div style="font-size:1.25rem;font-weight:700;color:#f59e0b;">×{{ $it->unidadesErp() }}</div>
                                 {{-- Lo escaneado de esta línea, para que una de varias unidades no parezca sin tocar. --}}
                                 @if(! $isPicked && (int) $it->cantidad_pickeada > 0)
-                                    <div style="font-size:.75rem;color:#10b981;font-weight:700;">{{ (int) $it->cantidad_pickeada }} de {{ $it->cantidad }}</div>
+                                    <div style="font-size:.75rem;color:#10b981;font-weight:700;">{{ (int) $it->cantidad_pickeada }} de {{ $it->unidadesErp() }}</div>
                                 @endif
                                 <div style="font-size:1.5rem;">{{ $isPicked ? '✅' : '⏳' }}</div>
                             </div>

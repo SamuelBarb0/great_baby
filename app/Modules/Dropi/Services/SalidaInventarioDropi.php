@@ -55,7 +55,7 @@ class SalidaInventarioDropi
     {
         return (int) $pedido->items
             ->filter(fn ($i) => ($i->variante_id || $i->producto_id) && (int) $i->cantidad > 0)
-            ->sum(fn ($i) => (int) $i->cantidad);
+            ->sum(fn ($i) => $i->unidadesErp());
     }
 
     /**
@@ -118,7 +118,8 @@ class SalidaInventarioDropi
         $porSujeto = [];
         foreach ($pedido->items as $item) {
             if (! $item->variante_id && ! $item->producto_id) continue;
-            $cantidad = (int) ($item->cantidad ?? 0);
+            // Packs (27-nov-2026): «X 2 CAJAS» saca 2 del ERP por cada una de Dropi.
+            $cantidad = (int) ($item->cantidad ?? 0) > 0 ? $item->unidadesErp() : 0;
             if ($cantidad <= 0) continue;
 
             $clave = CostoPromedio::clave($item->variante_id, $item->producto_id);
@@ -179,7 +180,8 @@ class SalidaInventarioDropi
         $asiento = [];
         foreach ($pedido->items as $item) {
             if (! $item->variante_id && ! $item->producto_id) continue;
-            $cantidad = (int) ($item->cantidad ?? 0);
+            // Packs (27-nov-2026): «X 2 CAJAS» saca 2 del ERP por cada una de Dropi.
+            $cantidad = (int) ($item->cantidad ?? 0) > 0 ? $item->unidadesErp() : 0;
             if ($cantidad <= 0) continue;
 
             $clave = CostoPromedio::clave($item->variante_id, $item->producto_id);

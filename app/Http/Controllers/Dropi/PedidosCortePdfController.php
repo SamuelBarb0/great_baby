@@ -54,7 +54,8 @@ class PedidosCortePdfController extends Controller
                 'nombre' => self::nombreProducto($i),
                 // Nuestra referencia; sin vínculo, la de Dropi (26-nov-2026).
                 'sku' => $i->referenciaErp() ?? $i->sku_dropi,
-                'cantidad' => (int) $i->cantidad,
+                // Lo que va en la caja: «X 2 CAJAS» son 2 (27-nov-2026).
+                'cantidad' => $i->unidadesErp(),
             ])->all(),
         ])->all();
 
@@ -66,7 +67,7 @@ class PedidosCortePdfController extends Controller
             'corte' => $corte,
             'filas' => $filas,
             'soloUno' => (bool) $pedidoId,
-            'unidades' => (int) $pedidos->sum(fn (DropiPedido $p) => $p->items->sum('cantidad')),
+            'unidades' => (int) $pedidos->sum(fn (DropiPedido $p) => $p->items->sum(fn (DropiPedidoItem $i) => $i->unidadesErp())),
             'monto' => (float) $pedidos->sum('monto_esperado_proveedor'),
             'generado' => now(),
         ])
@@ -88,6 +89,12 @@ class PedidosCortePdfController extends Controller
             return implode(' · ', $partes) ?: (string) $i->sku_dropi;
         }
 
-        return $i->producto?->nombre ?? ($i->sku_dropi ?: 'Sin producto vinculado');
+        // Agregado: la variación de Dropi al lado (27-nov-2026: «X 2 CAJAS» no salía
+        //   y se empacaba una sola caja).
+        if ($i->producto) {
+            return implode(' · ', array_filter([$i->producto->nombre, $i->variacionConUnidades()]));
+        }
+
+        return $i->sku_dropi ?: 'Sin producto vinculado';
     }
 }

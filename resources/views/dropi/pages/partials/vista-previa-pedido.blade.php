@@ -48,7 +48,7 @@
         <div style="{{ $rotulo }}margin-bottom:.35rem;">Productos</div>
         @foreach($pedido->items as $i)
             <div style="display:flex;gap:.75rem;align-items:baseline;padding:.3rem 0;border-top:1px solid rgba(156,163,175,.2);">
-                <span style="font-weight:700;min-width:2.5rem;">×{{ $i->cantidad }}</span>
+                <span style="font-weight:700;min-width:2.5rem;">×{{ $i->unidadesErp() }}</span>
                 <span style="font-family:ui-monospace,monospace;min-width:7rem;">{{ $i->referenciaErp() ?? $i->sku_dropi }}</span>
                 <span style="flex:1;">{{ $i->producto_nombre }}@if(filled($i->variacion))<span style="color:#6b7280;"> · {{ $i->variacion }}</span>@endif</span>
             </div>
