@@ -50,6 +50,16 @@ class EtiquetasMasivasController extends Controller
      */
     private const PUNTOS_MAX = 3;
 
+    /**
+     * Desde cuántos puntos por módulo lee el lector de mesa de empaque: con
+     * uno no leía (videos de las 9:13 am del 27-nov-2026). El código que no
+     * cabe con estos va en la etiqueta con su código corto.
+     */
+    private const PUNTOS_MIN = 2;
+
+    /** Letras del código que caben en un renglón debajo de las barras (7 pt monoespaciada en 26 mm). */
+    private const TEXTO_MAX = 17;
+
     /** Blanco a cada lado de las barras, en módulos: sin él el lector no sabe dónde empieza. */
     private const SILENCIO_MODULOS = 10;
 
@@ -348,6 +358,8 @@ class EtiquetasMasivasController extends Controller
                 // Lo que va en las barras: el código del ERP, o el corto si aquel no cabe en el adhesivo.
                 $e['impreso'] = self::cabe($e['codigo']) || blank($e['corto'] ?? null) ? $e['codigo'] : $e['corto'];
                 $e['barras_dibujo'] = self::barrasDibujadas($e['impreso'], filled($e['color'] ?? null));
+                // Debajo, el código del ERP si cabe en el renglón: tecleado a mano, la estación también lo encuentra.
+                $e['texto'] = mb_strlen(Code128::codificable($e['codigo'])) <= self::TEXTO_MAX ? $e['codigo'] : $e['impreso'];
 
                 continue;
             }
@@ -376,10 +388,10 @@ class EtiquetasMasivasController extends Controller
         return array_sum(array_column(Code128::tramos($codigo), 1)) + 2 * self::SILENCIO_MODULOS;
     }
 
-    /** ¿Cabe el código en el adhesivo con rayas de al menos un punto? */
+    /** ¿Cabe el código en el adhesivo con rayas de los puntos que el lector de empaque alcanza a leer? */
     public static function cabe(string $codigo): bool
     {
-        return self::modulosConSilencio($codigo) * self::PUNTO_MM <= self::AREA_DROPI['ancho'];
+        return self::modulosConSilencio($codigo) * self::PUNTOS_MIN * self::PUNTO_MM <= self::AREA_DROPI['ancho'];
     }
 
     /**

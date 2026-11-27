@@ -208,6 +208,32 @@ it('el código corto de la etiqueta (GBP/GBV) abre el pedido y marca el producto
         ->and(\App\Modules\Dropi\Actions\ProcesarEscaneoEmpaque::productoDelCodigo('GBP' . $body->id))->toBe([null, null]);
 });
 
+it('el código corto numérico de la etiqueta (1/2 + id) abre el pedido y marca el producto; el código real gana si coinciden (27-nov-2026)', function () {
+    $tapete = erPedido('ER-36', 'ER-TAP', '2026-11-24 09:00');
+    $producto = Producto::where('referencia', 'ER-TAP')->firstOrFail();
+
+    $this->actingAs($this->empacador);
+    Livewire::test(EstacionEmpaque::class)
+        ->set('codigo', \App\Support\CodigoCortoEtiqueta::deProducto($producto->id))
+        ->call('escanear')
+        ->assertSet('pedidoActivoId', $tapete->id);
+
+    expect((int) $tapete->items()->first()->cantidad_pickeada)->toBe(1);
+
+    $body = Producto::create(['referencia' => 'ER-BODY', 'nombre' => 'Body', 'desglose_stock' => true, 'activo' => true]);
+    $azul = \App\Modules\Dropi\Models\ProductoVariante::create(['producto_id' => $body->id, 'color_nombre' => 'Azul', 'codigo_barras' => 'AND2505-917']);
+    $corto = \App\Support\CodigoCortoEtiqueta::deVariante($azul->id);
+    expect($corto)->toMatch('/^1\d{7}$/')
+        ->and(\App\Modules\Dropi\Actions\ProcesarEscaneoEmpaque::productoDelCodigo($corto)[0]?->id)->toBe($azul->id)
+        ->and(\App\Modules\Dropi\Actions\ProcesarEscaneoEmpaque::productoDelCodigo('19999999'))->toBe([null, null])
+        ->and(\App\Modules\Dropi\Actions\ProcesarEscaneoEmpaque::productoDelCodigo(\App\Support\CodigoCortoEtiqueta::deProducto($body->id)))->toBe([null, null]);
+
+    // Una variante cuyo código real es igual a un corto: se queda con el real.
+    $pijama = Producto::create(['referencia' => 'ER-PIJ', 'nombre' => 'Pijama', 'desglose_stock' => true, 'activo' => true]);
+    $rosa = \App\Modules\Dropi\Models\ProductoVariante::create(['producto_id' => $pijama->id, 'color_nombre' => 'Rosa', 'codigo_barras' => $corto === '10000001' ? '10000002' : '10000001']);
+    expect(\App\Modules\Dropi\Actions\ProcesarEscaneoEmpaque::productoDelCodigo($rosa->codigo_barras)[0]?->id)->toBe($rosa->id);
+});
+
 it('al confirmar se abre solo el siguiente de la cola', function () {
     $a = erPedido('ER-40', 'ER-VOL', '2026-11-24 09:00');
     $b = erPedido('ER-41', 'ER-VOL', '2026-11-24 09:05');

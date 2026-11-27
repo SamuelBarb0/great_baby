@@ -69,7 +69,7 @@
                                         @php $x += $ancho; @endphp
                                     @endforeach
                                 </div>
-                                <div class="codigo">{{ \App\Support\Code128::codificable($fila[$i]['impreso'] ?? $fila[$i]['codigo']) }}</div>
+                                <div class="codigo">{{ \App\Support\Code128::codificable($fila[$i]['texto'] ?? $fila[$i]['impreso'] ?? $fila[$i]['codigo']) }}</div>
                             </div>
                         @endisset
                     </td>

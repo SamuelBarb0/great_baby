@@ -82,10 +82,12 @@ it('el PDF lleva el código del ERP: el de la variante o la referencia del agreg
 
     $vistas = [];
     $impresos = [];
+    $textos = [];
     $conQr = [];
-    \Illuminate\Support\Facades\View::composer('catalogo.pdf.etiquetas-dropi', function ($v) use (&$vistas, &$impresos, &$conQr) {
+    \Illuminate\Support\Facades\View::composer('catalogo.pdf.etiquetas-dropi', function ($v) use (&$vistas, &$impresos, &$textos, &$conQr) {
         $vistas[] = array_column($v->getData()['etiquetas'], 'codigo');
         $impresos[] = array_column($v->getData()['etiquetas'], 'impreso');
+        $textos[] = array_column($v->getData()['etiquetas'], 'texto');
         $conQr[] = collect($v->getData()['etiquetas'])->contains(fn ($e) => isset($e['qr']));
     });
 
@@ -101,9 +103,12 @@ it('el PDF lleva el código del ERP: el de la variante o la referencia del agreg
         // Las de Dropi llevan el nombre y el código de barras: ni QR se genera.
         ->and($conQr)->toBe([false, false]);
 
-    // En las barras: el de la variante (23 letras) no cabe en el adhesivo y va su
-    // código corto, que la estación de empaque también reconoce; «899» sí cabe.
-    expect($impresos)->toBe([['GBV' . $this->variante->id], ['899']]);
+    // En las barras: el de la variante (23 letras) no cabe con rayas de 2 puntos y
+    // va su código corto numérico, que la estación de empaque también reconoce;
+    // «899» sí cabe. Debajo, el real cuando entra en el renglón (no es el caso).
+    $corto = \App\Support\CodigoCortoEtiqueta::deVariante($this->variante->id);
+    expect($impresos)->toBe([[$corto], ['899']])
+        ->and($textos)->toBe([[$corto], ['899']]);
 });
 
 it('las etiquetas de Dropi llevan el nombre y el código de barras; las del catálogo siguen completas', function () {
@@ -152,11 +157,43 @@ it('las barras usan el ancho que les cabe: rayas de 2 puntos si caben; si ni con
         ->and($abeja['silencio'])->toBe(2.5)
         ->and($abeja['alto'])->toBe(10);
 
-    // Hasta 13 letras caben con 1 punto; los de la mitad de las variantes (16 a 24) no.
-    expect($C::cabe('7701234567890'))->toBeTrue()
-        ->and($C::cabe('ABCDEFGHIJKLM'))->toBeTrue()
+    // «Cabe» es con rayas de 2 puntos: el lector de mesa de empaque no leía las
+    // de 1 (27-nov-2026). «AND2505-917» (el del video) ya no cabe y va el corto.
+    expect($C::cabe('5907B'))->toBeTrue()
+        ->and($C::cabe('899'))->toBeTrue()
+        ->and($C::cabe('AND2505-917'))->toBeFalse()
+        ->and($C::cabe('7701234567890'))->toBeFalse()
         ->and($C::cabe('AND2507-94/800-05ELF-18M'))->toBeFalse()
         ->and($C::barrasDibujadas('GBV123', true)['alto'])->toBe(7);
+});
+
+it('el código corto numérico siempre sale con rayas de 2 puntos, hasta con ids de 7 cifras (27-nov-2026)', function () {
+    $C = \App\Http\Controllers\Catalogo\EtiquetasMasivasController::class;
+
+    foreach ([1, 917, 65432, 9999999] as $id) {
+        foreach ([\App\Support\CodigoCortoEtiqueta::deVariante($id), \App\Support\CodigoCortoEtiqueta::deProducto($id)] as $corto) {
+            $b = $C::barrasDibujadas($corto, true);
+            expect($corto)->toHaveLength(8)
+                ->and($C::cabe($corto))->toBeTrue()
+                ->and(min(array_column($b['tramos'], 1)))->toBeGreaterThanOrEqual(0.25)
+                ->and($b['ancho'])->toBeLessThanOrEqual(26.0)
+                ->and(\App\Support\CodigoCortoEtiqueta::leer($corto)['id'])->toBe($id);
+        }
+    }
+});
+
+it('debajo de las barras va el código del ERP si entra en el renglón, aunque las barras lleven el corto', function () {
+    $this->actingAs($this->aracely);
+    $this->variante->update(['codigo_barras' => 'AND2505-917']);
+
+    $datos = [];
+    \Illuminate\Support\Facades\View::composer('catalogo.pdf.etiquetas-dropi', function ($v) use (&$datos) {
+        $datos = $v->getData()['etiquetas'][0];
+    });
+    $this->get(route('catalogo.etiquetas.dropi', 1))->assertOk();
+
+    expect($datos['impreso'])->toBe(\App\Support\CodigoCortoEtiqueta::deVariante($this->variante->id))
+        ->and($datos['texto'])->toBe('AND2505-917');
 });
 
 it('sin vínculo no hay etiqueta, y sin permiso no se imprime', function () {
