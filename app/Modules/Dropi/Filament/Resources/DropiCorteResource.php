@@ -3,22 +3,21 @@
 namespace App\Modules\Dropi\Filament\Resources;
 
 use App\Modules\Dropi\Actions\CerrarCorte;
-use App\Modules\Dropi\Actions\GenerarRemisionesCorte;
 use App\Modules\Dropi\Enums\EstadoCorte;
+use App\Modules\Dropi\Enums\EstadoPedidoDropi;
 use App\Modules\Dropi\Filament\Resources\DropiCorteResource\Pages;
 use App\Http\Controllers\Dropi\PedidosCortePdfController;
 use App\Modules\Dropi\Models\DropiCorte;
 use App\Modules\Dropi\Models\DropiPedido;
 use BackedEnum;
 use Filament\Actions\Action;
-use Filament\Actions\EditAction;
 use Filament\Notifications\Notification;
-use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Radio;
 use Filament\Forms\Components\Select;
-use Filament\Forms\Components\TextInput;
 use Filament\Resources\Resource;
 use App\Support\FilamentPolicy\HeredaAutorizacion;
+use Filament\Infolists\Components\TextEntry;
+use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 use Filament\Tables\Columns\BadgeColumn;
 use Filament\Tables\Columns\TextColumn;
@@ -53,20 +52,33 @@ class DropiCorteResource extends Resource
         return \App\Auth\Permisos::puede(auth()->user(), 'dropi_cortes');
     }
 
-    public static function form(Schema $schema): Schema
+    /**
+     * La cabecera de la pantalla del corte (26-nov-2026): qué corte es y cómo
+     * van sus pedidos. Los pedidos, uno por uno, van debajo (PedidosRelationManager).
+     * El corte ya no se crea ni se edita a mano: nace con «Generar corte».
+     */
+    public static function infolist(Schema $schema): Schema
     {
+        $cuenta = fn (DropiCorte $c, array $estados) => $c->pedidos()->whereIn('estado', $estados)->count();
+
         return $schema->components([
-            DatePicker::make('fecha')->required()->native(false)->displayFormat('Y-m-d'),
-            Select::make('numero')
-                ->label('Número de corte')
-                ->options([1 => 'Corte 1', 2 => 'Corte 2'])
-                ->required(),
-            Select::make('estado')
-                ->options(collect(EstadoCorte::cases())->mapWithKeys(fn ($c) => [$c->value => $c->label()]))
-                ->required(),
-            TextInput::make('pedidos_totales')->numeric()->default(0),
-            TextInput::make('pedidos_pendientes_inv')->label('Pendientes por inventario')->numeric()->default(0),
-            TextInput::make('pedidos_despachados')->numeric()->default(0),
+            Section::make('Cómo van sus pedidos')
+                ->description(fn (DropiCorte $record) => 'Corte ' . mb_strtolower((string) EstadoCorte::de($record->estado)?->label()))
+                ->columns(['default' => 2, 'md' => 3, 'xl' => 6])
+                ->schema([
+                    TextEntry::make('total')->label('Pedidos')
+                        ->state(fn (DropiCorte $record) => $record->pedidos()->count())->size('lg')->weight('bold'),
+                    TextEntry::make('por_empacar')->label('Por empacar')->color('warning')->size('lg')->weight('bold')
+                        ->state(fn (DropiCorte $record) => $cuenta($record, [EstadoPedidoDropi::Pending, EstadoPedidoDropi::Alistando])),
+                    TextEntry::make('sin_inventario')->label('Pendientes por inventario')->color('danger')->size('lg')->weight('bold')
+                        ->state(fn (DropiCorte $record) => $cuenta($record, [EstadoPedidoDropi::PendienteInventario])),
+                    TextEntry::make('empacados')->label('Empacados')->color('info')->size('lg')->weight('bold')
+                        ->state(fn (DropiCorte $record) => $cuenta($record, [EstadoPedidoDropi::Empacado])),
+                    TextEntry::make('despachados')->label('Despachados')->color('success')->size('lg')->weight('bold')
+                        ->state(fn (DropiCorte $record) => $cuenta($record, [EstadoPedidoDropi::Despachado, EstadoPedidoDropi::Entregado, EstadoPedidoDropi::Pagado, EstadoPedidoDropi::DevolucionEnCamino, EstadoPedidoDropi::Devuelto])),
+                    TextEntry::make('cancelados')->label('Cancelados')->color('gray')->size('lg')->weight('bold')
+                        ->state(fn (DropiCorte $record) => $cuenta($record, [EstadoPedidoDropi::CanceladoDropi, EstadoPedidoDropi::CanceladoGb])),
+                ]),
         ]);
     }
 
@@ -86,89 +98,86 @@ class DropiCorteResource extends Resource
                 TextColumn::make('cerrado_at')->label('Finalizado')->dateTime('Y-m-d H:i')->toggleable(),
             ])
             ->defaultSort('fecha', 'desc')
-            ->recordActions([
-                // Primero se cierra la entrada y se empaca; al final se congela
-                //   (24-nov-2026: «desde cerrar corte poder hacer todo el proceso
-                //   de empacado»). Ver EstadoCorte.
-                Action::make('cerrar_entrada')
-                    ->label('Cerrar corte')
-                    ->icon('heroicon-o-scissors')
-                    ->color('warning')
-                    ->requiresConfirmation()
-                    ->modalHeading(fn (DropiCorte $record) => 'Cerrar el corte '.$record->etiqueta())
-                    ->modalDescription('Desde ahora este corte no recibe pedidos: los nuevos de Dropi van al siguiente corte. Sus pedidos se siguen recolectando, empacando y despachando. Cuando todo esté empacado, «Finalizar corte» lo congela con el manifiesto.')
-                    ->modalSubmitActionLabel('Cerrar corte')
-                    ->visible(fn (DropiCorte $record) => EstadoCorte::de($record->estado) === EstadoCorte::Abierto)
-                    ->action(function (DropiCorte $record) {
-                        try {
-                            \App\Modules\Dropi\Actions\CortarEntradaCorte::run($record->id, auth()->id());
-                            Notification::make()->title('Corte cerrado: ya no recibe pedidos')
-                                ->body('Sigan recolectando y empacando. Los pedidos nuevos entran al siguiente corte.')->success()->send();
-                        } catch (\Throwable $e) {
-                            Notification::make()->title('No se pudo cerrar')->body($e->getMessage())->danger()->send();
-                        }
-                    }),
-                Action::make('cerrar_corte')
-                    ->label('Finalizar corte + Manifiesto')
-                    ->icon('heroicon-o-lock-closed')
-                    ->color('success')
-                    ->requiresConfirmation()
-                    ->modalDescription('Congela el corte, genera manifiesto PDF con QR y hash SHA-256, y produce remisiones 1:1 listas para ARI. Pide que no queden pedidos sin empacar. Al finalizar no se puede editar.')
-                    ->visible(fn (DropiCorte $record) => $record->estado !== EstadoCorte::Cerrado)
-                    ->action(function (DropiCorte $record) {
-                        try {
-                            $r = CerrarCorte::run($record->id, auth()->id());
-                            Notification::make()
-                                ->title('✅ Corte finalizado y manifiesto generado')
-                                ->body("Hash: " . substr($r['hash'], 0, 12) . "… · Remisiones: {$r['remisiones']} · Descarga el PDF desde el botón 'Manifiesto PDF' del corte.")
-                                ->success()
-                                ->send();
-                        } catch (\Throwable $e) {
-                            Notification::make()->title('No se pudo finalizar')->body($e->getMessage())->danger()->send();
-                        }
-                    }),
-                Action::make('descargar_manifiesto')
-                    ->label('Manifiesto PDF')
-                    ->icon('heroicon-o-document-arrow-down')
-                    ->color('gray')
-                    ->visible(fn (DropiCorte $record) => (bool) $record->manifiesto_pdf_path)
-                    ->url(fn (DropiCorte $record) => route('dropi.manifiesto.descargar', $record))
-                    ->openUrlInNewTab(),
-                self::accionPedidosPdf(),
-                // Empacados que quedaron sin guía (Dropi la rechazó o no
-                //   respondió al empacar): se piden todas de una vez.
-                Action::make('guias_pendientes')
-                    ->label(fn (DropiCorte $record) => 'Guías pendientes (' . \App\Modules\Dropi\Actions\GenerarGuiaDropi::sinGuia($record)->count() . ')')
-                    ->icon('heroicon-o-truck')
-                    ->color('warning')
-                    ->visible(fn (DropiCorte $record) => \App\Modules\Dropi\Actions\GenerarGuiaDropi::activa()
-                        && \App\Modules\Dropi\Actions\GenerarGuiaDropi::sinGuia($record)->exists())
-                    ->requiresConfirmation()
-                    ->modalHeading('Generar las guías pendientes en Dropi')
-                    ->modalDescription('Pide a Dropi la guía de cada pedido empacado de este corte que todavía no la tiene. Las guías son reales: la transportadora las registra. Los stickers se imprimen desde la Estación de Empaque.')
-                    ->action(function (DropiCorte $record) {
-                        $r = \App\Modules\Dropi\Actions\GenerarGuiaDropi::make()->pendientesDelCorte($record, auth()->id());
-                        $n = Notification::make()
-                            ->title("Guías generadas: {$r['generadas']}")
-                            ->body($r['errores'] ? 'Sin guía: ' . implode(' · ', array_slice($r['errores'], 0, 5)) : null);
-                        ($r['errores'] ? $n->warning()->persistent() : $n->success())->send();
-                    }),
-                Action::make('generar_remisiones')
-                    ->label('Solo remisiones ARI')
-                    ->icon('heroicon-o-document-plus')
-                    ->color('info')
-                    ->requiresConfirmation()
-                    ->modalDescription('Crea remisiones 1:1 sin cerrar el corte (útil para probar).')
-                    ->visible(fn (DropiCorte $record) => $record->estado !== EstadoCorte::Cerrado)
-                    ->action(function (DropiCorte $record) {
-                        $r = GenerarRemisionesCorte::run($record->id);
+            ->recordActions(self::accionesDelCorte());
+    }
+
+    /**
+     * Lo que se hace con un corte: en su fila y arriba en su pantalla. Sin
+     * remisiones sueltas, editar ni crear (26-nov-2026: se hace desde «Generar
+     * corte» y desde Dropi).
+     *
+     * @return list<Action>
+     */
+    public static function accionesDelCorte(): array
+    {
+        return [
+            // Primero se cierra la entrada y se empaca; al final se congela
+            //   (24-nov-2026: «desde cerrar corte poder hacer todo el proceso
+            //   de empacado»). Ver EstadoCorte.
+            Action::make('cerrar_entrada')
+                ->label('Cerrar corte')
+                ->icon('heroicon-o-scissors')
+                ->color('warning')
+                ->requiresConfirmation()
+                ->modalHeading(fn (DropiCorte $record) => 'Cerrar el corte '.$record->etiqueta())
+                ->modalDescription('Desde ahora este corte no recibe pedidos: los nuevos de Dropi van al siguiente corte. Sus pedidos se siguen recolectando, empacando y despachando. Cuando todo esté empacado, «Finalizar corte» lo congela con el manifiesto.')
+                ->modalSubmitActionLabel('Cerrar corte')
+                ->visible(fn (DropiCorte $record) => EstadoCorte::de($record->estado) === EstadoCorte::Abierto)
+                ->action(function (DropiCorte $record) {
+                    try {
+                        \App\Modules\Dropi\Actions\CortarEntradaCorte::run($record->id, auth()->id());
+                        Notification::make()->title('Corte cerrado: ya no recibe pedidos')
+                            ->body('Sigan recolectando y empacando. Los pedidos nuevos entran al siguiente corte.')->success()->send();
+                    } catch (\Throwable $e) {
+                        Notification::make()->title('No se pudo cerrar')->body($e->getMessage())->danger()->send();
+                    }
+                }),
+            Action::make('cerrar_corte')
+                ->label('Finalizar corte + Manifiesto')
+                ->icon('heroicon-o-lock-closed')
+                ->color('success')
+                ->requiresConfirmation()
+                ->modalDescription('Congela el corte y genera el manifiesto PDF con QR y hash SHA-256. Pide que no queden pedidos sin empacar. Al finalizar no se puede cambiar.')
+                ->visible(fn (DropiCorte $record) => $record->estado !== EstadoCorte::Cerrado)
+                ->action(function (DropiCorte $record) {
+                    try {
+                        $r = CerrarCorte::run($record->id, auth()->id());
                         Notification::make()
-                            ->title('Remisiones generadas')
-                            ->body("Corte {$r['corte']} · {$r['remisiones_creadas']} remisiones · $" . number_format($r['valor_lote'], 0, ',', '.'))
-                            ->success()->send();
-                    }),
-                EditAction::make(),
-            ]);
+                            ->title('✅ Corte finalizado y manifiesto generado')
+                            ->body("Hash: " . substr($r['hash'], 0, 12) . "… · Descarga el PDF desde el botón 'Manifiesto PDF' del corte.")
+                            ->success()
+                            ->send();
+                    } catch (\Throwable $e) {
+                        Notification::make()->title('No se pudo finalizar')->body($e->getMessage())->danger()->send();
+                    }
+                }),
+            Action::make('descargar_manifiesto')
+                ->label('Manifiesto PDF')
+                ->icon('heroicon-o-document-arrow-down')
+                ->color('gray')
+                ->visible(fn (DropiCorte $record) => (bool) $record->manifiesto_pdf_path)
+                ->url(fn (DropiCorte $record) => route('dropi.manifiesto.descargar', $record))
+                ->openUrlInNewTab(),
+            self::accionPedidosPdf(),
+            // Empacados que quedaron sin guía (Dropi la rechazó o no
+            //   respondió al empacar): se piden todas de una vez.
+            Action::make('guias_pendientes')
+                ->label(fn (DropiCorte $record) => 'Guías pendientes (' . \App\Modules\Dropi\Actions\GenerarGuiaDropi::sinGuia($record)->count() . ')')
+                ->icon('heroicon-o-truck')
+                ->color('warning')
+                ->visible(fn (DropiCorte $record) => \App\Modules\Dropi\Actions\GenerarGuiaDropi::activa()
+                    && \App\Modules\Dropi\Actions\GenerarGuiaDropi::sinGuia($record)->exists())
+                ->requiresConfirmation()
+                ->modalHeading('Generar las guías pendientes en Dropi')
+                ->modalDescription('Pide a Dropi la guía de cada pedido empacado de este corte que todavía no la tiene. Las guías son reales: la transportadora las registra. Los stickers se imprimen desde la Estación de Empaque.')
+                ->action(function (DropiCorte $record) {
+                    $r = \App\Modules\Dropi\Actions\GenerarGuiaDropi::make()->pendientesDelCorte($record, auth()->id());
+                    $n = Notification::make()
+                        ->title("Guías generadas: {$r['generadas']}")
+                        ->body($r['errores'] ? 'Sin guía: ' . implode(' · ', array_slice($r['errores'], 0, 5)) : null);
+                    ($r['errores'] ? $n->warning()->persistent() : $n->success())->send();
+                }),
+        ];
     }
 
     /**
@@ -220,12 +229,16 @@ class DropiCorteResource extends Resource
             });
     }
 
+    public static function getRelations(): array
+    {
+        return [DropiCorteResource\RelationManagers\PedidosRelationManager::class];
+    }
+
     public static function getPages(): array
     {
         return [
             'index' => Pages\ListDropiCortes::route('/'),
-            'create' => Pages\CreateDropiCorte::route('/create'),
-            'edit' => Pages\EditDropiCorte::route('/{record}/edit'),
+            'view' => Pages\ViewDropiCorte::route('/{record}'),
         ];
     }
 }

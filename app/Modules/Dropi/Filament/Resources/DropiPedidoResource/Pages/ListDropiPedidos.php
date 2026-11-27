@@ -49,70 +49,20 @@ class ListDropiPedidos extends ListRecords
         $this->resetTable();
     }
 
-    /** El avance de las guías y de los reportes de los cortes (se refresca con el sondeo de 5 s de la tabla). */
+    /** El filtro por etapa que viene de un enlace, con cómo quitarlo. */
     public function getSubheading(): string|\Illuminate\Contracts\Support\Htmlable|null
     {
-        $lineas = [];
-
         if ($e = \App\Modules\Dropi\Enums\EstadoPedidoDropi::tryFrom((string) $this->etapa)) {
-            $lineas[] = e("Mostrando sólo: {$e->label()} (en el ERP) · ") . '<a href="#" wire:click.prevent="quitarEtapa" style="text-decoration:underline">quitar</a>';
+            return new \Illuminate\Support\HtmlString(e("Mostrando sólo: {$e->label()} (en el ERP) · ") . '<a href="#" wire:click.prevent="quitarEtapa" style="text-decoration:underline">quitar</a>');
         }
 
-        $a = \App\Modules\Dropi\Jobs\GenerarGuiasEnBloqueJob::avance(auth()->id());
-        if ($a) {
-            $listas = $a['hechas'] + $a['saltadas'] + count($a['errores']);
-            $texto = $listas < $a['total']
-                ? "Generando guías: {$listas} de {$a['total']}"
-                : "Guías generadas: {$a['hechas']} de {$a['total']}";
-            if ($a['saltadas']) {
-                $texto .= " · {$a['saltadas']} saltadas (no estaban PENDIENTE en Dropi)";
-            }
-            if ($a['errores']) {
-                $texto .= ' · ' . count($a['errores']) . ' con error: ' . implode(' | ', array_slice($a['errores'], 0, 3));
-            }
-            $lineas[] = e($texto);
-        }
-
-        // Los reportes de los cortes de hoy (25-nov-2026): el avance y, listos, el PDF.
-        $lotes = \App\Modules\Dropi\Models\DropiLoteImpresion::query()
-            ->where('created_at', '>=', now('America/Bogota')->startOfDay())
-            ->with('corte')->latest('id')->limit(4)->get();
-        foreach ($lotes as $l) {
-            $linea = e($l->titulo()) . ': ';
-            $linea .= match ($l->estado) {
-                \App\Modules\Dropi\Models\DropiLoteImpresion::GENERANDO_GUIAS => e("generando guías en Dropi, faltan {$l->guias_pendientes}…"),
-                \App\Modules\Dropi\Models\DropiLoteImpresion::DESCARGANDO => e("bajando stickers, {$l->descargados} de {$l->total}…"),
-                \App\Modules\Dropi\Models\DropiLoteImpresion::ARMANDO => e('armando el PDF, parte ' . (count($l->partes ?? []) + 1) . '…'),
-                \App\Modules\Dropi\Models\DropiLoteImpresion::ERROR => e('falló: ' . $l->error),
-                default => collect($l->partes ?? [])->keys()->map(fn ($i) => '<a href="' . e(route('dropi.guias.parte', [$l, $i + 1])) . '" target="_blank" rel="noopener" style="text-decoration:underline;font-weight:600">🖨 ' . (count($l->partes ?? []) > 1 ? 'Parte ' . ($i + 1) : 'Reporte') . '</a>')->implode(' · ')
-                    . ($l->sin_sticker ? e(' · ' . count($l->sin_sticker) . ' sin sticker') : ''),
-            };
-            // Qué pasó con cada guía (26-nov-2026), con el detalle a un clic.
-            if ($conteo = $l->conteoResultados()) {
-                $linea .= '<br><span style="font-size:.9em">'
-                    . collect($conteo)->map(fn ($n, $tipo) => e(\App\Modules\Dropi\Models\DropiLoteImpresion::RESULTADOS[$tipo]['icono'] . ' ' . $n . ' ' . mb_strtolower(\App\Modules\Dropi\Models\DropiLoteImpresion::RESULTADOS[$tipo]['titulo'])))->implode(' · ')
-                    . ' · <a href="#" wire:click.prevent="mountAction(\'resultadosGuias\', { lote: ' . $l->id . ' })" style="text-decoration:underline;font-weight:600">Ver detalle</a></span>';
-            }
-            $lineas[] = $linea;
-        }
-
-        return $lineas ? new \Illuminate\Support\HtmlString(implode('<br>', $lineas)) : null;
+        return null;
     }
 
-    /**
-     * «Ver detalle» de un reporte (26-nov-2026): cada pedido que no salió con
-     * guía nueva, por qué y qué hacer. Se abre desde la línea del reporte.
-     */
-    public function resultadosGuiasAction(): Action
+    /** Los reportes de los cortes de hoy y el avance de las guías, en tarjetas (26-nov-2026). */
+    protected function getHeaderWidgets(): array
     {
-        return Action::make('resultadosGuias')
-            ->modalHeading(fn (array $arguments) => \App\Modules\Dropi\Models\DropiLoteImpresion::with('corte')->find($arguments['lote'] ?? 0)?->titulo() ?? 'Reporte')
-            ->modalContent(fn (array $arguments) => view('dropi.pages.partials.resultados-guias', [
-                'lote' => \App\Modules\Dropi\Models\DropiLoteImpresion::find($arguments['lote'] ?? 0),
-            ]))
-            ->modalWidth('4xl')
-            ->modalSubmitAction(false)
-            ->modalCancelActionLabel('Cerrar');
+        return [\App\Modules\Dropi\Filament\Widgets\ReporteGuiasWidget::class];
     }
 
     protected function getHeaderActions(): array

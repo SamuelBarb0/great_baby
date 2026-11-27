@@ -8,7 +8,6 @@ use App\Modules\Dropi\Listeners\RecalcularContadoresCorte;
 use App\Modules\Dropi\Models\DropiPedido;
 use Carbon\CarbonImmutable;
 use Filament\Actions\Action;
-use Filament\Actions\CreateAction;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ListRecords;
 use Illuminate\Database\Eloquent\Builder;
@@ -51,7 +50,6 @@ class ListDropiCortes extends ListRecords
                     RecalcularContadoresCorte::recontar($corte->id);
                     Notification::make()->title("{$n} pedido(s) al {$corte->etiqueta()}")->success()->send();
                 }),
-            CreateAction::make(),
         ];
     }
 }

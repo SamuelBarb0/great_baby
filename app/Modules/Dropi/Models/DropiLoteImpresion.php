@@ -69,15 +69,46 @@ class DropiLoteImpresion extends Model
      * que se le dice a Aracely y qué tiene que hacer. Lo arma GenerarGuiasEnBloqueJob.
      */
     public const RESULTADOS = [
-        'generada' => ['icono' => '✅', 'titulo' => 'Guía generada', 'hacer' => null],
-        'ya_tenia' => ['icono' => '↪', 'titulo' => 'Ya tenía guía en Dropi', 'hacer' => 'Nada: se usó la que ya tenía, no se generó otra.'],
-        'cancelado' => ['icono' => '🚫', 'titulo' => 'Cancelado o rechazado en Dropi', 'hacer' => 'No se despacha. Ya quedó cancelado en el ERP.'],
-        'reemplazado' => ['icono' => '🔁', 'titulo' => 'Dropi ya no tiene esta orden (la reemplazó por otra)', 'hacer' => 'No despachar esta: la que vale es la nueva. Ya quedó cancelada en el ERP.'],
-        'sin_cobertura' => ['icono' => '🚚', 'titulo' => 'La transportadora no llega a esa dirección', 'hacer' => 'Cambiar la transportadora o la dirección en Dropi, o cancelar el pedido. Después, incluirlo en el próximo corte.'],
-        'en_otro_estado' => ['icono' => '⏸', 'titulo' => 'En Dropi no está pendiente', 'hacer' => 'Revisar el pedido en Dropi. Ya quedó actualizado en el ERP.'],
-        'sin_inventario' => ['icono' => '📦', 'titulo' => 'No está listo para despachar en el ERP', 'hacer' => 'Revisar el inventario del pedido; cuando esté, incluirlo en el próximo corte.'],
-        'error' => ['icono' => '⚠', 'titulo' => 'Dropi respondió con un error', 'hacer' => 'Incluirlo en el próximo corte para reintentar; si se repite, revisarlo en Dropi.'],
+        'generada' => ['icono' => '✅', 'titulo' => 'Guía generada', 'hacer' => null, 'grupo' => 'bien', 'color' => '#16a34a'],
+        'ya_tenia' => ['icono' => '↪', 'titulo' => 'Ya tenía guía en Dropi', 'hacer' => 'Nada: se usó la que ya tenía, no se generó otra.', 'grupo' => 'bien', 'color' => '#0891b2'],
+        'cancelado' => ['icono' => '🚫', 'titulo' => 'Cancelado o rechazado en Dropi', 'hacer' => 'No se despacha. Ya quedó cancelado en el ERP.', 'grupo' => 'solo', 'color' => '#6b7280'],
+        'reemplazado' => ['icono' => '🔁', 'titulo' => 'Dropi ya no tiene esta orden (la reemplazó por otra)', 'hacer' => 'No despachar esta: la que vale es la nueva. Ya quedó cancelada en el ERP.', 'grupo' => 'solo', 'color' => '#6b7280'],
+        'sin_cobertura' => ['icono' => '🚚', 'titulo' => 'La transportadora no llega a esa dirección', 'hacer' => 'Cambiar la transportadora o la dirección en Dropi, o cancelar el pedido. Después, incluirlo en el próximo corte.', 'grupo' => 'accion', 'color' => '#d97706'],
+        'en_otro_estado' => ['icono' => '⏸', 'titulo' => 'En Dropi no está pendiente', 'hacer' => 'Revisar el pedido en Dropi. Ya quedó actualizado en el ERP.', 'grupo' => 'accion', 'color' => '#d97706'],
+        'sin_inventario' => ['icono' => '📦', 'titulo' => 'No está listo para despachar en el ERP', 'hacer' => 'Revisar el inventario del pedido; cuando esté, incluirlo en el próximo corte.', 'grupo' => 'accion', 'color' => '#d97706'],
+        'error' => ['icono' => '⚠', 'titulo' => 'Dropi respondió con un error', 'hacer' => 'Incluirlo en el próximo corte para reintentar; si se repite, revisarlo en Dropi.', 'grupo' => 'accion', 'color' => '#dc2626'],
     ];
+
+    /**
+     * Cómo se agrupan en el reporte: primero lo que pide algo de Aracely, luego
+     * lo que el ERP ya resolvió solo, al final lo que salió bien.
+     */
+    public const GRUPOS = [
+        'accion' => ['titulo' => 'Necesitan tu acción', 'color' => '#dc2626'],
+        'solo' => ['titulo' => 'Se resolvieron solos', 'color' => '#6b7280'],
+        'bien' => ['titulo' => 'Salieron bien', 'color' => '#16a34a'],
+    ];
+
+    /** Cuántos pedidos piden algo de Aracely. */
+    public function conAccion(): int
+    {
+        return collect($this->resultados ?? [])
+            ->filter(fn ($r) => (self::RESULTADOS[$r['tipo'] ?? '']['grupo'] ?? 'accion') === 'accion')
+            ->count();
+    }
+
+    /** Qué tanto lleva (0–100) en lo que esté haciendo, para la barra de avance. */
+    public function avance(): int
+    {
+        $total = max(1, (int) $this->total);
+
+        return match ($this->estado) {
+            self::GENERANDO_GUIAS => (int) round(100 * count($this->resultados ?? []) / $total),
+            self::DESCARGANDO => (int) round(100 * $this->descargados / $total),
+            self::ARMANDO, self::LISTO => 100,
+            default => 0,
+        };
+    }
 
     /** Cuántos pedidos de cada tipo, en el orden de RESULTADOS. @return array<string, int> */
     public function conteoResultados(): array

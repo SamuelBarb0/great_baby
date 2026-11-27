@@ -176,9 +176,9 @@ class VistaAlistador extends Page
             ->where('heartbeat_at', '>=', now()->subMinutes(10))
             ->pluck('pedido_id')->all();
 
-        $cola = app(\App\Modules\Dropi\Support\ColaDeEmpaque::class)->delCorte($this->corteId, (int) auth()->id(), 20 + count($bloqueadosPorOtros))
-            ->reject(fn (DropiPedido $p) => in_array($p->id, $bloqueadosPorOtros, true))
-            ->take(20);
+        // Todos los del corte (26-nov-2026: con el tope de 20 la bodega no veía el resto).
+        $cola = app(\App\Modules\Dropi\Support\ColaDeEmpaque::class)->delCorte($this->corteId, (int) auth()->id())
+            ->reject(fn (DropiPedido $p) => in_array($p->id, $bloqueadosPorOtros, true));
 
         return new Collection($cola->values()->all());
     }

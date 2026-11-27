@@ -41,7 +41,7 @@ class ResumenCorteActivoWidget extends StatsOverviewWidget
                 ->description(ucfirst($corte->estado->label()))
                 ->color($corte->estado->color())
                 ->icon('heroicon-o-clipboard-document-list')
-                ->url(DropiCorteResource::getUrl('edit', ['record' => $corte->id])),
+                ->url(DropiCorteResource::getUrl('view', ['record' => $corte->id])),
 
             Stat::make('Pedidos en el corte', (string) $corte->pedidos_totales)
                 ->description($corte->pedidos_despachados . ' despachados · clic para ver')
