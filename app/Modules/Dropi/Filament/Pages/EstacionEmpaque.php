@@ -432,12 +432,17 @@ class EstacionEmpaque extends Page
 
             \Filament\Notifications\Notification::make()
                 ->title('Empaque cancelado')
-                ->body('Tu picking de este pedido fue liberado.')
+                ->body('Tu picking de este pedido fue liberado. Para seguir, «▶ Empezar a empacar»; para saltarlo, «⏭ Dejar para después».')
                 ->success()->send();
         }
         $this->pedidoActivoId = null;
         $this->ultimoResultado = null;
         $this->registroCache = null;
+
+        // Cancelar también pausa el turno (27-nov-2026): en turno, la pantalla
+        //   volvía a abrir el mismo pedido al instante, porque sigue siendo el
+        //   primero de la fila. Quien quiera saltarlo usa «Dejar para después».
+        $this->pausarTurno();
     }
 
     /**

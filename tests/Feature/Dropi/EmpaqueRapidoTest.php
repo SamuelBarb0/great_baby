@@ -578,3 +578,19 @@ it('escanear una guía ya empacada dice cuándo y quién, y deja reimprimir su g
         ->and($estacion->get('ultimoResultado')['mensaje'])->toContain('Ya está Empacado')->toContain('por ' . $this->empacador->name);
     $estacion->assertSee('🖨 Reimprimir guía')->assertSet('pedidoActivoId', null);
 });
+
+it('«Cancelar» en turno suelta el pedido y pausa: no se vuelve a abrir solo el mismo pedido (27-nov-2026)', function () {
+    $a = erPedido('ER-CA1', 'ER-VOL', '2026-11-24 08:00');
+    erPedido('ER-CA2', 'ER-VOL', '2026-11-24 09:00');
+
+    $this->actingAs($this->empacador);
+    Livewire::test(EstacionEmpaque::class)
+        ->call('siguientePedido')->assertSet('pedidoActivoId', $a->id)->assertSet('enTurno', true)
+        ->call('cancelarPedido')
+        ->assertSet('pedidoActivoId', null)->assertSet('enTurno', false)
+        // El refresco de cada 3 s ya no lo vuelve a abrir.
+        ->call('esperarPedido')->assertSet('pedidoActivoId', null)
+        ->assertSee('▶ Empezar a empacar');
+
+    expect(EmpaqueRegistro::where('pedido_id', $a->id)->value('estado'))->not->toBe('en_curso');
+});
