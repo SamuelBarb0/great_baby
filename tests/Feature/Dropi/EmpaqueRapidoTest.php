@@ -42,6 +42,14 @@ beforeEach(function () {
         $p = Producto::create(['referencia' => $ref, 'nombre' => $nombre, 'desglose_stock' => false, 'activo' => true]);
         app(VincularProductoDropi::class)->aProducto("SKU-{$ref}", $p->id);
     }
+
+    // La estación sólo trabaja el corte puesto en el alistador (27-nov-2026):
+    //   el del último reporte que generó Aracely. Los pedidos de prueba van ahí.
+    $this->corteEnTrabajo = \App\Modules\Dropi\Models\DropiCorte::create(['fecha' => '2026-11-20', 'numero' => 1]);
+    \App\Modules\Dropi\Models\DropiLoteImpresion::create([
+        'corte_id' => $this->corteEnTrabajo->id, 'pedidos' => [], 'total' => 0, 'guias_pendientes' => 0,
+        'estado' => \App\Modules\Dropi\Models\DropiLoteImpresion::LISTO,
+    ]);
 });
 
 /** Un pedido listo para empacar; por defecto con la guía ya impresa, que es lo que entra a la cola. */
@@ -59,6 +67,7 @@ function erPedido(string $guia, string $ref, string $creado, bool $impreso = tru
     // Con stock o sin él, para la cola cuenta que esté listo para empacar.
     $p->estado = EstadoPedidoDropi::Pending;
     $p->save();
+    DropiPedido::whereKey($p->id)->update(['corte_id' => test()->corteEnTrabajo->id]);
     if ($impreso) {
         // Impreso sin posición en la pila, como lo que se imprime en Dropi.
         DropiPedido::whereKey($p->id)->update(['guia_impresa_at' => now()]);
@@ -144,6 +153,32 @@ it('«Siguiente pedido» abre el siguiente libre, y otro empacador recibe el que
 
     expect(EmpaqueRegistro::where('pedido_id', $a->id)->value('operario_id'))->toBe($this->empacador->id)
         ->and(EmpaqueRegistro::where('pedido_id', $b->id)->value('operario_id'))->toBe($this->otro->id);
+});
+
+it('la estación sólo da los pedidos del corte puesto en el alistador: los de cortes anteriores no se cuelan (27-nov-2026)', function () {
+    $viejo = erPedido('ER-80', 'ER-VOL', '2026-11-24 08:00');
+    $deHoy1 = erPedido('ER-81', 'ER-VOL', '2026-11-24 09:00');
+    $deHoy2 = erPedido('ER-82', 'ER-TAP', '2026-11-24 09:30');
+
+    // Aracely genera el corte de hoy: su reporte es el último, el alistador lo pone.
+    $hoy = \App\Modules\Dropi\Models\DropiCorte::create(['fecha' => '2026-11-21', 'numero' => 1]);
+    \App\Modules\Dropi\Models\DropiLoteImpresion::create([
+        'corte_id' => $hoy->id, 'pedidos' => [], 'total' => 0, 'guias_pendientes' => 0,
+        'estado' => \App\Modules\Dropi\Models\DropiLoteImpresion::LISTO,
+    ]);
+    DropiPedido::whereIn('id', [$deHoy1->id, $deHoy2->id])->update(['corte_id' => $hoy->id]);
+
+    $cola = app(ColaDeEmpaque::class);
+    expect(app(\App\Modules\Dropi\Support\RecoleccionDelCorte::class)->cortesEnTrabajo()->first()?->id)->toBe($hoy->id)
+        ->and($cola->pedidos()->pluck('id')->all())->toBe([$deHoy1->id, $deHoy2->id])
+        ->and($cola->contar())->toBe(2)
+        ->and($cola->siguienteCon($this->empacador->id, null, Producto::where('referencia', 'ER-VOL')->value('id'))?->id)->toBe($deHoy1->id);
+
+    $this->actingAs($this->empacador);
+    Livewire::test(EstacionEmpaque::class)->call('siguientePedido')->assertSet('pedidoActivoId', $deHoy1->id)
+        ->call('siguientePedido'); // con uno abierto no toma otro
+
+    expect(EmpaqueRegistro::where('pedido_id', $viejo->id)->exists())->toBeFalse();
 });
 
 it('con dos empacadores al tiempo nadie recibe ni toca el pedido que tiene el otro (25-nov-2026)', function () {
@@ -304,7 +339,7 @@ it('mientras falte algo del pedido no se imprime ni se confirma', function () {
     $p = DropiPedido::where('guia', 'ER-70')->firstOrFail();
     $p->estado = EstadoPedidoDropi::Pending;
     $p->save();
-    DropiPedido::whereKey($p->id)->update(['guia_impresa_at' => now(), 'sticker_path' => 'colombia/guias/er-70.pdf']);
+    DropiPedido::whereKey($p->id)->update(['guia_impresa_at' => now(), 'sticker_path' => 'colombia/guias/er-70.pdf', 'corte_id' => $this->corteEnTrabajo->id]);
 
     $this->actingAs($this->empacador);
     $lw = Livewire::test(EstacionEmpaque::class)

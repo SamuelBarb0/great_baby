@@ -39,7 +39,7 @@ class ColaDeEmpaque
      */
     public function pedidos(?int $operarioId = null, ?int $limite = null): Collection
     {
-        $delErp = $this->base($operarioId)->whereNotNull('orden_empaque')
+        $delErp = $this->deLaEstacion($operarioId)->whereNotNull('orden_empaque')
             ->orderBy('orden_empaque')->orderBy('id')
             ->when($limite, fn ($q) => $q->limit($limite))
             ->with(self::CON_ITEMS)->get();
@@ -49,7 +49,7 @@ class ColaDeEmpaque
         }
 
         // Lo impreso en Dropi no tiene posición en la pila: suele ser poco.
-        $deDropi = ImprimirGuiasDropi::ordenar($this->base($operarioId)->whereNull('orden_empaque')->with(self::CON_ITEMS)->get());
+        $deDropi = ImprimirGuiasDropi::ordenar($this->deLaEstacion($operarioId)->whereNull('orden_empaque')->with(self::CON_ITEMS)->get());
 
         $todo = $delErp->concat($deDropi)->values();
 
@@ -72,7 +72,7 @@ class ColaDeEmpaque
     /** Cuántos hay por empacar, sin cargar ninguno. */
     public function contar(?int $operarioId = null): int
     {
-        return $this->base($operarioId)->count();
+        return $this->deLaEstacion($operarioId)->count();
     }
 
     /** Pendientes que nadie ha impreso: no le llegan a nadie hasta que Aracely los imprima. */
@@ -102,9 +102,22 @@ class ColaDeEmpaque
             ->when($varianteId, fn ($w) => $w->where('variante_id', $varianteId))
             ->when(! $varianteId, fn ($w) => $w->whereNull('variante_id')->where('producto_id', $productoId)));
 
-        return $lleva($this->base($operarioId))->whereNotNull('orden_empaque')
+        return $lleva($this->deLaEstacion($operarioId))->whereNotNull('orden_empaque')
             ->orderBy('orden_empaque')->orderBy('id')->with(self::CON_ITEMS)->first()
-            ?? ImprimirGuiasDropi::ordenar($lleva($this->base($operarioId))->whereNull('orden_empaque')->with(self::CON_ITEMS)->get())->first();
+            ?? ImprimirGuiasDropi::ordenar($lleva($this->deLaEstacion($operarioId))->whereNull('orden_empaque')->with(self::CON_ITEMS)->get())->first();
+    }
+
+    /**
+     * La cola de la estación: sólo el corte que está puesto en la Vista del
+     * Alistador (27-nov-2026: se colaban los cortes anteriores entre los de
+     * hoy). El mismo criterio que el alistador, para que nunca se desfasen;
+     * sin corte en trabajo, la cola está vacía.
+     */
+    private function deLaEstacion(?int $operarioId): Builder
+    {
+        $corteId = app(RecoleccionDelCorte::class)->cortesEnTrabajo()->first()?->id;
+
+        return $this->base($operarioId)->where('corte_id', $corteId ?? 0);
     }
 
     /** Lo que se puede empacar: impreso, despachable, fuera de un corte cerrado y sin otro empacador encima. */
