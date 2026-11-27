@@ -157,9 +157,10 @@ it('la lista se separa en pestañas por el estado de Dropi, legible y sin el del
     $enCamino = $enDropi('G-3', 81003, 'EN BODEGA DESTINO');
     $this->actingAs($this->aracely);
 
+    // Quien genera cortes entra a «Pendiente», su trabajo del día (27-nov-2026).
     $lista = Livewire::test(ListDropiPedidos::class);
-    expect($lista->get('activeTab'))->toBe('todos');
-    $lista->assertCanSeeTableRecords([$pendiente, $conGuia, $enCamino])
+    expect($lista->get('activeTab'))->toBe('pendiente');
+    $lista->set('activeTab', 'todos')->assertCanSeeTableRecords([$pendiente, $conGuia, $enCamino])
         ->assertSeeText('Guía generada')->assertSeeText('En bodega destino')->assertDontSeeText('GUIA_GENERADA');
 
     $lista->set('activeTab', 'pendiente')->assertCanSeeTableRecords([$pendiente])->assertCanNotSeeTableRecords([$conGuia, $enCamino]);
@@ -238,7 +239,7 @@ it('el modo empaque muestra todos los pedidos del corte, no sólo los primeros 2
 
     Livewire::test(VistaAlistador::class)
         ->call('cambiarModo', 'empaque')
-        ->assertSee('Empaque · 25')
+        ->assertSee('2 · Empacar pedidos · 25')
         ->assertSee('G-25');
 });
 
@@ -434,7 +435,7 @@ it('el alistador imprime sólo la hoja de alistamiento, sin los stickers del rep
     $this->actingAs($this->aracely);
 
     Livewire::test(VistaAlistador::class)
-        ->assertSeeText('Solo alistamiento')
+        ->assertSeeText('Imprimir hoja de recogida')
         ->assertSeeHtml(e(route('dropi.recoleccion.pdf', $p->corte_id)));
 });
 
@@ -477,4 +478,46 @@ it('la recolección va de mayor a menor cantidad con los colores de un estilo se
     // El PDF sigue el orden escogido.
     $corte = DropiPedido::where('guia', 'G-1')->first()->corte_id;
     $this->get(route('dropi.recoleccion.pdf', [$corte, 'orden' => 'ruta']))->assertOk();
+});
+
+it('la vista del alistador guía por pasos: recoger, al 100 % pasar a empacar, quitar el chulito pide confirmar (27-nov-2026)', function () {
+    pedidoEnCorte('G-81', [['SKU-899', 2]]);
+    $this->actingAs($this->aracely);
+
+    $vista = Livewire::test(VistaAlistador::class)
+        ->assertSee(['1 · Recoger productos · 1', '2 · Empacar pedidos · 1', 'Recoger productos', 'Imprimir hoja de recogida', 'Más unidades primero', 'Camino de la bodega'])
+        ->assertDontSee('Pasar a Empacar pedidos')
+        ->assertDontSeeHtml('wire:confirm');
+
+    $vista->call('marcarRecogido', 'SKU-899')
+        ->assertSeeText('1 de 1 referencias recogidas')
+        ->assertSee('✔ Todo recogido')->assertSee('Pasar a Empacar pedidos')
+        ->assertSeeHtml('wire:confirm="¿Quitar el chulito de Volante?');
+
+    $vista->call('cambiarModo', 'empaque')->assertSee('Abrir Estación de Empaque')
+        ->assertSeeHtml(\App\Modules\Dropi\Filament\Pages\EstacionEmpaque::getUrl());
+});
+
+it('sin corte, la vista espera sola y le dice a la oficina qué hacer (27-nov-2026)', function () {
+    $this->actingAs($this->aracely);
+
+    Livewire::test(VistaAlistador::class)
+        ->assertSeeText('Todavía no hay guías impresas')
+        ->assertSeeText('Esta pantalla se actualiza sola')
+        ->assertSeeHtml('wire:poll.15s')
+        ->assertSeeText('Generar corte de hoy');
+});
+
+it('«Pedidos Dropi» muestra el camino del día y «Generar corte de hoy», y no deja generar otro mientras uno se genera (27-nov-2026)', function () {
+    $this->actingAs($this->aracely);
+    $lista = Livewire::test(ListDropiPedidos::class)
+        ->assertSeeText('1. Revisa «Pendiente»')
+        ->assertActionVisible('generarCorteDeHoy');
+
+    $corte = \App\Modules\Dropi\Actions\AsignarCorteACarga::run(CarbonImmutable::now());
+    DropiLoteImpresion::create(['corte_id' => $corte->id, 'pedidos' => [], 'total' => 5, 'guias_pendientes' => 5, 'estado' => DropiLoteImpresion::GENERANDO_GUIAS]);
+    $antes = DropiLoteImpresion::count();
+
+    $lista->callAction('generarCorteDeHoy')->assertNotified('Ya hay un corte generándose');
+    expect(DropiLoteImpresion::count())->toBe($antes);
 });

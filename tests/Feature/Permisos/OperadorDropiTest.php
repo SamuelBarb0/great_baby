@@ -284,7 +284,9 @@ it('el menú Dropi del pedido pide su casilla, no el nombre de Aracely', functio
     $this->rol->givePermissionTo('ver.dropi_cambiar_en_dropi');
     $this->actingAs($this->operador->fresh());
 
+    // Con la casilla, la lista abre en «Pendiente» (27-nov-2026); este pedido no tiene estatus de Dropi.
     \Livewire\Livewire::test(ListDropiPedidos::class)
+        ->set('activeTab', 'todos')
         ->assertTableActionVisible('infoDropi', $pedido)
         ->assertTableActionVisible('actualizarEstatusDropi', $pedido)
         ->assertTableActionVisible('etiquetasDropi', $pedido);

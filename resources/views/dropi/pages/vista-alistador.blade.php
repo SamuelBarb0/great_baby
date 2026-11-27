@@ -54,10 +54,14 @@
             </div>
         @else
             {{-- Aquí se trabaja DESPUÉS de Aracely: sin guías impresas no hay nada que recoger. --}}
-            <div style="text-align:center;padding:2.5rem 1rem;">
+            {{-- Se mira sola cada 15 s (27-nov-2026): apenas la oficina genera el corte, aparece. --}}
+            <div wire:poll.15s style="text-align:center;padding:2.5rem 1rem;">
                 <div style="font-size:2.5rem;">🖨</div>
                 <div style="font-size:1.25rem;font-weight:700;margin-top:.5rem;">Todavía no hay guías impresas</div>
-                <div style="color:#9ca3af;margin-top:.5rem;">Aracely: en Pedidos Dropi selecciona los pedidos y dale <strong>Generar corte</strong>. Cuando salga el reporte, el corte aparece aquí.</div>
+                <div style="opacity:.85;margin-top:.5rem;font-size:1rem;">Esperando a que la oficina genere el corte. Esta pantalla se actualiza sola.</div>
+                @if(auth()->user()?->esAracely())
+                    <div style="opacity:.75;margin-top:.5rem;font-size:.9rem;">En Pedidos Dropi, «Generar corte de hoy». Cuando salga el reporte, el corte aparece aquí.</div>
+                @endif
             </div>
         @endif
     </x-filament::section>
@@ -84,29 +88,29 @@
     {{-- Selector de modo con tabs --}}
     <x-filament::tabs style="margin-top:1.5rem;">
         <x-filament::tabs.item :active="$modo === 'recoleccion'" wire:click="cambiarModo('recoleccion')" icon="heroicon-o-clipboard-document-list">
-            Recolección · {{ count($recoleccion) }}<span class="alistador-sufijo"> refs</span>
+            1 · Recoger productos · {{ count($recoleccion) }}
         </x-filament::tabs.item>
         <x-filament::tabs.item :active="$modo === 'empaque'" wire:click="cambiarModo('empaque')" icon="heroicon-o-cube">
-            Empaque · {{ $empaque->count() }}<span class="alistador-sufijo"> pedidos</span>
+            2 · Empacar pedidos · {{ $empaque->count() }}
         </x-filament::tabs.item>
     </x-filament::tabs>
 
     {{-- MODO RECOLECCIÓN --}}
     @if($modo === 'recoleccion')
         <x-filament::section class="alistador-seccion" style="margin-top:1rem;">
-            <x-slot name="heading">Modo Recolección</x-slot>
-            <x-slot name="description">Ve el total de unidades por referencia, en el orden del recorrido de la bodega, para pasar una sola vez. Toca cada referencia cuando la recojas: queda marcada para todos. Cuando termines, cambia a Empaque.</x-slot>
+            <x-slot name="heading">Recoger productos</x-slot>
+            <x-slot name="description">Toca cada producto cuando ya lo tengas en la canasta: queda marcado para todas las tablets.</x-slot>
             {{-- Sólo la hoja, sin stickers: en el puesto del alistador la impresora es
                  de etiquetas y el reporte trae los stickers detrás (25-nov-2026). Y los
                  reportes del corte: la hoja de alistamiento abre cada PDF. --}}
             <x-slot name="afterHeader">
                 <div style="display:flex;flex-wrap:wrap;gap:.4rem;">
                     <x-filament::button tag="a" :href="route('dropi.recoleccion.pdf', [$corte, 'orden' => $this->ordenRecoleccion])" target="_blank" icon="heroicon-o-clipboard-document-list">
-                        Solo alistamiento
+                        Imprimir hoja de recogida
                     </x-filament::button>
                     @foreach($reportes->filter(fn ($r) => ! empty($r->partes)) as $r)
                         <x-filament::button tag="a" :href="route('dropi.guias.parte', [$r, 1])" target="_blank" icon="heroicon-o-printer" color="gray">
-                            Reporte {{ $r->created_at->timezone('America/Bogota')->format('g:i a') }}
+                            Guías y stickers ({{ $r->created_at->timezone('America/Bogota')->format('g:i a') }})
                         </x-filament::button>
                     @endforeach
                 </div>
@@ -119,22 +123,30 @@
                     $recogidas = collect($recoleccion)->where('marcada', true)->count();
                     $pctRecogido = round($recogidas / count($recoleccion) * 100);
                 @endphp
+                {{-- Progreso del «chulito», lo primero que se ve (27-nov-2026): cuánto falta por recoger. --}}
+                <div style="margin-bottom:1rem;">
+                    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:.35rem;">
+                        <span style="font-size:1.25rem;"><strong>{{ $recogidas }}</strong> de {{ count($recoleccion) }} referencias recogidas</span>
+                        <span style="font-weight:800;font-size:1.25rem;">{{ $pctRecogido }}%</span>
+                    </div>
+                    <div style="height:.75rem;border-radius:9999px;background:rgba(156,163,175,.2);overflow:hidden;">
+                        <div style="height:100%;background:#22c55e;width:{{ $pctRecogido }}%;transition:width .3s ease;"></div>
+                    </div>
+                </div>
+                @if($recogidas === count($recoleccion))
+                    <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:.75rem;padding:1rem 1.25rem;margin-bottom:1rem;border-radius:.75rem;background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.45);">
+                        <span style="font-size:1.1rem;font-weight:700;color:#16a34a;">✔ Todo recogido</span>
+                        <x-filament::button size="lg" color="success" icon="heroicon-o-arrow-right" icon-position="after" wire:click="cambiarModo('empaque')">
+                            Pasar a Empacar pedidos
+                        </x-filament::button>
+                    </div>
+                @endif
                 {{-- El orden de la lista: por cantidad (de serie) o por el recorrido (26-nov-2026). --}}
                 <div style="display:flex;gap:.5rem;align-items:center;margin-bottom:.75rem;font-size:.85rem;">
                     <span style="color:#9ca3af;">Ordenar:</span>
-                    @foreach([\App\Modules\Dropi\Support\RecoleccionDelCorte::POR_CANTIDAD => 'Por cantidad', \App\Modules\Dropi\Support\RecoleccionDelCorte::POR_RUTA => 'Por recorrido'] as $valor => $texto)
+                    @foreach([\App\Modules\Dropi\Support\RecoleccionDelCorte::POR_CANTIDAD => 'Más unidades primero', \App\Modules\Dropi\Support\RecoleccionDelCorte::POR_RUTA => 'Camino de la bodega'] as $valor => $texto)
                         <x-filament::button size="sm" :color="$ordenRecoleccion === $valor ? 'primary' : 'gray'" wire:click="ordenarRecoleccion('{{ $valor }}')">{{ $texto }}</x-filament::button>
                     @endforeach
-                </div>
-                {{-- Progreso del «chulito»: cuántas referencias ya se sacaron de la bodega. --}}
-                <div style="margin-bottom:1rem;">
-                    <div style="display:flex;justify-content:space-between;font-size:.85rem;margin-bottom:.25rem;">
-                        <span><strong>{{ $recogidas }}</strong> de {{ count($recoleccion) }} referencias recogidas</span>
-                        <span style="font-weight:700;">{{ $pctRecogido }}%</span>
-                    </div>
-                    <div style="height:.5rem;border-radius:9999px;background:rgba(156,163,175,.2);overflow:hidden;">
-                        <div style="height:100%;background:#22c55e;width:{{ $pctRecogido }}%;transition:width .3s ease;"></div>
-                    </div>
                 </div>
                 {{-- Desktop / tablet horizontal --}}
                 <div class="alistador-tabla-desktop" style="overflow-x:auto;">
@@ -153,13 +165,14 @@
                         <tbody>
                             @foreach($recoleccion as $g)
                                 <tr wire:key="rec-{{ $g['sku'] }}" wire:click="marcarRecogido(@js($g['sku']))"
+                                    @if($g['marcada']) wire:confirm="¿Quitar el chulito de {{ $g['producto'] }}? Vuelve a quedar por recoger para todos." @endif
                                     class="{{ $g['marcada'] ? 'alistador-hecha' : '' }}" style="border-bottom:1px solid rgba(156,163,175,.1);cursor:pointer;{{ $g['marcada'] ? 'background:rgba(34,197,94,.08);' : '' }}">
                                     <td class="alistador-chulito" style="padding:.75rem;text-align:center;">@include('dropi.pages.partials.chulito-recoleccion', ['g' => $g])</td>
                                     <td style="padding:.75rem;font-family:ui-monospace,monospace;font-size:.8rem;">@include('dropi.pages.partials.referencia-erp', ['g' => $g])</td>
                                     <td style="padding:.75rem;font-weight:600;">{{ $g['producto'] }}</td>
-                                    <td style="padding:.75rem;font-size:.85rem;color:#9ca3af;">{{ $g['variante'] ?: '—' }}</td>
+                                    <td style="padding:.75rem;font-size:1rem;opacity:.85;">{{ $g['variante'] ?: '—' }}</td>
                                     <td style="padding:.75rem;">
-                                        <span style="font-family:ui-monospace,monospace;font-size:.75rem;padding:.25rem .5rem;background:rgba(156,163,175,.15);border-radius:.25rem;">{{ $g['ubicacion_sugerida'] }}</span>
+                                        <span style="font-family:ui-monospace,monospace;font-size:1.1rem;font-weight:700;padding:.3rem .6rem;background:rgba(156,163,175,.18);border-radius:.35rem;white-space:nowrap;">📍 {{ $g['ubicacion_sugerida'] }}</span>
                                     </td>
                                     <td style="padding:.75rem;font-size:.85rem;color:#9ca3af;">{{ $g['zona'] ?? '—' }}</td>
                                     <td style="padding:.75rem;text-align:right;">
@@ -175,12 +188,13 @@
                 <div class="alistador-tabla-movil" style="display:none;">
                     @foreach($recoleccion as $g)
                         <div wire:key="rec-movil-{{ $g['sku'] }}" wire:click="marcarRecogido(@js($g['sku']))"
+                             @if($g['marcada']) wire:confirm="¿Quitar el chulito de {{ $g['producto'] }}? Vuelve a quedar por recoger para todos." @endif
                              style="padding:1rem;border:1px solid {{ $g['marcada'] ? 'rgba(34,197,94,.5)' : 'rgba(156,163,175,.2)' }};border-radius:.75rem;margin-bottom:.5rem;cursor:pointer;{{ $g['marcada'] ? 'background:rgba(34,197,94,.08);' : '' }}" class="{{ $g['marcada'] ? 'alistador-hecha' : '' }}">
                             <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;">
                                 <div class="alistador-chulito" style="flex-shrink:0;">@include('dropi.pages.partials.chulito-recoleccion', ['g' => $g, 'compacto' => true])</div>
                                 <div style="flex:1;min-width:0;">
                                     <div style="font-weight:700;font-size:1rem;">{{ $g['producto'] }}</div>
-                                    <div style="font-size:.8rem;color:#9ca3af;margin-top:.25rem;">{{ $g['variante'] ?: '—' }}</div>
+                                    <div style="font-size:.95rem;opacity:.85;margin-top:.25rem;">{{ $g['variante'] ?: '—' }}</div>
                                     <div style="font-family:ui-monospace,monospace;font-size:.7rem;color:#6b7280;margin-top:.25rem;word-break:break-all;">@include('dropi.pages.partials.referencia-erp', ['g' => $g])</div>
                                     @if($g['marcada'])
                                         <div style="font-size:.75rem;color:#16a34a;font-weight:600;margin-top:.35rem;">✓ {{ $g['marcada_por'] ?? '—' }} · {{ $g['marcada_at'] }}</div>
@@ -191,7 +205,7 @@
                                 <span style="display:inline-flex;align-items:center;justify-content:center;min-width:3rem;height:3rem;border-radius:9999px;background:#f59e0b;color:white;font-weight:700;font-size:1.25rem;flex-shrink:0;">{{ $g['total_unidades'] }}</span>
                             </div>
                             <div style="margin-top:.5rem;">
-                                <span style="font-family:ui-monospace,monospace;font-size:.8rem;padding:.375rem .75rem;background:rgba(156,163,175,.15);border-radius:.375rem;">📍 {{ $g['ubicacion_sugerida'] }}@if($g['zona']) · Zona {{ $g['zona'] }}@endif</span>
+                                <span style="font-family:ui-monospace,monospace;font-size:1.1rem;font-weight:700;padding:.4rem .8rem;background:rgba(156,163,175,.18);border-radius:.375rem;">📍 {{ $g['ubicacion_sugerida'] }}@if($g['zona']) · Zona {{ $g['zona'] }}@endif</span>
                             </div>
                         </div>
                     @endforeach
@@ -217,7 +231,13 @@
         <div wire:poll.5s>
         <x-filament::section style="margin-top:1rem;">
             <x-slot name="heading">Por empacar · {{ $empaque->count() }}</x-slot>
-            <x-slot name="description">En el orden de la pila de stickers, igual que la Estación de Empaque. Al tomar un pedido queda bloqueado para ti — nadie más puede empacarlo hasta que termines o pasen 10 minutos sin actividad.</x-slot>
+            <x-slot name="description">En el orden de la pila de stickers. Lo normal es empacar en la Estación de Empaque, escaneando cada producto.</x-slot>
+            {{-- El camino de siempre, a un toque (27-nov-2026); «Tomar / Empacar» se quedan. --}}
+            <x-slot name="afterHeader">
+                <x-filament::button tag="a" :href="\App\Modules\Dropi\Filament\Pages\EstacionEmpaque::getUrl()" icon="heroicon-o-qr-code" icon-position="before">
+                    Abrir Estación de Empaque
+                </x-filament::button>
+            </x-slot>
 
             @if($empaque->isEmpty())
                 <div style="text-align:center;padding:2rem;color:#9ca3af;">Cola vacía. Revisa Recolección o vuelve luego.</div>

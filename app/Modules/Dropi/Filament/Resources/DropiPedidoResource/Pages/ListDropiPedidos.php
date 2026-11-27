@@ -49,14 +49,31 @@ class ListDropiPedidos extends ListRecords
         $this->resetTable();
     }
 
-    /** El filtro por etapa que viene de un enlace, con cómo quitarlo. */
+    /**
+     * El filtro por etapa que viene de un enlace, con cómo quitarlo. Sin él, el
+     * camino del día en una línea (27-nov-2026: «se pierden, no hay opciones
+     * claras»), y a quien no genera cortes, adónde ir a trabajar.
+     */
     public function getSubheading(): string|\Illuminate\Contracts\Support\Htmlable|null
     {
         if ($e = \App\Modules\Dropi\Enums\EstadoPedidoDropi::tryFrom((string) $this->etapa)) {
             return new \Illuminate\Support\HtmlString(e("Mostrando sólo: {$e->label()} (en el ERP) · ") . '<a href="#" wire:click.prevent="quitarEtapa" style="text-decoration:underline">quitar</a>');
         }
 
-        return null;
+        if (DropiPedidoResource::puedeCambiarEnDropi()) {
+            return '1. Revisa «Pendiente»  →  2. «Generar corte de hoy»  →  3. Imprime la hoja y los stickers del reporte  →  4. Resuelve los que piden tu acción.';
+        }
+
+        return new \Illuminate\Support\HtmlString(e('Para alistar o empacar, entra a ')
+            . '<a href="' . e(\App\Modules\Dropi\Filament\Pages\VistaAlistador::getUrl()) . '" style="text-decoration:underline">Vista del Alistador</a>'
+            . e(' o a la ')
+            . '<a href="' . e(\App\Modules\Dropi\Filament\Pages\EstacionEmpaque::getUrl()) . '" style="text-decoration:underline">Estación de Empaque</a>.');
+    }
+
+    /** Quien genera cortes entra a «Pendiente», que es su trabajo del día. */
+    public function getDefaultActiveTab(): string|int|null
+    {
+        return DropiPedidoResource::puedeCambiarEnDropi() ? 'pendiente' : 'todos';
     }
 
     /** Los reportes de los cortes de hoy y el avance de las guías, en tarjetas (26-nov-2026). */
@@ -69,6 +86,21 @@ class ListDropiPedidos extends ListRecords
     {
         // La tabla hace poll cada 5 s, así que la etiqueta se refresca sola.
         return [
+            // El trabajo del día, siempre a la vista (27-nov-2026: sólo aparecía al
+            //   seleccionar pedidos). Lleva lo pendiente sin corte; para escoger a
+            //   mano sigue «Generar corte con los seleccionados» de la tabla.
+            Action::make('generarCorteDeHoy')
+                ->label('Generar corte de hoy')
+                ->icon('heroicon-o-scissors')
+                ->color('primary')
+                ->visible(fn () => DropiPedidoResource::puedeCambiarEnDropi())
+                ->badge(fn () => DropiPedidoResource::corteEnCurso() ? null : (DropiPedidoResource::candidatosCorteDeHoy()->count() ?: null))
+                ->tooltip(fn () => ($l = DropiPedidoResource::corteEnCurso()) ? 'Hay un corte generándose: ' . $l->titulo() : 'Todo lo pendiente que aún no está en un corte')
+                ->requiresConfirmation()
+                ->modalHeading(fn () => 'Generar el ' . DropiPedidoResource::corteDeAhora())
+                ->modalDescription(fn () => DropiPedidoResource::descripcionCorte(DropiPedidoResource::candidatosCorteDeHoy()))
+                ->modalSubmitActionLabel('Sí, generar el corte')
+                ->action(fn () => DropiPedidoResource::ejecutarCorte(DropiPedidoResource::candidatosCorteDeHoy())),
             Action::make('sincronizar')
                 ->label(fn () => self::estadoSync()['label'])
                 ->icon(fn () => self::estadoSync()['icon'])
