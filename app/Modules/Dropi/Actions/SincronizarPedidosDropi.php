@@ -359,6 +359,9 @@ class SincronizarPedidosDropi
             'user_id' => auth()->id(),
         ]);
 
+        // ¿Reemplaza a otro del mismo cliente? (un pedido editado en Dropi es una orden nueva).
+        \App\Modules\Dropi\Jobs\RevisarReemplazadosJob::alLlegar($pedido);
+
         return 'nuevo';
     }
 

@@ -152,6 +152,11 @@ $dropiWebSync = fn () => (bool) config('dropi.web.sync_activo');
 Schedule::command('dropi:web-sync recientes')->everyFifteenSeconds()->withoutOverlapping(2)->when($dropiWebSync);
 Schedule::command('dropi:web-sync ventana')->everyMinute()->withoutOverlapping(10)->when($dropiWebSync);
 Schedule::command('dropi:web-sync transito')->everyTenMinutes()->withoutOverlapping(30)->when($dropiWebSync);
+// Lo que el ERP tiene sin despachar, pedido por pedido contra Dropi: los que el
+//   dropshipper edita (Dropi los reemplaza) no vuelven a salir en la lista y se
+//   quedaban pendientes en el alistador y los cortes (26-nov-2026). 40 por vuelta
+//   cada 10 min: todo lo pendiente se revisa en menos de una hora.
+Schedule::command('dropi:revisar-pendientes --max=40')->everyTenMinutes()->withoutOverlapping(15)->runInBackground()->when($dropiWebSync);
 // Pagos: Dropi paga ~1 día después de la entrega sin cambiar el estatus; se
 //   revisa el detalle de los entregados sin pago (trae su `history_wallet`).
 Schedule::command('dropi:web-sync pagos --max-detalles=60')->everyThirtyMinutes()->withoutOverlapping(20)->when($dropiWebSync);

@@ -3,19 +3,15 @@
 namespace App\Modules\Dropi\Jobs;
 
 use App\Modules\Dropi\Actions\GenerarGuiaDropi;
-use App\Modules\Dropi\Actions\SincronizarPedidosDropi;
-use App\Modules\Dropi\Clients\DropiWebClient;
-use App\Modules\Dropi\Enums\EstadoPedidoDropi;
 use App\Modules\Dropi\Models\DropiLoteImpresion;
 use App\Modules\Dropi\Models\DropiPedido;
 use App\Modules\Dropi\Services\ImprimirGuiasDropi;
-use App\Modules\Dropi\Services\MapearPedidoDropiWeb;
+use App\Modules\Dropi\Services\RevisarPedidoEnDropi;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -32,7 +28,8 @@ use Illuminate\Support\Facades\Log;
  * los que Dropi reemplaza, y el corte de las 9:19 pidió guías de pedidos ya
  * rechazados o reemplazados (y despachados con su orden nueva). Sólo lo que en
  * Dropi sigue PENDIENTE pide guía: una guía es real (la transportadora la
- * registra). Lo demás se pone al día en el ERP y queda explicado en el reporte.
+ * registra). Lo demás se pone al día en el ERP y queda explicado en el reporte
+ * (RevisarPedidoEnDropi, que también revisa cada rato lo que no ha salido).
  *
  * Con «Generar corte» (25-nov-2026) cada guía es de un reporte: la última en
  * terminar, bien o mal, arranca el reporte (ImprimirGuiasDropi::iniciar).
@@ -83,10 +80,10 @@ class GenerarGuiasEnBloqueJob implements ShouldQueue
         return Cache::get(self::claveAvance($userId));
     }
 
-    public function handle(GenerarGuiaDropi $generar, DropiWebClient $client, MapearPedidoDropiWeb $mapper, SincronizarPedidosDropi $sync): void
+    public function handle(GenerarGuiaDropi $generar, RevisarPedidoEnDropi $revisar): void
     {
         try {
-            $this->generar($generar, $client, $mapper, $sync);
+            $this->generar($generar, $revisar);
         } finally {
             $this->contarEnReporte();
         }
@@ -102,7 +99,7 @@ class GenerarGuiasEnBloqueJob implements ShouldQueue
         $this->contarEnReporte();
     }
 
-    private function generar(GenerarGuiaDropi $generar, DropiWebClient $client, MapearPedidoDropiWeb $mapper, SincronizarPedidosDropi $sync): void
+    private function generar(GenerarGuiaDropi $generar, RevisarPedidoEnDropi $revisar): void
     {
         $p = DropiPedido::with('huella')->find($this->pedidoId);
         if (! $p || ! $p->dropi_orden_id) {
@@ -128,21 +125,19 @@ class GenerarGuiasEnBloqueJob implements ShouldQueue
             return;
         }
 
-        try {
-            $detalle = $client->pedidoDetalle((int) $p->dropi_orden_id);
-        } catch (\Throwable $e) {
-            if (self::noExisteEnDropi($e->getMessage())) {
-                $this->darDeBaja($p, 'reemplazado', 'Dropi ya no tiene la orden.');
-            } else {
-                $this->fallo($p, 'error', 'No se pudo consultar en Dropi: ' . self::motivoDropi($e->getMessage()));
-            }
+        $r = $revisar->diagnosticar($p);
+        if ($r['tipo'] === RevisarPedidoEnDropi::NO_EXISTE) {
+            $this->darDeBaja($p, $revisar, 'reemplazado', $r['motivo']);
 
             return;
         }
+        if ($r['tipo'] === RevisarPedidoEnDropi::ERROR) {
+            $this->fallo($p, 'error', 'No se pudo consultar en Dropi: ' . $r['motivo']);
 
-        $estatus = mb_strtoupper(trim((string) ($detalle['status'] ?? '')));
-        if ($estatus !== 'PENDIENTE') {
-            $this->ponerAlDia($p, $detalle, $estatus, $mapper, $sync, $generar);
+            return;
+        }
+        if ($r['tipo'] === RevisarPedidoEnDropi::OTRO_ESTATUS) {
+            $this->ponerAlDia($p, $r['detalle'], $r['estatus'], $revisar, $generar);
 
             return;
         }
@@ -153,9 +148,9 @@ class GenerarGuiasEnBloqueJob implements ShouldQueue
             $this->resultado($p, 'generada', null, $g['guia'] ?? $p->fresh()?->guia);
         } catch (\Throwable $e) {
             Log::warning('dropi.guias_en_bloque.fallo', ['pedido_id' => $p->id, 'msg' => $e->getMessage()]);
-            $msg = self::motivoDropi($e->getMessage());
+            $msg = RevisarPedidoEnDropi::motivoDropi($e->getMessage());
             match (true) {
-                self::noExisteEnDropi($msg) => $this->darDeBaja($p, 'reemplazado', "Dropi: «{$msg}»."),
+                RevisarPedidoEnDropi::noExisteEnDropi($msg) => $this->darDeBaja($p, $revisar, 'reemplazado', "Dropi: «{$msg}»."),
                 str_contains(mb_strtolower($msg), 'cobertura') => $this->fallo($p, 'sin_cobertura', $msg),
                 default => $this->fallo($p, 'error', $msg),
             };
@@ -166,18 +161,9 @@ class GenerarGuiasEnBloqueJob implements ShouldQueue
      * En Dropi ya no está pendiente: el ERP lo trae como está allá (lo mismo que
      * haría el sync) y se explica. Si ya tiene guía, entra al reporte con ella.
      */
-    private function ponerAlDia(DropiPedido $p, array $detalle, string $estatus, MapearPedidoDropiWeb $mapper, SincronizarPedidosDropi $sync, GenerarGuiaDropi $generar): void
+    private function ponerAlDia(DropiPedido $p, array $detalle, string $estatus, RevisarPedidoEnDropi $revisar, GenerarGuiaDropi $generar): void
     {
-        try {
-            $sync->importarPedidos([$mapper->desdeDetalle($detalle)]);
-            DB::table('dropi_web_huellas')->updateOrInsert(
-                ['dropi_orden_id' => (int) $p->dropi_orden_id],
-                ['estatus_dropi' => $estatus, 'huella' => ''],
-            );
-        } catch (\Throwable $e) {
-            Log::warning('dropi.guias_en_bloque.poner_al_dia', ['pedido_id' => $p->id, 'msg' => $e->getMessage()]);
-        }
-        $p->refresh();
+        $revisar->ponerAlDia($p, $detalle, $estatus);
 
         if (in_array($estatus, ['CANCELADO', 'RECHAZADO', 'REEMPLAZADA'], true)) {
             $this->anotar(fn (array $a) => ['saltadas' => $a['saltadas'] + 1] + $a);
@@ -207,18 +193,11 @@ class GenerarGuiasEnBloqueJob implements ShouldQueue
      * cliente, otra orden) o la borró. Sale del ERP como cancelada por Dropi,
      * igual que el sync cancela una «REEMPLAZADA», y se busca la nueva.
      */
-    private function darDeBaja(DropiPedido $p, string $tipo, string $detalle): void
+    private function darDeBaja(DropiPedido $p, RevisarPedidoEnDropi $revisar, string $tipo, string $detalle): void
     {
-        try {
-            // Lo canceló Dropi, como cuando el sync trae una «REEMPLAZADA»: sin usuario.
-            $p->transicionar(EstadoPedidoDropi::CanceladoDropi, 'api', null, [
-                'origen' => 'generar_corte', 'motivo' => 'Dropi ya no tiene la orden ' . $p->dropi_orden_id,
-            ]);
-        } catch (\Throwable $e) {
-            Log::warning('dropi.guias_en_bloque.dar_de_baja', ['pedido_id' => $p->id, 'msg' => $e->getMessage()]);
-        }
+        $revisar->darDeBaja($p, 'generar_corte');
 
-        $nueva = self::reemplazoDe($p);
+        $nueva = RevisarPedidoEnDropi::reemplazoDe($p);
         if ($nueva) {
             $detalle .= " La nueva es la orden {$nueva->dropi_orden_id}"
                 . ($nueva->tieneGuiaReal() ? ", con guía {$nueva->guia} ({$nueva->estado?->label()})." : ', todavía sin guía.');
@@ -228,46 +207,12 @@ class GenerarGuiasEnBloqueJob implements ShouldQueue
         $this->resultado($p, $tipo, $detalle);
     }
 
-    /** La orden que la reemplazó: mismo teléfono, creada ese mismo día, y viva. */
-    public static function reemplazoDe(DropiPedido $p): ?DropiPedido
-    {
-        if (blank($p->cliente_telefono)) {
-            return null;
-        }
-        $cuando = $p->dropi_creado_at ?? $p->created_at;
-
-        return DropiPedido::query()
-            ->where('cliente_telefono', $p->cliente_telefono)
-            ->whereKeyNot($p->id)
-            ->whereNotIn('estado', [EstadoPedidoDropi::CanceladoDropi, EstadoPedidoDropi::CanceladoGb])
-            ->when($cuando, fn ($q) => $q->whereBetween('dropi_creado_at', [$cuando->copy()->subDay(), $cuando->copy()->addDays(2)]))
-            ->orderByDesc('dropi_orden_id')
-            ->first();
-    }
-
     /** $motivo: lo que dijo Dropi, sin adornos (va al aviso y al reporte). */
     private function fallo(DropiPedido $p, string $tipo, string $motivo): void
     {
         $error = "Orden {$p->dropi_orden_id}: " . mb_substr($motivo, 0, 160);
         $this->anotar(fn (array $a) => ['errores' => [...$a['errores'], $error]] + $a);
         $this->resultado($p, $tipo, str_starts_with($motivo, 'No se pudo') ? $motivo : "Dropi: «{$motivo}».");
-    }
-
-    /** «Orden no encontrada» al leerla, o «fue reemplazada» al pedir la guía. */
-    public static function noExisteEnDropi(string $msg): bool
-    {
-        $m = mb_strtolower($msg);
-
-        return str_contains($m, 'no encontrada') || str_contains($m, 'reemplazada por una nueva');
-    }
-
-    /** Lo que dijo Dropi, sin el «Dropi no cambió el pedido 123:» del cliente. */
-    private static function motivoDropi(string $msg): string
-    {
-        $m = preg_replace('/^Dropi no (cambió|dejó|devolvió)[^:]*:\s*/u', '', $msg);
-        $m = preg_replace('/^Error al actualizar la orden:\s*/u', '', (string) $m);
-
-        return mb_substr(trim((string) $m), 0, 160);
     }
 
     /** Qué pasó con este pedido, en el reporte (lo que lee Aracely). */
