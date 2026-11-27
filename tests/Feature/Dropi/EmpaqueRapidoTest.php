@@ -389,6 +389,31 @@ it('«Confirmar empaque» da por empacado lo que falte, imprime la guía y abre 
         ->and(json_decode($bitacora, true)['confirmado_a_mano'] ?? null)->toBe(2);
 });
 
+it('dos tallas del mismo producto agrupado (mismo código): cada escaneo marca una línea y el pedido se completa (27-nov-2026)', function () {
+    $tapete = Producto::where('referencia', 'ER-TAP')->value('id');
+    app(VincularProductoDropi::class)->aProducto('SKU-ER-TAP-22', $tapete); // otra talla en Dropi, el mismo producto en el ERP
+    app(SincronizarPedidosDropi::class)->importarPedidos([new PedidoDropiDTO(
+        guia: 'ER-TALLAS', dropiOrdenId: 'O-ER-TALLAS', transportadora: 'X', tienda: 'T', vendedorNombre: 'Vendedora',
+        vendedorIdentificacion: null, clienteNombre: 'Ana', clienteDoc: null, clienteTelefono: null,
+        clienteDireccion: null, clienteCiudad: 'CALI', clienteDepto: null, estadoDropi: 'sin_estado',
+        montoEsperadoProveedor: 60000, montoClienteFinal: null, gananciaVendedor: null, fleteTransportadora: null,
+        items: [new ItemDropiDTO('SKU-ER-TAP', 1, 30000, 'x', 'x'), new ItemDropiDTO('SKU-ER-TAP-22', 1, 30000, 'x', 'x')],
+        creadoAt: CarbonImmutable::parse('2026-11-24 08:00'),
+    )]);
+    $p = DropiPedido::where('guia', 'ER-TALLAS')->firstOrFail();
+    $p->estado = EstadoPedidoDropi::Pending;
+    $p->save();
+    DropiPedido::whereKey($p->id)->update(['guia_impresa_at' => now(), 'sticker_path' => 'colombia/guias/tallas.pdf', 'corte_id' => $this->corteEnTrabajo->id]);
+
+    $this->actingAs($this->empacador);
+    Livewire::test(EstacionEmpaque::class)
+        ->set('codigo', 'ER-TALLAS')->call('escanear')
+        ->set('codigo', 'ER-TAP')->call('escanear')->assertNotDispatched('empaque-completo')
+        ->set('codigo', 'ER-TAP')->call('escanear')->assertDispatched('empaque-completo');
+
+    expect($p->items()->pluck('cantidad_pickeada')->all())->toBe([1, 1]);
+});
+
 it('«Dejar para después» manda el pedido al final de la fila y abre el siguiente (27-nov-2026)', function () {
     $a = erPedido('ER-A1', 'ER-VOL', '2026-11-24 08:00');
     $b = erPedido('ER-A2', 'ER-TAP', '2026-11-24 08:10');

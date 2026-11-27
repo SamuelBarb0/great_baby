@@ -197,13 +197,14 @@ class ProcesarEscaneoEmpaque
             }
 
             // C-F2 R2 · Match polimórfico: buscar item por variante_id O producto_id.
-            if ($variante) {
-                $item = $pedido?->items->firstWhere('variante_id', $variante->id);
-                $etiquetaSujeto = "La variante {$codigo}";
-            } else {
-                $item = $pedido?->items->first(fn ($i) => $i->variante_id === null && $i->producto_id === $productoAgregado->id);
-                $etiquetaSujeto = "El producto agregado {$productoAgregado->referencia}";
-            }
+            //   Con varias líneas del mismo producto (27-nov-2026: dos tallas de un
+            //   zapato agrupado comparten código), la primera que falte; si todas
+            //   están completas, la primera, para decir «ya está completo».
+            $lineas = $variante
+                ? ($pedido?->items->where('variante_id', $variante->id) ?? collect())
+                : ($pedido?->items->filter(fn ($i) => $i->variante_id === null && $i->producto_id === $productoAgregado->id) ?? collect());
+            $item = $lineas->first(fn ($i) => (int) ($i->cantidad_pickeada ?? 0) < (int) ($i->cantidad ?? 1)) ?? $lineas->first();
+            $etiquetaSujeto = $variante ? "La variante {$codigo}" : "El producto agregado {$productoAgregado->referencia}";
 
             if (! $item) {
                 return [
