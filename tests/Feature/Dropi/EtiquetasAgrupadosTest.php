@@ -227,3 +227,24 @@ describe('el selector de etiquetas (bodega, 23-nov-2026)', function () {
         expect($html)->not->toContain('$0')->and($html)->toContain('$15.000');
     });
 });
+
+it('«Catálogo de productos» encuentra el producto por su nombre en Dropi y lo muestra debajo (27-nov-2026: «abejita» es «ABEJA BAILARINA»)', function () {
+    \Filament\Facades\Filament::setCurrentPanel('admin');
+    $this->actingAs($this->aracely);
+
+    $abeja = Producto::sinKardexAutomatico(fn () => Producto::create(['referencia' => '5907B', 'nombre' => 'ABEJA BAILARINA', 'desglose_stock' => false, 'activo' => true]));
+    $otro = Producto::sinKardexAutomatico(fn () => Producto::create(['referencia' => '5907C', 'nombre' => 'PATO', 'desglose_stock' => false, 'activo' => true]));
+    DB::table('dropi_vinculos_producto')->insert([
+        ['sku_dropi' => 'DV-2351083', 'producto_id' => $abeja->id, 'variante_id' => null, 'producto_nombre' => 'Abejita chiquitica', 'variacion' => 'Rojo', 'created_at' => now(), 'updated_at' => now()],
+        ['sku_dropi' => 'DV-2351084', 'producto_id' => $abeja->id, 'variante_id' => null, 'producto_nombre' => 'Abejita chiquitica', 'variacion' => 'Negro', 'created_at' => now(), 'updated_at' => now()],
+    ]);
+
+    \Livewire\Livewire::test(\App\Modules\Dropi\Filament\Pages\CatalogoProductosDropi::class)
+        ->searchTable('abejita')
+        ->assertCanSeeTableRecords([$abeja])
+        ->assertCanNotSeeTableRecords([$otro, $this->tetero])
+        ->assertSee('En Dropi: Abejita chiquitica')
+        // Por su nombre del ERP y su referencia sigue encontrándose igual.
+        ->searchTable('bailarina')->assertCanSeeTableRecords([$abeja])->assertCanNotSeeTableRecords([$otro])
+        ->searchTable('5907C')->assertCanSeeTableRecords([$otro])->assertCanNotSeeTableRecords([$abeja]);
+});
