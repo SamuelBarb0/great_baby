@@ -489,3 +489,21 @@ it('si Dropi todavía no publica el sticker no se guarda nada y se puede reinten
     $this->get(route('dropi.pedido.sticker', $p))->assertNotFound();
     $this->get(route('dropi.pedido.sticker', $p))->assertOk();
 });
+
+it('la estación muestra el avance del corte en vivo: lo que falta arriba y lo empacado abajo (27-nov-2026)', function () {
+    $a = erPedido('ER-AV1', 'ER-VOL', '2026-11-24 08:00');
+    $b = erPedido('ER-AV2', 'ER-TAP', '2026-11-24 08:10');
+    DropiPedido::whereIn('id', [$a->id, $b->id])->update(['lote_impresion_id' => \App\Modules\Dropi\Models\DropiLoteImpresion::value('id')]);
+
+    $this->actingAs($this->empacador);
+    Livewire::test(EstacionEmpaque::class)->assertSeeLivewire(\App\Livewire\AvanceCorteEmpaque::class)
+        ->set('codigo', 'ER-AV1')->call('escanear')
+        ->set('codigo', 'ER-VOL')->call('escanear')
+        ->call('confirmarYSiguiente');
+
+    Livewire::test(\App\Livewire\AvanceCorteEmpaque::class)
+        ->assertSee('wire:poll.5s', false)
+        ->assertSeeText('1 de 2 empacados')
+        ->assertSeeInOrder(['Por empacar · 1', 'ER-AV2', 'Empacados · 1', 'ER-AV1'])
+        ->assertSee($this->empacador->name);
+});

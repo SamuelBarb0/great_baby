@@ -186,6 +186,51 @@ class RecoleccionDelCorte
     }
 
     /**
+     * Lo ya empacado de un corte, lo más reciente primero (27-nov-2026: «ver
+     * cómo se van bajando los pedidos a medida que vamos pistoleando»), para la
+     * Vista del Alistador y la estación de empaque. Con quién lo empacó, a qué
+     * hora y cuántas unidades se confirmaron sin escanear.
+     *
+     * @return Collection<int, array{guia:string, cliente:string, ciudad:?string, productos:string, operario:?string, hora:?string, fin:int, a_mano:int}>
+     */
+    public function empacados(int $corteId): Collection
+    {
+        $pedidos = DropiPedido::query()->where('corte_id', $corteId)->whereNotNull('lote_impresion_id')
+            ->whereIn('estado', [EstadoPedidoDropi::Empacado, EstadoPedidoDropi::Despachado, EstadoPedidoDropi::Entregado, EstadoPedidoDropi::Pagado])
+            ->with(['items.variante.producto', 'items.producto'])->get();
+        $registros = \App\Modules\Dropi\Models\EmpaqueRegistro::query()->whereIn('pedido_id', $pedidos->pluck('id'))->where('estado', 'completado')
+            ->with('operario:id,name')->orderByDesc('fin_at')->get()->unique('pedido_id')->keyBy('pedido_id');
+
+        return $pedidos->map(function (DropiPedido $p) use ($registros) {
+            $r = $registros->get($p->id);
+
+            return [
+                'guia' => (string) $p->guia,
+                'cliente' => (string) $p->cliente_nombre,
+                'ciudad' => $p->cliente_ciudad,
+                'productos' => self::resumenProductos($p),
+                'operario' => $r?->operario?->name,
+                'hora' => $r?->fin_at?->timezone('America/Bogota')->format('g:i a'),
+                'fin' => $r?->fin_at?->getTimestamp() ?? 0,
+                'a_mano' => max(0, (int) ($r?->items_totales ?? 0) - (int) ($r?->items_escaneados ?? 0)),
+            ];
+        })->sortByDesc('fin')->values();
+    }
+
+    /** «2× Tapete, 1× Volante»: lo que reconoce quien empaca. */
+    public static function resumenProductos(DropiPedido $p): string
+    {
+        return $p->items->map(fn ($it) => $it->cantidad . '× ' . (($it->variante?->producto ?? $it->producto)?->nombre ?? $it->sku_dropi))->implode(', ');
+    }
+
+    /** @return array<int, string> pedido => quién lo tiene abierto en la estación ahora */
+    public static function empacandoAhora(): array
+    {
+        return \App\Modules\Dropi\Models\EmpaqueRegistro::query()->where('estado', 'en_curso')->with('operario:id,name')->get()
+            ->mapWithKeys(fn ($r) => [$r->pedido_id => (string) ($r->operario?->name ?? 'alguien')])->all();
+    }
+
+    /**
      * Los cortes que trabajan la Vista del Alistador y la estación de empaque:
      * los de los dos últimos reportes que generó Aracely, mientras no estén
      * finalizados, el más viejo primero. Sin reporte, no hay nada que recoger

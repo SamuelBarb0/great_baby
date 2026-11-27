@@ -254,6 +254,10 @@
         </div>
     @endif
 
+    {{-- El avance del corte en vivo (27-nov-2026): su propio componente, para que
+         refrescarlo no toque el campo de la pistola. --}}
+    @livewire(\App\Livewire\AvanceCorteEmpaque::class)
+
     {{-- Lo empacado hoy por este operario, con su guía de Dropi: el sticker se
          imprime desde aquí aunque la página se haya recargado (24-nov-2026). --}}
     @php $stickers = $this->misStickers(); @endphp

@@ -10,7 +10,6 @@ use App\Modules\Dropi\Models\DropiCorte;
 use App\Modules\Dropi\Models\DropiEstadoBitacora;
 use App\Modules\Dropi\Models\DropiLoteImpresion;
 use App\Modules\Dropi\Models\DropiPedido;
-use App\Modules\Dropi\Models\EmpaqueRegistro;
 use App\Modules\Dropi\Models\DropiRecoleccionMarca;
 use App\Modules\Dropi\Support\RecoleccionDelCorte;
 use BackedEnum;
@@ -108,42 +107,16 @@ class VistaAlistador extends Page
         ];
     }
 
-    /**
-     * Lo ya empacado del corte, lo más reciente primero (27-nov-2026: «que en
-     * el alistador viéramos cómo se van bajando los pedidos a medida que vamos
-     * pistoleando»). Con quién lo empacó, a qué hora y si se confirmó sin
-     * escanear todo.
-     *
-     * @return \Illuminate\Support\Collection<int, array{guia:string, cliente:string, ciudad:?string, productos:string, operario:?string, hora:?string, a_mano:int}>
-     */
+    /** Lo ya empacado del corte, lo más reciente primero (ver RecoleccionDelCorte::empacados). */
     public function getEmpacadosProperty(): \Illuminate\Support\Collection
     {
-        if (! $this->corteId) {
-            return collect();
-        }
-        $pedidos = DropiPedido::query()->where('corte_id', $this->corteId)->whereNotNull('lote_impresion_id')
-            ->whereIn('estado', [EstadoPedidoDropi::Empacado, EstadoPedidoDropi::Despachado, EstadoPedidoDropi::Entregado, EstadoPedidoDropi::Pagado])
-            ->with(['items.variante.producto', 'items.producto'])->get();
-        $registros = EmpaqueRegistro::query()->whereIn('pedido_id', $pedidos->pluck('id'))->where('estado', 'completado')
-            ->with('operario:id,name')->orderByDesc('fin_at')->get()->unique('pedido_id')->keyBy('pedido_id');
-
-        return $pedidos->map(fn (DropiPedido $p) => [
-            'guia' => (string) $p->guia,
-            'cliente' => (string) $p->cliente_nombre,
-            'ciudad' => $p->cliente_ciudad,
-            'productos' => $p->items->map(fn ($it) => $it->cantidad . '× ' . (($it->variante?->producto ?? $it->producto)?->nombre ?? $it->sku_dropi))->implode(', '),
-            'operario' => $registros->get($p->id)?->operario?->name ?? null,
-            'hora' => $registros->get($p->id)?->fin_at?->timezone('America/Bogota')->format('g:i a'),
-            'fin' => $registros->get($p->id)?->fin_at?->getTimestamp() ?? 0,
-            'a_mano' => max(0, (int) ($registros->get($p->id)?->items_totales ?? 0) - (int) ($registros->get($p->id)?->items_escaneados ?? 0)),
-        ])->sortByDesc('fin')->values();
+        return $this->corteId ? app(RecoleccionDelCorte::class)->empacados($this->corteId) : collect();
     }
 
     /** @return array<int, string> pedido => quién lo tiene abierto en la estación ahora */
     public function getEmpacandoProperty(): array
     {
-        return EmpaqueRegistro::query()->where('estado', 'en_curso')->with('operario:id,name')->get()
-            ->mapWithKeys(fn (EmpaqueRegistro $r) => [$r->pedido_id => (string) ($r->operario?->name ?? 'alguien')])->all();
+        return RecoleccionDelCorte::empacandoAhora();
     }
 
     public function cambiarModo(string $modo): void
