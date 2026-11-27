@@ -182,3 +182,69 @@ it('«Pedidos Dropi» resume el reporte y «Ver detalle» explica cada pedido', 
         ->and($html)->toContain('La nueva es la orden 98133965')
         ->and($html)->toContain('Qué hacer');
 });
+
+describe('cuando Dropi frena con «Too Many Attempts» (27-nov-2026)', function () {
+    it('se reintenta solo y, cuando Dropi contesta, queda «generada» y cuenta una sola vez', function () {
+        $p = gevPedido('910');
+        $llamadas = 0;
+        test()->partialMock(DropiWebClient::class, function ($m) use (&$llamadas) { $m->shouldReceive('pedidoDetalle')->andReturnUsing(function () use (&$llamadas) {
+            if (++$llamadas <= 2) {
+                throw new RuntimeException('Dropi no devolvió el pedido 910 (HTTP 429): Too Many Attempts.');
+            }
+
+            return gevDetalle('910', 'PENDIENTE');
+        }); });
+        $this->mock(GenerarGuiaDropi::class)->shouldReceive('handle')->once()->andReturn(['guia' => 'G-910']);
+
+        GenerarGuiasEnBloqueJob::lanzar([$p->id], 1, $this->lote->id);
+
+        expect($llamadas)->toBe(3)
+            ->and(gevResultado($p))->toMatchArray(['tipo' => 'generada', 'guia' => 'G-910'])
+            ->and($this->lote->fresh()->guias_pendientes)->toBe(98);
+    });
+
+    it('si el freno llega al pedir la guía, también se reintenta', function () {
+        $p = gevPedido('911');
+        gevDropiDice(['911' => gevDetalle('911', 'PENDIENTE')]);
+        $intentos = 0;
+        $this->mock(GenerarGuiaDropi::class)->shouldReceive('handle')->andReturnUsing(function () use (&$intentos) {
+            if (++$intentos === 1) {
+                throw new RuntimeException('Dropi no cambió el pedido 911: Too Many Attempts.');
+            }
+
+            return ['guia' => 'G-911'];
+        });
+
+        GenerarGuiasEnBloqueJob::lanzar([$p->id], 1, $this->lote->id);
+
+        expect($intentos)->toBe(2)->and(gevResultado($p))->toMatchArray(['tipo' => 'generada', 'guia' => 'G-911']);
+    });
+
+    it('tras los reintentos, si sigue frenando, queda el error para Aracely', function () {
+        $p = gevPedido('912');
+        $llamadas = 0;
+        test()->partialMock(DropiWebClient::class, function ($m) use (&$llamadas) { $m->shouldReceive('pedidoDetalle')->andReturnUsing(function () use (&$llamadas) {
+            $llamadas++;
+            throw new RuntimeException('Dropi no devolvió el pedido 912 (HTTP 429): Too Many Attempts.');
+        }); });
+        $this->mock(GenerarGuiaDropi::class)->shouldNotReceive('handle');
+
+        GenerarGuiasEnBloqueJob::lanzar([$p->id], 1, $this->lote->id);
+
+        expect($llamadas)->toBe(GenerarGuiasEnBloqueJob::REINTENTOS_POR_FRENO + 1)
+            ->and(gevResultado($p)['tipo'])->toBe('error')
+            ->and(gevResultado($p)['detalle'])->toContain('Too Many Attempts')
+            ->and($this->lote->fresh()->guias_pendientes)->toBe(98);
+    });
+
+    it('los demás errores no se reintentan: sin cobertura sale de una', function () {
+        $p = gevPedido('913');
+        gevDropiDice(['913' => gevDetalle('913', 'PENDIENTE')]);
+        $this->mock(GenerarGuiaDropi::class)->shouldReceive('handle')->once()
+            ->andThrow(new RuntimeException('Dropi no cambió el pedido 913: Lo sentimos, no hay cobertura disponible'));
+
+        GenerarGuiasEnBloqueJob::lanzar([$p->id], 1, $this->lote->id);
+
+        expect(gevResultado($p)['tipo'])->toBe('sin_cobertura');
+    });
+});

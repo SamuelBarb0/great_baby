@@ -50,9 +50,40 @@ class GenerarGuiasEnBloqueJob implements ShouldQueue
      */
     public int $timeout = 80;
 
-    public function __construct(public int $pedidoId, public ?int $userId, public ?int $loteId = null)
+    /**
+     * Cuántas veces se reintenta cuando Dropi frena con «Too Many Attempts»
+     * (27-nov-2026: quedaban en «Necesitan tu acción» y había que meterlos a
+     * mano). Cada vez espera un minuto más.
+     */
+    public const REINTENTOS_POR_FRENO = 5;
+
+    /** Dropi frenó: este trabajo se vuelve a encolar en vez de contar en el reporte. */
+    private bool $reencolado = false;
+
+    public function __construct(public int $pedidoId, public ?int $userId, public ?int $loteId = null, public int $freno = 0)
     {
         $this->onQueue(self::COLA);
+    }
+
+    /** ¿Dropi pidió esperar? («Too Many Attempts», HTTP 429). */
+    public static function esFreno(string $mensaje): bool
+    {
+        $m = mb_strtolower($mensaje);
+
+        return str_contains($m, 'too many attempts') || str_contains($m, 'http 429') || str_contains($m, 'too many requests');
+    }
+
+    /** Vuelve a la cola con espera, si le quedan intentos; si no, false y se reporta. */
+    private function reencolarPorFreno(): bool
+    {
+        if ($this->freno >= self::REINTENTOS_POR_FRENO) {
+            return false;
+        }
+        self::dispatch($this->pedidoId, $this->userId, $this->loteId, $this->freno + 1)
+            ->delay(now()->addSeconds(60 * ($this->freno + 1)));
+        $this->reencolado = true;
+
+        return true;
     }
 
     /** Encola una guía por pedido y reinicia el avance de este usuario. */
@@ -85,7 +116,10 @@ class GenerarGuiasEnBloqueJob implements ShouldQueue
         try {
             $this->generar($generar, $revisar);
         } finally {
-            $this->contarEnReporte();
+            // Reencolado por freno de Dropi: cuenta el intento que termine.
+            if (! $this->reencolado) {
+                $this->contarEnReporte();
+            }
         }
     }
 
@@ -132,6 +166,9 @@ class GenerarGuiasEnBloqueJob implements ShouldQueue
             return;
         }
         if ($r['tipo'] === RevisarPedidoEnDropi::ERROR) {
+            if (self::esFreno((string) $r['motivo']) && $this->reencolarPorFreno()) {
+                return;
+            }
             $this->fallo($p, 'error', 'No se pudo consultar en Dropi: ' . $r['motivo']);
 
             return;
@@ -149,6 +186,9 @@ class GenerarGuiasEnBloqueJob implements ShouldQueue
         } catch (\Throwable $e) {
             Log::warning('dropi.guias_en_bloque.fallo', ['pedido_id' => $p->id, 'msg' => $e->getMessage()]);
             $msg = RevisarPedidoEnDropi::motivoDropi($e->getMessage());
+            if (self::esFreno($e->getMessage()) && $this->reencolarPorFreno()) {
+                return;
+            }
             match (true) {
                 RevisarPedidoEnDropi::noExisteEnDropi($msg) => $this->darDeBaja($p, $revisar, 'reemplazado', "Dropi: «{$msg}»."),
                 str_contains(mb_strtolower($msg), 'cobertura') => $this->fallo($p, 'sin_cobertura', $msg),
