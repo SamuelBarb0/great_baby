@@ -20,7 +20,7 @@ beforeEach(function () {
     Queue::fake();
     $corte = AsignarCorteACarga::run(CarbonImmutable::now());
     $this->pedido = DropiPedido::create([
-        'corte_id' => $corte->id, 'guia' => 'SIN-GUIA-777', 'dropi_orden_id' => '777',
+        'corte_id' => $corte->id, 'guia' => '777', 'dropi_orden_id' => '777',
         'cliente_nombre' => 'Ana', 'monto_esperado_proveedor' => 1000,
     ]);
 

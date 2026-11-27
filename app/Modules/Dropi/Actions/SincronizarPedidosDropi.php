@@ -209,7 +209,7 @@ class SincronizarPedidosDropi
         if ($clienteNombre === '') $clienteNombre = 'SIN NOMBRE';
 
         // Driver web · los pedidos sin despachar entran con guía provisional
-        //   (SIN-GUIA-<orden>), así que se buscan también por orden de Dropi y la
+        //   (su número de orden; antes SIN-GUIA-<orden>), así que se buscan también por orden de Dropi y la
         //   guía real reemplaza a la provisional cuando Dropi la asigna.
         $existente = ($dto->dropiOrdenId !== ''
                 ? DropiPedido::where('dropi_orden_id', $dto->dropiOrdenId)->first()
@@ -217,7 +217,7 @@ class SincronizarPedidosDropi
             ?? DropiPedido::where('guia', $guia)->first();
         $guiaNueva = $existente
             && $existente->guia !== $guia
-            && ! str_starts_with($guia, \App\Modules\Dropi\Services\MapearPedidoDropiWeb::PREFIJO_SIN_GUIA)
+            && ! DropiPedido::esGuiaProvisional($guia, $dto->dropiOrdenId)
             && ! DropiPedido::withTrashed()->where('guia', $guia)->exists();
 
         // Re-audit DR-α (FUNC-C1) · antes: `$estadoInicial = $existente
@@ -248,14 +248,14 @@ class SincronizarPedidosDropi
             ? ($estadoDesdeDropi ?? $existente->estado)
             : ($estadoDesdeDropi ?? $this->resolverEstado->porSku($itemsPlano));
 
-        // El corte nace cuando Aracely genera (25-nov-2026): lo que llega por
-        //   despachar entra «sin corte». Lo que el ERP ve por primera vez ya
-        //   despachado, entregado o cancelado (se manejó del todo en Dropi) entra
-        //   al corte de su hora, como antes, para que se facture al cerrarlo.
-        $porDespachar = in_array($estadoInicial, [EstadoPedidoDropi::Pending, EstadoPedidoDropi::PendienteInventario], true);
-
+        // El corte sólo nace cuando Aracely genera (25-nov-2026) y el sync nunca
+        //   lo asigna ni lo crea (27-nov-2026): todo entra «sin corte», también lo
+        //   que el ERP ve por primera vez ya despachado, entregado o cancelado
+        //   (se manejó del todo en Dropi) — se queda en Pedidos. Antes eso iba al
+        //   corte de su hora y, si estaba cerrado, abría uno nuevo: así nació un
+        //   corte 26-3 con un pedido que Dropi ya había cancelado.
         $data = [
-            'corte_id' => $porDespachar ? null : AsignarCorteACarga::run($dto->creadoAt)->id,
+            'corte_id' => null,
             'dropi_orden_id' => $dto->dropiOrdenId,
             // 8.2 · el plazo de 72 h de Dropi corre desde que nació el pedido
             // allá, no desde que el ERP lo trajo.

@@ -127,7 +127,7 @@ it('el sync en tiempo real importa pedidos por la API oficial', function () {
     $r = app(SincronizarDropiWeb::class)->handle('recientes');
 
     expect($r['nuevos'])->toBe(2)->and($r['errores'])->toBe(0)
-        ->and(DropiPedido::where('dropi_orden_id', '101')->value('guia'))->toBe('SIN-GUIA-101')
+        ->and(DropiPedido::where('dropi_orden_id', '101')->value('guia'))->toBe('101')
         ->and(DropiPedido::where('dropi_orden_id', '102')->value('guia'))->toBe('G-102');
 
     // Segunda vuelta sin cambios: la huella evita volver a pedir el detalle.

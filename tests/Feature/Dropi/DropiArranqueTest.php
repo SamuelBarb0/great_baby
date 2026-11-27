@@ -21,7 +21,7 @@ beforeEach(function () {
 
     $this->pedido = function (string $orden, EstadoPedidoDropi $estado, ?string $enDropi) use ($corte) {
         $p = DropiPedido::create([
-            'corte_id' => $corte->id, 'guia' => "SIN-GUIA-{$orden}", 'dropi_orden_id' => $orden,
+            'corte_id' => $corte->id, 'guia' => (string) $orden, 'dropi_orden_id' => $orden,
             'cliente_nombre' => 'Ana', 'monto_esperado_proveedor' => 1000,
         ]);
         $p->forceFill(['estado' => $estado])->save();

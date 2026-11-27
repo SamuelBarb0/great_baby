@@ -153,7 +153,7 @@ class GenerarGuiaDropi
         return $corte->pedidos()
             ->where('estado', EstadoPedidoDropi::Empacado)
             ->whereNotNull('dropi_orden_id')
-            ->where('guia', 'like', \App\Modules\Dropi\Services\MapearPedidoDropiWeb::PREFIJO_SIN_GUIA . '%');
+            ->conGuiaProvisional();
     }
 
     private function buscarSticker(DropiPedido $pedido): void

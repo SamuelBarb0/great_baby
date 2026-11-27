@@ -10,6 +10,7 @@ use App\Modules\Dropi\Actions\AsignarCorteACarga;
 use App\Modules\Dropi\Actions\GenerarGuiaDropi;
 use App\Modules\Dropi\Actions\SincronizarDropiWeb;
 use App\Modules\Dropi\Jobs\GenerarGuiasEnBloqueJob;
+use App\Modules\Dropi\Models\DropiCorte;
 use App\Modules\Dropi\Models\DropiLoteImpresion;
 use App\Modules\Dropi\Models\DropiPedido;
 use App\Modules\Dropi\Services\ImprimirGuiasDropi;
@@ -27,7 +28,7 @@ beforeEach(function () {
 function cdePedido(string $orden, ?string $enDropi, string $sku = 'TP', array $cambios = []): DropiPedido
 {
     $p = DropiPedido::create($cambios + [
-        'corte_id' => test()->corte->id, 'guia' => "SIN-GUIA-{$orden}", 'dropi_orden_id' => $orden,
+        'corte_id' => test()->corte->id, 'guia' => (string) $orden, 'dropi_orden_id' => $orden,
         'cliente_nombre' => 'Ana', 'monto_esperado_proveedor' => 1000,
     ]);
     $p->items()->create(['sku_dropi' => $sku, 'producto_nombre' => "Producto {$sku}", 'cantidad' => 1, 'precio_proveedor_unit' => 1000]);
@@ -315,7 +316,7 @@ it('si Dropi rechaza una guía, el reporte sale igual con lo demás y el rechaza
         ->and($mal->fresh()->lote_impresion_id)->toBeNull(); // se puede volver a generar
 });
 
-it('el pedido que llega por despachar nace sin corte; el que ya llega despachado entra al corte de su hora', function () {
+it('el sync nunca asigna ni crea cortes: lo que llega por despachar, despachado o cancelado se queda en Pedidos', function () {
     $dto = fn (string $orden, string $estado) => new \App\Modules\Dropi\DTOs\PedidoDropiDTO(
         guia: "G-{$orden}", dropiOrdenId: $orden, transportadora: 'X', tienda: 'T', vendedorNombre: 'V',
         vendedorIdentificacion: null, clienteNombre: 'Ana', clienteDoc: null, clienteTelefono: null,
@@ -324,10 +325,31 @@ it('el pedido que llega por despachar nace sin corte; el que ya llega despachado
         items: [new \App\Modules\Dropi\DTOs\ItemDropiDTO('TP', 1, 30000, 'x', null)],
         creadoAt: CarbonImmutable::parse('2026-11-25 08:00'),
     );
-    app(\App\Modules\Dropi\Actions\SincronizarPedidosDropi::class)->importarPedidos([$dto('901', 'PENDIENTE'), $dto('902', 'ENTREGADO')]);
+    $cortesAntes = DropiCorte::withTrashed()->count();
+    $r = app(\App\Modules\Dropi\Actions\SincronizarPedidosDropi::class)->importarPedidos([$dto('901', 'PENDIENTE'), $dto('902', 'ENTREGADO'), $dto('903', 'CANCELADO')]);
 
-    expect(DropiPedido::where('dropi_orden_id', '901')->value('corte_id'))->toBeNull()
-        ->and(DropiPedido::where('dropi_orden_id', '902')->value('corte_id'))->not->toBeNull();
+    expect($r['errores'])->toBe(0)
+        ->and(DropiPedido::whereIn('dropi_orden_id', ['901', '902', '903'])->count())->toBe(3)
+        ->and(DropiPedido::whereIn('dropi_orden_id', ['901', '902', '903'])->whereNotNull('corte_id')->count())->toBe(0)
+        ->and(DropiCorte::withTrashed()->count())->toBe($cortesAntes);
+});
+
+it('un corte borrado no traba nada: sigue ocupando su número y se salta al siguiente', function () {
+    $dia = '2026-11-26';
+    DropiCorte::create(['fecha' => $dia, 'numero' => 1])->forceFill(['estado' => \App\Modules\Dropi\Enums\EstadoCorte::EnDespacho->value])->save();
+    DropiCorte::create(['fecha' => $dia, 'numero' => 2])->forceFill(['estado' => \App\Modules\Dropi\Enums\EstadoCorte::EnDespacho->value])->save();
+    $borrado = DropiCorte::create(['fecha' => $dia, 'numero' => 3]);
+    $borrado->delete();
+
+    // Tarde, con el 2 cerrado y el 3 borrado: antes tronaba con «No query results».
+    $corte = \App\Modules\Dropi\Actions\AsignarCorteACarga::run(CarbonImmutable::parse("{$dia} 18:00"));
+    expect($corte->numero)->toBe(4)->and($corte->trashed())->toBeFalse();
+
+    // Y si el borrado es el corte natural de la hora, tampoco se devuelve.
+    $natural = DropiCorte::create(['fecha' => '2026-12-01', 'numero' => 1]);
+    $natural->delete();
+    $otro = \App\Modules\Dropi\Actions\AsignarCorteACarga::run(CarbonImmutable::parse('2026-12-01 09:00'));
+    expect($otro->trashed())->toBeFalse()->and($otro->id)->not->toBe($natural->id)->and($otro->numero)->toBe(2);
 });
 
 it('lo empacado o despachado sin corte sale como alerta en Cortes y entra al corte abierto con un clic', function () {

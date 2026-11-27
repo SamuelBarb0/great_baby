@@ -40,7 +40,7 @@ beforeEach(function () {
 function pcrPedido(DropiCorte $corte, string $orden, EstadoPedidoDropi $estado = EstadoPedidoDropi::Pending, array $items = [['TP', 2]]): DropiPedido
 {
     $id = DB::table('dropi_pedidos')->insertGetId([
-        'guia' => "SIN-GUIA-{$orden}", 'dropi_orden_id' => $orden, 'estado' => $estado->value, 'corte_id' => $corte->id,
+        'guia' => (string) $orden, 'dropi_orden_id' => $orden, 'estado' => $estado->value, 'corte_id' => $corte->id,
         'cliente_nombre' => "Cliente {$orden}", 'cliente_ciudad' => 'Cali', 'cliente_direccion' => 'Calle 1 # 2-3',
         'monto_esperado_proveedor' => 30000, 'created_at' => now(), 'updated_at' => now(),
     ]);

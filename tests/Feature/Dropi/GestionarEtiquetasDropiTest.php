@@ -19,7 +19,7 @@ beforeEach(function () {
 
     $corte = \App\Modules\Dropi\Actions\AsignarCorteACarga::run(\Carbon\CarbonImmutable::now());
     $this->pedido = DropiPedido::create([
-        'corte_id' => $corte->id, 'guia' => 'SIN-GUIA-555', 'dropi_orden_id' => '555',
+        'corte_id' => $corte->id, 'guia' => '555', 'dropi_orden_id' => '555',
         'cliente_nombre' => 'Ana', 'monto_esperado_proveedor' => 1000,
     ]);
 });

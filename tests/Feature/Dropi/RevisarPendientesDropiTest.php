@@ -18,7 +18,7 @@ function rpdPedido(string $orden, array $cambios = []): DropiPedido
     $estado = $cambios['estado'] ?? EstadoPedidoDropi::Pending->value;
     unset($cambios['estado']);
     $p = DropiPedido::create($cambios + [
-        'guia' => "SIN-GUIA-{$orden}", 'dropi_orden_id' => $orden,
+        'guia' => (string) $orden, 'dropi_orden_id' => $orden,
         'cliente_nombre' => 'Ana Pérez', 'cliente_telefono' => '3001112233',
         'monto_esperado_proveedor' => 1000, 'dropi_creado_at' => now()->subDays(2),
     ]);

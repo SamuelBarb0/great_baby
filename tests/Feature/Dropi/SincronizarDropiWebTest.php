@@ -6,6 +6,7 @@ use App\Modules\Dropi\Models\DropiPedido;
 use App\Modules\Dropi\Models\DropiWebSesion;
 use App\Modules\Dropi\Services\DropiWebAuth;
 use App\Modules\Dropi\Services\MapearPedidoDropiWeb;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 
 /** Detalle con la forma real de bff/orders/myorders/v2/{id} (datos de cliente inventados). */
@@ -66,7 +67,7 @@ function fakeDropi(array $detalles): void
 it('mapea el detalle de Dropi: guía provisional, ítems y monto de proveedor', function () {
     $dto = app(MapearPedidoDropiWeb::class)->desdeDetalle(detalleDropi());
 
-    expect($dto->guia)->toBe('SIN-GUIA-90719548')
+    expect($dto->guia)->toBe('90719548')
         ->and($dto->dropiOrdenId)->toBe('90719548')
         ->and($dto->estadoDropi)->toBe('')
         ->and($dto->items)->toHaveCount(1)
@@ -91,7 +92,7 @@ it('mete el pedido pendiente sin guía y le pone la guía real cuando Dropi la a
 
     expect($r['nuevos'])->toBe(1);
     $pedido = DropiPedido::where('dropi_orden_id', '90719548')->first();
-    expect($pedido->guia)->toBe('SIN-GUIA-90719548');
+    expect($pedido->guia)->toBe('90719548');
 
     // La bodega lo empieza a alistar; Dropi genera la guía (sigue «antes del despacho»).
     $pedido->transicionar(EstadoPedidoDropi::Alistando, 'sistema');
@@ -147,4 +148,32 @@ it('el sync no borra lo escrito en el ERP ni cambia el pedido de corte', functio
     expect($pedido->guia)->toBe('064100000001')
         ->and($pedido->cliente_doc)->toBe('1098765432')
         ->and($pedido->corte_id)->toBe($otroCorte->id);
+});
+
+it('la guía provisional es el número de orden a secas y todavía reconoce el formato viejo SIN-GUIA-', function () {
+    $base = ['cliente_nombre' => 'X', 'monto_esperado_proveedor' => 0, 'estado' => EstadoPedidoDropi::Pending->value, 'created_at' => now(), 'updated_at' => now()];
+    $nuevo = DB::table('dropi_pedidos')->insertGetId($base + ['guia' => '91000001', 'dropi_orden_id' => '91000001']);
+    $viejo = DB::table('dropi_pedidos')->insertGetId($base + ['guia' => 'SIN-GUIA-91000002', 'dropi_orden_id' => '91000002']);
+    $real = DB::table('dropi_pedidos')->insertGetId($base + ['guia' => '064109999998', 'dropi_orden_id' => '91000003']);
+
+    expect(DropiPedido::find($nuevo)->tieneGuiaReal())->toBeFalse()
+        ->and(DropiPedido::find($viejo)->tieneGuiaReal())->toBeFalse()
+        ->and(DropiPedido::find($real)->tieneGuiaReal())->toBeTrue()
+        ->and(DropiPedido::conGuiaProvisional()->pluck('id')->sort()->values()->all())->toBe([$nuevo, $viejo]);
+});
+
+it('la migración quita el prefijo SIN-GUIA- y deja quieto el que chocaría con otra guía', function () {
+    $base = ['cliente_nombre' => 'X', 'monto_esperado_proveedor' => 0, 'estado' => EstadoPedidoDropi::Pending->value, 'created_at' => now(), 'updated_at' => now()];
+    $limpio = DB::table('dropi_pedidos')->insertGetId($base + ['guia' => 'SIN-GUIA-92000001', 'dropi_orden_id' => '92000001']);
+    $choca = DB::table('dropi_pedidos')->insertGetId($base + ['guia' => 'SIN-GUIA-92000002', 'dropi_orden_id' => '92000002']);
+    DB::table('dropi_pedidos')->insert($base + ['guia' => '92000002', 'dropi_orden_id' => '92999999']);
+
+    $migracion = require database_path('migrations/2026_11_27_090000_guia_provisional_sin_prefijo.php');
+    $migracion->up();
+
+    expect(DB::table('dropi_pedidos')->where('id', $limpio)->value('guia'))->toBe('92000001')
+        ->and(DB::table('dropi_pedidos')->where('id', $choca)->value('guia'))->toBe('SIN-GUIA-92000002');
+
+    $migracion->down();
+    expect(DB::table('dropi_pedidos')->where('id', $limpio)->value('guia'))->toBe('SIN-GUIA-92000001');
 });

@@ -26,14 +26,17 @@ class AsignarCorteACarga
         $fecha = $creadoAt->toDateString();
         $numero = $creadoAt->hour < 14 ? 1 : 2;
 
-        // 1) firstOrCreate atómico (respeta UNIQUE(fecha, numero)).
+        // 1) firstOrCreate atómico (respeta UNIQUE(fecha, numero)). Con los
+        //    borrados: un corte borrado sigue ocupando su número en la base, y
+        //    sin `withTrashed` aquí no se encontraba, el insert chocaba y todo
+        //    tronaba con «No query results» (corte 26-3, 27-nov-2026).
         try {
-            $corte = DropiCorte::firstOrCreate(
+            $corte = DropiCorte::withTrashed()->firstOrCreate(
                 ['fecha' => $fecha, 'numero' => $numero],
                 ['estado' => EstadoCorte::Abierto],
             );
         } catch (\Illuminate\Database\UniqueConstraintViolationException) {
-            $corte = DropiCorte::whereDate('fecha', $fecha)->where('numero', $numero)->firstOrFail();
+            $corte = DropiCorte::withTrashed()->whereDate('fecha', $fecha)->where('numero', $numero)->firstOrFail();
         }
         // `estado` está protegido: el corte recién creado lo toma del default de
         //   la base («abierto») pero el objeto quedaba sin él, y abajo se leía
@@ -54,7 +57,8 @@ class AsignarCorteACarga
                     ->first();
                 if ($abierto) return $abierto;
 
-                $ultimoNumero = (int) DropiCorte::whereDate('fecha', $fecha)->max('numero');
+                // Los borrados cuentan: su número ya está usado.
+                $ultimoNumero = (int) DropiCorte::withTrashed()->whereDate('fecha', $fecha)->max('numero');
                 $siguiente = $ultimoNumero + 1;
 
                 try {
@@ -77,6 +81,7 @@ class AsignarCorteACarga
      */
     private function esCerrado(DropiCorte $corte): bool
     {
-        return ! EstadoCorte::de($corte->estado)?->recibePedidos();
+        // Un corte borrado no recibe pedidos: se pasa al siguiente.
+        return $corte->trashed() || ! EstadoCorte::de($corte->estado)?->recibePedidos();
     }
 }

@@ -29,7 +29,7 @@ beforeEach(function () {
 function gevPedido(string $orden, array $cambios = []): DropiPedido
 {
     $p = DropiPedido::create($cambios + [
-        'corte_id' => test()->corte->id, 'guia' => "SIN-GUIA-{$orden}", 'dropi_orden_id' => $orden,
+        'corte_id' => test()->corte->id, 'guia' => (string) $orden, 'dropi_orden_id' => $orden,
         'cliente_nombre' => 'Ana Pérez', 'cliente_telefono' => '3001112233',
         'monto_esperado_proveedor' => 1000, 'dropi_creado_at' => now()->subDay(),
     ]);

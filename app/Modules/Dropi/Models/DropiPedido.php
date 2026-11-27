@@ -121,11 +121,28 @@ class DropiPedido extends Model implements AuditableContract
         return $this->guia_impresa_at !== null || (bool) $this->huella?->guia_descargada;
     }
 
-    /** ¿Ya tiene la guía de la transportadora? (no la provisional SIN-GUIA-<orden> del sync). */
+    /**
+     * ¿Ya tiene la guía de la transportadora? Mientras no, el sync le pone como
+     * guía provisional su número de orden (antes «SIN-GUIA-<orden>»).
+     */
     public function tieneGuiaReal(): bool
     {
         return filled($this->guia)
-            && ! str_starts_with((string) $this->guia, \App\Modules\Dropi\Services\MapearPedidoDropiWeb::PREFIJO_SIN_GUIA);
+            && ! self::esGuiaProvisional((string) $this->guia, $this->dropi_orden_id);
+    }
+
+    /** La guía provisional del sync: el número de orden, o el formato viejo SIN-GUIA-<orden>. */
+    public static function esGuiaProvisional(string $guia, int|string|null $ordenId): bool
+    {
+        return str_starts_with($guia, \App\Modules\Dropi\Services\MapearPedidoDropiWeb::PREFIJO_SIN_GUIA)
+            || (filled($ordenId) && $guia === (string) $ordenId);
+    }
+
+    /** Los pedidos que siguen con la guía provisional (ver esGuiaProvisional). */
+    public function scopeConGuiaProvisional(\Illuminate\Database\Eloquent\Builder $query): void
+    {
+        $query->where(fn ($q) => $q->whereColumn('guia', 'dropi_orden_id')
+            ->orWhere('guia', 'like', \App\Modules\Dropi\Services\MapearPedidoDropiWeb::PREFIJO_SIN_GUIA . '%'));
     }
 
     /** El PDF del sticker de la guía, publicado por Dropi (ver GenerarGuiaDropi). */

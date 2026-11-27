@@ -17,7 +17,12 @@ use Carbon\CarbonImmutable;
  */
 class MapearPedidoDropiWeb
 {
-    /** Prefijo de la guía provisional de los pedidos que Dropi aún no despacha. */
+    /**
+     * Prefijo que llevaba la guía provisional hasta el 27-nov-2026. Ahora la
+     * provisional es el número de orden a secas («que aparezcan todos
+     * simplemente con el número del pedido»); el prefijo se sigue reconociendo
+     * por si queda algún pedido viejo con él.
+     */
     public const PREFIJO_SIN_GUIA = 'SIN-GUIA-';
 
     /** Estatus Dropi → valor canónico que entiende SincronizarPedidosDropi::mapearEstadoDropi(). */
@@ -48,7 +53,8 @@ class MapearPedidoDropiWeb
         $estatus = mb_strtoupper(trim((string) ($o['status'] ?? '')));
         $guia = strtoupper(trim((string) ($o['shipping_guide'] ?? '')));
         if ($guia === '') {
-            $guia = self::PREFIJO_SIN_GUIA . $o['id'];
+            // Sin guía todavía: la provisional es el número de la orden.
+            $guia = (string) $o['id'];
         }
 
         $items = [];
