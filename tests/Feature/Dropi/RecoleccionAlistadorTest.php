@@ -229,6 +229,19 @@ it('la cola de empaque va en el orden de la pila de stickers, como la Estación 
     expect(Livewire::test(VistaAlistador::class)->instance()->empaque->pluck('guia')->all())->toBe(['G-1', 'G-2']);
 });
 
+it('el modo empaque muestra todos los pedidos del corte, no sólo los primeros 20 (26-nov-2026)', function () {
+    bodegaConRuta();
+    foreach (range(1, 25) as $n) {
+        pedidoEnCorte("G-{$n}", [['DV-555', 1]]);
+    }
+    $this->actingAs($this->aracely);
+
+    Livewire::test(VistaAlistador::class)
+        ->call('cambiarModo', 'empaque')
+        ->assertSee('Empaque · 25')
+        ->assertSee('G-25');
+});
+
 it('sin un corte generado la vista no deja empezar; con un corte nuevo, el alistador sólo ve ese (26-nov-2026)', function () {
     // De mañana: el Corte 2 de abajo es de las 3 pm, y corrido después de esa hora
     //   el primero también caía en él (el test dependía del reloj).

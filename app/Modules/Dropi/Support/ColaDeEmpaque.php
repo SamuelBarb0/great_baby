@@ -57,14 +57,15 @@ class ColaDeEmpaque
     }
 
     /**
-     * Los primeros de un corte, en el orden de la pila (Vista del Alistador).
+     * Los de un corte, en el orden de la pila (Vista del Alistador): todos,
+     * salvo que se pida un tope (26-nov-2026: se veían siempre 20).
      *
      * @return Collection<int, DropiPedido>  con items
      */
-    public function delCorte(int $corteId, ?int $operarioId = null, int $limite = 20): Collection
+    public function delCorte(int $corteId, ?int $operarioId = null, ?int $limite = null): Collection
     {
         return $this->base($operarioId)->where('corte_id', $corteId)
-            ->orderBy('orden_empaque')->orderBy('id')->limit($limite)
+            ->orderBy('orden_empaque')->orderBy('id')->when($limite, fn ($q) => $q->limit($limite))
             ->with(self::CON_ITEMS)->get();
     }
 
