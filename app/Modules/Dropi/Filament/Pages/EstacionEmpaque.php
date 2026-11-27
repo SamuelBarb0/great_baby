@@ -437,6 +437,49 @@ class EstacionEmpaque extends Page
         $this->registroCache = null;
     }
 
+    /**
+     * «⏭ Dejar para después» (27-nov-2026: «hay productos que aún no tenemos
+     * listos… que nos quede de última fila»): suelta el pedido como «Cancelar»
+     * y lo manda al final de la pila, así la estación sigue con el siguiente.
+     * Vuelve a salir cuando se acaben los demás, o antes escaneando su guía.
+     */
+    public function dejarParaDespues(): void
+    {
+        $pedidoId = $this->pedidoActivoId;
+        if (! $pedidoId) {
+            return;
+        }
+        $miRegistro = EmpaqueRegistro::where('pedido_id', $pedidoId)
+            ->where('estado', 'en_curso')
+            ->where('operario_id', auth()->id())
+            ->first();
+        if (! $miRegistro) {
+            Notification::make()->title('No puedes dejarlo para después')->body('Este empaque lo tomó otro operario.')->danger()->send();
+
+            return;
+        }
+
+        DB::transaction(function () use ($miRegistro, $pedidoId) {
+            $miRegistro->update(['estado' => 'anulado', 'fin_at' => now()]);
+            \App\Modules\Dropi\Models\DropiPedidoItem::where('pedido_id', $pedidoId)
+                ->where('pickeado_por', auth()->id())
+                ->update(['cantidad_pickeada' => 0, 'pickeado_at' => null, 'pickeado_por' => null]);
+            // Al final de la pila: detrás de todo lo impreso hasta ahora.
+            DropiPedido::whereKey($pedidoId)->update([
+                'orden_empaque' => (int) DropiPedido::withTrashed()->max('orden_empaque') + 1,
+            ]);
+        });
+
+        $guia = DropiPedido::find($pedidoId)?->guia;
+        $this->pedidoActivoId = null;
+        $this->ultimoResultado = null;
+        $this->registroCache = null;
+
+        $abierto = $this->enTurno && $this->abrirSiguiente();
+        $this->dispatch('empaque-scan', sonido: 'ok', mensaje: "⏭ Pedido {$guia} al final de la fila."
+            . ($abierto ? ' Siguiente: ' . DropiPedido::find($this->pedidoActivoId)?->guia . '.' : ''));
+    }
+
     public function pedidoActivo(): ?DropiPedido
     {
         if (! $this->pedidoActivoId) {

@@ -129,6 +129,12 @@
                             style="padding:.6rem 1rem;background:transparent;color:#9ca3af;border:1px solid rgba(156,163,175,.35);border-radius:.5rem;cursor:pointer;">
                         Cancelar
                     </button>
+                    {{-- Producto que todavía no está listo (27-nov-2026): al final de la fila. --}}
+                    <button wire:click="dejarParaDespues" wire:loading.attr="disabled" wire:target="dejarParaDespues"
+                            title="Lo manda al final de la fila y abre el siguiente"
+                            style="padding:.6rem 1rem;background:transparent;color:#fbbf24;border:1px solid rgba(251,191,36,.45);border-radius:.5rem;cursor:pointer;">
+                        ⏭ Dejar para después
+                    </button>
                     @php $registroActivo = $this->registroActivo(); @endphp
                     @if($registroActivo?->foto_path)
                         <span style="padding:.6rem 1rem;background:rgba(16,185,129,.15);color:#10b981;border:1px solid #10b981;border-radius:.5rem;font-weight:600;font-size:.85rem;display:inline-flex;align-items:center;gap:.35rem;">

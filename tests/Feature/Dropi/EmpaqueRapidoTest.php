@@ -389,6 +389,29 @@ it('«Confirmar empaque» da por empacado lo que falte, imprime la guía y abre 
         ->and(json_decode($bitacora, true)['confirmado_a_mano'] ?? null)->toBe(2);
 });
 
+it('«Dejar para después» manda el pedido al final de la fila y abre el siguiente (27-nov-2026)', function () {
+    $a = erPedido('ER-A1', 'ER-VOL', '2026-11-24 08:00');
+    $b = erPedido('ER-A2', 'ER-TAP', '2026-11-24 08:10');
+    $c = erPedido('ER-A3', 'ER-VOL', '2026-11-24 08:20');
+    foreach ([$a, $b, $c] as $i => $p) {
+        DropiPedido::whereKey($p->id)->update(['orden_empaque' => 100 + $i]);
+    }
+
+    $this->actingAs($this->empacador);
+    $lw = Livewire::test(EstacionEmpaque::class)
+        ->call('siguientePedido')->assertSet('pedidoActivoId', $a->id)
+        ->set('codigo', 'ER-VOL')->call('escanear')   // alcanzó a escanear algo
+        ->call('dejarParaDespues')
+        ->assertSet('pedidoActivoId', $b->id);       // sigue con el siguiente
+
+    expect(app(ColaDeEmpaque::class)->pedidos($this->otro->id)->pluck('id')->all())->toBe([$c->id, $a->id])
+        ->and(EmpaqueRegistro::where('pedido_id', $a->id)->value('estado')?->value ?? EmpaqueRegistro::where('pedido_id', $a->id)->value('estado'))->toBe('anulado')
+        ->and((int) $a->items()->sum('cantidad_pickeada'))->toBe(0);
+
+    // Vuelve a salir al final: o antes, escaneando su guía.
+    $lw->call('cancelarPedido')->set('codigo', 'ER-A1')->call('escanear')->assertSet('pedidoActivoId', $a->id);
+});
+
 it('con todo escaneado, confirmar no vuelve a imprimir la guía (ya salió con el último escaneo)', function () {
     $p = erPedido('ER-95', 'ER-VOL', '2026-11-24 09:00');
     DropiPedido::whereKey($p->id)->update(['sticker_path' => 'colombia/guias/er-95.pdf']);
