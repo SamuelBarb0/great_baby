@@ -155,21 +155,26 @@ it('«Siguiente pedido» abre el siguiente libre, y otro empacador recibe el que
         ->and(EmpaqueRegistro::where('pedido_id', $b->id)->value('operario_id'))->toBe($this->otro->id);
 });
 
-it('la estación sólo da los pedidos del corte puesto en el alistador: los de cortes anteriores no se cuelan (27-nov-2026)', function () {
+it('la estación da los pedidos de los dos últimos cortes generados: los de cortes anteriores no se cuelan (27-nov-2026)', function () {
     $viejo = erPedido('ER-80', 'ER-VOL', '2026-11-24 08:00');
     $deHoy1 = erPedido('ER-81', 'ER-VOL', '2026-11-24 09:00');
     $deHoy2 = erPedido('ER-82', 'ER-TAP', '2026-11-24 09:30');
 
-    // Aracely genera el corte de hoy: su reporte es el último, el alistador lo pone.
-    $hoy = \App\Modules\Dropi\Models\DropiCorte::create(['fecha' => '2026-11-21', 'numero' => 1]);
-    \App\Modules\Dropi\Models\DropiLoteImpresion::create([
-        'corte_id' => $hoy->id, 'pedidos' => [], 'total' => 0, 'guias_pendientes' => 0,
-        'estado' => \App\Modules\Dropi\Models\DropiLoteImpresion::LISTO,
-    ]);
-    DropiPedido::whereIn('id', [$deHoy1->id, $deHoy2->id])->update(['corte_id' => $hoy->id]);
+    // Aracely genera dos cortes más: en trabajo quedan los dos últimos (27-nov-2026),
+    //   y el del beforeEach, más viejo, ya no se cuela.
+    $medio = \App\Modules\Dropi\Models\DropiCorte::create(['fecha' => '2026-11-21', 'numero' => 1]);
+    $hoy = \App\Modules\Dropi\Models\DropiCorte::create(['fecha' => '2026-11-22', 'numero' => 1]);
+    foreach ([$medio, $hoy] as $c) {
+        \App\Modules\Dropi\Models\DropiLoteImpresion::create([
+            'corte_id' => $c->id, 'pedidos' => [], 'total' => 0, 'guias_pendientes' => 0,
+            'estado' => \App\Modules\Dropi\Models\DropiLoteImpresion::LISTO,
+        ]);
+    }
+    DropiPedido::whereKey($deHoy1->id)->update(['corte_id' => $medio->id]);
+    DropiPedido::whereKey($deHoy2->id)->update(['corte_id' => $hoy->id]);
 
     $cola = app(ColaDeEmpaque::class);
-    expect(app(\App\Modules\Dropi\Support\RecoleccionDelCorte::class)->cortesEnTrabajo()->first()?->id)->toBe($hoy->id)
+    expect(app(\App\Modules\Dropi\Support\RecoleccionDelCorte::class)->cortesEnTrabajo()->pluck('id')->all())->toBe([$medio->id, $hoy->id])
         // Qué pedidos, no en qué orden: con un pedido por producto, el empate de la pila depende de los ids.
         ->and($cola->pedidos()->pluck('id')->sort()->values()->all())->toBe([$deHoy1->id, $deHoy2->id])
         ->and($cola->contar())->toBe(2)

@@ -209,8 +209,14 @@
 
     {{-- MODO EMPAQUE --}}
     @if($modo === 'empaque')
+        @php
+            $empacando = $this->empacando;
+            $empacados = $this->empacados;
+        @endphp
+        {{-- En vivo (27-nov-2026): lo que se pistolea en la estación baja de «Por empacar» a «Empacados» solo. --}}
+        <div wire:poll.5s>
         <x-filament::section style="margin-top:1rem;">
-            <x-slot name="heading">Modo Empaque · Cola compartida</x-slot>
+            <x-slot name="heading">Por empacar · {{ $empaque->count() }}</x-slot>
             <x-slot name="description">En el orden de la pila de stickers, igual que la Estación de Empaque. Al tomar un pedido queda bloqueado para ti — nadie más puede empacarlo hasta que termines o pasen 10 minutos sin actividad.</x-slot>
 
             @if($empaque->isEmpty())
@@ -226,6 +232,9 @@
                                         <x-filament::badge :color="$pedido->estado->value === 'pending' ? 'warning' : 'info'">
                                             {{ $pedido->estado->label() }}
                                         </x-filament::badge>
+                                        @if($quien = $empacando[$pedido->id] ?? null)
+                                            <x-filament::badge color="success">📦 empacando: {{ $quien }}</x-filament::badge>
+                                        @endif
                                     </div>
                                     <div style="margin-top:.5rem;font-size:.9rem;">
                                         <strong>{{ $pedido->cliente_nombre }}</strong>
@@ -264,6 +273,31 @@
                 </div>
             @endif
         </x-filament::section>
+
+        <x-filament::section style="margin-top:1rem;">
+            <x-slot name="heading">✅ Empacados · {{ $empacados->count() }}</x-slot>
+            <x-slot name="description">Lo último que se empacó, arriba.</x-slot>
+
+            @if($empacados->isEmpty())
+                <div style="text-align:center;padding:1.25rem;color:#9ca3af;">Todavía no se ha empacado nada de este corte.</div>
+            @else
+                <div style="display:grid;gap:.35rem;">
+                    @foreach($empacados as $e)
+                        <div style="display:flex;flex-wrap:wrap;gap:.25rem .75rem;align-items:baseline;padding:.5rem .75rem;border-radius:.5rem;background:rgba(34,197,94,.06);border:1px solid rgba(34,197,94,.18);font-size:.85rem;">
+                            <span style="color:#22c55e;">✔</span>
+                            <span style="font-family:ui-monospace,monospace;font-weight:600;">{{ $e['guia'] }}</span>
+                            <span style="opacity:.8;">{{ $e['cliente'] }}@if($e['ciudad']) · {{ $e['ciudad'] }}@endif</span>
+                            <span style="color:#9ca3af;flex:1 1 12rem;">{{ $e['productos'] }}</span>
+                            <span style="color:#9ca3af;white-space:nowrap;">{{ $e['hora'] }}@if($e['operario']) · {{ $e['operario'] }}@endif</span>
+                            @if($e['a_mano'] > 0)
+                                <span title="Confirmado con el botón sin escanear todo" style="color:#f59e0b;white-space:nowrap;">✋ {{ $e['a_mano'] }} sin escanear</span>
+                            @endif
+                        </div>
+                    @endforeach
+                </div>
+            @endif
+        </x-filament::section>
+        </div>
     @endif
     @endif
 </x-filament-panels::page>

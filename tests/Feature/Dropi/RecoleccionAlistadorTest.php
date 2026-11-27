@@ -242,7 +242,7 @@ it('el modo empaque muestra todos los pedidos del corte, no sólo los primeros 2
         ->assertSee('G-25');
 });
 
-it('sin un corte generado la vista no deja empezar; con un corte nuevo, el alistador sólo ve ese (26-nov-2026)', function () {
+it('sin un corte generado la vista no deja empezar; con un corte nuevo, sigue en el anterior mientras le falte algo (27-nov-2026)', function () {
     // De mañana: el Corte 2 de abajo es de las 3 pm, y corrido después de esa hora
     //   el primero también caía en él (el test dependía del reloj).
     $this->travelTo(CarbonImmutable::today()->setTime(9, 0));
@@ -259,11 +259,47 @@ it('sin un corte generado la vista no deja empezar; con un corte nuevo, el alist
     $b = pedidoEnCorte('G-2', [['DV-555', 2]]);
     DropiPedido::whereKey($b->id)->update(['corte_id' => $tarde->id, 'lote_impresion_id' => $lote->id]);
 
-    $vista = Livewire::test(VistaAlistador::class)->assertSet('corteId', $tarde->id);
-    expect($vista->instance()->cortes->pluck('id')->all())->toBe([$tarde->id])
-        ->and(array_column($vista->instance()->recoleccion, 'sku'))->toBe(['DV-555']);
-    // Al otro corte no se puede saltar.
-    $vista->call('escogerCorte', $a->corte_id)->assertSet('corteId', $tarde->id);
+    // Al Corte 1 todavía le falta: el alistador sigue ahí y el 2 queda al lado para cambiar.
+    $vista = Livewire::test(VistaAlistador::class)->assertSet('corteId', $a->corte_id);
+    expect($vista->instance()->cortes->pluck('id')->all())->toBe([$a->corte_id, $tarde->id])
+        ->and(array_column($vista->instance()->recoleccion, 'sku'))->toBe(['SKU-899']);
+    $vista->call('escogerCorte', $tarde->id)->assertSet('corteId', $tarde->id);
+    expect(array_column($vista->instance()->recoleccion, 'sku'))->toBe(['DV-555']);
+
+    // La estación da los dos: primero lo que le falta al 1.
+    expect(app(\App\Modules\Dropi\Support\ColaDeEmpaque::class)->pedidos()->pluck('id')->all())->toBe([$a->id, $b->id]);
+
+    // Con el 1 al día, el alistador abre el 2.
+    DropiPedido::whereKey($a->id)->update(['estado' => EstadoPedidoDropi::Empacado->value]);
+    Livewire::test(VistaAlistador::class)->assertSet('corteId', $tarde->id);
+});
+
+it('modo empaque en vivo: lo que se empaca en la estación baja a «Empacados» con quién y a qué hora (27-nov-2026)', function () {
+    $a = pedidoEnCorte('G-71', [['SKU-899', 1]]);
+    $b = pedidoEnCorte('G-72', [['SKU-899', 1]]);
+    $c = pedidoEnCorte('G-73', [['SKU-899', 1]]);
+    \App\Modules\Dropi\Models\EmpaqueRegistro::create([
+        'pedido_id' => $b->id, 'operario_id' => $this->luli->id, 'inicio_at' => now(), 'items_totales' => 1, 'items_escaneados' => 0, 'estado' => 'en_curso',
+    ]);
+    \App\Modules\Dropi\Models\EmpaqueRegistro::create([
+        'pedido_id' => $a->id, 'operario_id' => $this->luli->id, 'inicio_at' => now()->subMinute(), 'fin_at' => now(),
+        'items_totales' => 1, 'items_escaneados' => 0, 'estado' => 'completado',
+    ]);
+    DropiPedido::whereKey($a->id)->update(['estado' => EstadoPedidoDropi::Empacado->value]);
+    $this->actingAs($this->aracely);
+
+    $vista = Livewire::test(VistaAlistador::class)->call('cambiarModo', 'empaque')
+        ->assertSee('wire:poll.5s', false)
+        ->assertSee('Por empacar · 2')
+        ->assertSee('📦 empacando: Luli')
+        ->assertSee('✅ Empacados · 1')
+        ->assertSee('✋ 1 sin escanear');
+    expect($vista->instance()->empacados->pluck('guia')->all())->toBe(['G-71'])
+        ->and($vista->instance()->empacados->first()['operario'])->toBe('Luli');
+
+    // Se empaca otro: en el siguiente refresco baja a «Empacados».
+    DropiPedido::whereKey($c->id)->update(['estado' => EstadoPedidoDropi::Empacado->value]);
+    $vista->call('$refresh')->assertSee('Por empacar · 1')->assertSee('✅ Empacados · 2');
 });
 
 it('el PDF de la recolección lo baja el alistador, con casillas y la ruta por zonas', function () {
