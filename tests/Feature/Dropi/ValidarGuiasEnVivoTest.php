@@ -248,3 +248,58 @@ describe('cuando Dropi frena con «Too Many Attempts» (27-nov-2026)', function 
         expect(gevResultado($p)['tipo'])->toBe('sin_cobertura');
     });
 });
+
+describe('cuando Dropi no contesta a tiempo (28-nov-2026: «cURL error 28» con la guía ya creada)', function () {
+    it('se reintenta y, si la guía sí quedó en Dropi, entra al corte con ella', function () {
+        $p = gevPedido('920');
+        $consultas = 0;
+        test()->partialMock(DropiWebClient::class, function ($m) use (&$consultas) { $m->shouldReceive('pedidoDetalle')->andReturnUsing(function () use (&$consultas) {
+            // La primera vez está pendiente; al reintentar, Dropi ya generó la guía.
+            return ++$consultas === 1 ? gevDetalle('920', 'PENDIENTE') : gevDetalle('920', 'GUIA_GENERADA', '240066985832');
+        }); });
+        $intentos = 0;
+        $this->mock(GenerarGuiaDropi::class)->shouldReceive('handle')->andReturnUsing(function () use (&$intentos) {
+            if (++$intentos === 1) {
+                throw new RuntimeException('cURL error 28: Operation timed out after 20001 milliseconds with 0 bytes received');
+            }
+
+            return ['guia' => '240066985832'];
+        });
+
+        GenerarGuiasEnBloqueJob::lanzar([$p->id], 1, $this->lote->id);
+
+        expect($consultas)->toBe(2)
+            ->and(gevResultado($p))->toMatchArray(['tipo' => 'ya_tenia', 'guia' => '240066985832'])
+            ->and($p->fresh()->guia)->toBe('240066985832')
+            ->and($this->lote->fresh()->guias_pendientes)->toBe(98);
+    });
+
+    it('si la consulta misma se demora, también se reintenta', function () {
+        $p = gevPedido('921');
+        $consultas = 0;
+        test()->partialMock(DropiWebClient::class, function ($m) use (&$consultas) { $m->shouldReceive('pedidoDetalle')->andReturnUsing(function () use (&$consultas) {
+            if (++$consultas === 1) {
+                throw new \Illuminate\Http\Client\ConnectionException('cURL error 28: Operation timed out after 20001 milliseconds with 0 bytes received');
+            }
+
+            return gevDetalle('921', 'PENDIENTE');
+        }); });
+        $this->mock(GenerarGuiaDropi::class)->shouldReceive('handle')->once()->andReturn(['guia' => 'G-921']);
+
+        GenerarGuiasEnBloqueJob::lanzar([$p->id], 1, $this->lote->id);
+
+        expect(gevResultado($p))->toMatchArray(['tipo' => 'generada', 'guia' => 'G-921']);
+    });
+
+    it('un trabajo cortado por tiempo vuelve a la cola en vez de quedar en error', function () {
+        Queue::fake();
+        $p = gevPedido('922');
+
+        (new GenerarGuiasEnBloqueJob($p->id, 1, $this->lote->id))
+            ->failed(new \Illuminate\Queue\MaxAttemptsExceededException('GenerarGuiasEnBloqueJob has been attempted too many times or run too long.'));
+
+        Queue::assertPushed(GenerarGuiasEnBloqueJob::class, fn ($j) => $j->pedidoId === $p->id && $j->freno === 1);
+        expect(gevResultado($p))->toBeNull()
+            ->and($this->lote->fresh()->guias_pendientes)->toBe(99);
+    });
+});

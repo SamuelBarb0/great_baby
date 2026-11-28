@@ -61,10 +61,21 @@ class SincronizarDropiWeb
     public const CACHE_ERROR = 'dropi:sync:ultimo_error';
 
     /**
+     * Hasta cuándo puede seguir esta vuelta (28-nov-2026): con Dropi tardando
+     * 25-30 s por llamada, «ventana» pasó 4 minutos detallando pedidos y, como
+     * el cron de Hostinger no arranca otro `schedule:run` mientras el anterior
+     * siga vivo, el worker de guías no se levantó y el corte de las 8:15 se
+     * quedó con 70 guías en cola. Lo que no alcance queda sin huella y entra en
+     * la vuelta siguiente. Null = sin tope (quien llama no es el cron).
+     */
+    protected ?float $limite = null;
+
+    /**
      * @return array{modo:string, vistos:int, cambiados:int, nuevos:int, actualizados:int, errores:int, pagos:int}
      */
     public function handle(string $modo = 'recientes', int $dias = 3, int $maxPaginas = 20, int $maxDetalles = 120): array
     {
+        $this->limite = microtime(true) + (int) config('dropi.web.segundos_por_vuelta', 40);
         try {
             $r = $this->sincronizar($modo, $dias, $maxPaginas, $maxDetalles);
         } catch (\Throwable $e) {
@@ -163,7 +174,11 @@ class SincronizarDropiWeb
         $dtos = [];
         $movimientos = [];
         $errores = 0;
-        foreach ($ordenes as $id) {
+        foreach ($ordenes as $i => $id) {
+            if ($this->sinTiempo()) {
+                Log::info('dropi.web.sin_tiempo', ['detallados' => $i, 'quedan' => count($ordenes) - $i]);
+                break;
+            }
             try {
                 $detalle = $this->client->pedidoDetalle((int) $id);
                 $dtos[] = $this->mapper->desdeDetalle($detalle);
@@ -264,6 +279,10 @@ class SincronizarDropiWeb
     {
         $todos = [];
         for ($p = 0; $p < $maxPaginas; $p++) {
+            // La primera página siempre; las demás, si queda tiempo.
+            if ($p > 0 && $this->sinTiempo()) {
+                break;
+            }
             try {
                 $objetos = $this->client->pedidosCrudos($filtros, $p, 100)['objects'];
             } catch (\App\Modules\Dropi\Exceptions\DropiSesionNoDisponible $e) {
@@ -280,6 +299,12 @@ class SincronizarDropiWeb
         }
 
         return $todos;
+    }
+
+    /** ¿Se acabó el tiempo de esta vuelta? */
+    protected function sinTiempo(): bool
+    {
+        return $this->limite !== null && microtime(true) >= $this->limite;
     }
 
     /** @return array<int, array> los pedidos de la lista cuya huella no coincide con la guardada */

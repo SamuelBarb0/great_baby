@@ -177,3 +177,23 @@ it('la migración quita el prefijo SIN-GUIA- y deja quieto el que chocaría con 
     $migracion->down();
     expect(DB::table('dropi_pedidos')->where('id', $limpio)->value('guia'))->toBe('SIN-GUIA-92000001');
 });
+
+it('con el tiempo de la vuelta agotado no se queda esperando a Dropi: lo que falta entra en la siguiente (28-nov-2026)', function () {
+    fakeDropi([
+        90719548 => detalleDropi(),
+        90719549 => detalleDropi(['id' => 90719549, 'name' => 'Luz']),
+    ]);
+
+    config()->set('dropi.web.segundos_por_vuelta', 0);
+    $r = app(SincronizarDropiWeb::class)->handle('recientes');
+
+    expect($r['vistos'])->toBe(2)
+        ->and($r['nuevos'])->toBe(0)
+        ->and(DropiPedido::count())->toBe(0);
+
+    // Sin huella marcada: la siguiente vuelta, con tiempo, los trae.
+    config()->set('dropi.web.segundos_por_vuelta', 40);
+    app(SincronizarDropiWeb::class)->handle('recientes');
+
+    expect(DropiPedido::whereIn('dropi_orden_id', ['90719548', '90719549'])->count())->toBe(2);
+});

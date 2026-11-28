@@ -40,6 +40,9 @@ return [
         'timeout' => (int) env('DROPI_WEB_TIMEOUT', 20),
         // Enciende el sync programado (routes/console.php). Apagado por defecto.
         'sync_activo' => (bool) env('DROPI_WEB_SYNC', false),
+        // Tope de cada vuelta del sync con Dropi (28-nov-2026): lo que no alcance
+        //   entra en la siguiente, y el cron no se queda trabado esperando a Dropi.
+        'segundos_por_vuelta' => (int) env('DROPI_WEB_SYNC_SEGUNDOS', 40),
         // Primer día que se importa de la wallet. Cada movimiento genera su
         // asiento contable, así que no se trae la historia anterior.
         'wallet_desde' => env('DROPI_WALLET_DESDE', '2026-09-01'),

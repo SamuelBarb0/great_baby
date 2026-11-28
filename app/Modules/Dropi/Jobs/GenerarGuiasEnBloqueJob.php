@@ -53,7 +53,7 @@ class GenerarGuiasEnBloqueJob implements ShouldQueue
     /**
      * Cuántas veces se reintenta cuando Dropi frena con «Too Many Attempts»
      * (27-nov-2026: quedaban en «Necesitan tu acción» y había que meterlos a
-     * mano). Cada vez espera un minuto más.
+     * mano) o no contesta a tiempo (28-nov-2026). Cada vez espera un minuto más.
      */
     public const REINTENTOS_POR_FRENO = 5;
 
@@ -71,6 +71,24 @@ class GenerarGuiasEnBloqueJob implements ShouldQueue
         $m = mb_strtolower($mensaje);
 
         return str_contains($m, 'too many attempts') || str_contains($m, 'http 429') || str_contains($m, 'too many requests');
+    }
+
+    /**
+     * ¿Dropi no contestó a tiempo? (28-nov-2026: «cURL error 28 … timed out» en 5
+     * pedidos del corte de las 8:15, y 4 de ellos SÍ tenían guía en Dropi). No es
+     * un «no»: se reintenta, y al reintentar la consulta ve si la guía ya quedó.
+     */
+    public static function esDemora(string $mensaje): bool
+    {
+        $m = mb_strtolower($mensaje);
+
+        return str_contains($m, 'curl error 28') || str_contains($m, 'timed out');
+    }
+
+    /** ¿Vale la pena volver a intentar más tarde? (freno o demora de Dropi). */
+    public static function esPasajero(string $mensaje): bool
+    {
+        return self::esFreno($mensaje) || self::esDemora($mensaje);
     }
 
     /** Vuelve a la cola con espera, si le quedan intentos; si no, false y se reporta. */
@@ -123,9 +141,19 @@ class GenerarGuiasEnBloqueJob implements ShouldQueue
         }
     }
 
-    /** Se cayó (tiempo agotado): igual cuenta, o el reporte esperaría para siempre. */
+    /**
+     * Se cayó (tiempo agotado): se reintenta como una demora de Dropi (la guía
+     * pudo haber quedado); sin intentos, igual cuenta, o el reporte esperaría
+     * para siempre.
+     */
     public function failed(\Throwable $e): void
     {
+        $cortado = $e instanceof \Illuminate\Queue\TimeoutExceededException
+            || $e instanceof \Illuminate\Queue\MaxAttemptsExceededException
+            || self::esDemora($e->getMessage());
+        if ($cortado && $this->reencolarPorFreno()) {
+            return;
+        }
         $p = DropiPedido::find($this->pedidoId);
         if ($p) {
             $this->resultado($p, 'error', 'El trabajo se cortó esperando a Dropi: ' . mb_substr($e->getMessage(), 0, 120));
@@ -166,7 +194,7 @@ class GenerarGuiasEnBloqueJob implements ShouldQueue
             return;
         }
         if ($r['tipo'] === RevisarPedidoEnDropi::ERROR) {
-            if (self::esFreno((string) $r['motivo']) && $this->reencolarPorFreno()) {
+            if (self::esPasajero((string) $r['motivo']) && $this->reencolarPorFreno()) {
                 return;
             }
             $this->fallo($p, 'error', 'No se pudo consultar en Dropi: ' . $r['motivo']);
@@ -186,7 +214,7 @@ class GenerarGuiasEnBloqueJob implements ShouldQueue
         } catch (\Throwable $e) {
             Log::warning('dropi.guias_en_bloque.fallo', ['pedido_id' => $p->id, 'msg' => $e->getMessage()]);
             $msg = RevisarPedidoEnDropi::motivoDropi($e->getMessage());
-            if (self::esFreno($e->getMessage()) && $this->reencolarPorFreno()) {
+            if (self::esPasajero($e->getMessage()) && $this->reencolarPorFreno()) {
                 return;
             }
             match (true) {
