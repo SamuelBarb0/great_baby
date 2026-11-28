@@ -23,6 +23,10 @@ use Livewire\Attributes\Url;
  * nombre en Dropi) y cada movimiento dice en palabras qué pasó, con su
  * documento: la guía abre el pedido, la recepción o la carga abren su documento.
  * El costo promedio y el saldo se calculan como el kardex del ERP.
+ *
+ * Sin buscar nada (28-nov-2026, Samuel: «¿no debería aparecer más info sin
+ * necesidad de buscar?»): el resumen del periodo, los últimos movimientos de
+ * todos los productos y los que más se movieron, cada uno con clic a su kardex.
  */
 class KardexDropi extends Page
 {
@@ -45,6 +49,19 @@ class KardexDropi extends Page
 
     /** Cuántos productos se ofrecen al buscar. */
     public const COINCIDENCIAS = 12;
+
+    /** Cuántos movimientos recientes se ven sin buscar. */
+    public const RECIENTES = 50;
+
+    /** Cuántos productos salen en «Los que más se movieron». */
+    public const TOP = 10;
+
+    /** Lo que vuelve a la bodega: desempacados y devoluciones. */
+    private const VUELVEN = [SalidaInventarioDropi::REVERSO, 'devolucion', \App\Modules\Dropi\Models\DropiDevolucion::class];
+
+    /** hoy | semana | mes */
+    #[Url]
+    public string $periodo = 'hoy';
 
     #[Url]
     public string $buscar = '';
@@ -146,12 +163,7 @@ class KardexDropi extends Page
                 ->orWhereIn('variante_id', $p->variantes->pluck('id')->all() ?: [0]));
         }
 
-        // Cada quien ve sus bodegas, como en el kardex del ERP.
-        $u = auth()->user();
-        if (! $u->esAracely() && ! Permisos::esRoot($u)) {
-            $bodegas = $u->bodegasQueVeIds();
-            $bodegas ? $q->whereIn('ubicacion_id', $bodegas) : $q->whereRaw('1 = 0');
-        }
+        self::alcance($q);
 
         $saldo = 0;
         $costoProm = 0.0;
@@ -190,6 +202,129 @@ class KardexDropi extends Page
             'costo_promedio' => $costoProm,
             'valor' => round(max($saldo, 0) * $costoProm, 2),
         ];
+    }
+
+    /** Cada quien ve sus bodegas, como en el kardex del ERP. */
+    private static function alcance($q, string $columna = 'ubicacion_id')
+    {
+        $u = auth()->user();
+        if (! $u->esAracely() && ! Permisos::esRoot($u)) {
+            $bodegas = $u->bodegasQueVeIds();
+            $bodegas ? $q->whereIn($columna, $bodegas) : $q->whereRaw('1 = 0');
+        }
+
+        return $q;
+    }
+
+    /** Desde cuándo cuenta el periodo elegido, en hora de Colombia. */
+    public function desde(): \Carbon\CarbonInterface
+    {
+        $hoy = now('America/Bogota');
+
+        return (match ($this->periodo) {
+            'semana' => $hoy->copy()->subDays(6)->startOfDay(),
+            'mes' => $hoy->copy()->startOfMonth(),
+            default => $hoy->copy()->startOfDay(),
+        })->timezone(config('app.timezone'));
+    }
+
+    /**
+     * Lo que pasó en el periodo, en cuatro números, y el valor del inventario
+     * (lo que costó lo que entró menos lo que costó lo que salió).
+     *
+     * @return array{salieron: int, salieron_costo: float, entraron: int, volvieron: int, otras_salidas: int, valor: float}
+     */
+    public function getResumenProperty(): array
+    {
+        $grupos = self::alcance(InventarioMovimiento::query())
+            ->where('created_at', '>=', $this->desde())
+            ->selectRaw('referencia_tipo, cantidad > 0 AS entra, SUM(cantidad) AS unidades, SUM(cantidad * COALESCE(costo_unit, 0)) AS costo')
+            ->groupBy('referencia_tipo', 'entra')
+            ->get();
+
+        $r = ['salieron' => 0, 'salieron_costo' => 0.0, 'entraron' => 0, 'volvieron' => 0, 'otras_salidas' => 0];
+        foreach ($grupos as $g) {
+            $unidades = (int) $g->unidades;
+            match (true) {
+                $g->referencia_tipo === SalidaInventarioDropi::EGRESO && ! $g->entra => [$r['salieron'] -= $unidades, $r['salieron_costo'] -= (float) $g->costo],
+                in_array($g->referencia_tipo, self::VUELVEN, true) && (bool) $g->entra => $r['volvieron'] += $unidades,
+                (bool) $g->entra => $r['entraron'] += $unidades,
+                default => $r['otras_salidas'] -= $unidades,
+            };
+        }
+        $r['valor'] = round((float) self::alcance(InventarioMovimiento::query())->sum(\Illuminate\Support\Facades\DB::raw('cantidad * COALESCE(costo_unit, 0)')), 2);
+
+        return $r;
+    }
+
+    /** Los últimos movimientos de todos los productos, el más reciente arriba. */
+    public function getRecientesProperty(): array
+    {
+        return self::alcance(InventarioMovimiento::query()->with(['ubicacion:id,codigo,nombre', 'producto:id,nombre,referencia', 'variante.producto:id,nombre,referencia']))
+            ->orderByDesc('created_at')->orderByDesc('id')
+            ->limit(self::RECIENTES)
+            ->get()
+            ->map(function (InventarioMovimiento $m) {
+                [$que, $documento, $url] = self::explicar($m);
+                $producto = $m->producto ?? $m->variante?->producto;
+
+                return [
+                    'fecha' => $m->created_at?->timezone('America/Bogota')->format('d/m g:i a'),
+                    'producto_id' => $producto?->id,
+                    'producto' => $producto?->nombre ?? '—',
+                    'variante' => $m->variante ? self::nombreVariante($m->variante) : null,
+                    'que' => $que,
+                    'documento' => $documento,
+                    'url' => $url,
+                    'bodega' => (string) ($m->ubicacion?->nombre ?: $m->ubicacion?->codigo),
+                    'cantidad' => (int) $m->cantidad,
+                ];
+            })->all();
+    }
+
+    /**
+     * Los productos que más salieron en el periodo, con lo que les queda.
+     *
+     * @return list<array{id: int, nombre: string, referencia: string, salieron: int, entraron: int, saldo: int}>
+     */
+    public function getTopProperty(): array
+    {
+        $producto = 'COALESCE(inventario_movimientos.producto_id, pv.producto_id)';
+        $base = fn () => self::alcance(InventarioMovimiento::query()
+            ->leftJoin('producto_variantes as pv', 'pv.id', '=', 'inventario_movimientos.variante_id'), 'inventario_movimientos.ubicacion_id');
+
+        $top = $base()->where('inventario_movimientos.created_at', '>=', $this->desde())
+            ->selectRaw("{$producto} AS pid, SUM(CASE WHEN cantidad < 0 THEN -cantidad ELSE 0 END) AS salieron, SUM(CASE WHEN cantidad > 0 THEN cantidad ELSE 0 END) AS entraron")
+            ->groupByRaw($producto)
+            ->orderByDesc('salieron')->orderByDesc('entraron')
+            ->limit(self::TOP)
+            ->get()
+            ->filter(fn ($t) => $t->pid);
+        if ($top->isEmpty()) {
+            return [];
+        }
+
+        $saldos = $base()->whereRaw("{$producto} IN (" . $top->pluck('pid')->map(fn ($id) => (int) $id)->implode(',') . ')')
+            ->selectRaw("{$producto} AS pid, SUM(cantidad) AS saldo")->groupByRaw($producto)->pluck('saldo', 'pid');
+        $productos = Producto::whereKey($top->pluck('pid'))->get(['id', 'nombre', 'referencia'])->keyBy('id');
+
+        return $top->map(fn ($t) => [
+            'id' => (int) $t->pid,
+            'nombre' => (string) ($productos[$t->pid]->nombre ?? "Producto #{$t->pid}"),
+            'referencia' => (string) ($productos[$t->pid]->referencia ?? ''),
+            'salieron' => (int) $t->salieron,
+            'entraron' => (int) $t->entraron,
+            'saldo' => (int) ($saldos[$t->pid] ?? 0),
+        ])->values()->all();
+    }
+
+    /** Volver al inicio desde el kardex de un producto. */
+    public function soltar(): void
+    {
+        $this->producto = null;
+        $this->variante = null;
+        $this->buscar = '';
+        $this->mostrar = self::POR_PAGINA;
     }
 
     public static function nombreVariante(ProductoVariante $v): string

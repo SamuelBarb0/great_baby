@@ -97,3 +97,30 @@ it('quien no tiene kardex ni contabilidad no la ve', function () {
     expect(KardexDropi::canAccess())->toBeFalse();
     $this->get(KardexDropi::getUrl())->assertForbidden();
 });
+
+it('sin buscar muestra el resumen del periodo, lo último que se movió y lo que más se movió (28-nov-2026)', function () {
+    $this->travelTo(\Carbon\Carbon::parse('2026-11-28 10:00', 'America/Bogota'));
+    $this->actingAs($this->aracely);
+
+    $pagina = Livewire::test(KardexDropi::class)->set('periodo', 'mes');
+    $k = $pagina->instance();
+
+    // Salieron 3 por pedido (a $1.500), entraron 20, volvió 1; valor = 10.000 + 20.000 − 4.500 + 1.500.
+    expect($k->resumen)->toMatchArray(['salieron' => 3, 'salieron_costo' => 4500.0, 'entraron' => 20, 'volvieron' => 1, 'otras_salidas' => 0, 'valor' => 27000.0])
+        ->and($k->recientes[0])->toMatchArray(['producto_id' => $this->abeja->id, 'producto' => 'ABEJA BAILARINA', 'que' => 'Volvió: se desempacó el pedido', 'cantidad' => 1])
+        ->and($k->top[0])->toMatchArray(['id' => $this->abeja->id, 'salieron' => 3, 'entraron' => 21, 'saldo' => 18]);
+
+    $pagina->assertSeeText('Salieron por pedidos Dropi')
+        ->assertSeeText('Los que más se movieron')
+        ->assertSeeText('Últimos movimientos de todos los productos')
+        ->assertSee("elegir({$this->abeja->id})", false);
+
+    // Hoy no se movió nada: el resumen en cero, los últimos movimientos siguen ahí.
+    $pagina->set('periodo', 'hoy');
+    expect($pagina->instance()->resumen['salieron'])->toBe(0)
+        ->and($pagina->instance()->recientes)->toHaveCount(4);
+
+    // Del resumen al kardex del producto y de vuelta.
+    $pagina->call('elegir', $this->abeja->id)->assertSeeText('Volver al resumen')
+        ->call('soltar')->assertSet('producto', null)->assertSeeText('Últimos movimientos de todos los productos');
+});
