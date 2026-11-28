@@ -216,6 +216,27 @@ class EstacionEmpaque extends Page
         }
     }
 
+    /**
+     * «Empacar →» en la lista del corte o de los cortes anteriores (28-nov-2026):
+     * abre ese pedido como si se hubiera escaneado su guía, con las mismas
+     * reglas (quién lo tiene, si ya está empacado…).
+     */
+    #[\Livewire\Attributes\On('empaque-abrir-pedido')]
+    public function abrirPedido(int $pedidoId): void
+    {
+        if ($this->pedidoActivoId) {
+            $this->dispatch('empaque-scan', sonido: 'warn', mensaje: 'Termina o deja para después el pedido que tienes abierto.');
+
+            return;
+        }
+        $pedido = DropiPedido::find($pedidoId);
+        if (! $pedido) {
+            return;
+        }
+        $this->codigo = (string) $pedido->guia;
+        $this->escanear();
+    }
+
     /** «▶ Siguiente pedido»: abre el primero libre de la cola, sin escanear la guía. */
     public function siguientePedido(): void
     {

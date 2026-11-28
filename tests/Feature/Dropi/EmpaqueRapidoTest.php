@@ -594,3 +594,58 @@ it('«Cancelar» en turno suelta el pedido y pausa: no se vuelve a abrir solo el
 
     expect(EmpaqueRegistro::where('pedido_id', $a->id)->value('estado'))->not->toBe('en_curso');
 });
+
+it('lo que quedó de cortes anteriores sale aparte, con cuántos y qué productos, y «Empacar →» lo abre en la estación (28-nov-2026)', function () {
+    $lote = \App\Modules\Dropi\Models\DropiLoteImpresion::value('id');
+    $v1 = erPedido('ER-Q1', 'ER-VOL', '2026-11-20 08:00');
+    $v2 = erPedido('ER-Q2', 'ER-TAP', '2026-11-20 08:10');
+    $v3 = erPedido('ER-Q3', 'ER-VOL', '2026-11-20 08:20');
+    DropiPedido::whereIn('id', [$v1->id, $v2->id, $v3->id])->update(['lote_impresion_id' => $lote]);
+
+    // Aracely genera dos cortes más: el del 20 deja de estar en trabajo con 3 pedidos sin empacar.
+    foreach ([['2026-11-27', 1], ['2026-11-28', 1]] as [$fecha, $numero]) {
+        $c = \App\Modules\Dropi\Models\DropiCorte::create(['fecha' => $fecha, 'numero' => $numero]);
+        \App\Modules\Dropi\Models\DropiLoteImpresion::create([
+            'corte_id' => $c->id, 'pedidos' => [], 'total' => 0, 'guias_pendientes' => 0,
+            'estado' => \App\Modules\Dropi\Models\DropiLoteImpresion::LISTO,
+        ]);
+    }
+
+    $this->actingAs($this->empacador);
+    Livewire::test(\App\Livewire\AvanceCorteEmpaque::class)
+        ->assertSeeText('Quedaron de cortes anteriores · 3')
+        ->assertSeeText('2026-11-20 — Corte 1')
+        ->assertSeeText('faltan 3 pedidos')
+        ->assertSeeText('2× Volante (x), 1× Tapete (x)')
+        ->assertSeeInOrder(['ER-Q1', 'Empacar →', 'ER-Q2', 'ER-Q3'])
+        ->assertSee("empaque-abrir-pedido', { pedidoId: {$v2->id} }", false);
+
+    // «Empacar →» abre ese pedido; con uno abierto, no se cambia por otro.
+    Livewire::test(EstacionEmpaque::class)
+        ->dispatch('empaque-abrir-pedido', pedidoId: $v2->id)
+        ->assertSet('pedidoActivoId', $v2->id)
+        ->dispatch('empaque-abrir-pedido', pedidoId: $v3->id)
+        ->assertSet('pedidoActivoId', $v2->id)
+        ->assertDispatched('empaque-scan', sonido: 'warn', mensaje: 'Termina o deja para después el pedido que tienes abierto.');
+
+    // Empacándose, ya no ofrece «Empacar →» para ese pedido.
+    Livewire::test(\App\Livewire\AvanceCorteEmpaque::class)
+        ->assertDontSee("empaque-abrir-pedido', { pedidoId: {$v2->id} }", false)
+        ->assertSee("empaque-abrir-pedido', { pedidoId: {$v1->id} }", false);
+});
+
+it('un corte anterior de hace más de 15 días ya no se lista (28-nov-2026)', function () {
+    $this->corteEnTrabajo->update(['fecha' => now()->subDays(20)->toDateString()]);
+    $p = erPedido('ER-Q9', 'ER-VOL', '2026-11-01 08:00');
+    DropiPedido::whereKey($p->id)->update(['lote_impresion_id' => \App\Modules\Dropi\Models\DropiLoteImpresion::value('id')]);
+    foreach ([['2026-11-27', 1], ['2026-11-28', 1]] as [$fecha, $numero]) {
+        $c = \App\Modules\Dropi\Models\DropiCorte::create(['fecha' => $fecha, 'numero' => $numero]);
+        \App\Modules\Dropi\Models\DropiLoteImpresion::create([
+            'corte_id' => $c->id, 'pedidos' => [], 'total' => 0, 'guias_pendientes' => 0,
+            'estado' => \App\Modules\Dropi\Models\DropiLoteImpresion::LISTO,
+        ]);
+    }
+
+    $this->actingAs($this->empacador);
+    Livewire::test(\App\Livewire\AvanceCorteEmpaque::class)->assertDontSeeText('Quedaron de cortes anteriores');
+});

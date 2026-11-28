@@ -38,6 +38,42 @@
         </div>
     @endif
 
+    {{-- Lo que quedó de cortes anteriores (28-nov-2026): cuántos, qué productos y
+         «Empacar →» para abrir cada pedido en la estación. --}}
+    @if($anteriores->isNotEmpty())
+        <div style="padding:1rem;background:rgba(217,119,6,.1);border:1px solid rgba(217,119,6,.55);border-radius:1rem;display:grid;gap:.6rem;">
+            <div style="font-weight:800;color:#fcd34d;font-size:1.05rem;">⚠ Quedaron de cortes anteriores · {{ $anteriores->sum('total') }}</div>
+            @foreach($anteriores as $a)
+                <details @if($loop->first) open @endif style="border-radius:.6rem;background:#111827;border:1px solid rgba(148,163,184,.25);">
+                    <summary style="cursor:pointer;padding:.6rem .75rem;list-style:revert;color:#f1f5f9;">
+                        <strong>{{ $a['etiqueta'] }}</strong>
+                        <span style="color:#fcd34d;font-weight:700;"> · faltan {{ $a['total'] }} {{ $a['total'] === 1 ? 'pedido' : 'pedidos' }}</span>
+                        <div style="font-size:.85rem;color:#cbd5e1;margin-top:.2rem;">{{ $a['productos'] }}</div>
+                    </summary>
+                    <div style="display:grid;gap:.3rem;max-height:16rem;overflow-y:auto;padding:0 .6rem .6rem;">
+                        @forelse($a['pedidos'] as $f)
+                            <div style="display:flex;justify-content:space-between;align-items:center;gap:.5rem;font-size:.9rem;padding:.4rem .6rem;border-radius:.4rem;background:rgba(100,116,139,.16);color:#f1f5f9;">
+                                <span>
+                                    <span style="font-family:ui-monospace,monospace;font-weight:700;">{{ $f['guia'] }}</span>
+                                    <span style="color:#cbd5e1;"> · {{ $f['cliente'] }} · {{ $f['productos'] }}</span>
+                                    @if($f['empacando'])<span style="color:#7dd3fc;font-weight:600;"> · 📦 {{ $f['empacando'] }}</span>@endif
+                                </span>
+                                @unless($f['empacando'])
+                                    <button type="button" wire:click="$dispatch('empaque-abrir-pedido', { pedidoId: {{ $f['id'] }} })"
+                                            style="flex:none;min-height:40px;padding:.35rem .8rem;border-radius:.5rem;border:none;background:#d97706;color:#111827;font-weight:800;cursor:pointer;">
+                                        Empacar →
+                                    </button>
+                                @endunless
+                            </div>
+                        @empty
+                            <div style="font-size:.9rem;color:#cbd5e1;">Nada con esa búsqueda.</div>
+                        @endforelse
+                    </div>
+                </details>
+            @endforeach
+        </div>
+    @endif
+
     @foreach($cortes as $c)
         <div style="padding:1rem;background:#111827;border:1px solid rgba(148,163,184,.25);border-radius:1rem;">
             <div style="display:flex;justify-content:space-between;align-items:baseline;gap:.5rem;flex-wrap:wrap;">
@@ -54,10 +90,18 @@
             <div style="font-size:.8rem;color:#e2e8f0;text-transform:uppercase;letter-spacing:.05em;font-weight:700;margin-bottom:.35rem;">⏳ Por empacar · {{ $c['faltan_total'] }}</div>
             <div style="display:grid;gap:.3rem;max-height:16rem;overflow-y:auto;margin-bottom:.9rem;">
                 @forelse($c['faltan'] as $f)
-                    <div style="font-size:.9rem;padding:.45rem .6rem;border-radius:.4rem;background:rgba(100,116,139,.16);color:#f1f5f9;">
-                        <span style="font-family:ui-monospace,monospace;font-weight:700;">{{ $f['guia'] }}</span>
-                        <span style="color:#cbd5e1;"> · {{ $f['productos'] }}</span>
-                        @if($f['empacando'])<span style="color:#7dd3fc;font-weight:600;"> · 📦 {{ $f['empacando'] }}</span>@endif
+                    <div style="display:flex;justify-content:space-between;align-items:center;gap:.5rem;font-size:.9rem;padding:.45rem .6rem;border-radius:.4rem;background:rgba(100,116,139,.16);color:#f1f5f9;">
+                        <span>
+                            <span style="font-family:ui-monospace,monospace;font-weight:700;">{{ $f['guia'] }}</span>
+                            <span style="color:#cbd5e1;"> · {{ $f['productos'] }}</span>
+                            @if($f['empacando'])<span style="color:#7dd3fc;font-weight:600;"> · 📦 {{ $f['empacando'] }}</span>@endif
+                        </span>
+                        @unless($f['empacando'])
+                            <button type="button" wire:click="$dispatch('empaque-abrir-pedido', { pedidoId: {{ $f['id'] }} })"
+                                    style="flex:none;min-height:36px;padding:.3rem .7rem;border-radius:.5rem;border:1px solid rgba(148,163,184,.5);background:none;color:#f1f5f9;font-weight:700;cursor:pointer;">
+                                Empacar →
+                            </button>
+                        @endunless
                     </div>
                 @empty
                     <div style="font-size:.95rem;color:#86efac;">{{ $buscar !== '' ? 'Nada pendiente con esa búsqueda.' : '¡Nada por empacar en este corte!' }}</div>
