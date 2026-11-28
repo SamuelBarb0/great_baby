@@ -30,6 +30,9 @@ class ImprimirEtiquetasAccion
 {
     public const NOMBRE = 'imprimirEtiquetas';
 
+    /** La vista previa que reemplaza al aviso (27-nov-2026): la página la declara como `verEtiquetasAction()`. */
+    public const VISTA_PREVIA = 'verEtiquetas';
+
     public static function make(): Action
     {
         return Action::make(self::NOMBRE)
@@ -38,10 +41,10 @@ class ImprimirEtiquetasAccion
             ->color('warning')
             ->modalHeading(fn (array $arguments, ?Model $record) => 'Imprimir etiquetas · ' . (self::producto($arguments, $record)?->referencia ?? ''))
             ->modalDescription('Siempre en el rollo de la térmica. «Cuántas de cada una» las pone todas iguales; al lado de cada una puedes cambiar la suya.')
-            ->modalSubmitActionLabel('Preparar etiquetas')
+            ->modalSubmitActionLabel('Imprimir etiquetas')
             ->modalWidth('lg')
             ->schema(fn (array $arguments, ?Model $record) => self::campos(self::opciones($arguments, $record)))
-            ->action(function (array $data, array $arguments, ?Model $record): void {
+            ->action(function (array $data, array $arguments, ?Model $record, $livewire): void {
                 $o = self::opciones($arguments, $record);
                 $copias = self::limitar($data['copias'] ?? 1);
                 $original = (bool) ($data['original'] ?? false);
@@ -80,7 +83,29 @@ class ImprimirEtiquetasAccion
                             ->url($url, shouldOpenInNewTab: true)->close(),
                     ])
                     ->send();
+
+                // La misma ventana muestra las etiquetas con su botón de imprimir: el
+                //   aviso de la esquina se perdía (27-nov-2026). El aviso queda de respaldo.
+                if (method_exists($livewire, self::VISTA_PREVIA . 'Action')) {
+                    $livewire->replaceMountedAction(self::VISTA_PREVIA, [
+                        'url' => $url,
+                        'titulo' => "{$total} etiqueta(s) de {$o['producto']['referencia']}",
+                    ]);
+                }
             });
+    }
+
+    /** Las etiquetas ya armadas, a la vista, con «Imprimir» y «Abrir en otra pestaña». */
+    public static function vistaPrevia(): Action
+    {
+        return Action::make(self::VISTA_PREVIA)
+            ->modalHeading(fn (array $arguments) => '🏷 ' . ($arguments['titulo'] ?? 'Etiquetas'))
+            ->modalDescription('Revísalas e imprímelas en la térmica.')
+            ->modalWidth('3xl')
+            ->schema([])
+            ->modalContent(fn (array $arguments) => view('dropi.pages.partials.etiquetas-vista-previa', ['url' => (string) ($arguments['url'] ?? '')]))
+            ->modalSubmitAction(false)
+            ->modalCancelActionLabel('Cerrar');
     }
 
     private static function producto(array $arguments, ?Model $record): ?Producto

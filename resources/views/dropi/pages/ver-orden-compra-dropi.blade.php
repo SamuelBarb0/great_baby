@@ -117,7 +117,7 @@
                 <div style="color:#9ca3af;font-size:.85rem;">
                     {{-- Sin carga pasados unos minutos: se recibió antes del envío automático o no subió (25-nov-2026). --}}
                     @if ($o->recepciones->where('estado', 'confirmada')->max('created_at')?->lt(now()->subMinutes(10)))
-                        Con esta compra no se subió nada a Dropi (se recibió antes del envío automático, o falló): usa «Igualar con Dropi» en «Vincular con el ERP».
+                        Con esta compra no se subió nada a Dropi (se recibió antes del envío automático, o falló): usa «Más → Igualar stock con Dropi» en «Vincular productos».
                     @elseif (setting('dropi.stock_al_recibir', true))
                         Subiendo a Dropi lo recibido… (tarda un minuto; recarga la página).
                     @else

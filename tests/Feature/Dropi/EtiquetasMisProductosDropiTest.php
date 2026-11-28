@@ -69,12 +69,13 @@ it('la tarjeta ofrece las etiquetas sólo si hay algo vinculado al ERP', functio
     $this->actingAs($this->aracely);
 
     Livewire::test(MisProductosDropi::class)
-        ->assertSee('Etiquetas con código de barras')
-        ->assertSee(route('catalogo.etiquetas.dropi', 1), false)
-        ->assertSee(route('catalogo.etiquetas.dropi', 2), false)
+        ->assertSee('Imprimir etiquetas')
+        ->assertSee('Falta en parte (1 de 2)')
+        ->assertSee("mountAction('imprimirEtiquetas'", false)                    // el 1: un solo producto del ERP, la ventana
         ->assertDontSee(route('catalogo.etiquetas.dropi', 3), false)
         ->assertSee('Solo salen las variaciones vinculadas al ERP.')                 // el 1 está vinculado en parte
-        ->assertSee('Para imprimir su código de barras, vincúlalo');                 // el 3
+        ->assertSee('Para imprimir su etiqueta hay que vincularlo con el ERP.')    // el 3
+        ->assertSee('Vincular →');
 });
 
 it('el PDF lleva el código del ERP: el de la variante o la referencia del agregado', function () {

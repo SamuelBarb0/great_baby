@@ -187,13 +187,15 @@ describe('el selector de etiquetas (bodega, 23-nov-2026)', function () {
             ->mountAction('imprimirEtiquetas', ['producto' => $this->tetero->id])
             ->fillForm(['color_0' => true, 'cant_c_0' => 1, 'color_1' => true, 'cant_c_1' => 3, 'color_2' => false])
             ->callMountedAction()
-            ->assertHasNoActionErrors();
+            // La misma ventana pasa a la vista previa con «Imprimir» (27-nov-2026).
+            ->assertActionMounted('verEtiquetas')
+            ->assertMountedActionModalSee(['🖨 Imprimir', '4 etiqueta(s) de 202510-5']);
 
         $this->get(etiquetasDelAviso())->assertOk()->assertHeader('content-type', 'application/pdf');
         expect(array_count_values(array_column($this->vistas['catalogo.pdf.etiquetas-dropi'], 'color')))->toBe(['Azul' => 1, 'Rojo' => 3]);
     });
 
-    it('en el panel Dropi, «Catálogo de productos» imprime las variantes marcadas con su cantidad', function () {
+    it('en el panel Dropi, «Buscar producto» imprime las variantes marcadas con su cantidad y las muestra con «Imprimir»', function () {
         \Filament\Facades\Filament::setCurrentPanel('admin');
         $this->actingAs($this->aracely);
 
@@ -202,7 +204,8 @@ describe('el selector de etiquetas (bodega, 23-nov-2026)', function () {
                 'copias' => 1, "var_{$this->azul->id}" => true, "cant_v_{$this->azul->id}" => 3,
                 "var_{$this->rosa->id}" => true, "cant_v_{$this->rosa->id}" => 1,
             ])
-            ->assertHasNoActionErrors();
+            ->assertActionMounted('verEtiquetas')
+            ->assertMountedActionModalSee('🖨 Imprimir');
 
         $this->get(etiquetasDelAviso())->assertOk();
         expect(array_count_values(array_column($this->vistas['catalogo.pdf.etiquetas-dropi'], 'codigo')))
@@ -247,4 +250,37 @@ it('«Catálogo de productos» encuentra el producto por su nombre en Dropi y lo
         // Por su nombre del ERP y su referencia sigue encontrándose igual.
         ->searchTable('bailarina')->assertCanSeeTableRecords([$abeja])->assertCanNotSeeTableRecords([$otro])
         ->searchTable('5907C')->assertCanSeeTableRecords([$otro])->assertCanNotSeeTableRecords([$abeja]);
+});
+
+it('«Buscar producto» encuentra por código de barras y por el código corto de la etiqueta (27-nov-2026)', function () {
+    \Filament\Facades\Filament::setCurrentPanel('admin');
+    $this->actingAs($this->aracely);
+
+    $carro = Producto::create(['referencia' => 'CAR-01', 'nombre' => 'CARRO DE BOMBEROS', 'desglose_stock' => true, 'activo' => true]);
+    ProductoVariante::create(['producto_id' => $carro->id, 'color_codigo' => 'ROJ', 'color_nombre' => 'Rojo', 'codigo_barras' => '7701234567890']);
+
+    \Livewire\Livewire::test(\App\Modules\Dropi\Filament\Pages\CatalogoProductosDropi::class)
+        ->assertSee('Buscar producto')
+        ->searchTable('7701234567890')->assertCanSeeTableRecords([$carro])->assertCanNotSeeTableRecords([$this->tetero])
+        ->searchTable(\App\Support\CodigoCortoEtiqueta::deProducto($this->tetero->id))
+        ->assertCanSeeTableRecords([$this->tetero])->assertCanNotSeeTableRecords([$carro]);
+});
+
+it('«Buscar producto» avisa lo de Dropi que coincide y no está vinculado, con «Vincular ahora →» (27-nov-2026)', function () {
+    \Filament\Facades\Filament::setCurrentPanel('admin');
+    $this->actingAs($this->aracely);
+
+    $foto = json_decode(Storage::disk('local')->get(CatalogoDropi::FOTO), true);
+    $foto['productos'][] = CatalogoDropi::resumir(['id' => 8, 'name' => 'Mordedor jirafa', 'type' => 'VARIABLE', 'sku' => null, 'warehouse_product' => [],
+        'variations' => [['id' => 801, 'sale_price' => '5000', 'attribute_values' => [['value' => 'Amarillo']], 'warehouse_product_variation' => [['stock' => 4]]]]]);
+    Storage::disk('local')->put(CatalogoDropi::FOTO, json_encode($foto));
+
+    \Livewire\Livewire::test(\App\Modules\Dropi\Filament\Pages\CatalogoProductosDropi::class)
+        ->searchTable('jirafa')
+        ->assertCanNotSeeTableRecords([$this->tetero])
+        ->assertSee('que el ERP todavía no reconoce')
+        ->assertSee('Mordedor jirafa')
+        ->assertSee('Sin vincular')
+        ->assertSee('Vincular ahora →')
+        ->assertSee('No encontramos «jirafa» en el ERP');
 });

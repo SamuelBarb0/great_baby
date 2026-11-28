@@ -338,7 +338,7 @@ final class Permisos
         'dropi_siigo' => 'SIIGO de Dropi (resolución DIAN)',
         'dropi_importar_pedidos' => 'Importar pedidos (Excel)',
         'dropi_mis_productos' => 'Mis productos en Dropi (y Carga masiva)',
-        'dropi_vincular_productos' => 'Vincular con el ERP',
+        'dropi_vincular_productos' => 'Vincular productos',
         'dropi_cambiar_en_dropi' => '↳ Botón «Dropi» del pedido: estatus y etiquetas',
         'dropi_devoluciones_destino' => '↳ Cambiar el destino de inventario',
         'dropi_productos' => 'Productos y stock en Dropi (desde el ERP)',

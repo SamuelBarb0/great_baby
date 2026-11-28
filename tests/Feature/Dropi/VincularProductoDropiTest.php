@@ -146,3 +146,35 @@ it('desde Productos de Dropi también se vincula un producto agregado (sin varia
     $item = DropiPedidoItem::whereHas('pedido', fn ($q) => $q->where('guia', 'G6'))->sole();
     expect($item->variante_id)->toBeNull()->and($item->producto_id)->toBe($agregado->id);
 });
+
+it('«Vincular productos» abre siempre en «Frenan pedidos», marca el pack y con una búsqueda en el enlace busca en todos (27-nov-2026)', function () {
+    \Illuminate\Support\Facades\Storage::fake('local');
+    $pack = new PedidoDropiDTO(
+        guia: 'G8', dropiOrdenId: 'O-G8', transportadora: 'X', tienda: 'T', vendedorNombre: 'V',
+        vendedorIdentificacion: null, clienteNombre: 'Ana', clienteDoc: null, clienteTelefono: null,
+        clienteDireccion: null, clienteCiudad: null, clienteDepto: null, estadoDropi: 'sin_estado',
+        montoEsperadoProveedor: 1000, montoClienteFinal: null, gananciaVendedor: null, fleteTransportadora: null,
+        items: [new ItemDropiDTO('DV-5550001', 1, 1000, 'Rompecabezas Minecraft', 'X 2 CAJAS')],
+        creadoAt: CarbonImmutable::now(),
+    );
+    app(SincronizarPedidosDropi::class)->importarPedidos([$pack]);
+    \Spatie\Permission\Models\Role::findOrCreate('Aracely', 'web');
+    $user = \App\Models\User::factory()->create();
+    $user->assignRole('Aracely');
+    $this->actingAs($user);
+    \Filament\Facades\Filament::setCurrentPanel('admin');
+
+    \Livewire\Livewire::test(\App\Modules\Dropi\Filament\Pages\ProductosDeDropi::class)
+        ->assertSet('filtro', null)
+        ->assertSee('Frenan pedidos')
+        ->assertSee('Código Dropi')
+        ->assertSee('DV-5550001')
+        ->assertSee('Pack ×2')
+        ->assertSee('Más');
+
+    // «Vincular ahora →» de «Buscar producto» llega con la búsqueda: se busca en todos.
+    \Livewire\Livewire::withQueryParams(['buscar' => 'minecraft'])
+        ->test(\App\Modules\Dropi\Filament\Pages\ProductosDeDropi::class)
+        ->assertSet('filtro', 'todos')
+        ->assertSee('Rompecabezas Minecraft');
+});

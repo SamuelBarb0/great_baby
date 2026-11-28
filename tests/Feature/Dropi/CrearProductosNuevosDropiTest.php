@@ -283,8 +283,8 @@ it('con la regla apagada se crea a mano: uno por uno o todos de una vez', functi
         ->and($todos['errores'][0])->toContain('PAPEL-1');
 });
 
-it('«Vincular con el ERP» trae el interruptor, el masivo y el botón por fila', function () {
+it('«Vincular productos» trae el interruptor (en «Más»), el masivo y el botón por fila', function () {
     $html = $this->actingAs($this->jefa)->get('/admin/productos-de-dropi?filtro=nuevo')->assertOk()->getContent();
 
-    expect($html)->toContain('Crear solos: No')->toContain('Crear en el ERP');
+    expect($html)->toContain('Crear solos los nuevos: No')->toContain('Crear en el ERP');
 });

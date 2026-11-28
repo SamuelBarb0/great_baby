@@ -16,6 +16,7 @@ use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Illuminate\Support\Facades\Cache;
+use Livewire\Attributes\Url;
 
 /**
  * «Productos de Dropi» en el panel Dropi (/admin): el catálogo propio leído por
@@ -28,21 +29,27 @@ class ProductosDeDropi extends Page
 {
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-arrow-path-rounded-square';
 
-    protected static ?string $navigationLabel = 'Vincular con el ERP';
+    // Por la tarea, no por el sistema (27-nov-2026: «se pierden»).
+    protected static ?string $navigationLabel = 'Vincular productos';
 
     protected static string|\UnitEnum|null $navigationGroup = 'Productos';
 
     protected static ?int $navigationSort = 2;
 
-    protected static ?string $title = 'Vincular con el ERP';
+    protected static ?string $title = 'Vincular productos';
 
     protected static ?string $slug = 'productos-de-dropi';
 
     protected string $view = 'dropi.pages.productos-de-dropi';
 
-    /** Estado que se está viendo; NULL = «con pedidos esperando». */
+    /**
+     * Pestaña que se está viendo; NULL = «Frenan pedidos», «todos» = todas. En el
+     * enlace (27-nov-2026): «Vincular →» de otras pantallas llega directo al producto.
+     */
+    #[Url]
     public ?string $filtro = null;
 
+    #[Url]
     public string $buscar = '';
 
     public const LIMITE = 200;
@@ -78,14 +85,11 @@ class ProductosDeDropi extends Page
 
     public function mount(): void
     {
-        // Se arranca por lo que frena despachos; si no hay nada esperando, por lo vinculable.
-        $r = $this->previa['resumen'];
-        $this->filtro = match (true) {
-            ($r['con_pedidos'] ?? 0) > 0 => null,
-            $this->sinDropi !== [] => 'sin_dropi',
-            ($r['enlazar'] ?? 0) > 0 => 'enlazar',
-            default => 'revisar',
-        };
+        // Siempre se abre en «Frenan pedidos» (27-nov-2026: abrir cada día en una
+        //   pestaña distinta desorientaba). Con una búsqueda en el enlace, en todas.
+        if ($this->buscar !== '' && $this->filtro === null) {
+            $this->filtro = 'todos';
+        }
     }
 
     public function getPreviaProperty(): array
@@ -119,9 +123,11 @@ class ProductosDeDropi extends Page
         $t = mb_strtolower(trim($this->buscar));
 
         return collect($this->previa['filas'])
-            ->filter(fn ($f) => $this->filtro === null
-                ? ($f['pedidos_esperando'] > 0 && $f['estado'] !== 'vinculado')
-                : $f['estado'] === $this->filtro)
+            ->filter(fn ($f) => match ($this->filtro) {
+                null => $f['pedidos_esperando'] > 0 && $f['estado'] !== 'vinculado',
+                'todos' => true,
+                default => $f['estado'] === $this->filtro,
+            })
             ->filter(fn ($f) => $t === '' || collect([$f['nombre'], $f['sku'], $f['llave'], $f['variacion'], $f['destino_label']])
                 ->contains(fn ($x) => str_contains(mb_strtolower((string) $x), $t)))
             ->sortByDesc('pedidos_esperando')
@@ -134,11 +140,28 @@ class ProductosDeDropi extends Page
         $this->filtro = $estado;
     }
 
+    /**
+     * Unidades del ERP por cada una de Dropi, para el aviso «Pack ×2» (27-nov-2026):
+     * la del vínculo si ya existe; si no, la que se le pondría por el nombre.
+     *
+     * @return array<string, int> llave => unidades (sólo las mayores que 1)
+     */
+    public function getPacksProperty(): array
+    {
+        $filas = collect($this->filas);
+        $guardadas = \App\Modules\Dropi\Models\DropiVinculoProducto::query()
+            ->whereIn('sku_dropi', $filas->pluck('llave'))->pluck('unidades', 'sku_dropi');
+
+        return $filas->mapWithKeys(fn ($f) => [$f['llave'] => (int) ($guardadas[$f['llave']] ?? \App\Modules\Dropi\Models\DropiVinculoProducto::detectarUnidades($f['variacion'] ?? null))])
+            ->filter(fn ($u) => $u > 1)->all();
+    }
+
     protected function getHeaderActions(): array
     {
         return [
             Action::make('leer')
-                ->label(fn () => $this->leyendo ? 'Leyendo Dropi…' : 'Leer de Dropi')
+                ->label(fn () => $this->leyendo ? 'Actualizando desde Dropi…'
+                    : 'Actualizar desde Dropi' . (($l = $this->previa['leido_at'] ?? null) ? ' · ' . \Illuminate\Support\Carbon::parse($l)->locale('es')->diffForHumans(short: true) : ''))
                 ->icon('heroicon-o-arrow-path')
                 ->color('gray')
                 ->disabled(fn () => $this->leyendo)
@@ -150,13 +173,13 @@ class ProductosDeDropi extends Page
                         ->info()->send();
                 }),
             Action::make('vincularSeguros')
-                ->label(fn () => 'Vincular ' . ($this->previa['resumen']['enlazar'] ?? 0))
+                ->label(fn () => 'Confirmar sugeridos (' . ($this->previa['resumen']['enlazar'] ?? 0) . ')')
                 ->icon('heroicon-o-link')
                 ->disabled(fn () => ($this->previa['resumen']['enlazar'] ?? 0) === 0)
                 ->visible(fn () => $this->puedeEditar)
                 ->requiresConfirmation()
-                ->modalHeading('Vincular lo seguro')
-                ->modalDescription('Se vinculan las llaves con la misma referencia o la misma variación en el ERP. Los pedidos que las esperaban toman el producto y, si hay stock, salen de «pendiente por inventario».')
+                ->modalHeading('Confirmar los sugeridos')
+                ->modalDescription('Se vinculan los productos de Dropi con la misma referencia o la misma variación en el ERP (pestaña «Sugeridos»). Los pedidos que los esperaban toman el producto y, si hay stock, salen de «pendiente por inventario».')
                 ->action(function () {
                     $this->exigirEdicion();
 
@@ -165,11 +188,13 @@ class ProductosDeDropi extends Page
                         ->body("{$r['items']} líneas de pedido ya tienen producto · {$r['pedidos_liberados']} pedidos salieron de «pendiente por inventario».");
                     ($r['errores'] ? $n->warning()->body('No se pudieron: ' . implode(' | ', array_slice($r['errores'], 0, 5))) : $n->success())->send();
                 }),
+            // Lo que no es vincular, en «Más» (27-nov-2026: cinco botones arriba).
+            \Filament\Actions\ActionGroup::make([
             // «Igualar con Dropi» (25-nov-2026): lo recibido antes del envío
             //   automático (el SA383 y su DIDA-004) o cualquier diferencia. Arma
             //   una carga en borrador con el antes y el después; se confirma ahí.
             Action::make('igualarDropi')
-                ->label('Igualar con Dropi')
+                ->label('Igualar stock con Dropi')
                 ->icon('heroicon-o-arrows-right-left')
                 ->color('warning')
                 ->visible(fn () => $this->puedeEditar)
@@ -227,7 +252,7 @@ class ProductosDeDropi extends Page
                 }),
             // La regla, aquí mismo: que lo hagan solos o no.
             Action::make('automatico')
-                ->label(fn () => CrearProductosNuevosDropi::todos() ? 'Crear solos: Sí' : 'Crear solos: No')
+                ->label(fn () => CrearProductosNuevosDropi::todos() ? 'Crear solos los nuevos: Sí' : 'Crear solos los nuevos: No')
                 ->icon(fn () => CrearProductosNuevosDropi::todos() ? 'heroicon-o-check-circle' : 'heroicon-o-pause-circle')
                 ->color(fn () => CrearProductosNuevosDropi::todos() ? 'success' : 'gray')
                 ->visible(fn () => $this->puedeEditar)
@@ -241,6 +266,12 @@ class ProductosDeDropi extends Page
                     \App\Support\Reglas::set('dropi.crear_productos_nuevos', CrearProductosNuevosDropi::todos() ? '0' : '1');
                     Notification::make()->title(CrearProductosNuevosDropi::todos() ? 'Se crearán solos' : 'Ya no se crearán solos')->success()->send();
                 }),
+            ])
+                ->label('Más')
+                ->icon('heroicon-o-ellipsis-horizontal')
+                ->button()
+                ->color('gray')
+                ->visible(fn () => $this->puedeEditar),
         ];
     }
 
@@ -397,8 +428,9 @@ class ProductosDeDropi extends Page
             ->visible(fn () => $this->puedeEditar)
             ->modalSubmitActionLabel('Vincular')
             ->modalHeading(fn (array $arguments) => 'Vincular ' . ($arguments['nombre'] ?? $arguments['llave']))
-            ->modalDescription(fn (array $arguments) => 'Llave en Dropi: ' . $arguments['llave']
-                . '. «Producto» lleva el stock en un solo total: todas las variaciones de Dropi descuentan de ahí.')
+            ->modalDescription(fn (array $arguments) => 'Código Dropi: ' . $arguments['llave'] . '.'
+                . (($arguments['unidades'] ?? 1) > 1 ? ' Es un pack: cada venta descuenta ' . $arguments['unidades'] . ' unidades del producto del ERP.' : '')
+                . ' Un «Producto» lleva el stock en un solo total: todas las variaciones de Dropi descuentan de ahí.')
             ->schema([
                 Select::make('destino')
                     ->label('Producto del ERP')

@@ -91,6 +91,12 @@ class MisProductosDropi extends Page
         return \App\Modules\Dropi\Filament\Support\ImprimirEtiquetasAccion::make();
     }
 
+    /** Las etiquetas armadas, a la vista con «Imprimir» (ver ImprimirEtiquetasAccion). */
+    public function verEtiquetasAction(): \Filament\Actions\Action
+    {
+        return \App\Modules\Dropi\Filament\Support\ImprimirEtiquetasAccion::vistaPrevia();
+    }
+
     /**
      * El producto del ERP con que está vinculado uno de Dropi, si es uno solo.
      * Si sus variaciones apuntan a varios, el botón imprime como antes: una

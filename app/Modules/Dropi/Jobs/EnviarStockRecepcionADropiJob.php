@@ -83,7 +83,7 @@ class EnviarStockRecepcionADropiJob implements ShouldQueue, ShouldBeUnique
 
             if (! $p->dropi_sku) {
                 $ops[] = $base + ['tipo' => Op::ACTUALIZAR, 'estado' => Op::OMITIDO, 'detalle' => ['lineas' => []],
-                    'motivo' => 'No está en Dropi: créalo o asócialo en «Vincular con el ERP» → «Del ERP, no están en Dropi».'];
+                    'motivo' => 'No está en Dropi: créalo o asócialo en «Vincular productos» → «Del ERP, no están en Dropi».'];
 
                 continue;
             }

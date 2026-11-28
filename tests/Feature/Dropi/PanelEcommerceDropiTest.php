@@ -90,7 +90,7 @@ it('el panel Dropi está organizado en Operación, Productos, Dinero y Configura
 
     $html = $this->actingAs($this->aracely)->get('/admin/productos-de-dropi')->assertOk()
         ->assertSee('Mis productos en Dropi')
-        ->assertSee('Vincular con el ERP')
+        ->assertSee('Vincular productos')
         // «Crear producto en Dropi» ya no está en el menú: vive en «Mis productos en Dropi».
         ->assertDontSee('Crear producto en Dropi')
         ->assertDontSee('https://app.dropi.co/dashboard/products/add', false)
@@ -143,7 +143,7 @@ it('Mis productos en Dropi muestra el catálogo sin fotos, con precio, stock y s
         ->assertDontSee('principal.gif', false)                                     // Dropi no deja subir fotos: no se muestran
         ->assertSee('$12.500 – $13.000')
         ->assertSee('Stock 10')
-        ->assertSee('Vinculado en parte')                                           // 1 de 2 variaciones
+        ->assertSee('Falta en parte (1 de 2)')                                     // 1 de 2 variaciones
         ->assertSee('Bebé')
         ->assertSee('Cascos para niños')
         ->assertDontSee('Sin foto')

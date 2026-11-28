@@ -5,19 +5,23 @@
         $money = fn ($v) => $v === null ? '—' : '$' . number_format((float) $v, 0, ',', '.');
         $rango = fn ($p) => $p['precio_min'] === null ? '—'
             : ($p['precio_min'] == $p['precio_max'] ? $money($p['precio_min']) : $money($p['precio_min']) . ' – ' . $money($p['precio_max']));
+        // Un solo vocabulario en Productos (27-nov-2026): las mismas palabras en
+        //   «Buscar producto» y «Vincular productos».
         $chipVinculo = [
-            'si' => ['Vinculado al ERP', '#059669', 'rgba(5,150,105,.1)'],
-            'parcial' => ['Vinculado en parte', '#d97706', 'rgba(217,119,6,.1)'],
+            'si' => ['Vinculado', '#059669', 'rgba(5,150,105,.1)'],
+            'parcial' => ['Falta en parte', '#d97706', 'rgba(217,119,6,.1)'],
             'no' => ['Sin vincular', '#6b7280', 'rgba(107,114,128,.12)'],
         ];
+        $puedeVincular = \App\Modules\Dropi\Filament\Pages\ProductosDeDropi::canAccess();
+        $urlVincular = fn ($p) => \App\Modules\Dropi\Filament\Pages\ProductosDeDropi::getUrl(['filtro' => 'todos', 'buscar' => $p['nombre']]);
     @endphp
 
     @if(! $cat['leido_at'])
         <x-filament::section>
             <p style="color:#9ca3af;">
                 Todavía no se ha leído el catálogo de Dropi. Ve a
-                <a href="{{ \App\Modules\Dropi\Filament\Pages\ProductosDeDropi::getUrl() }}" style="color:#f59e0b;font-weight:600;">Vincular con el ERP</a>
-                y usa <b>Leer de Dropi</b>.
+                <a href="{{ \App\Modules\Dropi\Filament\Pages\ProductosDeDropi::getUrl() }}" style="color:#f59e0b;font-weight:600;">Vincular productos</a>
+                y usa <b>Actualizar desde Dropi</b>.
             </p>
         </x-filament::section>
     @else
@@ -61,8 +65,11 @@
                                 <span style="font-size:.8rem;{{ $p['stock'] > 0 ? '' : 'color:#dc2626;font-weight:600;' }}">Stock {{ $p['stock'] }}</span>
                             </div>
                             <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:.4rem;">
-                                @php [$tx, $co, $bg] = $chipVinculo[$p['vinculo']]; @endphp
-                                <span style="font-size:.7rem;font-weight:600;padding:.15rem .5rem;border-radius:999px;white-space:nowrap;color:{{ $co }};background:{{ $bg }};">{{ $tx }}</span>
+                                @php
+                                    [$tx, $co, $bg] = $chipVinculo[$p['vinculo']];
+                                    $faltan = collect($p['variaciones'])->where('vinculado', false)->count();
+                                @endphp
+                                <span style="font-size:.8rem;font-weight:700;padding:.15rem .55rem;border-radius:999px;white-space:nowrap;color:{{ $co }};background:{{ $bg }};">{{ $p['vinculo'] === 'parcial' ? $tx.' ('.$faltan.' de '.count($p['variaciones']).')' : $tx }}</span>
                                 {{-- Se abre en la ventana al lado (script de AdminPanelProvider); sin JS, en otra pestaña. --}}
                                 <a href="{{ \App\Modules\Dropi\Filament\Pages\MisProductosDropi::urlEditarEnDropi($p['id']) }}"
                                    target="_blank" rel="noopener"
@@ -73,26 +80,32 @@
                             </div>
                             {{-- La etiqueta lleva el código del ERP vinculado: es lo que reconoce la pistola de empaque. --}}
                             @php $erpId = $p['vinculo'] !== 'no' ? \App\Modules\Dropi\Filament\Pages\MisProductosDropi::productoErp($p) : null; @endphp
+                            {{-- Las etiquetas, con el mismo botón en todas las tarjetas (27-nov-2026). --}}
                             @if($erpId)
                                 {{-- Escoger cuáles y cuántas, como en la ficha de /app (25-nov-2026). --}}
                                 <button type="button" wire:click="mountAction('imprimirEtiquetas', { producto: {{ $erpId }} })"
                                         title="Escoge cuáles etiquetas y cuántas de cada una"
-                                        style="font-size:.78rem;font-weight:600;color:#2563eb;border:1px solid #3b82f6;border-radius:.5rem;padding:.2rem .6rem;text-align:center;background:none;cursor:pointer;">
-                                    🏷️ Etiquetas con código de barras
+                                        style="min-height:40px;font-size:.9rem;font-weight:700;color:#2563eb;border:1px solid #3b82f6;border-radius:.5rem;padding:.35rem .7rem;text-align:center;background:none;cursor:pointer;">
+                                    🏷️ Imprimir etiquetas
                                 </button>
                             @elseif($p['vinculo'] !== 'no')
+                                {{-- Vinculado a varios productos del ERP: las de cada variación vinculada. --}}
                                 <a href="{{ route('catalogo.etiquetas.dropi', $p['id']) }}" target="_blank" rel="noopener"
-                                   title="PDF con QR y código de barras de cada variación vinculada al ERP"
-                                   style="font-size:.78rem;font-weight:600;color:#2563eb;border:1px solid #3b82f6;border-radius:.5rem;padding:.2rem .6rem;text-align:center;text-decoration:none;">
-                                    🏷️ Etiquetas con código de barras
+                                   title="Las etiquetas de cada variación vinculada al ERP"
+                                   style="min-height:40px;font-size:.9rem;font-weight:700;color:#2563eb;border:1px solid #3b82f6;border-radius:.5rem;padding:.35rem .7rem;text-align:center;text-decoration:none;">
+                                    🏷️ Imprimir etiquetas
                                 </a>
-                                @if($p['vinculo'] === 'parcial')
-                                    <span style="font-size:.7rem;color:#d97706;">Solo salen las variaciones vinculadas al ERP.</span>
-                                @endif
-                            @else
-                                <span style="font-size:.72rem;color:#9ca3af;">
-                                    Para imprimir su código de barras, vincúlalo en
-                                    <a href="{{ \App\Modules\Dropi\Filament\Pages\ProductosDeDropi::getUrl() }}" style="color:#f59e0b;font-weight:600;">Vincular con el ERP</a>.
+                            @endif
+                            @if($p['vinculo'] === 'parcial')
+                                <span style="font-size:.85rem;color:#b45309;">Solo salen las variaciones vinculadas al ERP.@if($puedeVincular) <a href="{{ $urlVincular($p) }}" style="font-weight:700;text-decoration:underline;">Vincular las que faltan →</a>@endif</span>
+                            @elseif($p['vinculo'] === 'no')
+                                <span style="font-size:.85rem;opacity:.85;">
+                                    Para imprimir su etiqueta hay que vincularlo con el ERP.
+                                    @if($puedeVincular)
+                                        <a href="{{ $urlVincular($p) }}" style="color:#d97706;font-weight:700;">Vincular →</a>
+                                    @else
+                                        Pídele a la oficina que lo vincule.
+                                    @endif
                                 </span>
                             @endif
                             @if(count($p['variaciones']) > 1 || $p['variaciones'][0]['variacion'])
